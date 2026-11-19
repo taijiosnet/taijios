@@ -2,19 +2,35 @@
 #import "std/vec"
 using Tcl :: #import "tcl"
 using T :: #import "tcl_types"
+using UTF :: #import "tcl_tk_text"
 
 MAX_WIDGETS :: 32;
+MAX_ENTRY_BYTES :: 16384;
+LABEL :: 0;
+BUTTON :: 1;
+FRAME :: 2;
+ENTRY :: 3;
+CHAR_WIDTH :: 12;
+ENTRY_INSET :: 8;
 Box :: struct { x: s32; y: s32; w: s32; h: s32; }
+Packing :: struct {
+    side: s32;
+    padx: s32;
+    pady: s32;
+    fill: s32;
+    expand: s32;
+}
 Widget :: struct {
     name: Text;
     text: Text;
     command: Text;
     box: Box;
-    button: bool;
+    kind: s64;
+    parent: s64;
+    cursor: s64;
+    requested: Box;
     order: s32;
-    side: s32;
-    padx: s32;
-    pady: s32;
+    pack: Packing;
 }
 
 // One root per app, matching the current Taiji surface lifetime.
@@ -22,15 +38,20 @@ widgets: Vec(Widget);
 attached: bool;
 closed: bool;
 pressed: s64 = -1;
+focused: s64 = -1;
 sequence: s32;
 
 Attach :: (interpreter: *Tcl.Interpreter) -> bool {
     if attached { return false }
     commands := interpreter.extensions.count;
     prefixes := interpreter.prefixes.count;
-    attached = Tcl.RegisterCommand(interpreter, "label", Create, 0) &&
-               Tcl.RegisterCommand(interpreter, "button", Create, 1) &&
+    attached = Tcl.RegisterCommand(interpreter, "label", Create, LABEL) &&
+               Tcl.RegisterCommand(interpreter, "button", Create, BUTTON) &&
+               Tcl.RegisterCommand(interpreter, "frame", Create, FRAME) &&
+               Tcl.RegisterCommand(interpreter, "entry", Create, ENTRY) &&
                Tcl.RegisterCommand(interpreter, "pack", Pack) &&
+               Tcl.RegisterCommand(interpreter, "focus", Focus) &&
+               Tcl.RegisterCommand(interpreter, "bind", Bind) &&
                Tcl.RegisterCommand(interpreter, "destroy", Destroy) &&
                Tcl.RegisterPrefix(interpreter, ".", WidgetCommand);
     if !attached {
@@ -41,14 +62,20 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
 }
 
 Find :: (name: string) -> s64 {
-    for * widgets { if TextView(it.name) == name { return it_index } }
+    for * widgets { if it.name.bytes.count > 0 && TextView(it.name) == name { return it_index } }
     return -1;
 }
 
-FlatPath :: (path: string) -> bool {
-    if path.count < 2 || path[0] != 46 { return false }
-    for 1..path.count-1 { if path[it] == 46 { return false } }
-    return true;
+ParentEnd :: (path: string) -> s64 {
+    if path.count < 2 || path[0] != 46 || path[path.count-1] == 46 { return -1 }
+    parent_end: s64;
+    for 1..path.count-1 {
+        if path[it] == 46 {
+            if it == parent_end + 1 { return -1 }
+            parent_end = it;
+        }
+    }
+    return parent_end;
 }
 
 SetError :: (result: *Result, message: string) {
@@ -60,15 +87,16 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     if args.count % 2 != 0 { SetError(result, "expected option and value pairs"); return false }
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
-        if option != "-text" && (option != "-command" || !widget.button) {
-            SetError(result, "unsupported widget option");
-            return false;
-        }
+        if option == "-text" && (widget.kind == LABEL || widget.kind == BUTTON) { continue }
+        if option == "-command" && widget.kind == BUTTON { continue }
+        if option == "-bg" && widget.kind == ENTRY && TextView(args[2*i+1]) == "white" { continue }
+        SetError(result, "unsupported widget option or value");
+        return false;
     }
     for i: 0..args.count/2-1 {
         value: Text = TextCopy(TextView(args[2*i+1]));
         if TextView(args[2*i]) == "-text" { VecSwap(widget.text.bytes, value.bytes) }
-        else { VecSwap(widget.command.bytes, value.bytes) }
+        else if TextView(args[2*i]) == "-command" { VecSwap(widget.command.bytes, value.bytes) }
     }
     return true;
 }
@@ -76,21 +104,39 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
 Create :: (kind: s64, args: []Text, result: *Result) {
     if closed || args.count == 0 { SetError(result, "expected a widget path in an open root"); return }
     path := TextView(args[0]);
-    if !FlatPath(path) || Find(path) >= 0 { SetError(result, "invalid or duplicate widget path"); return }
-    if widgets.count == MAX_WIDGETS { SetError(result, "widget limit exceeded"); return }
-    widget := Widget.{name = TextCopy(path), button = kind == 1};
+    parent_end := ParentEnd(path);
+    if parent_end < 0 || Find(path) >= 0 { SetError(result, "invalid or duplicate widget path"); return }
+    parent: s64 = -1;
+    if parent_end > 0 {
+        parent = Find(path[:parent_end]);
+        if parent < 0 || widgets[parent].kind != FRAME { SetError(result, "expected a frame parent"); return }
+    }
+    widget := Widget.{name = TextCopy(path), kind = kind, parent = parent};
     if !Configure(*widget, args[1:], result) { return }
-    if !VecPush(widgets, widget) { SetError(result, "could not allocate widget"); return }
+    slot := widgets.count;
+    for * widgets { if it.name.bytes.count == 0 { slot = it_index; break } }
+    if slot == widgets.count {
+        if slot == MAX_WIDGETS { SetError(result, "widget limit exceeded"); return }
+        if !VecResize(widgets, slot + 1) { SetError(result, "could not allocate widget"); return }
+    }
+    saved := *widgets[slot];
+    saved.kind = widget.kind;
+    saved.parent = widget.parent;
+    saved.cursor = 0;
+    saved.order = 0;
+    saved.box = .{};
+    saved.pack = .{padx = 8, pady = 5};
+    VecSwap(saved.name.bytes, widget.name.bytes);
+    VecSwap(saved.text.bytes, widget.text.bytes);
+    VecSwap(saved.command.bytes, widget.command.bytes);
     unused BuilderAppend(result.value.bytes, path);
 }
 
 Pack :: (_: s64, args: []Text, result: *Result) {
     if args.count == 0 { SetError(result, "expected pack path ?path ...? ?options?"); return }
     count: s64;
-    side: s32;
-    padx: s32 = 8;
-    pady: s32 = 5;
-    while count < args.count && FlatPath(TextView(args[count])) {
+    options := Packing.{side = -1, padx = -1, pady = -1, fill = -1, expand = -1};
+    while count < args.count && ParentEnd(TextView(args[count])) >= 0 {
         if Find(TextView(args[count])) < 0 { SetError(result, "cannot pack unknown widget"); return }
         count += 1;
     }
@@ -99,23 +145,36 @@ Pack :: (_: s64, args: []Text, result: *Result) {
         option := TextView(args[count+2*i]);
         value := TextView(args[count+2*i+1]);
         if option == "-side" {
-            if value == "top" { side = 0 }
-            else if value == "left" { side = 1 }
-            else if value == "bottom" { side = 2 }
-            else if value == "right" { side = 3 }
+            if value == "top" { options.side = 0 }
+            else if value == "left" { options.side = 1 }
+            else if value == "bottom" { options.side = 2 }
+            else if value == "right" { options.side = 3 }
             else { SetError(result, "unknown pack side"); return }
         } else if option == "-padx" || option == "-pady" {
             amount, ok := ParseInteger(value);
             if !ok || amount < 0 || amount > 512 { SetError(result, "invalid pack padding"); return }
-            if option == "-padx" { padx = cast(s32)amount } else { pady = cast(s32)amount }
+            if option == "-padx" { options.padx = cast(s32)amount } else { options.pady = cast(s32)amount }
+        } else if option == "-fill" {
+            if value == "none" { options.fill = 0 }
+            else if value == "x" { options.fill = 1 }
+            else if value == "y" { options.fill = 2 }
+            else if value == "both" { options.fill = 3 }
+            else { SetError(result, "unknown pack fill"); return }
+        } else if option == "-expand" {
+            if value == "1" { options.expand = 1 }
+            else if value == "0" { options.expand = 0 }
+            else { SetError(result, "expected 0 or 1 for pack -expand"); return }
         } else { SetError(result, "unsupported pack option"); return }
     }
     for 0..count-1 {
         widget := *widgets[Find(TextView(args[it]))];
-        if widget.order == 0 { sequence += 1; widget.order = sequence }
-        widget.side = side;
-        widget.padx = padx;
-        widget.pady = pady;
+        sequence += 1;
+        widget.order = sequence;
+        if options.side >= 0 { widget.pack.side = options.side }
+        if options.padx >= 0 { widget.pack.padx = options.padx }
+        if options.pady >= 0 { widget.pack.pady = options.pady }
+        if options.fill >= 0 { widget.pack.fill = options.fill }
+        if options.expand >= 0 { widget.pack.expand = options.expand }
     }
 }
 
@@ -123,26 +182,22 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
     if args.count == 0 { SetError(result, "expected destroy path ?path ...?"); return }
     for 0..args.count-1 {
         path := TextView(args[it]);
-        if path == "." { closed = true; return }
+        if path == "." { closed = true; focused = -1; pressed = -1; return }
         index := Find(path);
         if index < 0 { continue }
-        last := widgets.count - 1;
-        if index != last {
-            old := *widgets[index];
-            tail := *widgets[last];
-            VecSwap(old.name.bytes, tail.name.bytes);
-            VecSwap(old.text.bytes, tail.text.bytes);
-            VecSwap(old.command.bytes, tail.command.bytes);
-            old.button = tail.button;
-            old.order = tail.order;
-            old.side = tail.side;
-            old.padx = tail.padx;
-            old.pady = tail.pady;
-            old.box = tail.box;
+        for * widgets {
+            if it.name.bytes.count == 0 { continue }
+            ancestor := it_index;
+            while ancestor >= 0 && ancestor != index { ancestor = widgets[ancestor].parent }
+            if ancestor != index { continue }
+            unused VecResize(it.name.bytes, 0);
+            unused VecResize(it.text.bytes, 0);
+            unused VecResize(it.command.bytes, 0);
+            it.order = 0;
+            it.box = .{};
+            if pressed == it_index { pressed = -1 }
+            if focused == it_index { focused = -1 }
         }
-        if pressed == index { pressed = -1 }
-        else if pressed == last { pressed = index }
-        unused VecResize(widgets, last);
     }
 }
 
@@ -155,71 +210,265 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     if subcommand == "configure" && args.count >= 3 { unused Configure(widget, args[1:], result); return }
     if subcommand == "cget" && args.count == 2 {
         option := TextView(args[1]);
-        if option == "-text" { unused BuilderAppend(result.value.bytes, TextView(widget.text)); return }
-        if option == "-command" && widget.button {
+        if option == "-text" && (widget.kind == LABEL || widget.kind == BUTTON) {
+            unused BuilderAppend(result.value.bytes, TextView(widget.text)); return;
+        }
+        if option == "-bg" && widget.kind == ENTRY {
+            unused BuilderAppend(result.value.bytes, "white"); return;
+        }
+        if option == "-command" && widget.kind == BUTTON {
             unused BuilderAppend(result.value.bytes, TextView(widget.command)); return;
         }
     }
-    if subcommand == "invoke" && args.count == 1 && widget.button {
+    if subcommand == "invoke" && args.count == 1 && widget.kind == BUTTON {
         unused BuilderAppend(script.bytes, TextView(widget.command));
         return;
     }
+    if widget.kind == ENTRY { EntryCommand(widget, args, result); return }
     SetError(result, "unsupported widget subcommand or arguments");
 }
 
-Minimum :: (a: s32, b: s32) -> s32 { return ifx a < b then a else b }
-NonNegative :: (x: s32) -> s32 { return ifx x > 0 then x else 0 }
+Focus :: (_: s64, args: []Text, result: *Result) {
+    if args.count == 0 {
+        if focused >= 0 { unused BuilderAppend(result.value.bytes, TextView(widgets[focused].name)) }
+        return;
+    }
+    if args.count != 1 { SetError(result, "expected focus ?entry?"); return }
+    index := Find(TextView(args[0]));
+    if closed || index < 0 || widgets[index].kind != ENTRY { SetError(result, "expected an open entry path"); return }
+    focused = index;
+}
 
-Layout :: (width: s32, height: s32) {
-    cavity := Box.{x = 12, y = 12, w = NonNegative(width - 24), h = NonNegative(height - 24)};
-    // Maintain packing order even when creation or deletion order differs.
-    after: s32;
-    while true {
-        index: s64 = -1;
-        for * widgets {
-            if it.order > after && (index < 0 || it.order < widgets[index].order) { index = it_index }
+Bind :: (_: s64, args: []Text, result: *Result) {
+    if args.count != 3 { SetError(result, "expected bind entry <Return> script"); return }
+    index := Find(TextView(args[0]));
+    event := TextView(args[1]);
+    if closed || index < 0 || widgets[index].kind != ENTRY || (event != "<Return>" && event != "<Key-\n>") {
+        SetError(result, "only the entry Return binding is supported"); return;
+    }
+    command: Text = TextCopy(TextView(args[2]));
+    VecSwap(widgets[index].command.bytes, command.bytes);
+}
+
+EntryOffset :: (widget: *Widget, index: string) -> (offset: s64, ok: bool) {
+    if index == "insert" { return widget.cursor, true }
+    if index == "end" { return widget.text.bytes.count, true }
+    number, ok := ParseInteger(index);
+    if !ok || number < 0 { return 0, false }
+    offset, good := UTF.Offset(TextView(widget.text), number);
+    return offset, good;
+}
+
+Insert :: (widget: *Widget, at: s64, value: string) -> bool {
+    if value.count > MAX_ENTRY_BYTES - widget.text.bytes.count || !UTF.SingleLine(value) { return false }
+    if value.count == 0 { return true }
+    after: Text;
+    {
+        before := TextView(widget.text);
+        if !BuilderAppend(after.bytes, before[:at]) || !BuilderAppend(after.bytes, value) ||
+           !BuilderAppend(after.bytes, before[at:]) { return false }
+    }
+    VecSwap(widget.text.bytes, after.bytes);
+    if at <= widget.cursor { widget.cursor += value.count }
+    return true;
+}
+
+Delete :: (widget: *Widget, first: s64, last: s64) {
+    if first >= last { return }
+    length := widget.text.bytes.count;
+    {
+        bytes := VecSlice(widget.text.bytes, 0, length);
+        for i: last..length-1 { bytes[first+i-last] = bytes[i] }
+    }
+    unused VecResize(widget.text.bytes, length - (last - first));
+    if last <= widget.cursor { widget.cursor -= last-first }
+    else if first < widget.cursor { widget.cursor = first }
+}
+
+EntryCommand :: (widget: *Widget, args: []Text, result: *Result) {
+    command := TextView(args[0]);
+    if command == "get" && args.count == 1 {
+        unused BuilderAppend(result.value.bytes, TextView(widget.text)); return;
+    }
+    valid := ((command == "index" || command == "icursor") && args.count == 2) ||
+             (command == "insert" && args.count == 3) || (command == "delete" && (args.count == 2 || args.count == 3));
+    if !valid { SetError(result, "unsupported entry subcommand or arguments"); return }
+    at, ok := EntryOffset(widget, TextView(args[1]));
+    if !ok { SetError(result, "bad entry index"); return }
+    if command == "index" {
+        value := T.Integer(UTF.Count(TextView(widget.text)[:at]));
+        VecSwap(result.value.bytes, value.value.bytes);
+    } else if command == "icursor" { widget.cursor = at }
+    else if command == "insert" {
+        if !Insert(widget, at, TextView(args[2])) { SetError(result, "cannot insert single-line UTF-8 text") }
+    } else {
+        last := UTF.Next(TextView(widget.text), at);
+        if args.count == 3 {
+            end, good := EntryOffset(widget, TextView(args[2]));
+            if !good { SetError(result, "bad entry index"); return }
+            last = end;
         }
-        if index < 0 { break }
-        widget := *widgets[index];
-        after = widget.order;
-        count := TextView(widget.text).count;
-        text_width := ifx count < 512 then cast(s32)count * 12 else 6144;
-        requested_w := text_width + 30;
-        requested_h := ifx widget.button then cast(s32)36 else cast(s32)28;
-        available := cavity;
-        if widget.side == 1 || widget.side == 3 {
-            available.w = Minimum(cavity.w, requested_w + widget.padx * 2);
-            if widget.side == 1 { cavity.x += available.w }
-            else { available.x += cavity.w - available.w }
-            cavity.w -= available.w;
-        } else {
-            available.h = Minimum(cavity.h, requested_h + widget.pady * 2);
-            if widget.side == 0 { cavity.y += available.h }
-            else { available.y += cavity.h - available.h }
-            cavity.h -= available.h;
-        }
-        w := Minimum(requested_w, NonNegative(available.w - widget.padx * 2));
-        h := Minimum(requested_h, NonNegative(available.h - widget.pady * 2));
-        widget.box = .{x = available.x + (available.w-w)/2, y = available.y + (available.h-h)/2, w = w, h = h};
+        Delete(widget, at, last);
     }
 }
 
-OverButton :: (x: s32, y: s32) -> s64 {
+EntryKey :: enum s32 { Return; Backspace; Delete; Left; Right; Home; End; }
+
+KeyDown :: (key: EntryKey) -> Text {
+    if focused < 0 { return TextCopy("") }
+    entry := *widgets[focused];
+    if key == .Return { return TextCopy(TextView(entry.command)) }
+    if key == .Left { entry.cursor = UTF.Previous(TextView(entry.text), entry.cursor) }
+    if key == .Right { entry.cursor = UTF.Next(TextView(entry.text), entry.cursor) }
+    if key == .Home { entry.cursor = 0 }
+    if key == .End { entry.cursor = entry.text.bytes.count }
+    if key == .Backspace {
+        at := UTF.Previous(TextView(entry.text), entry.cursor);
+        Delete(entry, at, entry.cursor);
+    }
+    if key == .Delete {
+        at := UTF.Next(TextView(entry.text), entry.cursor);
+        Delete(entry, entry.cursor, at);
+    }
+    return TextCopy("");
+}
+
+TextInput :: (value: string) {
+    if focused >= 0 { unused Insert(*widgets[focused], widgets[focused].cursor, value) }
+}
+
+Minimum :: (a: s32, b: s32) -> s32 { return ifx a < b then a else b }
+Maximum :: (a: s32, b: s32) -> s32 { return ifx a > b then a else b }
+NonNegative :: (x: s32) -> s32 { return ifx x > 0 then x else 0 }
+
+NextChild :: (parent: s64, after: s32) -> s64 {
+    index: s64 = -1;
+    for * widgets {
+        if it.parent == parent && it.order > after && (index < 0 || it.order < widgets[index].order) { index = it_index }
+    }
+    return index;
+}
+
+Horizontal :: (pack: Packing) -> bool { return pack.side == 1 || pack.side == 3 }
+
+Measure :: (parent: s64) -> Box {
+    used: Box;
+    required: Box;
+    index := NextChild(parent, 0);
+    while index >= 0 {
+        widget := *widgets[index];
+        requested: Box;
+        if widget.kind == FRAME { requested = Measure(index) }
+        else if widget.kind == ENTRY { requested = .{w = 168, h = 30} }
+        else {
+            length := UTF.Count(TextView(widget.text), 512);
+            requested = .{w = length * CHAR_WIDTH + 30, h = ifx widget.kind == BUTTON then 36 else 28};
+        }
+        widget.requested = requested;
+        w := requested.w + widget.pack.padx * 2;
+        h := requested.h + widget.pack.pady * 2;
+        if Horizontal(widget.pack) {
+            used.w += w;
+            required.h = Maximum(required.h, used.h + h);
+        } else {
+            used.h += h;
+            required.w = Maximum(required.w, used.w + w);
+        }
+        index = NextChild(parent, widget.order);
+    }
+    return .{w = Maximum(used.w, required.w), h = Maximum(used.h, required.h)};
+}
+
+// Reserve room for later siblings before sharing the cavity among expanders.
+Expansion :: (index: s64, cavity: s32, horizontal: bool) -> s32 {
+    available := cavity;
+    extra := cavity;
+    expanders: s32;
+    while index >= 0 {
+        widget := *widgets[index];
+        needed := ifx horizontal then widget.requested.w + widget.pack.padx * 2 else widget.requested.h + widget.pack.pady * 2;
+        if Horizontal(widget.pack) == horizontal {
+            available -= needed;
+            expanders += widget.pack.expand;
+        } else if expanders > 0 { extra = Minimum(extra, (available - needed) / expanders) }
+        index = NextChild(widget.parent, widget.order);
+    }
+    if expanders == 0 { return 0 }
+    return NonNegative(Minimum(extra, available / expanders));
+}
+
+Place :: (parent: s64, cavity: Box) {
+    index := NextChild(parent, 0);
+    while index >= 0 {
+        widget := *widgets[index];
+        pack := widget.pack;
+        available := cavity;
+        if Horizontal(pack) {
+            parcel := widget.requested.w + pack.padx * 2;
+            if pack.expand > 0 { parcel += Expansion(index, cavity.w, true) }
+            available.w = Minimum(cavity.w, parcel);
+            if pack.side == 1 { cavity.x += available.w }
+            else { available.x += cavity.w - available.w }
+            cavity.w -= available.w;
+        } else {
+            parcel := widget.requested.h + pack.pady * 2;
+            if pack.expand > 0 { parcel += Expansion(index, cavity.h, false) }
+            available.h = Minimum(cavity.h, parcel);
+            if pack.side == 0 { cavity.y += available.h }
+            else { available.y += cavity.h - available.h }
+            cavity.h -= available.h;
+        }
+        inner_w := NonNegative(available.w - pack.padx * 2);
+        inner_h := NonNegative(available.h - pack.pady * 2);
+        w := ifx (pack.fill & 1) != 0 then inner_w else Minimum(widget.requested.w, inner_w);
+        h := ifx (pack.fill & 2) != 0 then inner_h else Minimum(widget.requested.h, inner_h);
+        widget.box = .{x = available.x + (available.w-w)/2, y = available.y + (available.h-h)/2, w = w, h = h};
+        if widget.kind == FRAME { Place(index, widget.box) }
+        index = NextChild(parent, widget.order);
+    }
+}
+
+Layout :: (width: s32, height: s32) {
+    for * widgets { it.box = .{} }
+    unused Measure(-1);
+    Place(-1, .{x = 12, y = 12, w = NonNegative(width - 24), h = NonNegative(height - 24)});
+}
+
+EntrySlots :: (box: Box) -> s32 { return NonNegative(box.w - 2 * ENTRY_INSET - 1) / CHAR_WIDTH }
+
+EntryStart :: (widget: *Widget) -> s64 {
+    text := TextView(widget.text);
+    cursor_position := UTF.Count(text[:widget.cursor]);
+    first, _ := UTF.Offset(text, NonNegative(cursor_position - EntrySlots(widget.box)));
+    return first;
+}
+
+Over :: (x: s32, y: s32, kind: s64) -> s64 {
     for * widgets {
         box := it.box;
-        if it.button && it.order > 0 && x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h {
+        if it.kind == kind && x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h {
             return it_index;
         }
     }
     return -1;
 }
 
-PointerDown :: (x: s32, y: s32) { pressed = OverButton(x, y) }
+PointerDown :: (x: s32, y: s32) {
+    pressed = Over(x, y, BUTTON);
+    index := Over(x, y, ENTRY);
+    if index < 0 { return }
+    focused = index;
+    widget := *widgets[index];
+    start := EntryStart(widget);
+    position := NonNegative(x - widget.box.x - ENTRY_INSET + CHAR_WIDTH/2) / CHAR_WIDTH;
+    offset, _ := UTF.Offset(TextView(widget.text)[start:], position);
+    widget.cursor = start + offset;
+}
 
 PointerUp :: (x: s32, y: s32) -> Text {
     index := pressed;
     pressed = -1;
-    if index < 0 || OverButton(x, y) != index { return TextCopy("") }
+    if index < 0 || Over(x, y, BUTTON) != index { return TextCopy("") }
     return TextCopy(TextView(widgets[index].command));
 }
 

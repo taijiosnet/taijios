@@ -1,7 +1,19 @@
 // Guest fd 0 capability shared by hosted Tcl applications.
+#import "std/vec"
 host_api :: #system_library "host_api";
 
 #scope_export
 Read :: (buffer: []u8) -> s32 #foreign host_api;
 
 ReadBytes :: (buffer: []u8) -> s32 { return Read(buffer) }
+
+ReadScript :: (source: *Text) -> string {
+    chunk: [4096]u8;
+    while true {
+        count := ReadBytes(chunk[:]);
+        if count < 0 || count > chunk.count { return "cannot read guest stdin" }
+        if count == 0 { return "" }
+        if source.bytes.count + cast(s64)count > 1048576 { return "script exceeds 1 MiB" }
+        if !BuilderAppend(source.bytes, TextView(chunk[:count])) { return "cannot allocate script" }
+    }
+}

@@ -18,6 +18,15 @@ Redraw :: 2;
 Resize :: 3;
 Down :: 5;
 Up :: 6;
+Key :: 7;
+TextEvent :: 9;
+EnterKey :: 257;
+BackspaceKey :: 259;
+DeleteKey :: 261;
+RightKey :: 262;
+LeftKey :: 263;
+HomeKey :: 268;
+EndKey :: 269;
 
 #scope_export
 Open :: (title: string, width: s32, height: s32) -> bool #reads #foreign host_api;

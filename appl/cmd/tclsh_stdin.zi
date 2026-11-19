@@ -5,20 +5,8 @@ using Stdin :: #import "taijios_stdin"
 
 main :: () -> s32 {
     source: Text;
-    chunk: [4096]u8;
-    while true {
-        read := Stdin.ReadBytes(chunk[:]);
-        if read < 0 || read > chunk.count { print("tclsh: cannot read guest stdin\n"); return 1 }
-        if read == 0 { break }
-        if source.bytes.count + cast(s64)read > 1048576 {
-            print("tclsh: script exceeds 1 MiB\n");
-            return 1;
-        }
-        if !BuilderAppend(source.bytes, TextView(chunk[:read])) {
-            print("tclsh: cannot allocate script\n");
-            return 1;
-        }
-    }
+    error := Stdin.ReadScript(*source);
+    if error != "" { print("tclsh: %\n", error); return 1 }
     tcl: Tcl.Interpreter;
     result := Tcl.Eval(*tcl, TextView(source));
     output: Text = Tcl.TakeOutput(*tcl);

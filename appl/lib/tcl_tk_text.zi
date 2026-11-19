@@ -1,0 +1,56 @@
+// UTF-8 character boundaries shared by entry editing and stroke rendering.
+Decode :: (text: string, at: s64) -> (rune: s32, width: s64) {
+    first := cast(s32)text[at];
+    if first < 128 { return first, 1 }
+    size: s64;
+    min_rune: s32;
+    rune: s32;
+    if first >= 194 && first <= 223 { size = 2; min_rune = 128; rune = first & 31 }
+    else if first >= 224 && first <= 239 { size = 3; min_rune = 2048; rune = first & 15 }
+    else if first >= 240 && first <= 244 { size = 4; min_rune = 65536; rune = first & 7 }
+    else { return -1, 1 }
+    if at + size > text.count { return -1, 1 }
+    for i: 1..size-1 {
+        byte := cast(s32)text[at+i];
+        if byte < 128 || byte > 191 { return -1, 1 }
+        rune = (rune << 6) | (byte & 63);
+    }
+    if rune < min_rune || rune > 1114111 || (rune >= 55296 && rune <= 57343) { return -1, 1 }
+    return rune, size;
+}
+
+Next :: (text: string, at: s64) -> s64 {
+    if at >= text.count { return text.count }
+    _, size := Decode(text, at);
+    return at + size;
+}
+
+Previous :: (text: string, at: s64) -> s64 {
+    if at <= 0 { return 0 }
+    at -= 1;
+    while at > 0 && (text[at] & 192) == 128 { at -= 1 }
+    return at;
+}
+
+Offset :: (text: string, count: s64) -> (at: s64, ok: bool) {
+    at: s64;
+    while count > 0 && at < text.count { at = Next(text, at); count -= 1 }
+    return at, count == 0;
+}
+
+Count :: (text: string, limit: s32 = 2147483647) -> s32 {
+    at: s64;
+    count: s32;
+    while at < text.count && count < limit { at = Next(text, at); count += 1 }
+    return count;
+}
+
+SingleLine :: (text: string) -> bool {
+    at: s64;
+    while at < text.count {
+        rune, size := Decode(text, at);
+        if rune < 32 || rune == 127 { return false }
+        at += size;
+    }
+    return true;
+}

@@ -7,8 +7,15 @@ main :: () -> s32 {
     interpreter: Tcl.Interpreter;
     if !Tk.Attach(*interpreter) { return 1 }
     reference := Tcl.Eval(*interpreter, Input.Script);
-    if reference.code != .OK || TextView(reference.value) != "9 balls" { return 2 }
+    if reference.code != .OK || TextView(reference.value) != ".f.input.e" { return 2 }
     print("%\n", TextView(reference.value));
+    entry := Tcl.Eval(*interpreter, ".f.input.e get");
+    if entry.code != .OK || TextView(entry.value) != "aßéz" { return 9 }
+    print("%\n", TextView(entry.value));
+    index := Tcl.Eval(*interpreter, ".f.input.e index insert");
+    if index.code != .OK || TextView(index.value) != "2" { return 10 }
+    end := Tcl.Eval(*interpreter, ".f.input.e index end");
+    if end.code != .OK || TextView(end.value) != "4" { return 11 }
 
     bad_config := Tcl.Eval(*interpreter, ".count configure -text Lost -unsupported 1");
     if bad_config.code != .Error { return 3 }
@@ -19,6 +26,17 @@ main :: () -> s32 {
     if changed.code != .OK || TextView(changed.value) != "9" { return 5 }
 
     Tk.Layout(300, 208);
+    entry_id := Tk.Find(".f.input.e");
+    layout := Tk.widgets[entry_id].box;
+    if layout.w <= 168 || layout.y < 100 || layout.y + layout.h >= 208 { return 12 }
+    Tcl.Eval(*interpreter, "frame .f.hidden; entry .f.hidden.e; pack .f.hidden.e");
+    Tk.Layout(300, 208);
+    if Tk.widgets[Tk.Find(".f.hidden.e")].box.w != 0 { return 13 }
+    removed := Tcl.Eval(*interpreter, "destroy .f; focus");
+    if removed.code != .OK || removed.value.bytes.count != 0 || Tk.Find(".f.input.e") >= 0 ||
+       Tk.Find(".f.hidden.e") >= 0 { return 14 }
+    reused := Tcl.Eval(*interpreter, "frame .f; entry .f.input; .f.input get");
+    if reused.code != .OK || reused.value.bytes.count != 0 { return 15 }
     Tk.PointerDown(150, 70);
     Tcl.Eval(*interpreter, "destroy .more");
     cancelled: Text = Tk.PointerUp(150, 70);

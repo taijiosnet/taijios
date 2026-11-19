@@ -4,7 +4,7 @@ using Tcl :: #import "tcl"
 using Tk :: #import "tcl_tk"
 using Paint :: #import "tcl_tk_paint"
 using Surface :: #import "zx_surface"
-using Input :: #import "tcltk_input"
+using Stdin :: #import "taijios_stdin"
 
 Execute :: (tcl: *Tcl.Interpreter, script: string) -> bool {
     result := Tcl.Eval(tcl, script);
@@ -27,13 +27,16 @@ Draw :: (frame: *Frame, width: s32, height: s32) -> bool {
 }
 
 main :: () -> s32 {
+    source: Text;
+    error := Stdin.ReadScript(*source);
+    if error != "" { print("tcltk: %\n", error); return 1 }
     tcl: Tcl.Interpreter;
     if !Tk.Attach(*tcl) { return 1 }
-    if !Execute(*tcl, Input.Script) { return 1 }
+    if !Execute(*tcl, TextView(source)) { return 1 }
     if Tk.Closed() { return 0 }
     width: s32 = 300;
     height: s32 = 208;
-    if !Surface.OpenWindow("Bounce controls", width, height) { return 1 }
+    if !Surface.OpenWindow("Tk", width, height) { return 1 }
     defer Surface.CloseWindow();
     frame: Frame;
     if !Draw(*frame, width, height) { return 1 }
@@ -47,6 +50,20 @@ main :: () -> s32 {
             Tk.PointerDown(event.x, event.y);
         } else if event.kind == Surface.Up && event.button == 1 {
             script: Text = Tk.PointerUp(event.x, event.y);
+            if script.bytes.count > 0 && !Execute(*tcl, TextView(script)) { return 1 }
+        } else if event.kind == Surface.TextEvent {
+            Tk.TextInput(event.text);
+        } else if event.kind == Surface.Key {
+            key: Tk.EntryKey;
+            if event.key == Surface.EnterKey { key = .Return }
+            else if event.key == Surface.LeftKey { key = .Left }
+            else if event.key == Surface.RightKey { key = .Right }
+            else if event.key == Surface.HomeKey { key = .Home }
+            else if event.key == Surface.EndKey { key = .End }
+            else if event.key == Surface.BackspaceKey { key = .Backspace }
+            else if event.key == Surface.DeleteKey { key = .Delete }
+            else { continue }
+            script: Text = Tk.KeyDown(key);
             if script.bytes.count > 0 && !Execute(*tcl, TextView(script)) { return 1 }
         } else { continue }
         if !Tk.Closed() && !Draw(*frame, width, height) { return 1 }

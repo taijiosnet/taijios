@@ -1,5 +1,6 @@
 // A small, host-independent RGBA renderer and original stroke lettering.
 using Tk :: #import "tcl_tk"
+using UTF :: #import "tcl_tk_text"
 #import "std/vec"
 
 Canvas :: struct { pixels: []u8; width: s32; height: s32; }
@@ -9,6 +10,7 @@ BUTTON :: Ink.{r = 224, g = 234, b = 242};
 PRESSED :: Ink.{r = 188, g = 213, b = 231};
 BORDER :: Ink.{r = 119, g = 149, b = 173};
 LETTER :: Ink.{r = 25, g = 47, b = 67};
+ENTRY :: Ink.{r = 255, g = 255, b = 255};
 
 Fill :: (canvas: *Canvas, box: Tk.Box, ink: Ink) {
     left := Tk.NonNegative(box.x);
@@ -28,7 +30,7 @@ Fill :: (canvas: *Canvas, box: Tk.Box, ink: Ink) {
 }
 
 // Each group is x0,y0,x1,y1 on a 5 by 7 grid. Lowercase uses the same glyphs.
-Strokes :: (rune: u8) -> string {
+Strokes :: (rune: s32) -> string {
     byte := rune;
     if byte >= 97 && byte <= 122 { byte -= 32 }
     if byte == #char " " { return "" }
@@ -37,6 +39,7 @@ Strokes :: (rune: u8) -> string {
     if byte == #char "C" { return "404030100001010510364646" }
     if byte == #char "D" { return "000600303041414545360636" }
     if byte == #char "E" { return "0006004003330646" }
+    if byte == 233 || byte == 201 { return "00060141043406463021" }
     if byte == #char "F" { return "000600400333" }
     if byte == #char "G" { return "4030100001050536364646432343" }
     if byte == #char "H" { return "000640460343" }
@@ -95,16 +98,19 @@ Stroke :: (canvas: *Canvas, origin_x: s32, origin_y: s32, segment: string) {
     }
 }
 
-DrawText :: (canvas: *Canvas, box: Tk.Box, text: string) {
+DrawText :: (canvas: *Canvas, box: Tk.Box, text: string, center: bool = true) {
     if box.h < 14 { return }
-    length := Tk.Minimum(cast(s32)Tk.Minimum(box.w/12, 512), cast(s32)text.count);
-    x := box.x + (box.w - length*12)/2;
+    length := UTF.Count(text, Tk.Minimum(box.w/Tk.CHAR_WIDTH, 512));
+    x := ifx center then box.x + (box.w - length*Tk.CHAR_WIDTH)/2 else box.x;
     y := box.y + (box.h-14)/2;
+    offset: s64;
     for i: 0..length-1 {
-        glyph := Strokes(text[i]);
+        rune, size := UTF.Decode(text, offset);
+        offset += size;
+        glyph := Strokes(rune);
         for segment: 0..glyph.count/4-1 {
             at := segment * 4;
-            Stroke(canvas, x + i*12 + 1, y, glyph[at:at+4]);
+            Stroke(canvas, x + i*Tk.CHAR_WIDTH + 1, y, glyph[at:at+4]);
         }
     }
 }
@@ -115,7 +121,24 @@ Render :: (pixels: []u8, width: s32, height: s32) {
     for * Tk.widgets {
         if it.order == 0 || it.box.w < 4 || it.box.h < 4 { continue }
         box := it.box;
-        if it.button {
+        if it.kind == Tk.FRAME { continue }
+        if it.kind == Tk.ENTRY {
+            active := it_index == Tk.focused;
+            Fill(*canvas, box, ifx active then LETTER else BORDER);
+            Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
+            if box.w > 2 * Tk.ENTRY_INSET && box.h >= 18 {
+                start := Tk.EntryStart(it);
+                text := TextView(it.text);
+                inner_x := box.x + Tk.ENTRY_INSET;
+                DrawText(*canvas, .{x = inner_x, y = box.y, w = Tk.EntrySlots(box) * Tk.CHAR_WIDTH, h = box.h}, text[start:], false);
+                if active {
+                    x := inner_x + UTF.Count(text[start:it.cursor]) * Tk.CHAR_WIDTH;
+                    Fill(*canvas, .{x = x, y = box.y+4, w = 1, h = box.h-8}, LETTER);
+                }
+            }
+            continue;
+        }
+        if it.kind == Tk.BUTTON {
             Fill(*canvas, box, BORDER);
             Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2},
                  ifx it_index == Tk.pressed then PRESSED else BUTTON);
