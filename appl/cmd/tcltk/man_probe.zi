@@ -1,0 +1,35 @@
+#import "std/vec"
+using Files :: #import "taijios_files"
+using Man :: #import "man_pages"
+
+Has :: (body: string, fragment: string) -> bool {
+    for i: 0..body.count-fragment.count {
+        if body[i:i+fragment.count] == fragment { return true }
+    }
+    return false;
+}
+
+main :: () -> s32 {
+    data: [8192]u8;
+    if Files.ReadBytesAt("/man/2/INDEX", 0, data[:]) != 4096 { return 1 }
+    if Files.ReadBytesAt("/build/tcltk/man-mount/ls", 0, data[:4]) != 4 || TextView(data[:4]) != ".TH " { return 2 }
+    if Files.ReadBytesAt("/build/tcltk/man-mount/ls", 4, data[:4]) != 4 || TextView(data[:4]) != "LS 1" { return 3 }
+    if Files.ReadBytesAt("/man/1/ls", 131072, data[:]) != 0 { return 4 }
+    if Files.ReadBytesAt("/man/1/no-such-manual-probe", 0, data[:]) != -2 { return 5 }
+    if Files.ReadBytesAt("/man/1/ls", -1, data[:]) != -1 || TextView(data[:4]) != "LS 1" { return 6 }
+
+    alias := Man.Lookup("lc");
+    if TextView(alias.title) != "ls(1)" || !Has(TextView(alias.body), "ls, lc - list files") { return 7 }
+    open := Man.Lookup("2 sys-open");
+    if TextView(open.title) != "sys-open(2)" || !Has(TextView(open.body), "create: fn(") ||
+       !Has(TextView(open.body), "file descriptor") || Has(TextView(open.body), ".SH") { return 8 }
+    ambiguous := Man.Lookup("draw(2)");
+    if TextView(ambiguous.title) != "Matching manual pages" || !Has(TextView(ambiguous.body), "draw-0intro(2)") ||
+       !Has(TextView(ambiguous.body), "draw-example(2)") { return 9 }
+    missing := Man.Lookup("no-such-manual-probe");
+    if TextView(missing.title) != "No matches" { return 10 }
+    invalid := Man.Lookup("../NOTICE");
+    if TextView(invalid.title) != "Invalid manual query" { return 11 }
+    print("Guest namespace offsets, mount, errors, real manual lookup and formatting verified\n");
+    return 0;
+}

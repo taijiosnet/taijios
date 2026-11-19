@@ -1,6 +1,7 @@
 // A small, host-independent RGBA renderer and original stroke lettering.
 using Tk :: #import "tcl_tk"
 using UTF :: #import "tcl_tk_text"
+using View :: #import "tcl_tk_view"
 #import "std/vec"
 
 Canvas :: struct { pixels: []u8; width: s32; height: s32; }
@@ -10,6 +11,7 @@ BUTTON :: Ink.{r = 224, g = 234, b = 242};
 PRESSED :: Ink.{r = 188, g = 213, b = 231};
 BORDER :: Ink.{r = 119, g = 149, b = 173};
 LETTER :: Ink.{r = 25, g = 47, b = 67};
+MUTED :: Ink.{r = 112, g = 123, b = 132};
 ENTRY :: Ink.{r = 255, g = 255, b = 255};
 
 Fill :: (canvas: *Canvas, box: Tk.Box, ink: Ink) {
@@ -74,12 +76,29 @@ Strokes :: (rune: s32) -> string {
     if byte == #char "+" { return "03432125" }
     if byte == #char "-" { return "0343" }
     if byte == #char "." { return "2626" }
+    if byte == 40 { return "30101002020404161636" }
+    if byte == 41 { return "10303042424444363616" }
+    if byte == 47 { return "0640" }
+    if byte == 92 { return "0046" }
+    if byte == 44 { return "2516" }
+    if byte == 58 { return "22222525" }
+    if byte == 59 { return "22222516" }
+    if byte == 39 { return "2021" }
+    if byte == 34 { return "10113031" }
+    if byte == 95 { return "0646" }
+    if byte == 61 { return "02420444" }
+    if byte == 91 { return "301010161636" }
+    if byte == 93 { return "103030363616" }
+    if byte == 60 { return "40030346" }
+    if byte == 62 { return "00434306" }
+    if byte == 42 { return "1234123414320343" }
+    if byte == 124 { return "2026" }
     return "0110103030414142422323242626";
 }
 
 Magnitude :: (value: s32) -> s32 { return ifx value < 0 then -value else value }
 
-Stroke :: (canvas: *Canvas, origin_x: s32, origin_y: s32, segment: string) {
+Stroke :: (canvas: *Canvas, origin_x: s32, origin_y: s32, segment: string, ink: Ink) {
     x := cast(s32)segment[0] - 48;
     y := cast(s32)segment[1] - 48;
     end_x := cast(s32)segment[2] - 48;
@@ -90,7 +109,7 @@ Stroke :: (canvas: *Canvas, origin_x: s32, origin_y: s32, segment: string) {
     sy: s32 = ifx y < end_y then 1 else -1;
     error := dx + dy;
     while true {
-        Fill(canvas, .{x = origin_x + 2*x, y = origin_y + 2*y, w = 2, h = 2}, LETTER);
+        Fill(canvas, .{x = origin_x + 2*x, y = origin_y + 2*y, w = 2, h = 2}, ink);
         if x == end_x && y == end_y { break }
         doubled := 2 * error;
         if doubled >= dy { error += dy; x += sx }
@@ -98,7 +117,7 @@ Stroke :: (canvas: *Canvas, origin_x: s32, origin_y: s32, segment: string) {
     }
 }
 
-DrawText :: (canvas: *Canvas, box: Tk.Box, text: string, center: bool = true) {
+DrawText :: (canvas: *Canvas, box: Tk.Box, text: string, center: bool = true, ink: Ink = LETTER) {
     if box.h < 14 { return }
     length := UTF.Count(text, Tk.Minimum(box.w/Tk.CHAR_WIDTH, 512));
     x := ifx center then box.x + (box.w - length*Tk.CHAR_WIDTH)/2 else box.x;
@@ -110,7 +129,7 @@ DrawText :: (canvas: *Canvas, box: Tk.Box, text: string, center: bool = true) {
         glyph := Strokes(rune);
         for segment: 0..glyph.count/4-1 {
             at := segment * 4;
-            Stroke(canvas, x + i*Tk.CHAR_WIDTH + 1, y, glyph[at:at+4]);
+            Stroke(canvas, x + i*Tk.CHAR_WIDTH + 1, y, glyph[at:at+4], ink);
         }
     }
 }
@@ -122,6 +141,20 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         if it.order == 0 || it.box.w < 4 || it.box.h < 4 { continue }
         box := it.box;
         if it.kind == Tk.FRAME { continue }
+        if it.kind == Tk.TEXT {
+            Fill(*canvas, box, ifx it_index == Tk.focused then LETTER else BORDER);
+            Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
+            if box.h < 2 * View.INSET + View.ROW_HEIGHT { continue }
+            text := TextView(it.text);
+            for row: 0..it.view.visible-1 {
+                index := it.view.top + row;
+                if index >= it.view.rows.count { break }
+                line := View.Row(*it.view, text, index);
+                DrawText(*canvas, .{x = box.x + View.INSET, y = box.y + View.INSET + row*View.ROW_HEIGHT,
+                                   w = box.w - 2*View.INSET, h = View.ROW_HEIGHT}, line, false);
+            }
+            continue;
+        }
         if it.kind == Tk.ENTRY {
             active := it_index == Tk.focused;
             Fill(*canvas, box, ifx active then LETTER else BORDER);
@@ -143,6 +176,6 @@ Render :: (pixels: []u8, width: s32, height: s32) {
             Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2},
                  ifx it_index == Tk.pressed then PRESSED else BUTTON);
         }
-        DrawText(*canvas, box, TextView(it.text));
+        DrawText(*canvas, box, TextView(it.text), true, ifx it.disabled then MUTED else LETTER);
     }
 }

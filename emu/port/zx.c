@@ -17,6 +17,7 @@ enum {
 	ZxMaxImage = 32 * 1024 * 1024,
 	ZxSteps = 16000000,
 	ZxTitleBytes = 512,
+	ZxGuestPathBytes = 1024,
 };
 
 static int
@@ -344,6 +345,57 @@ zxclock(void *context, const char *module, const char *function,
 	return 1;
 }
 
+/* Read from the caller's Inferno namespace, including its mounts. */
+static int
+zxfilereadat(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	char path[ZxGuestPathBytes + 1], err[ERRMAX];
+	uchar bytes[4096];
+	const HostValue *name, *offset, *buffer;
+	size_t length;
+	long count, i;
+	int fd;
+
+	USED(context);
+	USED(module);
+	USED(function);
+	if(n != 3)
+		return 0;
+	name = args;
+	offset = args + 1;
+	buffer = args + 2;
+	if(name->kind != HOST_STRING || offset->kind != HOST_INTEGER ||
+	   offset->type == nil || strcmp(offset->type, "s64") != 0 ||
+	   buffer->kind != HOST_SLICE || buffer->type == nil ||
+	   strcmp(buffer->type, "[]u8") != 0 || (buffer->length != 0 && buffer->elements == nil))
+		return 0;
+
+	count = -1;
+	if(name->length != 0 && name->length <= ZxGuestPathBytes && name->data != nil &&
+	   memchr(name->data, 0, name->length) == nil && offset->integer >= 0 &&
+	   offset->integer <= INT64_MAX - sizeof(bytes)){
+		memmove(path, name->data, name->length);
+		path[name->length] = 0;
+		fd = kopen(path, OREAD);
+		if(fd < 0){
+			kgerrstr(err, sizeof(err));
+			if(strstr(err, "does not exist") != nil || strstr(err, "No such file") != nil)
+				count = -2;
+		}else{
+			length = buffer->length > sizeof(bytes) ? sizeof(bytes) : buffer->length;
+			count = length == 0 ? 0 : kpread(fd, bytes, length, offset->integer);
+			kclose(fd);
+			for(i = 0; i < count; i++)
+				buffer->elements[i].bits = bytes[i];
+		}
+	}
+	result->kind = HOST_INTEGER;
+	result->type = "s32";
+	result->integer = count;
+	return 1;
+}
+
 /* Package builds prefix the module leaf with p and 16 hexadecimal digits. */
 static int
 zxmodule(const char *actual, const char *leaf)
@@ -373,6 +425,10 @@ zxbindings(Bundle *bundle, ZxSurface *surface, HostBinding *bindings)
 			continue;
 		if(zxmodule(abi.module, "taijios_stdin") && strcmp(abi.function, "Read") == 0){
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxstdin, nil};
+			continue;
+		}
+		if(zxmodule(abi.module, "taijios_files") && strcmp(abi.function, "ReadAt") == 0){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxfilereadat, nil};
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_clock") && strcmp(abi.function, "MonotonicMillis") == 0){

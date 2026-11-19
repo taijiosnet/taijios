@@ -25,6 +25,10 @@ BackspaceKey :: 259;
 DeleteKey :: 261;
 RightKey :: 262;
 LeftKey :: 263;
+DownKey :: 264;
+UpKey :: 265;
+PageUpKey :: 266;
+PageDownKey :: 267;
 HomeKey :: 268;
 EndKey :: 269;
 

@@ -1,0 +1,88 @@
+// Manual browser navigation adapted from Inferno appl/wm/man.b. See NOTICE.
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Window :: #import "tcltk"
+using Files :: #import "taijios_files"
+using Man :: #import "man_pages"
+
+HISTORY_LIMIT :: 64;
+Visit :: struct { query: Text; top: Text; }
+
+history: Vec(Visit);
+current: s64 = -1;
+page: Man.Page;
+
+Replace :: (text: *Text, value: string) {
+    copy: Text = TextCopy(value);
+    VecSwap(text.bytes, copy.bytes);
+}
+
+AppendVisit :: (query: string) -> bool {
+    unused VecResize(history, current + 1);
+    if history.count == HISTORY_LIMIT {
+        for i: 1..history.count-1 {
+            VecSwap(history[i-1].query.bytes, history[i].query.bytes);
+            VecSwap(history[i-1].top.bytes, history[i].top.bytes);
+        }
+        current -= 1;
+        unused VecResize(history, history.count-1);
+    }
+    visit := Visit.{query = TextCopy(query), top = TextCopy("0")};
+    if !VecPush(history, visit) { return false }
+    current += 1;
+    return true;
+}
+
+Navigate :: (action: string, query: string, position: string) -> bool {
+    if current >= 0 { Replace(*history[current].top, position) }
+    if action == "open" {
+        if !AppendVisit(query) { return false }
+    } else if action == "back" {
+        if current <= 0 { return true }
+        current -= 1;
+    } else {
+        if current + 1 >= history.count { return true }
+        current += 1;
+    }
+    // Reopen from the current namespace when visiting a history entry again.
+    found := Man.Lookup(TextView(history[current].query));
+    VecSwap(page.title.bytes, found.title.bytes);
+    VecSwap(page.body.bytes, found.body.bytes);
+    return true;
+}
+
+Command :: (_: s64, args: []Text, result: *Result) {
+    if args.count > 0 {
+        action := TextView(args[0]);
+        if action == "open" && args.count == 3 {
+            if Navigate(action, TextView(args[1]), TextView(args[2])) { return }
+        } else if (action == "back" || action == "forward") && args.count == 2 {
+            if Navigate(action, "", TextView(args[1])) { return }
+        } else if args.count == 1 && current >= 0 {
+            value: string;
+            if action == "query" { value = TextView(history[current].query) }
+            else if action == "top" { value = TextView(history[current].top) }
+            else if action == "title" { value = TextView(page.title) }
+            else if action == "body" { value = TextView(page.body) }
+            else if action == "backstate" { value = ifx current > 0 then "normal" else "disabled" }
+            else if action == "forwardstate" { value = ifx current + 1 < history.count then "normal" else "disabled" }
+            else { result.code = .Error; unused BuilderAppend(result.value.bytes, "unknown manual action"); return }
+            unused BuilderAppend(result.value.bytes, value);
+            return;
+        }
+    }
+    result.code = .Error;
+    unused BuilderAppend(result.value.bytes, "invalid manual navigation request");
+}
+
+main :: () -> s32 {
+    script: Text;
+    path := "/appl/cmd/tcltk/man_query.tcl";
+    if Files.ReadFile(path, *script, 65536) != 0 {
+        print("man: could not read %\n", path);
+        return 1;
+    }
+    interpreter: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*interpreter, "manual", Command) { return 1 }
+    return Window.Run(*interpreter, TextView(script), "Manual", 500, 420);
+}

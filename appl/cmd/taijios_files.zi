@@ -1,0 +1,23 @@
+// Read-only positional access to the invoking program's guest namespace.
+#import "std/vec"
+host_api :: #system_library "host_api";
+
+#scope_export
+ReadAt :: (path: string, offset: s64, buffer: []u8) -> s32 #foreign host_api;
+
+// A call fills up to 4096 bytes. A negative result leaves the buffer intact.
+// -2 indicates a missing path, -1 another read error, and 0 indicates EOF.
+ReadBytesAt :: (path: string, offset: s64, buffer: []u8) -> s32 {
+    return ReadAt(path, offset, buffer);
+}
+
+ReadFile :: (path: string, text: *Text, limit: s64) -> s32 {
+    chunk: [4096]u8;
+    offset: s64;
+    while true {
+        count := ReadBytesAt(path, offset, chunk[:]);
+        if count <= 0 { return count }
+        if count > chunk.count || offset + count > limit || !BuilderAppend(text.bytes, TextView(chunk[:count])) { return -1 }
+        offset += count;
+    }
+}

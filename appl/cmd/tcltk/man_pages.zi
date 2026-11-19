@@ -1,0 +1,140 @@
+// Topic resolution from Inferno appl/lib/man.b and appl/wm/man.b. See NOTICE.
+#import "std/vec"
+using Files :: #import "taijios_files"
+using T :: #import "tcl_types"
+using Roff :: #import "man_roff"
+
+Query :: struct { topic: string; section: s64; }
+Match :: struct { file: Text; section: s64; }
+Matches :: struct { entries: Vec(Match); }
+Page :: struct { title: Text; body: Text; }
+
+Topic :: (name: string) -> bool {
+    if name.count == 0 || name.count > 120 || name[0] == 46 { return false }
+    for name {
+        if !T.NameByte(it) && it != 43 && it != 45 && it != 46 { return false }
+    }
+    return true;
+}
+
+ParseQuery :: (source: string) -> Query {
+    cursor := T.Cursor.{text = source};
+    first := Word(*cursor);
+    second := Word(*cursor);
+    if Word(*cursor) != "" { return .{} }
+    if second != "" {
+        section, valid := T.ParseInteger(first);
+        if valid && section >= 1 && section <= 10 && Topic(second) { return .{topic = second, section = section} }
+        return .{};
+    }
+    for i: 0..first.count-1 {
+        if first[i] != 40 { continue }
+        if first[first.count-1] != 41 { return .{} }
+        section, valid := T.ParseInteger(first[i+1:first.count-1]);
+        if valid && section >= 1 && section <= 10 && Topic(first[:i]) { return .{topic = first[:i], section = section} }
+        return .{};
+    }
+    if Topic(first) { return .{topic = first} }
+    return .{};
+}
+
+Word :: (cursor: *T.Cursor) -> string {
+    while T.Has(cursor) && T.Space(T.Peek(cursor)) { cursor.at += 1 }
+    start := cursor.at;
+    while T.Has(cursor) && !T.Space(T.Peek(cursor)) { cursor.at += 1 }
+    return cursor.text[start:cursor.at];
+}
+
+FilePath :: (section: s64, file: string) -> Text {
+    number := T.Integer(section);
+    path: Text;
+    unused BuilderAppend(path.bytes, "/man/");
+    unused BuilderAppend(path.bytes, TextView(number.value));
+    unused BuilderAppend(path.bytes, "/");
+    unused BuilderAppend(path.bytes, file);
+    return path;
+}
+
+PageName :: (section: s64, name: string) -> Text {
+    number := T.Integer(section);
+    title: Text;
+    unused BuilderAppend(title.bytes, name);
+    unused BuilderAppend(title.bytes, "(");
+    unused BuilderAppend(title.bytes, TextView(number.value));
+    unused BuilderAppend(title.bytes, ")");
+    return title;
+}
+
+Add :: (matches: *Matches, section: s64, file: string) {
+    for i: 0..matches.entries.count-1 {
+        prior := *matches.entries[i];
+        if prior.section == section && TextView(prior.file) == file { return }
+    }
+    match := Match.{section = section, file = TextCopy(file)};
+    unused VecPush(matches.entries, match);
+}
+
+Section :: (matches: *Matches, section: s64, topic: string) -> bool {
+    index_path: Text = FilePath(section, "INDEX");
+    index: Text;
+    count := matches.entries.count;
+    status := Files.ReadFile(TextView(index_path), *index, 65536);
+    if status == -1 { return false }
+    cursor := T.Cursor.{text = TextView(index)};
+    while T.Has(*cursor) {
+        record := T.Cursor.{text = Roff.Line(*cursor)};
+        name := Word(*record);
+        if name != topic { continue }
+        file := Word(*record);
+        if Topic(file) { Add(matches, section, file) }
+    }
+    // Like Limbo Man, also accept a literal file name missing from the index.
+    if matches.entries.count == count {
+        direct: Text = FilePath(section, topic);
+        probe: [1]u8;
+        read := Files.ReadBytesAt(TextView(direct), 0, probe[:]);
+        if read >= 0 { Add(matches, section, topic) }
+        if read == -1 { return false }
+    }
+    return true;
+}
+
+Message :: (title: string, body: string) -> Page {
+    return .{title = TextCopy(title), body = TextCopy(body)};
+}
+
+Lookup :: (request: string) -> Page {
+    query := ParseQuery(request);
+    if query.topic == "" {
+        return Message("Invalid manual query", "Enter a topic, topic(section), or section followed by a topic. Sections run from 1 to 10.");
+    }
+    matches: Matches;
+    readable := true;
+    if query.section != 0 { readable = Section(*matches, query.section, query.topic) }
+    else {
+        for section: 1..10 { if !Section(*matches, section, query.topic) { readable = false } }
+    }
+    if matches.entries.count == 0 {
+        if !readable { return Message("Could not read manuals", "Taiji could not read the manual files for that query.") }
+        return Message("No matches", "No manual page matches that topic and section. Try another topic or leave out the section.");
+    }
+    if matches.entries.count == 1 {
+        name: Text = PageName(matches.entries[0].section, TextView(matches.entries[0].file));
+        path: Text = FilePath(matches.entries[0].section, TextView(matches.entries[0].file));
+        source: Text;
+        if Files.ReadFile(TextView(path), *source, 131072) != 0 {
+            return Message("Could not read manual", TextView(path));
+        }
+        body: Text = Roff.Format(TextView(source));
+        if body.bytes.count == 0 { return Message(TextView(name), "This manual page has no readable text.") }
+        return .{title = name, body = body};
+    }
+    body: Text;
+    unused BuilderAppend(body.bytes, "Several pages match. Enter one of these names to open it:\n\n");
+    for * matches.entries {
+        name: Text = PageName(it.section, TextView(it.file));
+        unused BuilderAppend(body.bytes, TextView(name));
+        unused BuilderAppend(body.bytes, "\n");
+    }
+    return .{title = TextCopy("Matching manual pages"), body = body};
+}

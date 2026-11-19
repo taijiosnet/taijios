@@ -76,11 +76,13 @@ def reference(env):
     print("Inferno Tk and the portable model agree on button, entry text, character indexes and focus")
 
 
-def interaction(env, image, script, exercise):
+def interaction(env, image, script, exercise, *, size=(300, 208)):
     path = "/" + str(image.relative_to(ROOT))
-    source = "/" + str(script.relative_to(ROOT))
+    run = f"zxrun -w {path}"
+    if script is not None:
+        run += f" < /{script.relative_to(ROOT)}"
     app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c",
-                 f"zxrun -w {path} < {source}",
+                 run,
                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = bytearray()
     errors = bytearray()
@@ -121,25 +123,29 @@ def interaction(env, image, script, exercise):
                     "mousedown", "1", "sleep", "0.15", "mouseup", "1", env=env, check=True)
 
         box = until(canvas, "Tk surface did not present its canvas")
-        assert (box[2] - box[0], box[3] - box[1]) == (300, 208), box
+        assert (box[2] - box[0], box[3] - box[1]) == size, box
         command("xdotool", "windowfocus", window, env=env, check=True)
 
         def keys(*names):
             command("xdotool", "key", "--delay", "80", *names, env=env, check=True)
 
-        expected = exercise(box[0], box[1], click, keys, capture, transcript)
+        def type_text(value):
+            command("xdotool", "type", "--delay", "80", value, env=env, check=True)
+
+        expected = exercise(box[0], box[1], click, keys, type_text, capture, transcript)
         until(lambda: b"0" in transcript(), "Close button callback did not return success")
         until(lambda: canvas() is None, "destroy . did not remove the canvas")
         assert transcript() == [line.encode() for line in expected] + [b"0"], output
     except AssertionError as failure:
-        raise AssertionError(f"{script.name}: {failure} (guest output {output!r})") from failure
+        name = image.name if script is None else script.name
+        raise AssertionError(f"{name}: {failure} (guest output {output!r})") from failure
     finally:
         stop(app)
         app.stdout.close()
         app.stderr.close()
 
 
-def bounce(x, y, click, _keys, capture, transcript):
+def bounce(x, y, click, _keys, _type_text, capture, transcript):
     label = (x + 85, y + 12, x + 215, y + 48)
     starting = capture().crop(label)
     assert len(starting.getcolors()) > 1, "label rendered no visible text"
@@ -155,7 +161,7 @@ def bounce(x, y, click, _keys, capture, transcript):
     return ["9 balls", "8 balls"]
 
 
-def man_query(x, y, click, keys, capture, transcript):
+def entry_widget(x, y, click, keys, _type_text, capture, transcript):
     entry = (x + 20, y + 20, x + 178, y + 47)
     label = (x + 50, y + 60, x + 250, y + 130)
     blank = capture().crop(entry)
@@ -179,9 +185,89 @@ def man_query(x, y, click, keys, capture, transcript):
     return ["x", "é", "a", "ba"]
 
 
+def manual_browser(x, y, click, keys, type_text, capture, _transcript):
+    heading = (x + 75, y + 59, x + 425, y + 86)
+    body = (x + 29, y + 103, x + 470, y + 336)
+
+    def current():
+        image = capture()
+        return image.crop(heading), image.crop(body)
+
+    def equals(a, b):
+        return ImageChops.difference(a[0], b[0]).getbbox() is None and ImageChops.difference(a[1], b[1]).getbbox() is None
+
+    def changed(before, description):
+        def poll():
+            now = current()
+            return now if not equals(now, before) else None
+
+        return until(poll, description)
+
+    def query(previous, value, enter):
+        click(x + 250, y + 35)
+        keys("End", *(["BackSpace"] * len(previous)))
+        type_text(value)
+        if enter:
+            keys("Return")
+        else:
+            click(x + 430, y + 35)
+
+    first = current()
+    assert min(len(part.getcolors()) for part in first) > 1, "manual did not render heading and content"
+    click(x + 190, y + 386)
+    scrolled = changed(first, "Page Down did not scroll the actual manual")
+    assert ImageChops.difference(first[0], scrolled[0]).getbbox() is None
+
+    query("man(1)", "lc(1)", enter=False)
+    listing = changed(scrolled, "Search did not load the ls alias")
+    assert ImageChops.difference(scrolled[0], listing[0]).getbbox()
+    click(x + 60, y + 35)
+    until(lambda: equals(current(), scrolled), "Back did not restore the original scroll position")
+    click(x + 140, y + 35)
+    until(lambda: equals(current(), listing), "Next did not restore the ls page")
+
+    query("lc(1)", "absent-manual", enter=True)
+    missing = changed(listing, "a missing manual did not display a result")
+    query("absent-manual", "2 sys-open", enter=True)
+    recovered = changed(missing, "a section-qualified query did not recover after a missing manual")
+    assert not equals(recovered, listing)
+    click(x + 275, y + 186)
+    keys("Next")
+    scrolled_second = changed(recovered, "the focused text viewport did not accept Page Down")
+    keys("Home")
+    until(lambda: equals(current(), recovered), "Home did not reset scrolling")
+    assert not equals(scrolled_second, recovered)
+
+    click(x + 60, y + 35)
+    until(lambda: equals(current(), missing), "Back did not restore the missing result")
+    query("absent-manual", "man(1)", enter=True)
+    until(lambda: equals(current(), first), "a new search did not open a fresh view")
+    click(x + 140, y + 35)
+    assert equals(current(), first), "a new search did not discard the forward history"
+    query("man(1)", "canvas(9)", enter=True)
+    long_page = changed(first, "the largest installed manual page did not render")
+    click(x + 275, y + 186)
+    keys("End")
+    changed(long_page, "End did not reach the bottom of the long manual")
+    click(x + 430, y + 386)
+    return []
+
+
+def file_and_manual_probe(env):
+    image = BUILD / "man_probe.zx"
+    compile_image("man_probe", image, "--bind-host", "taijios_files")
+    (BUILD / "man-mount").mkdir(exist_ok=True)
+    script = "bind /man/1 /build/tcltk/man-mount; zxrun /build/tcltk/man_probe.zx"
+    result = command(EMU, "-r", ROOT, "/dis/sh.dis", "-c", script, env=env, stdin=subprocess.DEVNULL,
+                     capture_output=True, text=True)
+    expected = "Guest namespace offsets, mount, errors, real manual lookup and formatting verified\n0\n"
+    assert result.returncode in (0, -9) and result.stdout == expected and not result.stderr, result
+    print(expected.splitlines()[0])
+
+
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--installed", action="store_true", help="exercise /dis/tcltk.zx instead of the build image")
+    cli.add_argument("--installed", action="store_true", help="exercise /dis/tcltk.zx and /dis/man.zx")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     model = BUILD / "tcltk_model_test.zx"
@@ -192,14 +278,18 @@ def main():
     assert portable.stdout == ".f.input.e\naßéz\n0\n" and portable.stderr == "", (portable.stdout, portable.stderr)
     if args.installed:
         image = ROOT / "dis/tcltk.zx"
+        manual = ROOT / "dis/man.zx"
     else:
         image = BUILD / "tcltk.zx"
         compile_image("tcltk", image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin")
+        manual = BUILD / "man.zx"
+        compile_image("man_app", manual, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
 
     env = os.environ.copy()
     for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"):
         env.pop(key, None)
     env["HARMONY_DESKTOP_RECOVERY"] = "0"
+    file_and_manual_probe(env)
     read_fd, write_fd = os.pipe()
     server = launch(env, "Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1024x768x24",
                     "-nolisten", "tcp", pass_fds=(write_fd,))
@@ -213,8 +303,10 @@ def main():
         reference(env)
         interaction(env, image, SOURCES / "bounce_controls.tcl", bounce)
         print("Hosted Tk loaded Bounce from guest stdin and verified clicks, redraw and closure")
-        interaction(env, image, SOURCES / "man_query.tcl", man_query)
-        print("Hosted Tk loaded Man from guest stdin and verified nested layout, UTF-8 editing and submission")
+        interaction(env, image, SOURCES / "entry_test.tcl", entry_widget)
+        print("Hosted Tk verified nested layout, UTF-8 editing and submission")
+        interaction(env, manual, None, manual_browser, size=(500, 420))
+        print("Hosted Man verified real pages, missing-result recovery, history and scroll restoration")
     finally:
         os.close(read_fd)
         stop(server)

@@ -1,0 +1,134 @@
+// Plain text layout for the manual macros used by Inferno's Parseman. See NOTICE.
+#import "std/vec"
+using T :: #import "tcl_types"
+
+Line :: (cursor: *T.Cursor) -> string {
+    start := cursor.at;
+    while T.Has(cursor) && T.Peek(cursor) != 10 { cursor.at += 1 }
+    end := cursor.at;
+    if T.Has(cursor) { cursor.at += 1 }
+    if end > start && cursor.text[end-1] == 13 { end -= 1 }
+    return cursor.text[start:end];
+}
+
+Word :: (cursor: *T.Cursor) -> string {
+    while T.Has(cursor) && T.Space(T.Peek(cursor)) { cursor.at += 1 }
+    start := cursor.at;
+    quoted := T.Has(cursor) && T.Peek(cursor) == 34;
+    if quoted {
+        cursor.at += 1;
+        start = cursor.at;
+        while T.Has(cursor) && T.Peek(cursor) != 34 { cursor.at += 1 }
+        end := cursor.at;
+        if T.Has(cursor) { cursor.at += 1 }
+        return cursor.text[start:end];
+    }
+    while T.Has(cursor) && !T.Space(T.Peek(cursor)) { cursor.at += 1 }
+    return cursor.text[start:cursor.at];
+}
+
+Break :: (output: *Text, lines: s64) {
+    if output.bytes.count == 0 { return }
+    at := output.bytes.count;
+    while at > 0 && output.bytes[at-1] == 10 && output.bytes.count-at < lines { at -= 1 }
+    for 0..lines-(output.bytes.count-at)-1 { unused VecPush(output.bytes, cast(u8)10) }
+}
+
+Escape :: (text: string, at: s64, output: *Text) -> s64 {
+    code := text[at];
+    if code == 34 { return text.count } // roff comment
+    if code == 38 || code == 99 { return at+1 }
+    if code == 102 || code == 115 || code == 42 {
+        i := at+1;
+        if i < text.count && text[i] == 40 { return ifx i+3 <= text.count then i+3 else text.count }
+        if i < text.count && text[i] == 91 {
+            i += 1;
+            while i < text.count && text[i] != 93 { i += 1 }
+        }
+        return ifx i < text.count then i+1 else i;
+    }
+    if code == 40 && at+2 < text.count {
+        symbol := text[at+1:at+3];
+        if symbol == "em" || symbol == "en" || symbol == "mi" { unused BuilderAppend(output.bytes, "-") }
+        else if symbol == "bu" { unused BuilderAppend(output.bytes, "*") }
+        else if symbol == "lq" || symbol == "rq" || symbol == "dq" { unused VecPush(output.bytes, cast(u8)34) }
+        else if symbol == "aq" || symbol == "oq" || symbol == "cq" { unused VecPush(output.bytes, cast(u8)39) }
+        else { unused BuilderAppend(output.bytes, "?") }
+        return at+3;
+    }
+    unused VecPush(output.bytes, ifx code == 101 then cast(u8)92 else code);
+    return at+1;
+}
+
+Append :: (output: *Text, text: string) {
+    at: s64;
+    while at < text.count {
+        byte := text[at];
+        at += 1;
+        if byte == 92 && at < text.count { at = Escape(text, at, output) }
+        else if byte == 9 { unused BuilderAppend(output.bytes, "    ") }
+        else { unused VecPush(output.bytes, byte) }
+    }
+}
+
+Separate :: (output: *Text) {
+    if output.bytes.count > 0 && output.bytes[output.bytes.count-1] != 10 {
+        unused VecPush(output.bytes, cast(u8)32);
+    }
+}
+
+Styled :: (output: *Text, cursor: *T.Cursor, alternate: bool) {
+    Separate(output);
+    word := Word(cursor);
+    first := true;
+    while word != "" {
+        if !first && !alternate { unused VecPush(output.bytes, cast(u8)32) }
+        Append(output, word);
+        first = false;
+        word = Word(cursor);
+    }
+}
+
+Format :: (source: string) -> Text {
+    input := T.Cursor.{text = source};
+    output: Text;
+    literal: bool;
+    while T.Has(*input) {
+        line := Line(*input);
+        if line.count == 0 {
+            if literal { unused VecPush(output.bytes, cast(u8)10) } else { Break(*output, 2) }
+            continue;
+        }
+        if line[0] != 46 && line[0] != 39 {
+            if !literal { Separate(*output) }
+            Append(*output, line);
+            if literal { unused VecPush(output.bytes, cast(u8)10) }
+            continue;
+        }
+        args := T.Cursor.{text = line[1:]};
+        macro := Word(*args);
+        if macro == "SH" || macro == "SS" {
+            Break(*output, 2);
+            Styled(*output, *args, false);
+            Break(*output, 1);
+        } else if macro == "PP" || macro == "LP" || macro == "P" || macro == "sp" || macro == "TP" {
+            Break(*output, 2);
+        } else if macro == "IP" {
+            Break(*output, 2);
+            Append(*output, Word(*args));
+        } else if macro == "br" || macro == "RS" || macro == "RE" {
+            Break(*output, 1);
+        } else if macro == "EX" || macro == "nf" || macro == "DS" {
+            Break(*output, 2);
+            literal = true;
+        } else if macro == "EE" || macro == "fi" || macro == "DE" {
+            Break(*output, 2);
+            literal = false;
+        } else if macro == "B" || macro == "I" || macro == "SM" || macro == "SB" {
+            Styled(*output, *args, false);
+        } else if macro == "BR" || macro == "BI" || macro == "IR" || macro == "RI" || macro == "IB" || macro == "RB" {
+            Styled(*output, *args, true);
+        }
+    }
+    return output;
+}

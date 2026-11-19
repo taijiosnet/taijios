@@ -3,6 +3,7 @@
 using Tcl :: #import "tcl"
 using T :: #import "tcl_types"
 using UTF :: #import "tcl_tk_text"
+using View :: #import "tcl_tk_view"
 
 MAX_WIDGETS :: 32;
 MAX_ENTRY_BYTES :: 16384;
@@ -10,6 +11,7 @@ LABEL :: 0;
 BUTTON :: 1;
 FRAME :: 2;
 ENTRY :: 3;
+TEXT :: 4;
 CHAR_WIDTH :: 12;
 ENTRY_INSET :: 8;
 Box :: struct { x: s32; y: s32; w: s32; h: s32; }
@@ -28,6 +30,8 @@ Widget :: struct {
     kind: s64;
     parent: s64;
     cursor: s64;
+    view: View.State;
+    disabled: bool;
     requested: Box;
     order: s32;
     pack: Packing;
@@ -49,6 +53,7 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
                Tcl.RegisterCommand(interpreter, "button", Create, BUTTON) &&
                Tcl.RegisterCommand(interpreter, "frame", Create, FRAME) &&
                Tcl.RegisterCommand(interpreter, "entry", Create, ENTRY) &&
+               Tcl.RegisterCommand(interpreter, "text", Create, TEXT) &&
                Tcl.RegisterCommand(interpreter, "pack", Pack) &&
                Tcl.RegisterCommand(interpreter, "focus", Focus) &&
                Tcl.RegisterCommand(interpreter, "bind", Bind) &&
@@ -89,14 +94,21 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
         option := TextView(args[2*i]);
         if option == "-text" && (widget.kind == LABEL || widget.kind == BUTTON) { continue }
         if option == "-command" && widget.kind == BUTTON { continue }
+        if option == "-state" && widget.kind == BUTTON {
+            value := TextView(args[2*i+1]);
+            if value == "normal" || value == "disabled" { continue }
+        }
         if option == "-bg" && widget.kind == ENTRY && TextView(args[2*i+1]) == "white" { continue }
         SetError(result, "unsupported widget option or value");
         return false;
     }
     for i: 0..args.count/2-1 {
+        option := TextView(args[2*i]);
+        if option == "-state" { widget.disabled = TextView(args[2*i+1]) == "disabled"; continue }
+        if option == "-bg" { continue }
         value: Text = TextCopy(TextView(args[2*i+1]));
-        if TextView(args[2*i]) == "-text" { VecSwap(widget.text.bytes, value.bytes) }
-        else if TextView(args[2*i]) == "-command" { VecSwap(widget.command.bytes, value.bytes) }
+        if option == "-text" { VecSwap(widget.text.bytes, value.bytes) }
+        else { VecSwap(widget.command.bytes, value.bytes) }
     }
     return true;
 }
@@ -123,6 +135,8 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     saved.kind = widget.kind;
     saved.parent = widget.parent;
     saved.cursor = 0;
+    saved.disabled = widget.disabled;
+    View.Reset(*saved.view);
     saved.order = 0;
     saved.box = .{};
     saved.pack = .{padx = 8, pady = 5};
@@ -193,6 +207,7 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             unused VecResize(it.name.bytes, 0);
             unused VecResize(it.text.bytes, 0);
             unused VecResize(it.command.bytes, 0);
+            View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
             if pressed == it_index { pressed = -1 }
@@ -219,12 +234,16 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
         if option == "-command" && widget.kind == BUTTON {
             unused BuilderAppend(result.value.bytes, TextView(widget.command)); return;
         }
+        if option == "-state" && widget.kind == BUTTON {
+            unused BuilderAppend(result.value.bytes, ifx widget.disabled then "disabled" else "normal"); return;
+        }
     }
     if subcommand == "invoke" && args.count == 1 && widget.kind == BUTTON {
-        unused BuilderAppend(script.bytes, TextView(widget.command));
+        if !widget.disabled { unused BuilderAppend(script.bytes, TextView(widget.command)) }
         return;
     }
     if widget.kind == ENTRY { EntryCommand(widget, args, result); return }
+    if widget.kind == TEXT { TextCommand(widget, args, result); return }
     SetError(result, "unsupported widget subcommand or arguments");
 }
 
@@ -233,9 +252,11 @@ Focus :: (_: s64, args: []Text, result: *Result) {
         if focused >= 0 { unused BuilderAppend(result.value.bytes, TextView(widgets[focused].name)) }
         return;
     }
-    if args.count != 1 { SetError(result, "expected focus ?entry?"); return }
+    if args.count != 1 { SetError(result, "expected focus ?widget?"); return }
     index := Find(TextView(args[0]));
-    if closed || index < 0 || widgets[index].kind != ENTRY { SetError(result, "expected an open entry path"); return }
+    if closed || index < 0 || (widgets[index].kind != ENTRY && widgets[index].kind != TEXT) {
+        SetError(result, "expected an open entry or text path"); return;
+    }
     focused = index;
 }
 
@@ -312,11 +333,64 @@ EntryCommand :: (widget: *Widget, args: []Text, result: *Result) {
     }
 }
 
-EntryKey :: enum s32 { Return; Backspace; Delete; Left; Right; Home; End; }
+TextLayout :: (widget: *Widget) {
+    columns := (widget.box.w - 2 * View.INSET) / CHAR_WIDTH;
+    height := (widget.box.h - 2 * View.INSET) / View.ROW_HEIGHT;
+    if widget.box.w == 0 { columns = 38 }
+    if widget.box.h == 0 { height = 14 }
+    View.Reflow(*widget.view, TextView(widget.text), Maximum(columns, 1), Maximum(height, 1));
+}
+
+TextCommand :: (widget: *Widget, args: []Text, result: *Result) {
+    command := TextView(args[0]);
+    if command == "yview" {
+        TextLayout(widget);
+        if args.count == 1 { View.Position(*widget.view, *result.value.bytes); return }
+        if args.count == 3 && TextView(args[1]) == "moveto" && View.Moveto(*widget.view, TextView(args[2])) { return }
+        if args.count == 4 && TextView(args[1]) == "scroll" {
+            amount, ok := ParseInteger(TextView(args[2]));
+            scale := TextView(args[3]);
+            if ok && (scale == "units" || scale == "pages") {
+                if scale == "pages" { amount *= View.PageSize(*widget.view) }
+                View.Move(*widget.view, amount);
+                return;
+            }
+        }
+        SetError(result, "expected yview ?moveto fraction|scroll count units|pages?"); return;
+    }
+    if args.count == 3 && TextView(args[1]) == "1.0" && TextView(args[2]) == "end" {
+        if command == "get" { unused BuilderAppend(result.value.bytes, TextView(widget.text)); return }
+        if command == "delete" {
+            unused VecResize(widget.text.bytes, 0);
+            View.Reset(*widget.view);
+            return;
+        }
+    }
+    if command == "insert" && args.count == 3 && TextView(args[1]) == "end" {
+        value := TextView(args[2]);
+        if value.count > 262144 - widget.text.bytes.count || !BuilderAppend(widget.text.bytes, value) {
+            SetError(result, "text widget exceeds its storage limit"); return;
+        }
+        widget.view.columns = 0;
+        return;
+    }
+    SetError(result, "unsupported text subcommand or arguments");
+}
+
+EntryKey :: enum s32 { Return; Backspace; Delete; Left; Right; Home; End; Up; Down; PageUp; PageDown; }
 
 KeyDown :: (key: EntryKey) -> Text {
     if focused < 0 { return TextCopy("") }
     entry := *widgets[focused];
+    if entry.kind == TEXT {
+        if key == .Up { View.Move(*entry.view, -1) }
+        if key == .Down { View.Move(*entry.view, 1) }
+        if key == .PageUp { View.Move(*entry.view, -View.PageSize(*entry.view)) }
+        if key == .PageDown { View.Move(*entry.view, View.PageSize(*entry.view)) }
+        if key == .Home { entry.view.top = 0 }
+        if key == .End { View.Move(*entry.view, entry.view.rows.count) }
+        return TextCopy("");
+    }
     if key == .Return { return TextCopy(TextView(entry.command)) }
     if key == .Left { entry.cursor = UTF.Previous(TextView(entry.text), entry.cursor) }
     if key == .Right { entry.cursor = UTF.Next(TextView(entry.text), entry.cursor) }
@@ -334,7 +408,9 @@ KeyDown :: (key: EntryKey) -> Text {
 }
 
 TextInput :: (value: string) {
-    if focused >= 0 { unused Insert(*widgets[focused], widgets[focused].cursor, value) }
+    if focused >= 0 && widgets[focused].kind == ENTRY {
+        unused Insert(*widgets[focused], widgets[focused].cursor, value);
+    }
 }
 
 Minimum :: (a: s32, b: s32) -> s32 { return ifx a < b then a else b }
@@ -360,6 +436,7 @@ Measure :: (parent: s64) -> Box {
         requested: Box;
         if widget.kind == FRAME { requested = Measure(index) }
         else if widget.kind == ENTRY { requested = .{w = 168, h = 30} }
+        else if widget.kind == TEXT { requested = .{w = 280, h = 150} }
         else {
             length := UTF.Count(TextView(widget.text), 512);
             requested = .{w = length * CHAR_WIDTH + 30, h = ifx widget.kind == BUTTON then 36 else 28};
@@ -424,6 +501,7 @@ Place :: (parent: s64, cavity: Box) {
         h := ifx (pack.fill & 2) != 0 then inner_h else Minimum(widget.requested.h, inner_h);
         widget.box = .{x = available.x + (available.w-w)/2, y = available.y + (available.h-h)/2, w = w, h = h};
         if widget.kind == FRAME { Place(index, widget.box) }
+        else if widget.kind == TEXT { TextLayout(widget) }
         index = NextChild(parent, widget.order);
     }
 }
@@ -446,7 +524,7 @@ EntryStart :: (widget: *Widget) -> s64 {
 Over :: (x: s32, y: s32, kind: s64) -> s64 {
     for * widgets {
         box := it.box;
-        if it.kind == kind && x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h {
+        if it.kind == kind && !it.disabled && x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h {
             return it_index;
         }
     }
@@ -456,7 +534,11 @@ Over :: (x: s32, y: s32, kind: s64) -> s64 {
 PointerDown :: (x: s32, y: s32) {
     pressed = Over(x, y, BUTTON);
     index := Over(x, y, ENTRY);
-    if index < 0 { return }
+    if index < 0 {
+        index = Over(x, y, TEXT);
+        if index >= 0 { focused = index }
+        return;
+    }
     focused = index;
     widget := *widgets[index];
     start := EntryStart(widget);
