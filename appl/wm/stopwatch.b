@@ -16,6 +16,11 @@ include "daytime.m";
 	daytime: Daytime;
 
 
+Zxrun: module
+{
+	init: fn(ctxt: ref Draw->Context, argv: list of string);
+};
+
 WmStopWatch: module
 {
 	init:	fn(ctxt: ref Draw->Context, argv: list of string);
@@ -62,12 +67,21 @@ sw_cfg := array[] of {
 	"update",
 };
 
-init(ctxt: ref Draw->Context, nil: list of string)
+init(ctxt: ref Draw->Context, argv: list of string)
 {
 	sys  = load Sys  Sys->PATH;
 	if (ctxt == nil) {
 		sys->fprint(sys->fildes(2), "stopwatch: no window context\n");
 		raise "fail:bad context";
+	}
+	if(argv != nil && tl argv != nil && hd tl argv == "-zx"){
+		zx := load Zxrun "/dis/zxrun.dis";
+		if(zx == nil){
+			sys->fprint(sys->fildes(2), "stopwatch: cannot load zxrun: %r\n");
+			raise "fail:zx";
+		}
+		zx->init(ctxt, "zxrun" :: "-w" :: "/dis/wm/stopwatch.zx" :: nil);
+		return;
 	}
 	draw = load Draw Draw->PATH;
 	tk   = load Tk  Tk->PATH;

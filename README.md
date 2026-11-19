@@ -37,7 +37,61 @@ checkout's `include` directory and the new archive. Set `ZX_LDFLAGS=-no-pie`
 for the archive built above, then build and install from `emu/Linux`. Build
 and install the shell command with `mk zxrun.install` from `appl/cmd`.
 
-The ZX runner accepts application images up to 32 MiB and allows 16 million
-execution steps including initialization. This integration covers standalone
-applications and console output. Dynamic ZX libraries and other Inferno
-services require guest-side bindings.
+The ZX runner accepts application images up to 32 MiB. Console execution has a
+16-million-step budget including initialization. Graphical programs keep their
+runtime instance for the lifetime of the window and run without this console
+budget. Dynamic ZX libraries and other Inferno services require their own
+integration.
+
+### Build and run ZX Stopwatch
+
+Stopwatch is a Kryon app. Its widgets, elapsed time, and three lap values are
+implemented in `appl/wm/stopwatch.zi`. Build it with Ziran's package CLI and the pinned Kryon
+revision in `appl/wm/ziran.lock`. For development, use
+`appl/wm/ziran.local.toml` with absolute paths to the canonical checkouts.
+
+```toml
+[overrides]
+ziran = "/path/to/ziran"
+kryon = "/path/to/kryon"
+```
+
+From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
+
+```sh
+(cd emu/Linux && mk install)
+(cd appl/cmd && mk zxrun.install)
+(
+    cd appl/wm
+    mk stopwatch.install
+    kryon_id=$(python3 -c 'import json; print(json.load(open("ziran.lock"))["root"]["dependencies"]["kryon"])')
+    ziran bundle --project --bind-host "${kryon_id}_pixmap" \
+        --entry stopwatch:main -o ../../dis/wm/stopwatch.zx stopwatch.zi
+)
+Linux/386/bin/emu -p main=256M -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
+```
+
+`wm/stopwatch` without `-zx` runs the original Dis app. To launch any compatible
+bundle in a TaijiOS window manager context, use `zxrun -w /path/to/app.zx`.
+
+The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
+`Close` to the guest window manager and Draw. `Present` uploads a packed RGBA8
+frame to a guest Draw image. `Event` supplies pointer buttons and movement,
+keyboard presses and UTF-8 text, redraw and resize, and close. The guest's rune
+channel supplies presses and text only, so key release and modifier state are
+unavailable. Surfaces are limited to 4,194,304 pixels and 4,096 pixels per axis.
+The `taijios_clock.MonotonicMillis` capability supplies elapsed time.
+
+### Verify the hosted runner
+
+Build the console fixture and put the Kryon hosted surface example bundle at
+`build/zx-smoke/hosted_surface.zx` using Kryon's hosted surface build instructions.
+Then run the smoke suite from the TaijiOS root. The graphics checks use a private
+Xvfb, `xdotool`, ImageMagick's `import`, and Pillow.
+
+```sh
+zi2zx --root build/zx-smoke --entry hello:main \
+    -o 'build/zx-smoke/hello app.zx' build/zx-smoke/hello.zi
+printf 'invalid ZX\n' > build/zx-smoke/bad.zx
+python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics
+```

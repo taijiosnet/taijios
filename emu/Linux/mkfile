@@ -56,14 +56,14 @@ install:V: $O.$CONF
 
 <../port/portmkfile
 
-zx.$O:	../port/zx.c $ROOT/mkconfig $ZX_LIB zxrunt.h zxmod.h
+zx.$O:	../port/zx.c $ROOT/mkconfig $ZX_LIB $ROOT/include/drawif.h zxrunt.h zxmod.h
 	$CC $CFLAGS $ZX_CFLAGS ../port/zx.c
 
-zxrunt.h:D:	$ROOT/module/zx.m
-	limbo -a $prereq > $target
+zxrunt.h:D:	../port/zxbuiltin.b $ROOT/module/zx.m $ROOT/module/draw.m $ROOT/module/sys.m
+	limbo -I $ROOT/module -a ../port/zxbuiltin.b > $target
 
-zxmod.h:D:	$ROOT/module/zx.m
-	limbo -t ZX $prereq > $target
+zxmod.h:D:	../port/zxbuiltin.b $ROOT/module/zx.m $ROOT/module/draw.m $ROOT/module/sys.m
+	limbo -I $ROOT/module -t ZX ../port/zxbuiltin.b > $target
 
 devfs.$O:	../port/devfs-posix.c
 devds.$O:	../port/devds.c

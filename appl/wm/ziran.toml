@@ -1,0 +1,11 @@
+[package]
+name = "taijios_wm"
+module_roots = ["."]
+
+[toolchain]
+git = "https://github.com/ziranlang/ziran.git"
+ref = "master"
+
+[dependencies.kryon]
+git = "https://git.waozi.xyz/kryonlabs/kryon.git"
+ref = "788f0151f72da196977c57a4b938e027c139a730"

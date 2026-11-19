@@ -25,6 +25,12 @@ y.debug
 
 /appl/**/*.dis
 /appl/**/*.sbl
+/appl/wm/ziran.local.toml
+/appl/wm/build/
+/dis/wm/stopwatch.zx
+/build/zx-smoke/*
+!/build/zx-smoke/hello.zi
+!/build/zx-smoke/run.py
 
 # generated C headers for built-in modules
 /libinterp/cryptmod.h

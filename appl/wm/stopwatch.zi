@@ -1,0 +1,70 @@
+Surface :: #import "kryon/host/surface";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Clock :: #import "taijios_clock";
+#import "kryon/geometry"
+#import "kryon/session"
+#import "kryon/tree"
+#import "std/number_text"
+
+running: bool;
+started: s64;
+elapsed: s64;
+laps: [3]s64;
+
+TimeLabel :: (millis: s64, out: []u8) -> string {
+    seconds := millis / 1000
+    hour_count := FormatInteger(seconds / 3600, out[:24]).count
+    at := cast(s64)23
+    minutes := (seconds / 60) % 60
+    seconds %= 60
+    out[at] = cast(u8)58
+    out[at + 1] = cast(u8)(48 + minutes / 10)
+    out[at + 2] = cast(u8)(48 + minutes % 10)
+    out[at + 3] = cast(u8)58
+    out[at + 4] = cast(u8)(48 + seconds / 10)
+    out[at + 5] = cast(u8)(48 + seconds % 10)
+    return TextView(out[at - hour_count:at + 6])
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    width := TreeRootBounds(session).width - 24.0
+    column := (width - 16.0) / 3.0
+    now := Clock.Millis()
+
+    if Button.Draw(session, .{.key = 1, .bounds = .{12.0, 12.0, column, 34.0}, .label = "Start"}) != 0 && !running {
+        started = now
+        running = true
+    }
+    if Button.Draw(session, .{.key = 2, .bounds = .{20.0 + column, 12.0, column, 34.0}, .label = "Stop"}) != 0 && running {
+        elapsed += now - started
+        running = false
+    }
+    if Button.Draw(session, .{.key = 3, .bounds = .{28.0 + column * 2.0, 12.0, column, 34.0}, .label = "Reset"}) != 0 {
+        elapsed = 0
+        started = now
+    }
+
+    current := elapsed
+    if running { current += now - started }
+    display: [32]u8
+    Text.Draw(session, .{.key = 4, .bounds = .{12.0, 53.0, width, 32.0},
+        .text = TimeLabel(current, display[:]), .size = 24})
+
+    names: [3]string = .["Time1", "Time2", "Time3"]
+    for i: 0..2 {
+        row := 94.0 + cast(float32)i * 36.0
+        if Button.Draw(session, .{.key = cast(u64)(5 + i), .bounds = .{12.0, row, column, 30.0}, .label = names[i]}) != 0 {
+            laps[i] = current
+        }
+        lap: [32]u8
+        Text.Draw(session, .{.key = cast(u64)(8 + i), .bounds = .{24.0 + column, row, width - column - 12.0, 30.0},
+            .text = TimeLabel(laps[i], lap[:]), .size = 16})
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    return Surface.Run(.{.title = "StopWatch", .width = 272, .height = 210}, Draw, 250)
+}

@@ -1,0 +1,4 @@
+main :: () -> s64 {
+    print("Hello from ZX %\n", 42);
+    return 4294967338;
+}
