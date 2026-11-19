@@ -103,6 +103,45 @@ def graphics():
         proc.stdout.close()
         proc.stderr.close()
 
+    def keyevents():
+        proc = launch('zxrun', '-w', '/build/zx-smoke/keyevents.zx')
+        transcript = bytearray()
+
+        def read():
+            for error, block in output(proc):
+                assert not error, block.decode('utf-8', 'replace')
+                transcript.extend(block)
+            return transcript.decode('utf-8', 'replace').splitlines()
+
+        def expect_keys(expected):
+            keys = [line for line in read() if line.startswith('key ')]
+            return keys[-len(expected):] == expected
+
+        try:
+            window = until(owned_window, 'emulator did not map its X window')
+            _, box = until(lambda: surface(window), 'ZX key event canvas missing')
+            command('xdotool', 'windowfocus', window, check=True)
+            for name, key, bit in [('Shift_L', 340, 1), ('Control_L', 341, 2), ('Alt_L', 342, 4)]:
+                command('xdotool', 'keydown', name, 'keydown', 'a', 'keyup', 'a',
+                        'keyup', name, check=True)
+                expected = [f'key 7 {key} {bit}', f'key 7 65 {bit}',
+                            f'key 8 65 {bit}', f'key 8 {key} 0']
+
+                until(lambda: expect_keys(expected), f'{name} press or release did not reach the ZX surface')
+            command('xdotool', 'keydown', 'Shift_L', 'keydown', 'Shift_R', 'keyup', 'Shift_L',
+                    'keyup', 'Shift_R', check=True)
+            until(lambda: expect_keys(['key 7 340 1', 'key 7 344 1', 'key 8 340 1', 'key 8 344 0']),
+                  'Shift modifier changed before the last Shift key was released')
+            until(lambda: 'text A' in read(), 'shifted text did not reach the ZX surface')
+            close(window, box)
+            until(lambda: '0' in read(), 'ZX key event fixture did not close cleanly')
+            print('ZX X11 keys: physical press and release with Shift, Control and Alt masks')
+        except AssertionError:
+            print('ZX key event output:', read())
+            raise
+        finally:
+            stop(proc)
+
     def kryon():
         proc = launch('zxrun', '-w', '/build/zx-smoke/hosted_surface.zx')
         transcript = deque(maxlen=80)
@@ -228,6 +267,7 @@ def graphics():
         display = os.read(reader, 32).strip() if ready else b''
         assert display.isdigit(), 'private Xvfb startup failed'
         env['DISPLAY'] = ':' + display.decode('ascii')
+        keyevents()
         kryon()
         stopwatch()
         legacy_stopwatch()

@@ -37,6 +37,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#include <X11/XKBlib.h>
 #include <X11/extensions/XShm.h>
 
 #include "keysym2ucs.h"
@@ -282,6 +283,7 @@ attachscreen(Rectangle *r, ulong *chan, int *d, int *width, int *softscreen)
 	if(!triedscreen){
 		triedscreen = 1;
 		kproc("xproc", xproc, xmcon, 0);
+		gkeyinit();
 		kproc("xkbdproc", xkbdproc, xkbdcon, KPX11);	/* silly stack size for bloated X11 */
 	}
 
@@ -537,19 +539,100 @@ setpointer(int x, int y)
 }
 
 static void
+xkeyevent(XDisplay *xd, XEvent *event, uchar *held, unsigned int altmask)
+{
+	XEvent next;
+	unsigned int state, code;
+	int key, down, bit, modifiers, i;
+	KeySym sym;
+
+	if(event->type == FocusOut){
+		memset(held, 0, 256);
+		gkeyevent('r', 0, 0);
+		return;
+	}
+	if((event->type != KeyPress && event->type != KeyRelease) || gkscanq != nil)
+		return;
+	down = event->type == KeyPress;
+	code = event->xkey.keycode;
+	if(code >= 256)
+		return;
+	if(!down && XEventsQueued(xd, QueuedAfterReading) != 0){
+		XPeekEvent(xd, &next);
+		if(next.type == KeyPress && next.xkey.time == event->xkey.time && next.xkey.keycode == code)
+			return;
+	}
+	sym = XkbKeycodeToKeysym(xd, code, 0, 0);
+	bit = 0;
+	if(sym >= XK_a && sym <= XK_z)
+		key = 'A' + sym - XK_a;
+	else if(sym >= XK_space && sym <= XK_asciitilde)
+		key = sym;
+	else if(sym >= XK_F1 && sym <= XK_F25)
+		key = 290 + sym - XK_F1;
+	else switch(sym){
+	case XK_Escape: key = 256; break;
+	case XK_Return: key = 257; break;
+	case XK_Tab: key = 258; break;
+	case XK_BackSpace: key = 259; break;
+	case XK_Insert: key = 260; break;
+	case XK_Delete: key = 261; break;
+	case XK_Right: key = 262; break;
+	case XK_Left: key = 263; break;
+	case XK_Down: key = 264; break;
+	case XK_Up: key = 265; break;
+	case XK_Page_Up: key = 266; break;
+	case XK_Page_Down: key = 267; break;
+	case XK_Home: key = 268; break;
+	case XK_End: key = 269; break;
+	case XK_Shift_L: bit = 1; key = 340; break;
+	case XK_Control_L: bit = 2; key = 341; break;
+	case XK_Alt_L: bit = 4; key = 342; break;
+	case XK_Shift_R: bit = 1; key = 344; break;
+	case XK_Control_R: bit = 2; key = 345; break;
+	case XK_Alt_R: bit = 4; key = 346; break;
+	default: return;
+	}
+	state = event->xkey.state;
+	modifiers = (state & ShiftMask ? 1 : 0) |
+		(state & ControlMask ? 2 : 0) | (state & altmask ? 4 : 0);
+	if(bit){
+		held[code] = down ? bit : 0;
+		modifiers &= ~bit;
+		for(i = 0; i < 256; i++)
+			modifiers |= held[i] & bit;
+	}
+	gkeyevent(down ? 'd' : 'u', key, modifiers);
+}
+
+static unsigned int
+xaltmask(XDisplay *xd)
+{
+	return XkbKeysymToModifiers(xd, XK_Alt_L) | XkbKeysymToModifiers(xd, XK_Alt_R);
+}
+
+static void
 xkbdproc(void *arg)
 {
 	XEvent event;
 	XDisplay *xd;
+	uchar held[256] = {0};
+	unsigned int altmask;
 
 	xd = arg;
 
 	/* BEWARE: the value of up is not defined for this proc on some systems */
 
 	XLockDisplay(xd);	/* should be ours alone */
-	XSelectInput(xd, xdrawable, KeyPressMask | KeyReleaseMask);		
+	XSelectInput(xd, xdrawable, KeyPressMask | KeyReleaseMask | FocusChangeMask);
+	altmask = xaltmask(xd);
 	for(;;){
 		XNextEvent(xd, &event);
+		if(event.type == MappingNotify){
+			XRefreshKeyboardMapping(&event.xmapping);
+			altmask = xaltmask(xd);
+		}
+		xkeyevent(xd, &event, held, altmask);
 		xkeyboard(&event);
 		xsetcursor(&event);
 	}

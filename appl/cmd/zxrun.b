@@ -22,6 +22,7 @@ Zxrun: module
 
 Zxresult: type (big, int, string);
 QueueSize: con 64;
+KeyCount: con 350;
 RGBAbytes: con Draw->Chans(16r48281808);
 
 Events: adt {
@@ -137,6 +138,8 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 	buttons := 0;
 	waiting := 0;
 	closed := 0;
+	rawkeys := 0;
+	held := array[KeyCount] of { * => 0 };
 
 	for(;;){
 		if(waiting && (queue.count != 0 || closed)){
@@ -182,6 +185,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 					w.onscreen(nil);
 					if(w.image != nil){
 						w.startinput("kbd" :: "ptr" :: nil);
+						rawkeys = w.wmctl("start keyevent") == nil;
 						kbd = w.ctxt.kbd;
 						ptr = w.ctxt.ptr;
 						kind := ZX->Redraw;
@@ -229,6 +233,12 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			bridge.input = event(ZX->Idle, bounds);
 			bridge.reply <-= 1;
 		c := <-ctl or c = <-title =>
+			if(rawkeys && len c >= 9 && c[:9] == "keyevent "){
+				keyevent(queue, held, bounds, c[9:]);
+				continue;
+			}
+			if(rawkeys && c == "haskbdfocus 0")
+				releasekeys(queue, held, bounds);
 			if(c == "exit"){
 				forget(w);
 				w = nil;
@@ -268,9 +278,11 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			}
 		k := <-kbd =>
 			e := event(ZX->Key, bounds);
-			e.key = keycode(k);
-			if(e.key != 0)
-				queue.push(e);
+			if(!rawkeys){
+				e.key = keycode(k);
+				if(e.key != 0)
+					queue.push(e);
+			}
 			if(k >= ' ' && k != 127 && (k < 16re000 || k > 16rf8ff)){
 				e.kind = ZX->Text;
 				e.key = 0;
@@ -299,6 +311,46 @@ paint(w: ref Wmclient->Window, source: ref Draw->Image): int
 event(kind: int, r: Draw->Rect): ZX->Input
 {
 	return (kind, 0, 0, 0, 0, 0, r.dx(), r.dy(), nil);
+}
+
+keyevent(queue: ref Events, held: array of int, bounds: Draw->Rect, message: string)
+{
+	(n, args) := sys->tokenize(message, " ");
+	if(n != 3)
+		return;
+	if(hd args == "r"){
+		releasekeys(queue, held, bounds);
+		return;
+	}
+	key := int hd tl args;
+	modifiers := int hd tl tl args;
+	if(key <= 0 || key >= len held || modifiers < 0 || modifiers > 7)
+		return;
+	e := event(ZX->Key, bounds);
+	case hd args {
+	"d" => held[key] = 1;
+	"u" =>
+		if(!held[key])
+			return;
+		held[key] = 0;
+		e.kind = ZX->Keyup;
+	* => return;
+	}
+	e.key = key;
+	e.modifiers = modifiers;
+	queue.push(e);
+}
+
+releasekeys(queue: ref Events, held: array of int, bounds: Draw->Rect)
+{
+	for(key := 1; key < len held; key++){
+		if(held[key]){
+			held[key] = 0;
+			e := event(ZX->Keyup, bounds);
+			e.key = key;
+			queue.push(e);
+		}
+	}
 }
 
 Events.push(q: self ref Events, e: ZX->Input)

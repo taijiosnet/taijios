@@ -63,7 +63,7 @@ From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
 (cd appl/cmd && mk zxrun.install)
 (
     cd appl/wm
-    mk stopwatch.install
+    mk wm.install stopwatch.install
     kryon_id=$(python3 -c 'import json; print(json.load(open("ziran.lock"))["root"]["dependencies"]["kryon"])')
     ziran bundle --project --bind-host "${kryon_id}_pixmap" \
         --entry stopwatch:main -o ../../dis/wm/stopwatch.zx stopwatch.zi
@@ -77,9 +77,13 @@ bundle in a TaijiOS window manager context, use `zxrun -w /path/to/app.zx`.
 The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
 `Close` to the guest window manager and Draw. `Present` uploads a packed RGBA8
 frame to a guest Draw image. `Event` supplies pointer buttons and movement,
-keyboard presses and UTF-8 text, redraw and resize, and close. The guest's rune
-channel supplies presses and text only, so key release and modifier state are
-unavailable. Surfaces are limited to 4,194,304 pixels and 4,096 pixels per axis.
+keyboard input and UTF-8 text, redraw and resize, and close. The X11 emulator
+exposes physical key presses, releases, and Shift, Control, and Alt through
+`/dev/keyevent`. The guest window manager forwards these events to the focused
+client that requests them. `/dev/keyboard` still carries Dis runes and supplies
+ZX text input. Window managers without the key event path use the rune channel
+for both presses and text. Surfaces are limited to 4,194,304 pixels and 4,096
+pixels per axis.
 The `taijios_clock.MonotonicMillis` capability supplies elapsed time.
 
 ### Verify the hosted runner
@@ -93,5 +97,7 @@ Xvfb, `xdotool`, ImageMagick's `import`, and Pillow.
 zi2zx --root build/zx-smoke --entry hello:main \
     -o 'build/zx-smoke/hello app.zx' build/zx-smoke/hello.zi
 printf 'invalid ZX\n' > build/zx-smoke/bad.zx
+zi2zx --root build/zx-smoke/keyevents --entry zx_surface:main \
+    -o build/zx-smoke/keyevents.zx build/zx-smoke/keyevents/zx_surface.zi
 python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics
 ```

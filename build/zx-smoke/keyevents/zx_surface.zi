@@ -1,0 +1,41 @@
+host_api :: #system_library "host_api";
+
+SurfaceEvent :: struct {
+    kind: s32;
+    x: s32;
+    y: s32;
+    button: s32;
+    key: s32;
+    modifiers: s32;
+    width: s32;
+    height: s32;
+    text: string;
+}
+
+Open :: (title: string, width: s32, height: s32) -> bool #reads #foreign host_api;
+Event :: (wait_ms: s32) -> SurfaceEvent #foreign host_api;
+Present :: (width: s32, height: s32, rgba: string) -> bool #reads #foreign host_api;
+Close :: () #foreign host_api;
+
+main :: () -> s32 {
+    if !Open("ZX key events", 240, 144) { return 1 }
+    defer Close()
+    rgba: [138240]u8
+    for i: 0..34559 {
+        at := i * 4
+        rgba[at] = cast(u8)248
+        rgba[at + 1] = cast(u8)250
+        rgba[at + 2] = cast(u8)252
+        rgba[at + 3] = cast(u8)255
+    }
+    if !Present(240, 144, TextView(rgba[:])) { return 2 }
+    while true {
+        e := Event(500)
+        if e.kind == 1 { return 0 }
+        if e.kind == 7 || e.kind == 8 {
+            print("key % % %\n", e.kind, e.key, e.modifiers)
+        }
+        if e.kind == 9 { print("text %\n", e.text) }
+    }
+    return 0
+}

@@ -20,7 +20,7 @@ Wm: module {
 	init:	fn(ctxt: ref Draw->Context, argv: list of string);
 };
 
-Ptrstarted, Kbdstarted, Controlstarted, Controller, Fixedorigin: con 1<<iota;
+Ptrstarted, Kbdstarted, Controlstarted, Controller, Fixedorigin, Keyeventstarted: con 1<<iota;
 Bdwidth: con 3;
 Sminx, Sminy, Smaxx, Smaxy: con iota;
 Minx, Miny, Maxx, Maxy: con 1<<iota;
@@ -34,6 +34,7 @@ controller: ref Client;
 allowcontrol := 1;
 fakekbd: chan of string;
 fakekbdin: chan of string;
+keyevents := 0;
 buttons := 0;
 
 badmodule(p: string)
@@ -83,6 +84,15 @@ init(ctxt: ref Draw->Context, argv: list of string)
 		raise "fail:no image";
 	}
 	wmclient->win.startinput("kbd" :: "ptr" :: nil);
+	rawkeys := chan of string;
+	if(ctxt.wm == nil){
+		fd := sys->open("/dev/keyevent", Sys->OREAD);
+		if(fd != nil){
+			spawn keyproc(fd, rawkeys);
+			keyevents = 1;
+		}
+	}else
+		keyevents = wmclient->win.wmctl("start keyevent") == nil;
 
 	wmctxt := win.ctxt;
 	screen = makescreen(win.image);
@@ -106,6 +116,10 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	for(;;) alt {
 	c := <-win.ctl or
 	c = <-wmctxt.ctl =>
+		if(len c >= 9 && c[:9] == "keyevent "){
+			sendkeyevent(c);
+			break;
+		}
 		# XXX could implement "pleaseexit" in order that
 		# applications can raise a warning message before
 		# they're unceremoniously dumped.
@@ -120,6 +134,8 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	c = int <-fakekbd =>
 		if(kbdfocus != nil)
 			kbdfocus.kbd <-= c;
+	c := <-rawkeys =>
+		sendkeyevent(c);
 	p := <-wmctxt.ptr =>
 		if(wmclient->win.pointer(*p))
 			break;
@@ -247,6 +263,11 @@ handlerequest(win: ref Wmclient->Window, wmctxt: ref Wmcontext, c: ref Client, r
 			# XXX this means that any new window grabs the focus from the current
 			# application, but usually you want this to happen... how can we distinguish
 			# the two cases?
+			setfocus(win, c);
+		"keyevent" =>
+			if(!keyevents)
+				return "key events not available";
+			c.flags |= Kbdstarted | Keyeventstarted;
 			setfocus(win, c);
 		"control" =>
 			if((c.flags & Controller) == 0)
@@ -575,6 +596,19 @@ setfocus(win: ref Wmclient->Window, new: ref Client)
 		kbdfocus = new;
 	} else
 		kbdfocus = nil;
+}
+
+sendkeyevent(message: string)
+{
+	if(kbdfocus != nil && (kbdfocus.flags & Keyeventstarted))
+		kbdfocus.ctl <-= message;
+}
+
+keyproc(fd: ref Sys->FD, messages: chan of string)
+{
+	buf := array[40] of byte;
+	while((n := sys->read(fd, buf, len buf)) > 0)
+		messages <-= string buf[:n];
 }
 
 makescreen(img: ref Image): ref Screen

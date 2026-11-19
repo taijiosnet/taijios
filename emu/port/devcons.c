@@ -32,7 +32,8 @@ enum
 	Qsysctl,
 	Qsysname,
 	Qtime,
-	Quser
+	Quser,
+	Qkeyevent
 };
 
 Dirtab contab[] =
@@ -58,6 +59,7 @@ Dirtab contab[] =
 	"sysname",	{Qsysname},	0,	0644,
 	"time",		{Qtime},	0,	0644,
 	"user",		{Quser},	0,	0644,
+	"keyevent",	{Qkeyevent},	0,	0444,
 };
 
 Queue*	gkscanq;		/* Graphics keyboard raw scancodes */
@@ -65,6 +67,8 @@ extern char*	gkscanid;		/* name of raw scan format (if defined) */
 Queue*	gkbdq;			/* Graphics keyboard unprocessed input */
 Queue*	kbdq;			/* Console window unprocessed keyboard input */
 Queue*	lineq;			/* processed console input */
+static Queue *gkeyq;
+static Ref gkeyreader;
 
 char	*ossysname;
 
@@ -156,6 +160,24 @@ gkbdputc(Queue *q, int ch)
 }
 
 void
+gkeyinit(void)
+{
+	gkeyq = qopen(32*1024, Qmsg, nil, nil);
+}
+
+void
+gkeyevent(int kind, int key, int modifiers)
+{
+	char message[40];
+	int n;
+
+	if(gkeyq == nil || gkeyreader.ref == 0)
+		return;
+	n = snprint(message, sizeof message, "keyevent %c %d %d", kind, key, modifiers);
+	qproduce(gkeyq, message, n);
+}
+
+void
 consinit(void)
 {
 	kbdq = qopen(512, 0, nil, nil);
@@ -212,6 +234,19 @@ consopen(Chan *c, int omode)
 		incref(&kbd.ctl);
 		break;
 
+	case Qkeyevent:
+		if(gkeyq == nil){
+			c->flag &= ~COPEN;
+			error("not supported");
+		}
+		if(incref(&gkeyreader) != 1){
+			decref(&gkeyreader);
+			c->flag &= ~COPEN;
+			error(Einuse);
+		}
+		qflush(gkeyq);
+		break;
+
 	case Qscancode:
 		qlock(&kbd.gq);
 		if(gkscanq != nil || gkscanid == nil) {
@@ -258,6 +293,10 @@ consclose(Chan *c)
 		/* last close of control file turns off raw */
 		if(decref(&kbd.ctl) == 0)
 			kbd.raw = 0;
+		break;
+
+	case Qkeyevent:
+		decref(&gkeyreader);
 		break;
 
 	case Qscancode:
@@ -392,6 +431,9 @@ consread(Chan *c, void *va, long n, vlong offset)
 
 	case Qkeyboard:
 		return qread(gkbdq, va, n);
+
+	case Qkeyevent:
+		return qread(gkeyq, va, n);
 
 	case Qkprint:
 		rlock(&kprintq.l);
