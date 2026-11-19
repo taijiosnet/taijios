@@ -301,6 +301,32 @@ zxsurface(void *context, const char *module, const char *function,
 }
 
 static int
+zxstdin(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	uchar bytes[4096];
+	size_t length;
+	long count, i;
+
+	USED(context);
+	USED(module);
+	USED(function);
+	if(n != 1 || args[0].kind != HOST_SLICE || args[0].type == nil ||
+	   strcmp(args[0].type, "[]u8") != 0 || (args[0].length != 0 && args[0].elements == nil))
+		return 0;
+	length = args[0].length;
+	if(length > sizeof(bytes))
+		length = sizeof(bytes);
+	count = length == 0 ? 0 : kread(0, bytes, length);
+	for(i = 0; i < count; i++)
+		args[0].elements[i].bits = bytes[i];
+	result->kind = HOST_INTEGER;
+	result->type = "s32";
+	result->integer = count;
+	return 1;
+}
+
+static int
 zxclock(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
 {
@@ -345,6 +371,10 @@ zxbindings(Bundle *bundle, ZxSurface *surface, HostBinding *bindings)
 	for(i = 0; i < BundleCapabilityCount(bundle); i++){
 		if(!BundleCapabilityAbiAt(bundle, i, &abi))
 			continue;
+		if(zxmodule(abi.module, "taijios_stdin") && strcmp(abi.function, "Read") == 0){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxstdin, nil};
+			continue;
+		}
 		if(zxmodule(abi.module, "taijios_clock") && strcmp(abi.function, "MonotonicMillis") == 0){
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxclock, nil};
 			continue;

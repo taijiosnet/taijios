@@ -30,6 +30,7 @@ y.debug
 /dis/wm/stopwatch.zx
 /build/zx-smoke/*
 !/build/zx-smoke/hello.zi
+!/build/zx-smoke/taijios_stdin.zi
 !/build/zx-smoke/run.py
 !/build/zx-smoke/keyevents/
 /build/zx-smoke/keyevents/*

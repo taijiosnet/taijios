@@ -94,6 +94,23 @@ for both presses and text. Surfaces are limited to 4,194,304 pixels and 4,096
 pixels per axis.
 The `taijios_clock.MonotonicMillis` capability supplies elapsed time.
 
+### Read guest standard input
+
+Both `zxrun` and `zxrun -w` can bind the typed standard input capability.
+Declare it in a module named `taijios_stdin.zi` and bind that module when
+building the application with `zi2zx --bind-host taijios_stdin`.
+
+```zi
+host_api :: #system_library "host_api";
+Read :: (buffer: []u8) -> s32 #foreign host_api;
+```
+
+`Read` reads up to 4096 bytes from the caller's guest fd 0 in one call. It
+returns the number of bytes copied, including short reads, and preserves the
+rest of the buffer. For a nonempty buffer, the call returns `0` at EOF or
+`-1` on a read error. An empty buffer returns `0` without reading. Dis pipes and input
+redirection supply the stream in both console and windowed runs.
+
 ### Verify the hosted runner
 
 Build the console fixture and put the Kryon hosted surface example bundle at
@@ -124,4 +141,13 @@ zi2zx --root build/zx-smoke/modules --module-path "$ZIRAN_SRC/std" \
 zi2zx --root build/zx-smoke/keyevents --entry zx_surface:Budget \
     -o build/zx-smoke/budget.zx build/zx-smoke/keyevents/zx_surface.zi
 python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics --runtime
+```
+
+To test guest stdin, build the fixture and add `--stdin` to the smoke command:
+
+```sh
+zi2zx --root build/zx-smoke --bind-host taijios_stdin \
+    --entry taijios_stdin:main -o build/zx-smoke/stdin.zx \
+    build/zx-smoke/taijios_stdin.zi
+python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics --runtime --stdin
 ```

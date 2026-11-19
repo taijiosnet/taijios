@@ -1,0 +1,20 @@
+host_api :: #system_library "host_api";
+
+Read :: (buffer: []u8) -> s32 #foreign host_api;
+
+main :: () -> s32 {
+    empty: [0]u8
+    if Read(empty[:]) != 0 { return 2 }
+    while true {
+        buffer: [4]u8 = .[255, 255, 255, 255]
+        count := Read(buffer[:])
+        if count > buffer.count || count < -1 { return 2 }
+        for i: 0..3 {
+            if i >= count && buffer[i] != 255 { return 2 }
+        }
+        if count < 0 { print("read error\n"); return 1 }
+        if count == 0 { return 0 }
+        print("%", TextView(buffer[:count]))
+    }
+    return 2
+}

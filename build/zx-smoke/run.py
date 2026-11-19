@@ -35,6 +35,18 @@ if '--runtime' in sys.argv[2:]:
     assert linked.stdout == 'Guest module received 41\n42\nGUEST_MODULE_OK\n'
     assert linked.stderr == ''
 
+if '--stdin' in sys.argv[2:]:
+    (files / 'stdin.in').write_text('first line\nsecond line\n')
+    stdin_image = '/build/zx-smoke/stdin.zx'
+    redirected = run(f'zxrun {stdin_image} < /build/zx-smoke/stdin.in')
+    assert redirected.stdout == 'first line\nsecond line\n0\n' and not redirected.stderr
+    piped = run(f'cat /build/zx-smoke/stdin.in | zxrun {stdin_image} | cat')
+    assert piped.stdout == redirected.stdout and not piped.stderr
+    empty = run(f'zxrun {stdin_image} < /dev/null')
+    assert empty.stdout == '0\n' and not empty.stderr
+    read_error = run(f'zxrun {stdin_image} >[0] /build/zx-smoke/stdin.writeonly')
+    assert read_error.stdout == 'read error\n1\n' and not read_error.stderr
+
 
 def graphics():
     import io
@@ -111,6 +123,22 @@ def graphics():
         proc.wait(timeout=5)
         proc.stdout.close()
         proc.stderr.close()
+
+    def windowed_stdin():
+        proc = launch('sh', '-c', f'zxrun -w {stdin_image} < /build/zx-smoke/stdin.in')
+        transcript = bytearray()
+
+        def read():
+            for error, block in output(proc):
+                assert not error, block
+                transcript.extend(block)
+            return b'first line\nsecond line\n0\n' in transcript
+
+        try:
+            until(read, 'windowed ZX did not read guest stdin')
+            print('ZX stdin: windowed runner honored guest fd 0 redirection')
+        finally:
+            stop(proc)
 
     def fuel():
         proc = launch('zxrun', '-w', '/build/zx-smoke/budget.zx')
@@ -304,6 +332,8 @@ def graphics():
         legacy_stopwatch()
         if '--runtime' in sys.argv[2:]:
             fuel()
+        if '--stdin' in sys.argv[2:]:
+            windowed_stdin()
     finally:
         os.close(reader)
         xvfb.terminate()
