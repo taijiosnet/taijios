@@ -1,0 +1,31 @@
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using Input :: #import "tcltk_input"
+
+main :: () -> s32 {
+    interpreter: Tcl.Interpreter;
+    if !Tk.Attach(*interpreter) { return 1 }
+    reference := Tcl.Eval(*interpreter, Input.Script);
+    if reference.code != .OK || TextView(reference.value) != "9 balls" { return 2 }
+    print("%\n", TextView(reference.value));
+
+    bad_config := Tcl.Eval(*interpreter, ".count configure -text Lost -unsupported 1");
+    if bad_config.code != .Error { return 3 }
+    after := Tcl.Eval(*interpreter, ".count cget -text");
+    if after.code != .OK || TextView(after.value) != "9 balls" { return 4 }
+    changed := Tcl.Eval(*interpreter,
+        "button .local -command {incr n}; proc p {} {set n 8; .local invoke}; p");
+    if changed.code != .OK || TextView(changed.value) != "9" { return 5 }
+
+    Tk.Layout(300, 208);
+    Tk.PointerDown(150, 70);
+    Tcl.Eval(*interpreter, "destroy .more");
+    cancelled: Text = Tk.PointerUp(150, 70);
+    if cancelled.bytes.count != 0 { return 6 }
+    destroyed := Tcl.Eval(*interpreter, ".more cget -text");
+    if destroyed.code != .Error { return 7 }
+    root := Tcl.Eval(*interpreter, "destroy .");
+    if root.code != .OK || !Tk.Closed() { return 8 }
+    return 0;
+}

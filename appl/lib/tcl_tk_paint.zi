@@ -1,0 +1,125 @@
+// A small, host-independent RGBA renderer and original stroke lettering.
+using Tk :: #import "tcl_tk"
+#import "std/vec"
+
+Canvas :: struct { pixels: []u8; width: s32; height: s32; }
+Ink :: struct { r: u8; g: u8; b: u8; }
+PAPER :: Ink.{r = 244, g = 246, b = 247};
+BUTTON :: Ink.{r = 224, g = 234, b = 242};
+PRESSED :: Ink.{r = 188, g = 213, b = 231};
+BORDER :: Ink.{r = 119, g = 149, b = 173};
+LETTER :: Ink.{r = 25, g = 47, b = 67};
+
+Fill :: (canvas: *Canvas, box: Tk.Box, ink: Ink) {
+    left := Tk.NonNegative(box.x);
+    top := Tk.NonNegative(box.y);
+    right := Tk.Minimum(box.x + box.w, canvas.width);
+    bottom := Tk.Minimum(box.y + box.h, canvas.height);
+    for y: top..bottom-1 {
+        offset := cast(s64)y * cast(s64)canvas.width * 4;
+        for x: left..right-1 {
+            i := offset + cast(s64)x * 4;
+            canvas.pixels[i] = ink.r;
+            canvas.pixels[i+1] = ink.g;
+            canvas.pixels[i+2] = ink.b;
+            canvas.pixels[i+3] = 255;
+        }
+    }
+}
+
+// Each group is x0,y0,x1,y1 on a 5 by 7 grid. Lowercase uses the same glyphs.
+Strokes :: (rune: u8) -> string {
+    byte := rune;
+    if byte >= 97 && byte <= 122 { byte -= 32 }
+    if byte == #char " " { return "" }
+    if byte == #char "A" { return "0610203046400343" }
+    if byte == #char "B" { return "00060030304141423033423333444545360636" }
+    if byte == #char "C" { return "404030100001010510364646" }
+    if byte == #char "D" { return "000600303041414545360636" }
+    if byte == #char "E" { return "0006004003330646" }
+    if byte == #char "F" { return "000600400333" }
+    if byte == #char "G" { return "4030100001050536364646432343" }
+    if byte == #char "H" { return "000640460343" }
+    if byte == #char "I" { return "004020260646" }
+    if byte == #char "J" { return "4045453606360604" }
+    if byte == #char "K" { return "000640030346" }
+    if byte == #char "L" { return "00060646" }
+    if byte == #char "M" { return "0600002323404046" }
+    if byte == #char "N" { return "060000464640" }
+    if byte == #char "O" { return "10301001010505161636364545414130" }
+    if byte == #char "P" { return "000600303041414242330333" }
+    if byte == #char "Q" { return "103010010105051616363645454141302446" }
+    if byte == #char "R" { return "0006003030414142423303332346" }
+    if byte == #char "S" { return "40303010100101020213333333444445453636161605" }
+    if byte == #char "T" { return "00402026" }
+    if byte == #char "U" { return "00050516163636454540" }
+    if byte == #char "V" { return "00264026" }
+    if byte == #char "W" { return "0016162323363640" }
+    if byte == #char "X" { return "00464006" }
+    if byte == #char "Y" { return "002340232326" }
+    if byte == #char "Z" { return "004040060646" }
+    if byte == #char "0" { return "103010010105051616363645454141300541" }
+    if byte == #char "1" { return "022020260646" }
+    if byte == #char "2" { return "011010303041414242060646" }
+    if byte == #char "3" { return "003030414142423313333344444545360636" }
+    if byte == #char "4" { return "3200030343434046" }
+    if byte == #char "5" { return "4000000303333344444545360636" }
+    if byte == #char "6" { return "403010000005051616363645454444330333" }
+    if byte == #char "7" { return "00404016" }
+    if byte == #char "8" { return "103010010102021333333342424141301304040505161636364545444433" }
+    if byte == #char "9" { return "43431313020201011010303041414545360636" }
+    if byte == #char "+" { return "03432125" }
+    if byte == #char "-" { return "0343" }
+    if byte == #char "." { return "2626" }
+    return "0110103030414142422323242626";
+}
+
+Magnitude :: (value: s32) -> s32 { return ifx value < 0 then -value else value }
+
+Stroke :: (canvas: *Canvas, origin_x: s32, origin_y: s32, segment: string) {
+    x := cast(s32)segment[0] - 48;
+    y := cast(s32)segment[1] - 48;
+    end_x := cast(s32)segment[2] - 48;
+    end_y := cast(s32)segment[3] - 48;
+    dx := Magnitude(end_x - x);
+    dy := -Magnitude(end_y - y);
+    sx: s32 = ifx x < end_x then 1 else -1;
+    sy: s32 = ifx y < end_y then 1 else -1;
+    error := dx + dy;
+    while true {
+        Fill(canvas, .{x = origin_x + 2*x, y = origin_y + 2*y, w = 2, h = 2}, LETTER);
+        if x == end_x && y == end_y { break }
+        doubled := 2 * error;
+        if doubled >= dy { error += dy; x += sx }
+        if doubled <= dx { error += dx; y += sy }
+    }
+}
+
+DrawText :: (canvas: *Canvas, box: Tk.Box, text: string) {
+    if box.h < 14 { return }
+    length := Tk.Minimum(cast(s32)Tk.Minimum(box.w/12, 512), cast(s32)text.count);
+    x := box.x + (box.w - length*12)/2;
+    y := box.y + (box.h-14)/2;
+    for i: 0..length-1 {
+        glyph := Strokes(text[i]);
+        for segment: 0..glyph.count/4-1 {
+            at := segment * 4;
+            Stroke(canvas, x + i*12 + 1, y, glyph[at:at+4]);
+        }
+    }
+}
+
+Render :: (pixels: []u8, width: s32, height: s32) {
+    canvas := Canvas.{pixels = pixels, width = width, height = height};
+    Fill(*canvas, .{w = width, h = height}, PAPER);
+    for * Tk.widgets {
+        if it.order == 0 || it.box.w < 4 || it.box.h < 4 { continue }
+        box := it.box;
+        if it.button {
+            Fill(*canvas, box, BORDER);
+            Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2},
+                 ifx it_index == Tk.pressed then PRESSED else BUTTON);
+        }
+        DrawText(*canvas, box, TextView(it.text));
+    }
+}

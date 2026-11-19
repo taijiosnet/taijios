@@ -1,0 +1,17 @@
+// Hosted input adapter for the Inferno Tcl shell port. See ../../NOTICE (MIT).
+// A small tcl_input module supplies Script for the console ZX entry.
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Input :: #import "tcl_input"
+
+main :: () -> s32 {
+    interpreter: Tcl.Interpreter;
+    result := Tcl.Eval(*interpreter, Input.Script);
+    output: Text = Tcl.TakeOutput(*interpreter);
+    print("%", TextView(output));
+    if result.code != .OK {
+        print("tclsh: %\n", TextView(result.value));
+        return 1;
+    }
+    return 0;
+}

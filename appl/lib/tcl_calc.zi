@@ -1,0 +1,120 @@
+// Integer expression module ported from Inferno tcl_calc.b. See ../../NOTICE (MIT).
+using T :: #import "tcl_types"
+
+Expression :: struct {
+    cursor: Cursor;
+    problem: string;
+}
+
+SkipSpaces :: (cursor: *Cursor) {
+    while Has(cursor) && Space(Peek(cursor)) { cursor.at += 1 }
+}
+
+Operand :: (expr: *Expression, depth: s32) -> s64 {
+    if depth > 64 { expr.problem = "expression nesting limit exceeded"; return 0 }
+    cursor := *expr.cursor;
+    SkipSpaces(cursor);
+    if !Has(cursor) { expr.problem = "expected expression operand"; return 0 }
+    byte := Peek(cursor);
+    if byte == 40 {
+        cursor.at += 1;
+        value := Binary(expr, 1, depth + 1);
+        if expr.problem != "" { return 0 }
+        SkipSpaces(cursor);
+        if !Has(cursor) || Take(cursor) != 41 { expr.problem = "missing close-parenthesis in expression" }
+        return value;
+    }
+    if byte == 43 || byte == 45 || byte == 33 {
+        cursor.at += 1;
+        SkipSpaces(cursor);
+        if byte == 45 && Has(cursor) && Digit(Peek(cursor)) {
+            return Numeral(expr, true);
+        }
+        value := Operand(expr, depth + 1);
+        if expr.problem != "" { return 0 }
+        if byte == 33 { return ifx value == 0 then 1 else 0 }
+        if byte == 45 { return Checked(expr, -value) }
+        return value;
+    }
+    if Digit(byte) { return Numeral(expr, false) }
+    start := cursor.at;
+    while Has(cursor) && NameByte(Peek(cursor)) { cursor.at += 1 }
+    word := cursor.text[start:cursor.at];
+    if word == "true" || word == "yes" || word == "on" { return 1 }
+    if word == "false" || word == "no" || word == "off" { return 0 }
+    expr.problem = "expected integer expression operand";
+    return 0;
+}
+
+Numeral :: (expr: *Expression, negative: bool) -> s64 {
+    cursor := *expr.cursor;
+    value: s64;
+    while Has(cursor) && Digit(Peek(cursor)) {
+        value = value * 10 + cast(s64)(Take(cursor) - 48);
+        if value > 2147483648 { expr.problem = "integer overflow"; return 0 }
+    }
+    return Checked(expr, ifx negative then -value else value);
+}
+
+Operator :: (cursor: *Cursor) -> (symbol: string, precedence: s32) {
+    SkipSpaces(cursor);
+    if !Has(cursor) { return "", 0 }
+    start := cursor.at;
+    byte := Peek(cursor);
+    if start + 1 < cursor.text.count && cursor.text[start+1] == 61 {
+        if byte == 61 || byte == 33 { return cursor.text[start:start+2], 1 }
+        if byte == 60 || byte == 62 { return cursor.text[start:start+2], 2 }
+    }
+    op := cursor.text[start:start+1];
+    if byte == 60 || byte == 62 { return op, 2 }
+    if byte == 43 || byte == 45 { return op, 3 }
+    if byte == 42 || byte == 47 || byte == 37 { return op, 4 }
+    return "", 0;
+}
+
+Checked :: (expr: *Expression, value: s64) -> s64 {
+    if InRange(value) { return value }
+    expr.problem = "integer overflow";
+    return 0;
+}
+
+Apply :: (expr: *Expression, op: string, a: s64, b: s64) -> s64 {
+    if op == "+" { return Checked(expr, a + b) }
+    if op == "-" { return Checked(expr, a - b) }
+    if op == "*" { return Checked(expr, a * b) }
+    if op == "==" { return ifx a == b then 1 else 0 }
+    if op == "!=" { return ifx a != b then 1 else 0 }
+    if op == "<" { return ifx a < b then 1 else 0 }
+    if op == "<=" { return ifx a <= b then 1 else 0 }
+    if op == ">" { return ifx a > b then 1 else 0 }
+    if op == ">=" { return ifx a >= b then 1 else 0 }
+    if b == 0 { expr.problem = "divide by zero"; return 0 }
+    quotient := a / b;
+    remainder := a % b;
+    if remainder != 0 && (remainder < 0) != (b < 0) {
+        quotient -= 1;
+        remainder += b;
+    }
+    if op == "%" { return remainder }
+    return Checked(expr, quotient);
+}
+
+Binary :: (expr: *Expression, minimum: s32, depth: s32) -> s64 {
+    value := Operand(expr, depth);
+    while expr.problem == "" {
+        op, precedence := Operator(*expr.cursor);
+        if precedence < minimum { break }
+        expr.cursor.at += op.count;
+        right := Binary(expr, precedence + 1, depth);
+        if expr.problem != "" { break }
+        value = Apply(expr, op, value, right);
+    }
+    return value;
+}
+
+EvaluateInteger :: (source: string) -> (number: s64, problem: string) {
+    expr := Expression.{cursor = .{text = source}};
+    value := Binary(*expr, 1, 0);
+    if expr.problem == "" && Has(*expr.cursor) { expr.problem = "unexpected token in integer expression" }
+    return value, expr.problem;
+}

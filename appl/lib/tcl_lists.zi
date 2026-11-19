@@ -1,0 +1,126 @@
+// Ported from the Inferno Limbo tcl_list.b and tcl_utils.b. See ../../NOTICE (MIT).
+#import "std/vec"
+using T :: #import "tcl_types"
+
+List :: struct {
+    words: Vec(Text);
+    problem: string;
+}
+
+ParseList :: (source: string) -> List {
+    cursor := Cursor.{text = source};
+    list: List;
+    while Has(*cursor) {
+        if Space(Peek(*cursor)) { cursor.at += 1; continue }
+        word: Text;
+        if Peek(*cursor) == 123 {
+            group := Braced(*cursor);
+            if group.code != .OK { return .{problem = "unmatched open brace in list"} }
+            VecSwap(word.bytes, group.value.bytes);
+            if Has(*cursor) && !Space(Peek(*cursor)) { return .{problem = "extra characters after list brace"} }
+        } else {
+            quoted := Peek(*cursor) == 34;
+            if quoted { cursor.at += 1 }
+            while Has(*cursor) {
+                byte := Peek(*cursor);
+                if (quoted && byte == 34) || (!quoted && Space(byte)) { break }
+                if byte == 92 { byte = Unescape(*cursor) } else { cursor.at += 1 }
+                unused VecPush(word.bytes, byte);
+            }
+            if quoted {
+                if !Has(*cursor) { return .{problem = "unmatched open quote in list"} }
+                cursor.at += 1;
+                if Has(*cursor) && !Space(Peek(*cursor)) { return .{problem = "extra characters after list quote"} }
+            }
+        }
+        unused VecPush(list.words, word);
+    }
+    return list;
+}
+
+// Favor brace quoting for ordinary grouped items. Unbalanced braces and a
+// trailing backslash require backslash quoting instead for a round trip.
+AppendElement :: (output: *Vec(u8), value: string, separate: bool = true) {
+    if separate { unused VecPush(<<output, cast(u8)32) }
+    if value.count == 0 { unused BuilderAppend(<<output, "{}"); return }
+    quote := value[0] == 35;
+    can_brace := true;
+    depth: s64;
+    at: s64;
+    while at < value.count {
+        byte := value[at];
+        if Space(byte) || byte == 123 || byte == 125 || byte == 34 || byte == 92 ||
+           byte == 36 || byte == 91 || byte == 93 || byte == 59 { quote = true }
+        if byte == 123 { depth += 1 }
+        if byte == 125 { depth -= 1; if depth < 0 { can_brace = false } }
+        if byte == 92 {
+            at += 1;
+            if at == value.count || value[at] == 10 { can_brace = false }
+        }
+        at += 1;
+    }
+    if !quote { unused BuilderAppend(<<output, value); return }
+    if can_brace && depth == 0 {
+        unused VecPush(<<output, cast(u8)123);
+        unused BuilderAppend(<<output, value);
+        unused VecPush(<<output, cast(u8)125);
+        return;
+    }
+    for value {
+        if it == 10 { unused BuilderAppend(<<output, "\\n"); continue }
+        if Space(it) || it == 123 || it == 125 || it == 34 || it == 92 ||
+           it == 36 || it == 91 || it == 93 || it == 59 || it == 35 {
+            unused VecPush(<<output, cast(u8)92);
+        }
+        unused VecPush(<<output, it);
+    }
+}
+
+Index :: (word: string, length: s64) -> (index: s64, valid: bool) {
+    if word == "end" { return length - 1, true }
+    if word.count > 4 && word[0:4] == "end-" {
+        offset, ok := ParseInteger(word[4:]);
+        return length - 1 - offset, ok && offset >= 0;
+    }
+    number, ok := ParseInteger(word);
+    return number, ok;
+}
+
+RunList :: (name: string, args: []Text) -> Result {
+    if name == "list" {
+        result: Text;
+        for 0..args.count-1 { AppendElement(*result.bytes, TextView(args[it]), it > 0) }
+        return .{value = result};
+    }
+    if name == "join" && (args.count < 1 || args.count > 2) { return WrongArgs("join list ?joinString?") }
+    if name == "llength" && args.count != 1 { return WrongArgs("llength list") }
+    if name == "lindex" && args.count != 2 { return WrongArgs("lindex list index") }
+    if name == "lrange" && args.count != 3 { return WrongArgs("lrange list first last") }
+    parsed := ParseList(TextView(args[0]));
+    if parsed.problem != "" { return Failure(parsed.problem) }
+    length := parsed.words.count;
+    if name == "llength" { return Integer(length) }
+    if name == "join" {
+        result: Text;
+        separator: string = " ";
+        if args.count == 2 { separator = TextView(args[1]) }
+        for 0..length-1 {
+            if it != 0 { unused BuilderAppend(result.bytes, separator) }
+            unused BuilderAppend(result.bytes, TextView(parsed.words[it]));
+        }
+        return .{value = result};
+    }
+    first, valid_first := Index(TextView(args[1]), length);
+    if !valid_first { return Failure("bad list index") }
+    if name == "lindex" {
+        if first < 0 || first >= length { return Success() }
+        return Success(TextView(parsed.words[first]));
+    }
+    last, valid_last := Index(TextView(args[2]), length);
+    if !valid_last { return Failure("bad list index") }
+    if first < 0 { first = 0 }
+    if last >= length { last = length - 1 }
+    result: Text;
+    for first..last { AppendElement(*result.bytes, TextView(parsed.words[it]), it > first) }
+    return .{value = result};
+}

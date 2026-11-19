@@ -1,0 +1,51 @@
+// Ported string operations from Inferno tcl_string.b. See ../../NOTICE (MIT).
+#import "std/vec"
+using T :: #import "tcl_types"
+using L :: #import "tcl_lists"
+
+Compare :: (left: string, right: string) -> s64 {
+    common := ifx left.count < right.count then left.count else right.count;
+    for 0..common-1 {
+        if left[it] < right[it] { return -1 }
+        if left[it] > right[it] { return 1 }
+    }
+    if left.count < right.count { return -1 }
+    if left.count > right.count { return 1 }
+    return 0;
+}
+
+RunString :: (args: []Text) -> Result {
+    if args.count < 1 { return WrongArgs("string option arg ?arg ...?") }
+    option := TextView(args[0]);
+    if option == "compare" || option == "equal" {
+        if args.count != 3 {
+            if option == "compare" { return WrongArgs("string compare string1 string2") }
+            return WrongArgs("string equal string1 string2");
+        }
+        comparison := Compare(TextView(args[1]), TextView(args[2]));
+        if option == "equal" { return Integer(ifx comparison == 0 then 1 else 0) }
+        return Integer(comparison);
+    }
+    if option == "length" {
+        if args.count != 2 { return WrongArgs("string length string") }
+        return Integer(TextView(args[1]).count);
+    }
+    if option == "index" || option == "range" {
+        if option == "index" && args.count != 3 { return WrongArgs("string index string charIndex") }
+        if option == "range" && args.count != 4 { return WrongArgs("string range string first last") }
+        value := TextView(args[1]);
+        first, valid_first := Index(TextView(args[2]), value.count);
+        if !valid_first { return Failure("bad string index") }
+        if option == "index" {
+            if first < 0 || first >= value.count { return Success() }
+            return Success(value[first:first+1]);
+        }
+        last, valid_last := Index(TextView(args[3]), value.count);
+        if !valid_last { return Failure("bad string index") }
+        if first < 0 { first = 0 }
+        if last >= value.count { last = value.count - 1 }
+        if first > last { return Success() }
+        return Success(value[first:last+1]);
+    }
+    return Failure("unsupported string option");
+}

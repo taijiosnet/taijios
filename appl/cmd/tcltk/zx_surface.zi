@@ -1,0 +1,31 @@
+// Generic Taiji surface ABI for the independent, optional Tk module.
+host_api :: #system_library "host_api";
+
+SurfaceEvent :: struct {
+    kind: s32;
+    x: s32;
+    y: s32;
+    button: s32;
+    key: s32;
+    modifiers: s32;
+    width: s32;
+    height: s32;
+    text: string;
+}
+
+Closed :: 1;
+Redraw :: 2;
+Resize :: 3;
+Down :: 5;
+Up :: 6;
+
+#scope_export
+Open :: (title: string, width: s32, height: s32) -> bool #reads #foreign host_api;
+Event :: (wait_ms: s32) -> SurfaceEvent #foreign host_api;
+Present :: (width: s32, height: s32, rgba: string) -> bool #reads #foreign host_api;
+Close :: () #foreign host_api;
+
+OpenWindow :: (title: string, width: s32, height: s32) -> bool { return Open(title, width, height) }
+GetEvent :: (wait_ms: s32) -> SurfaceEvent { return Event(wait_ms) }
+PresentRGBA :: (width: s32, height: s32, rgba: string) -> bool { return Present(width, height, rgba) }
+CloseWindow :: () { Close() }

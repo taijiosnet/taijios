@@ -1,0 +1,42 @@
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Types :: #import "tcl_types"
+
+calls: s32;
+
+WidgetProbe :: (context: s64, args: []Text, result: *Types.Result) {
+    calls += 1;
+    if context != 42 || args.count != 1 || TextView(args[0]) != "two words" {
+        result.code = .Error;
+        return;
+    }
+    unused BuilderAppend(result.value.bytes, "extension called");
+}
+
+main :: () -> s32 {
+    tcl: Tcl.Interpreter;
+    other: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, ".widget", WidgetProbe, 42) { return 1 }
+    if Tcl.RegisterCommand(*tcl, ".widget", WidgetProbe) { return 2 }
+    if Tcl.RegisterCommand(*tcl, "set", WidgetProbe) { return 3 }
+
+    first := Tcl.Eval(*tcl, "set shared {.widget}; puts [$shared {two words}]");
+    if first.code != .OK || calls != 1 { return 4 }
+    output: Text = Tcl.TakeOutput(*tcl);
+    if TextView(output) != "extension called\n" { return 5 }
+    empty: Text = Tcl.TakeOutput(*tcl);
+    if TextView(empty) != "" { return 6 }
+
+    missing := Tcl.Eval(*other, "set shared");
+    if missing.code != .Error { return 7 }
+    malformed := Tcl.Eval(*tcl, "set x {unfinished");
+    if malformed.code != .Error || TextView(malformed.value) != "missing close-brace" { return 8 }
+    exhausted := Tcl.Eval(*tcl, "while {1} {}");
+    if exhausted.code != .Error || TextView(exhausted.value) != "script command limit exceeded" { return 9 }
+    next := Tcl.Eval(*tcl, "set shared");
+    if next.code != .OK || TextView(next.value) != ".widget" { return 10 }
+    removed := Tcl.Eval(*tcl, "set x a; set y b; unset x; set y");
+    if removed.code != .OK || TextView(removed.value) != "b" { return 11 }
+    print("Tcl API OK\n");
+    return 0;
+}

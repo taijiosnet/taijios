@@ -1,0 +1,114 @@
+# Tcl in Ziran
+
+`tcl.zi` is a headless Ziran library. Add `appl/lib` to the Ziran module
+search path and import `tcl`. A zero-initialized `Interpreter` is ready to use.
+
+```zi
+#import "std/vec"
+using Tcl :: #import "tcl"
+
+main :: () -> s32 {
+    interpreter: Tcl.Interpreter;
+    result := Tcl.Eval(*interpreter, "set width 6; expr {$width * 7}");
+    print("%\n", TextView(result.value));
+    return ifx result.code == .OK then 0 else 1;
+}
+```
+
+`Eval` retains variables and procedure definitions on each interpreter.
+Procedure calls have independent local variables. Results own their text.
+`TakeOutput` takes and clears the text accumulated by `puts`, including
+output written before an error. An evaluation has a 10,000-command budget
+that also charges loop iterations, and permits 48 nested script levels.
+
+## Supported Tcl
+
+- Command separators, comments, nested braces, quoted and empty words,
+  basic backslash escapes and line continuations, scalar substitution with
+  `$name` and `${name}`, and nested command substitution with `[script]`.
+- `set`, `unset`, `incr`, `append`, `lappend`, `proc`, `return`, `if`,
+  `while`, `for`, `foreach`, `break`, `continue`, `catch`, `error` and `eval`.
+  Procedures accept defaults and a trailing `args`. `foreach` accepts a
+  variable list and one value list. `catch` accepts an optional result variable.
+- `list`, `llength`, `lindex`, `lrange`, `join`, and `string compare`,
+  `equal`, `length`, `index` and `range`. Indexes are decimal integers,
+  `end` or `end-N`. String lengths, comparisons and indexes use UTF-8 bytes.
+- `expr` and the Inferno `calc` alias accept signed 32-bit decimal integers,
+  `true`/`false`, `yes`/`no`, `on`/`off`, parentheses, unary `+ - !`, binary
+  `+ - * / %`, and numeric comparisons `== != < <= > >=`. Substitutions
+  inside an expression must yield a single integer or boolean. Overflow and
+  division by zero return errors.
+- `puts string` and `puts -nonewline string` write to the output buffer.
+
+This slice omits arrays, namespaces, cross-frame variable access, `{*}` word
+expansion, numeric and Unicode backslash escapes, wide integers, floating-point
+and lazy expression operators, Tcl packages, channels, `source`, and Tk.
+Commands outside the list above and extra options on those commands are outside
+the supported language subset.
+
+## Build, test and run
+
+From the TaijiOS root, with `ziran` and `zi2zx` on PATH and the existing
+ZX-enabled Linux emulator installed:
+
+```sh
+python3 appl/cmd/tclsh_tests/run.py
+build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
+```
+
+The native shell also reads stdin with `-` or when given no filename. The
+test runner compares the same reference script with the existing Limbo
+`tclsh`, runs both fixtures under ZX and hosted Taiji, and tests the library
+API separately. `zxrun` prints a final scalar `0` on success and `1` on a Tcl
+error.
+
+With a Taiji emulator that provides `taijios_stdin.Read`, build the shell that
+reads a script from the guest's standard input. It evaluates after EOF and
+accepts scripts up to 1 MiB.
+
+```sh
+zi2zx --root appl/cmd --module-path appl/lib --bind-host taijios_stdin \
+    --entry tclsh_stdin:main -o build/tcl/tclsh-stdin.zx appl/cmd/tclsh_stdin.zi
+install -m 0644 build/tcl/tclsh-stdin.zx dis/tclsh.zx
+python3 appl/cmd/tclsh_tests/run.py --stdin /dis/tclsh.zx
+```
+
+At the Taiji shell, run `zxrun /dis/tclsh.zx < /appl/cmd/tclsh_tests/reference.tcl`
+or pipe a script from a Dis command. For emulators with only console output,
+`appl/cmd/tclsh.zi` takes `Script` from an in-memory `tcl_input` module.
+Install the tested reference example with
+`install -m 0644 build/tcl/tclsh.zx dis/tclsh.zx` and run `zxrun /dis/tclsh.zx`.
+To build a different script into an image:
+
+```sh
+mkdir -p build/tcl
+cat > build/tcl/tcl_input.zi <<'ZI'
+Script :: #string TCL_SCRIPT_END
+set name Taiji
+puts "Hello, $name"
+TCL_SCRIPT_END;
+ZI
+zi2zx --root appl/cmd --module-path appl/lib --module-path build/tcl \
+    --entry tclsh:main -o build/tcl/tclsh.zx appl/cmd/tclsh.zi
+```
+
+## Optional Tk module
+
+`RegisterCommand` binds a name to a Ziran procedure and an optional `s64`
+context ID. The procedure receives that ID, the substituted argument words,
+and a pointer to `tcl_types.Result` for its owned result or error. Each
+interpreter has its own registered commands. `RegisterPrefix` also accepts a
+handler for a family of command names, such as Tk widget paths beginning with
+`.`. Its handler can return a script to evaluate in the current Tcl frame.
+The legacy `tcl_tk.b` bridges to Inferno Tk. The headless interpreter uses
+only Ziran libraries.
+
+The [optional Tk package and Bounce toolbar example](../cmd/tcltk/README.md)
+use that API. Their window binds to Taiji's generic surface ABI.
+
+## Attribution
+
+This port follows the Inferno Limbo sources `appl/cmd/tclsh.b`,
+`appl/lib/tcl.m`, `tcl_core.b`, `tcl_list.b`, `tcl_utils.b`, `tcl_calc.b`,
+and `tcl_string.b`. These files carry the Inferno distribution attribution and
+MIT terms in [NOTICE](../../NOTICE).

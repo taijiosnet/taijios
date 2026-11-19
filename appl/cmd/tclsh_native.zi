@@ -1,0 +1,33 @@
+// Native input adapter for the Inferno Tcl shell port. See ../../NOTICE (MIT).
+#import "std/vec"
+#import "std/byte_text_linux"
+#import "std/stdio_linux"
+#import "std/file"
+using Tcl :: #import "tcl"
+
+Run :: (script: string) -> s32 {
+    interpreter: Tcl.Interpreter;
+    result := Tcl.Eval(*interpreter, script);
+    output: Text = Tcl.TakeOutput(*interpreter);
+    WriteOutput(TextView(output));
+    if result.code != .OK {
+        PrintError(TextView(result.value));
+        PrintError("\n");
+        return 1;
+    }
+    return 0;
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    if argc > 2 { PrintError("usage: tclsh-ziran [script.tcl|-]\n"); return 2 }
+    if argc == 2 {
+        path := TextFromCString(argv[1]);
+        if path != "-" {
+            source, ok := ReadEntireFile(path);
+            if !ok { PrintError("could not read Tcl script\n"); return 1 }
+            return Run(source);
+        }
+    }
+    source: Text = ReadStandardInput();
+    return Run(TextView(source));
+}

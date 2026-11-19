@@ -1,0 +1,7 @@
+// Guest fd 0 capability shared by hosted Tcl applications.
+host_api :: #system_library "host_api";
+
+#scope_export
+Read :: (buffer: []u8) -> s32 #foreign host_api;
+
+ReadBytes :: (buffer: []u8) -> s32 { return Read(buffer) }

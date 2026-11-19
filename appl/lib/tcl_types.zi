@@ -1,0 +1,123 @@
+// Ported from the Inferno Limbo Tcl interpreter. See ../../NOTICE (MIT).
+#import "std/vec"
+#import "std/number_text"
+
+Code :: enum s32 { OK; Error; Return; Break; Continue; }
+
+Result :: struct {
+    code: Code;
+    value: Text;
+}
+
+Success :: (value: string = "") -> Result { return .{value = TextCopy(value)} }
+Failure :: (message: string) -> Result { return .{code = .Error, value = TextCopy(message)} }
+
+WrongArgs :: (usage: string) -> Result {
+    return QuotedError("wrong # args: should be \"", usage, "\"");
+}
+
+QuotedError :: (prefix: string, word: string, suffix: string) -> Result {
+    message: Text;
+    unused BuilderAppend(message.bytes, prefix);
+    unused BuilderAppend(message.bytes, word);
+    unused BuilderAppend(message.bytes, suffix);
+    return .{code = .Error, value = message};
+}
+
+Integer :: (value: s64) -> Result {
+    text: Text;
+    digits: [24]u8;
+    unused BuilderAppend(text.bytes, FormatInteger(value, digits[:]));
+    return .{value = text}
+}
+
+Space :: (byte: u8) -> bool { return byte == 32 || (byte >= 9 && byte <= 13) }
+InlineSpace :: (byte: u8) -> bool { return Space(byte) && byte != 10 }
+Digit :: (byte: u8) -> bool { return byte >= 48 && byte <= 57 }
+NameByte :: (byte: u8) -> bool {
+    return Digit(byte) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
+// The legacy interpreter's int is signed 32-bit. Wider intermediates let us
+// detect overflow before returning an expression result.
+INT_MIN :: -2147483648;
+INT_MAX :: 2147483647;
+
+InRange :: (value: s64) -> bool { return value >= INT_MIN && value <= INT_MAX }
+
+ParseInteger :: (text: string) -> (number: s64, ok: bool) {
+    first: s64 = 0;
+    last := text.count;
+    while first < last && Space(text[first]) { first += 1 }
+    while last > first && Space(text[last-1]) { last -= 1 }
+    if first == last { return 0, false }
+    negative := text[first] == 45;
+    if negative || text[first] == 43 { first += 1 }
+    if first == last { return 0, false }
+    magnitude: s64;
+    while first < last && Digit(text[first]) {
+        magnitude = magnitude * 10 + cast(s64)(text[first] - 48);
+        if magnitude > 2147483648 { return 0, false }
+        first += 1;
+    }
+    value := ifx negative then -magnitude else magnitude;
+    return value, first == last && InRange(value);
+}
+
+Cursor :: struct {
+    text: string;
+    at: s64;
+}
+
+Has :: (cursor: *Cursor) -> bool { return cursor.at < cursor.text.count }
+Peek :: (cursor: *Cursor) -> u8 { return cursor.text[cursor.at] }
+Take :: (cursor: *Cursor) -> u8 {
+    byte := Peek(cursor);
+    cursor.at += 1;
+    return byte;
+}
+
+ContinuesLine :: (cursor: *Cursor) -> bool {
+    return cursor.at + 1 < cursor.text.count && Peek(cursor) == 92 && cursor.text[cursor.at+1] == 10;
+}
+
+SkipContinuation :: (cursor: *Cursor) {
+    cursor.at += 2;
+    while Has(cursor) && (Peek(cursor) == 32 || Peek(cursor) == 9) { cursor.at += 1 }
+}
+
+Unescape :: (cursor: *Cursor) -> u8 {
+    if ContinuesLine(cursor) { SkipContinuation(cursor); return 32 }
+    cursor.at += 1;
+    if !Has(cursor) { return 92 }
+    byte := Take(cursor);
+    if byte == 97 { return 7 }
+    if byte == 98 { return 8 }
+    if byte == 102 { return 12 }
+    if byte == 110 { return 10 }
+    if byte == 114 { return 13 }
+    if byte == 116 { return 9 }
+    if byte == 118 { return 11 }
+    return byte;
+}
+
+Braced :: (cursor: *Cursor) -> Result {
+    cursor.at += 1;
+    depth: s64 = 1;
+    result: Result;
+    while Has(cursor) {
+        if ContinuesLine(cursor) {
+            SkipContinuation(cursor);
+            unused VecPush(result.value.bytes, cast(u8)32);
+            continue;
+        }
+        byte := Take(cursor);
+        if byte == 123 { depth += 1 }
+        if byte == 125 { depth -= 1 }
+        if depth == 0 { break }
+        if !VecPush(result.value.bytes, byte) { return Failure("cannot allocate word") }
+        if byte == 92 && Has(cursor) && !VecPush(result.value.bytes, Take(cursor)) { return Failure("cannot allocate word") }
+    }
+    if depth != 0 { return Failure("missing close-brace") }
+    return result;
+}
