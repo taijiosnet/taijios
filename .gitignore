@@ -47,6 +47,8 @@ y.debug
 /emu/*/errstr.h
 /emu/*/srv.h
 /emu/*/srvm.h
+/emu/Linux/zxrunt.h
+/emu/Linux/zxmod.h
 
 /emu/Nt/*.map
 /emu/Nt/*.exe

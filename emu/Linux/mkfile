@@ -1,4 +1,7 @@
 SYSTARG=Linux
+ZX_INC=
+ZX_LIB=
+ZX_LDFLAGS=
 <../../mkconfig
 SYSTARG=Linux
 
@@ -27,6 +30,7 @@ OBJ=\
 	segflush-$OBJTYPE.$O\
 	$CONF.root.$O\
 	lock.$O\
+	zx.$O\
 	$DEVS\
 	$PORT\
 
@@ -36,19 +40,30 @@ LIBNAMES=${LIBS:%=lib%.a}
 HFILES=\
 
 CFLAGS='-DROOT="'$ROOT'"' -DEMU -I. -I../port -I$ROOT/$SYSTARG/$OBJTYPE/include -I$ROOT/include -I$ROOT/libinterp $CTHREADFLAGS $CFLAGS $EMUOPTIONS
-SYSLIBS= $X11LIBS -lm -lpthread
+ZX_CFLAGS=`{if test -n "$ZX_LIB"; then echo -DTAIJI_ZX -I"$ZX_INC"; fi}
+ZX_SYSLIBS=`{if test -n "$ZX_LIB"; then echo -ldl; fi}
+SYSLIBS= $X11LIBS -lm -lpthread $ZX_SYSLIBS
 KERNDATE=`{$NDATE}
 
 default:V:	$O.$CONF
 
-$O.$CONF:	$OBJ $CONF.c $CONF.root.h $LIBNAMES
+$O.$CONF:	$OBJ $CONF.c $CONF.root.h $LIBNAMES $ZX_LIB
 	$CC $CFLAGS '-DKERNDATE='$KERNDATE $CONF.c
-	$LD $LDFLAGS -o $target $OBJ $CONF.$O $LIBFILES $SYSLIBS
+	$LD $LDFLAGS $ZX_LDFLAGS -o $target $OBJ $CONF.$O $LIBFILES $ZX_LIB $SYSLIBS
 
 install:V: $O.$CONF
 	cp $O.$CONF $INSTALLDIR/$CONF
 
 <../port/portmkfile
+
+zx.$O:	../port/zx.c $ROOT/mkconfig $ZX_LIB zxrunt.h zxmod.h
+	$CC $CFLAGS $ZX_CFLAGS ../port/zx.c
+
+zxrunt.h:D:	$ROOT/module/zx.m
+	limbo -a $prereq > $target
+
+zxmod.h:D:	$ROOT/module/zx.m
+	limbo -t ZX $prereq > $target
 
 devfs.$O:	../port/devfs-posix.c
 devds.$O:	../port/devds.c
