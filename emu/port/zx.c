@@ -6,6 +6,7 @@
 #include "isa.h"
 #include "kernel.h"
 #include "ziran_host.h"
+#include "ziran_zx_module.h"
 #include <time.h>
 #include "draw.h"
 #include "zxrunt.h"
@@ -35,21 +36,31 @@ zxwrite(void *context, int fd, const void *data, size_t size)
 	return 1;
 }
 
-static Bundle*
-zxopen(char *path, char *err)
+static void
+zxfree(void *context, const uchar *data, size_t size)
 {
-	Bundle *bundle;
+	USED(context);
+	USED(size);
+	free((void *)data);
+}
+
+static ZxModuleResolveResult
+zxread(void *context, const char *path, ZxModuleImage *image)
+{
+	char *err = context;
 	uchar *bytes, *grown, extra;
 	int fd, length, capacity;
 	long count;
 
-	fd = kopen(path, OREAD);
+	err[0] = '\0';
+	fd = kopen((char *)path, OREAD);
 	if(fd < 0){
 		kgerrstr(err, ERRMAX);
-		return nil;
+		if(strstr(err, "does not exist") != nil || strstr(err, "No such file") != nil)
+			return ZX_MODULE_IMAGE_MISSING;
+		return ZX_MODULE_IMAGE_ERROR;
 	}
 	bytes = nil;
-	bundle = nil;
 	length = capacity = 0;
 	for(;;){
 		if(length == capacity){
@@ -73,14 +84,29 @@ zxopen(char *path, char *err)
 			break;
 		length += count;
 	}
-	if(count == 0){
-		bundle = BundleOpenBytes(bytes, length);
-		if(bundle == nil)
-			strecpy(err, err+ERRMAX, "invalid ZX image");
-	}else if(count < 0 && err[0] == '\0')
+	if(count < 0 && err[0] == '\0')
 		kgerrstr(err, ERRMAX);
 	kclose(fd);
+	if(count == 0){
+		*image = (ZxModuleImage){bytes, length, zxfree};
+		return ZX_MODULE_IMAGE_FOUND;
+	}
 	free(bytes);
+	return ZX_MODULE_IMAGE_ERROR;
+}
+
+static Bundle*
+zxopen(const char *path, char *err)
+{
+	Bundle *bundle;
+	ZxModuleImage image;
+
+	if(zxread(err, path, &image) != ZX_MODULE_IMAGE_FOUND)
+		return nil;
+	bundle = BundleOpenBytes(image.data, image.size);
+	image.release(err, image.data, image.size);
+	if(bundle == nil)
+		strecpy(err, err+ERRMAX, "invalid ZX image");
 	return bundle;
 }
 
@@ -126,6 +152,8 @@ zxevent(ZxSurface *surface, const HostValue *args, int n, HostValue *result)
 	if(!zxrequest(win, ZX_Event))
 		return 0;
 	input = &win->input;
+	if(input->kind != ZX_Closed && (win->wait > 0 || input->kind != ZX_Idle))
+		BundleHostRenewSteps();
 	zxinteger(&event[0], "kind", input->kind);
 	zxinteger(&event[1], "x", input->x);
 	zxinteger(&event[2], "y", input->y);
@@ -341,13 +369,24 @@ struct ZxResult {
 static ZxResult
 zxrun(String *s, ZX_Window *win)
 {
+	static const char *const roots[] = {"/dis/lib"};
 	ZxSurface surface = {0};
 	HostBinding *bindings;
 	size_t count;
 	ZxResult result = {0, -1, ""};
 	Bundle *bundle;
-	BundleInstance *instance;
+	ZxModuleLoader *loader;
+	ZxModuleProgram *program;
 	char *path;
+	const char *problem;
+	ZxModuleLoaderConfig config = {
+		.roots = roots,
+		.root_count = nelem(roots),
+		.options = {.backend = BUNDLE_BACKEND_ENGINE, .max_steps = ZxSteps},
+		.resolve = zxread,
+		.resolve_context = result.problem,
+		.write = zxwrite,
+	};
 
 	path = strdup(string2c(s));
 	if(path == nil)
@@ -359,24 +398,29 @@ zxrun(String *s, ZX_Window *win)
 	if(bundle != nil){
 		count = BundleCapabilityCount(bundle);
 		bindings = nil;
-		instance = nil;
+		program = nil;
+		loader = ZxModuleLoaderOpenConfigured(&config);
 		if(count != 0 && count <= SIZE_MAX / sizeof(*bindings))
 			bindings = malloc(count * sizeof(*bindings));
-		if(count == 0 || bindings != nil){
+		if(loader != nil && (count == 0 || bindings != nil)){
 			count = zxbindings(bundle, &surface, bindings);
-			instance = BundleInstantiateWithConsole(bundle, bindings, count,
-				win == H ? ZxSteps : 0, zxwrite, nil);
+			program = ZxModuleProgramOpen(loader, bundle, bindings, count);
 		}
+		if(program == nil || !ZxModuleProgramRun(program, &result.value, &result.status)){
+			problem = loader == nil ? nil : ZxModuleLoaderError(loader);
+			if(problem != nil && problem[0] != '\0')
+				snprint(result.problem, sizeof(result.problem), "%s", problem);
+			else if(result.problem[0] == '\0')
+				strecpy(result.problem, result.problem+sizeof(result.problem),
+					program == nil ? "cannot initialize ZX program" : "ZX execution failed");
+			result.status = -1;
+		}else
+			result.problem[0] = '\0';
+		if(program != nil)
+			ZxModuleProgramClose(program);
+		if(loader != nil)
+			ZxModuleLoaderClose(loader);
 		free(bindings);
-		if(instance == nil)
-			strecpy(result.problem, result.problem+sizeof(result.problem), "cannot initialize ZX program");
-		else{
-			if(!BundleInstanceRun(instance, &result.value, &result.status)){
-				strecpy(result.problem, result.problem+sizeof(result.problem), "ZX execution failed");
-				result.status = -1;
-			}
-			BundleInstanceClose(instance);
-		}
 		BundleClose(bundle);
 	}
 	acquire();

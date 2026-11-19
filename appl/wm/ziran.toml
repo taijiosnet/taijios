@@ -3,8 +3,8 @@ name = "taijios_wm"
 module_roots = ["."]
 
 [toolchain]
-git = "https://github.com/ziranlang/ziran.git"
-ref = "master"
+git = "https://git.waozi.xyz/ziranlang/ziran.git"
+ref = "a7f112ff48d23c3d63fca33b868d13724620eea6"
 
 [dependencies.kryon]
 git = "https://git.waozi.xyz/kryonlabs/kryon.git"

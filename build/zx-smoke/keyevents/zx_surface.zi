@@ -39,3 +39,30 @@ main :: () -> s32 {
     }
     return 0
 }
+
+Work :: (start: s32) -> s32 {
+    value := start
+    for i: 0..4999999 {
+        value = (value + cast(s32)i) % 1299709
+    }
+    return value
+}
+
+Budget :: () -> s32 {
+    if !Open("ZX budget", 100, 100) {
+        return 1
+    }
+    defer Close()
+    value := cast(s32)0
+    for phase: 1..4 {
+        value = Work(value)
+        unused Event(20)
+        print("renewed % %\n", phase, value)
+    }
+    for phase: 1..4 {
+        unused Event(0)
+        value = Work(value)
+        print("polled % %\n", phase, value)
+    }
+    return 2
+}

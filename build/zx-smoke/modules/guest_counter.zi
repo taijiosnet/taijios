@@ -1,0 +1,5 @@
+#program_export
+Add :: (input: s32) -> s32 {
+    print("Guest module received %\n", input)
+    return input + 1
+}

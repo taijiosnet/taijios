@@ -26,6 +26,15 @@ missing = run('zxrun /build/zx-smoke/absent.zx >[2] /build/zx-smoke/missing.stde
 assert missing.stdout == 'zx\n' and missing.stderr == ''
 assert 'absent.zx' in (files / 'missing.stderr').read_text()
 
+if '--runtime' in sys.argv[2:]:
+    unbound = run('zxrun /build/zx-smoke/linked.zx >[2] /build/zx-smoke/module.stderr; echo $status')
+    assert unbound.stdout == 'zx\n' and unbound.stderr == ''
+    assert 'ZX module not found: guest_counter' in (files / 'module.stderr').read_text()
+    linked = run('bind -b /build/zx-smoke/modules /dis/lib; '
+                 'zxrun /build/zx-smoke/linked.zx | cat; echo GUEST_MODULE_OK')
+    assert linked.stdout == 'Guest module received 41\n42\nGUEST_MODULE_OK\n'
+    assert linked.stderr == ''
+
 
 def graphics():
     import io
@@ -103,6 +112,27 @@ def graphics():
         proc.stdout.close()
         proc.stderr.close()
 
+    def fuel():
+        proc = launch('zxrun', '-w', '/build/zx-smoke/budget.zx')
+        stdout, stderr = bytearray(), bytearray()
+
+        def exhausted():
+            for error, block in output(proc):
+                (stderr if error else stdout).extend(block)
+            return b'stopped after' in stderr or b'zxrun:' in stdout or b'zxrun:' in stderr
+
+        try:
+            until(exhausted, 'ZX budget test did not stop', timeout=40)
+            assert b'renewed 4 ' in stdout, (stdout, stderr)
+            assert b'polled 1 ' in stdout and b'polled 4 ' not in stdout, stdout
+            assert b'stopped after' in stderr, stderr
+            print('ZX budget: four waited frames completed, empty polls exhausted fuel')
+        except AssertionError:
+            print('ZX budget output:', repr(stdout), repr(stderr))
+            raise
+        finally:
+            stop(proc)
+
     def keyevents():
         proc = launch('zxrun', '-w', '/build/zx-smoke/keyevents.zx')
         transcript = bytearray()
@@ -163,9 +193,10 @@ def graphics():
             command('xdotool', 'windowfocus', window, check=True)
             click(window, x + 40, y + 55)
             until(lambda: seen(lambda s: s == 'click 1'), 'mouse click did not reach Kryon')
-            changed = capture(window)
-            assert ImageChops.difference(before.crop((x, y, right, y+35)),
-                                         changed.crop((x, y, right, y+35))).getbbox()
+            label = (x, y, right, y + 35)
+            until(lambda: ImageChops.difference(before.crop(label),
+                                                capture(window).crop(label)).getbbox(),
+                  'Kryon click did not redraw the counter')
             click(window, x + 40, y + 99)
             command('xdotool', 'key', 'eacute', check=True)
             until(lambda: seen(lambda s: s == 'text é'), 'Unicode text did not reach Kryon')
@@ -271,6 +302,8 @@ def graphics():
         kryon()
         stopwatch()
         legacy_stopwatch()
+        if '--runtime' in sys.argv[2:]:
+            fuel()
     finally:
         os.close(reader)
         xvfb.terminate()

@@ -34,6 +34,9 @@ y.debug
 !/build/zx-smoke/keyevents/
 /build/zx-smoke/keyevents/*
 !/build/zx-smoke/keyevents/zx_surface.zi
+!/build/zx-smoke/modules/
+/build/zx-smoke/modules/*
+!/build/zx-smoke/modules/*.zi
 
 # generated C headers for built-in modules
 /libinterp/cryptmod.h

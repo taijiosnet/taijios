@@ -22,9 +22,10 @@ shell using its guest pathname.
 zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
-For the Linux/386 emulator, build `libziran.a` in the canonical Ziran checkout
-with a Linux/i386 C toolchain. Use a host-built `zi2c` for code generation and
-keep the target objects in their own build directory.
+For the Linux/386 emulator, use the Ziran revision in `appl/wm/ziran.lock`.
+Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
+Use a host-built `zi2c` for code generation and keep the target objects in
+their own build directory.
 
 ```sh
 make build/bin/zi2c
@@ -37,11 +38,18 @@ checkout's `include` directory and the new archive. Set `ZX_LDFLAGS=-no-pie`
 for the archive built above, then build and install from `emu/Linux`. Build
 and install the shell command with `mk zxrun.install` from `appl/cmd`.
 
-The ZX runner accepts application images up to 32 MiB. Console execution has a
-16-million-step budget including initialization. Graphical programs keep their
-runtime instance for the lifetime of the window and run without this console
-budget. Dynamic ZX libraries and other Inferno services require their own
-integration.
+The ZX runner accepts application and library images up to 32 MiB each.
+Use `zi2zx --library` to build a shared ZX module and place its image at
+`/dis/lib/<logical-name>.zx` in the application's guest namespace. The runner
+honors guest `bind` mounts at `/dis/lib`. Declare module requirements and imports
+with `zi2zx --require-module` and `--import`, and open the module with
+`std/zx_module`. Module output follows the application's guest console and shell
+redirections. The shared loader validates module images and typed imports.
+
+Each ZX instance starts with a 16-million-step budget shared by initialization
+and execution. A graphical application renews its budget when `Event` delivers
+input or a window event, or completes a nonzero timed wait. Empty polls and
+closed-window events consume the remaining budget.
 
 ### Build and run ZX Stopwatch
 
@@ -100,4 +108,20 @@ printf 'invalid ZX\n' > build/zx-smoke/bad.zx
 zi2zx --root build/zx-smoke/keyevents --entry zx_surface:main \
     -o build/zx-smoke/keyevents.zx build/zx-smoke/keyevents/zx_surface.zi
 python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics
+```
+
+To include guest module resolution and graphical step-budget checks, build
+these fixtures with `ZIRAN_SRC` pointing to the Ziran source directory:
+
+```sh
+zi2zx --root build/zx-smoke/modules --library guest_counter \
+    --export guest_counter:Add -o build/zx-smoke/modules/guest_counter.zx \
+    build/zx-smoke/modules/guest_counter.zi
+zi2zx --root build/zx-smoke/modules --module-path "$ZIRAN_SRC/std" \
+    --entry linked:main --require-module GuestCounter=guest_counter \
+    --import linked:Add=GuestCounter:Add -o build/zx-smoke/linked.zx \
+    build/zx-smoke/modules/linked.zi
+zi2zx --root build/zx-smoke/keyevents --entry zx_surface:Budget \
+    -o build/zx-smoke/budget.zx build/zx-smoke/keyevents/zx_surface.zi
+python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics --runtime
 ```
