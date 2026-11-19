@@ -46,6 +46,18 @@ and lazy expression operators, Tcl packages, channels, `source`, and Tk.
 Commands outside the list above and extra options on those commands are outside
 the supported language subset.
 
+### Comparison with shipped Inferno Tcl
+
+The [Limbo core](tcl_core.b) also registers `array`, `dumpstack`, `exit`,
+`global`, `info`, `level`, `load`, `source`, `switch`, `time`, `uplevel`, and
+`upvar`. The Ziran list subset lacks the shipped `concat`, `linsert`,
+`lreplace`, `lsearch`, `lsort`, and `split`. The shipped string library adds
+`format`, search and matching, case conversion, trimming, and word indexes.
+The shipped calculator supports floating-point math and named functions. The
+shipped I/O module adds `close`, `eof`, `file`, `flush`, `gets`, `open`,
+`read`, `seek`, and `tell`, as well as channel arguments for `puts`. Those
+commands and options are outside the current Ziran subset.
+
 ## Build, test and run
 
 From the TaijiOS root, with `ziran` and `zi2zx` on PATH and the existing

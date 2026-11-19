@@ -2,12 +2,12 @@
 #import "std/vec"
 using Files :: #import "taijios_files"
 using T :: #import "tcl_types"
-using Roff :: #import "man_roff"
+#import "man_roff"
 
 Query :: struct { topic: string; section: s64; }
 Match :: struct { file: Text; section: s64; }
 Matches :: struct { entries: Vec(Match); }
-Page :: struct { title: Text; body: Text; }
+Page :: struct { title: Text; body: Text; references: Vec(ManualReference); }
 
 Topic :: (name: string) -> bool {
     if name.count == 0 || name.count > 120 || name[0] == 46 { return false }
@@ -19,9 +19,9 @@ Topic :: (name: string) -> bool {
 
 ParseQuery :: (source: string) -> Query {
     cursor := T.Cursor.{text = source};
-    first := Word(*cursor);
-    second := Word(*cursor);
-    if Word(*cursor) != "" { return .{} }
+    first := QueryWord(*cursor);
+    second := QueryWord(*cursor);
+    if QueryWord(*cursor) != "" { return .{} }
     if second != "" {
         section, valid := T.ParseInteger(first);
         if valid && section >= 1 && section <= 10 && Topic(second) { return .{topic = second, section = section} }
@@ -38,7 +38,7 @@ ParseQuery :: (source: string) -> Query {
     return .{};
 }
 
-Word :: (cursor: *T.Cursor) -> string {
+QueryWord :: (cursor: *T.Cursor) -> string {
     while T.Has(cursor) && T.Space(T.Peek(cursor)) { cursor.at += 1 }
     start := cursor.at;
     while T.Has(cursor) && !T.Space(T.Peek(cursor)) { cursor.at += 1 }
@@ -82,10 +82,10 @@ Section :: (matches: *Matches, section: s64, topic: string) -> bool {
     if status == -1 { return false }
     cursor := T.Cursor.{text = TextView(index)};
     while T.Has(*cursor) {
-        record := T.Cursor.{text = Roff.Line(*cursor)};
-        name := Word(*record);
+        record := T.Cursor.{text = Line(*cursor)};
+        name := QueryWord(*record);
         if name != topic { continue }
-        file := Word(*record);
+        file := QueryWord(*record);
         if Topic(file) { Add(matches, section, file) }
     }
     // Like Limbo Man, also accept a literal file name missing from the index.
@@ -125,9 +125,9 @@ Lookup :: (request: string) -> Page {
         if Files.ReadFile(TextView(path), *source, 131072) != 0 {
             return Message("Could not read manual", TextView(path));
         }
-        body: Text = Roff.Format(TextView(source));
-        if body.bytes.count == 0 { return Message(TextView(name), "This manual page has no readable text.") }
-        return .{title = name, body = body};
+        document := Format(TextView(source));
+        if document.body.bytes.count == 0 { return Message(TextView(name), "This manual page has no readable text.") }
+        return .{title = name, body = document.body, references = document.references};
     }
     body: Text;
     unused BuilderAppend(body.bytes, "Several pages match. Enter one of these names to open it:\n\n");

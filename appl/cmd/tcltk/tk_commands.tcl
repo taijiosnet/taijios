@@ -16,5 +16,9 @@ entry .f.input.e -bg white
 pack .f.input.e -fill x -expand 1
 pack .f.input -fill x
 pack .f -side bottom -fill x
+text .sample
+.sample insert end {café naïve café}
+.sample search -forwards -- café 1.1
+.sample search -backwards -- café 1.11
 focus .f.input.e
 focus

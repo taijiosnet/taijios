@@ -46,14 +46,21 @@ Search and Enter both use the guest's actual `/man/1/INDEX` through
 `/man/10/INDEX`. The viewer opens aliases and literal page filenames, lists
 ambiguous matches by page and section, and displays a message for invalid,
 missing, or unreadable results. Enter one of the listed page names to open it.
-Back and Next restore the query and scroll position. Use the Page Up and Page
-Down buttons, or click the document and use those keys, Up/Down, Home, and End.
+Click an underlined `topic(section)` reference to open that manual. Back and
+Next restore the query, scroll position, and last highlighted match. Use the
+Page Up and Page Down buttons, or click the document and use those keys,
+Up/Down, Home, and End.
+
+Enter `/term` to search forward in the current page or `?term` to search
+backward. Enter or Search continues from the last match and wraps at the end
+of the page. Search matches literal, case-sensitive text. A missing term shows
+`No match` and preserves the current position and highlight.
 
 The browser reads its Tcl UI from `/appl/cmd/tcltk/man_query.tcl` and formats
 the installed manual sources as wrapped plain text. It handles the common
 Inferno man macros for headings, paragraphs, inline styles, and examples.
-Clickable cross-references, in-page text search, plumbing, and full roff layout
-are outside this port.
+Cross-references use the `.IR` macro as in Inferno Man. Plumbing and full
+roff layout are outside this port.
 
 ### Guest file service
 
@@ -66,9 +73,10 @@ Negative results leave the caller's buffer intact. The service requires the
 emulator build containing `emu/port/zx.c`'s `taijios_files` binding.
 
 The tests compare the same widget commands with Inferno `tkcmd`. On private
-Xvfb they exercise Bounce, the UTF-8 entry, and manual lookup, missing-result
-recovery, history and scrolling. A hosted probe checks namespace mounts,
-file offsets and errors, and representative content from the real manuals.
+Xvfb they exercise Bounce, the UTF-8 entry, manual lookup, a real manual link,
+forward and backward text search, missing results, and history and scroll
+restoration. A hosted probe checks namespace mounts, file offsets and errors,
+and representative content from the real manuals.
 
 ## Supported commands
 
@@ -85,7 +93,11 @@ file offsets and errors, and representative content from the real manuals.
 | `.path configure option value` | Set one or more of that widget's supported options |
 | `.path cget option` | Read text, an entry's background, or a button's script |
 | `.entry get`, `insert index text`, `delete first ?last?`, `index index`, `icursor index` | Read or edit an entry using decimal character indexes, `insert`, or `end` |
-| `.text get 1.0 end`, `insert end text`, `delete 1.0 end` | Read, append to, or clear the text |
+| `.text get first ?last?`, `insert end text`, `delete 1.0 end` | Read one character or a range, append text, or clear the document |
+| `.text index index`, `see index` | Normalize an index or scroll to reveal it. Indexes are `line.column`, `end`, or `@x,y` relative to the widget. Logical indexes accept `+Nc` and `-Nc`. Columns count Unicode code points |
+| `.text search ?-forwards\|-backwards? ?-exact? ?--? pattern start ?stop?` | Return the first matching index or an empty string. Literal search wraps unless given a stop index |
+| `.text tag add name first last`, `tag remove name 1.0 end` | Mark a range or clear a tag's ranges. `sel` highlights its ranges |
+| `.text tag configure name -underline 0\|1`, `tag bind name <ButtonRelease-1> script` | Underline tagged ranges or bind a click to them. `%x` and `%y` give widget-relative coordinates |
 | `.text yview ?moveto fraction\|scroll count units\|pages?` | Read viewport fractions or scroll by a fraction, lines, or pages |
 | `.button invoke` | Evaluate the button's script and return its Tcl result |
 | `destroy .path ?path ...?` | Remove widgets and their descendants. `destroy .` closes the root |
@@ -97,6 +109,18 @@ left-button press and release inside the same button invokes its script.
 
 The fixed stroke font displays English letters, digits, spaces, `É`, and
 common punctuation. Lowercase shares the uppercase glyphs. Other code points display
-as `?` and retain their original value in Tcl. Selection, clipboard, grapheme
-navigation, broader bindings, themes, additional toplevels, and geometry
-managers beyond the listed pack options are outside this subset.
+as `?` and retain their original value in Tcl. Mouse selection, clipboard,
+grapheme navigation, and broader bindings are outside this subset.
+
+### Comparison with shipped Inferno Tk
+
+The port implements nine of the 25 commands advertised by the [Limbo Tcl/Tk
+bridge](../../lib/tcl_tk.b). The other 16 are `bitmap`, `canvas`, `checkbutton`,
+`grab`, `image`, `listbox`, `lower`, `menu`, `menubutton`, `radiobutton`,
+`raise`, `scale`, `scrollbar`, `toplevel`, `update`, and `variable`.
+The independent [Inferno Tk engine](../../../libtk/utils.c) has additional
+commands such as `choicebutton`, `cursor`, `grid`, `panel`, `send`, and
+`winfo`. Those are outside this subset, as are Tk's case-insensitive text
+search, marks, embedded windows, editable selections and wider tag API.
+See the [Tcl command comparison](../../lib/tcl.md#comparison-with-shipped-inferno-tcl)
+for the headless interpreter.

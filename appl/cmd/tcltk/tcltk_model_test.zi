@@ -16,6 +16,18 @@ main :: () -> s32 {
     if index.code != .OK || TextView(index.value) != "2" { return 10 }
     end := Tcl.Eval(*interpreter, ".f.input.e index end");
     if end.code != .OK || TextView(end.value) != "4" { return 11 }
+    forward := Tcl.Eval(*interpreter, ".sample search -forwards -- café 1.1");
+    if forward.code != .OK || TextView(forward.value) != "1.11" { return 16 }
+    backward := Tcl.Eval(*interpreter, ".sample search -backwards -- café 1.11");
+    if backward.code != .OK || TextView(backward.value) != "1.0" { return 17 }
+    utf := Tcl.Eval(*interpreter, ".sample get 1.0 1.0+4c");
+    if utf.code != .OK || TextView(utf.value) != "café" { return 18 }
+    wrap := Tcl.Eval(*interpreter, ".sample search café end");
+    if wrap.code != .OK || TextView(wrap.value) != "1.0" { return 19 }
+    bounded := Tcl.Eval(*interpreter, ".sample search café 1.1 1.11");
+    if bounded.code != .OK || bounded.value.bytes.count != 0 { return 20 }
+    point := Tcl.Eval(*interpreter, ".sample index @31,6");
+    if point.code != .OK || TextView(point.value) != "1.2" { return 21 }
 
     bad_config := Tcl.Eval(*interpreter, ".count configure -text Lost -unsupported 1");
     if bad_config.code != .Error { return 3 }

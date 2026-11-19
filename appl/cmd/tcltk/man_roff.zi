@@ -2,6 +2,10 @@
 #import "std/vec"
 using T :: #import "tcl_types"
 
+// Reference spans use the start and exclusive end byte offsets in body.
+ManualReference :: struct { first: s64; last: s64; }
+Document :: struct { body: Text; references: Vec(ManualReference); }
+
 Line :: (cursor: *T.Cursor) -> string {
     start := cursor.at;
     while T.Has(cursor) && T.Peek(cursor) != 10 { cursor.at += 1 }
@@ -77,8 +81,8 @@ Separate :: (output: *Text) {
     }
 }
 
-Styled :: (output: *Text, cursor: *T.Cursor, alternate: bool) {
-    Separate(output);
+Styled :: (output: *Text, cursor: *T.Cursor, alternate: bool, separate: bool = true) {
+    if separate { Separate(output) }
     word := Word(cursor);
     first := true;
     while word != "" {
@@ -89,9 +93,23 @@ Styled :: (output: *Text, cursor: *T.Cursor, alternate: bool) {
     }
 }
 
-Format :: (source: string) -> Text {
+ReferenceEnd :: (text: string) -> s64 {
+    paren: s64;
+    while paren < text.count && text[paren] != 40 {
+        byte := text[paren];
+        if !T.NameByte(byte) && byte != 43 && byte != 45 && byte != 46 { return 0 }
+        paren += 1;
+    }
+    if paren == 0 || paren > 120 || text[0] == 46 || paren+2 >= text.count { return 0 }
+    if text[paren+1] >= 49 && text[paren+1] <= 57 && text[paren+2] == 41 { return paren+3 }
+    if paren+3 < text.count && text[paren+1:paren+4] == "10)" { return paren+4 }
+    return 0;
+}
+
+Format :: (source: string) -> Document {
     input := T.Cursor.{text = source};
     output: Text;
+    references: Vec(ManualReference);
     literal: bool;
     while T.Has(*input) {
         line := Line(*input);
@@ -126,9 +144,19 @@ Format :: (source: string) -> Text {
             literal = false;
         } else if macro == "B" || macro == "I" || macro == "SM" || macro == "SB" {
             Styled(*output, *args, false);
-        } else if macro == "BR" || macro == "BI" || macro == "IR" || macro == "RI" || macro == "IB" || macro == "RB" {
+        } else if macro == "IR" {
+            Separate(*output);
+            start := output.bytes.count;
+            Styled(*output, *args, true, false);
+            text := TextView(output);
+            length := ReferenceEnd(text[start:]);
+            if length > 0 {
+                span := ManualReference.{first = start, last = start+length};
+                unused VecPush(references, span);
+            }
+        } else if macro == "BR" || macro == "BI" || macro == "RI" || macro == "IB" || macro == "RB" {
             Styled(*output, *args, true);
         }
     }
-    return output;
+    return .{body = output, references = references};
 }

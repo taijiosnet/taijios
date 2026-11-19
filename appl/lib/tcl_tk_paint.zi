@@ -13,6 +13,8 @@ BORDER :: Ink.{r = 119, g = 149, b = 173};
 LETTER :: Ink.{r = 25, g = 47, b = 67};
 MUTED :: Ink.{r = 112, g = 123, b = 132};
 ENTRY :: Ink.{r = 255, g = 255, b = 255};
+SELECTION :: Ink.{r = 255, g = 228, b = 145};
+LINK :: Ink.{r = 30, g = 98, b = 145};
 
 Fill :: (canvas: *Canvas, box: Tk.Box, ink: Ink) {
     left := Tk.NonNegative(box.x);
@@ -134,6 +136,25 @@ DrawText :: (canvas: *Canvas, box: Tk.Box, text: string, center: bool = true, in
     }
 }
 
+TextRow :: (canvas: *Canvas, view: *View.State, box: Tk.Box, line: string, start: s64) {
+    end := start + line.count;
+    for * view.ranges {
+        if it.last <= start || it.first >= end { continue }
+        tag := *view.tags[it.tag];
+        selected := TextView(tag.name) == "sel";
+        if !selected && !tag.underline { continue }
+        first := ifx it.first > start then it.first-start else 0;
+        last := ifx it.last < end then it.last-start else line.count;
+        before := UTF.Count(line[:first]);
+        cells := UTF.Count(line[first:last]);
+        x := before * Tk.CHAR_WIDTH;
+        width := Tk.Minimum(cells * Tk.CHAR_WIDTH, box.w-x);
+        if selected { Fill(canvas, .{x = box.x+x, y = box.y, w = width, h = box.h-2}, SELECTION) }
+        if tag.underline { Fill(canvas, .{x = box.x+x, y = box.y+box.h-2, w = width, h = 1}, LINK) }
+    }
+    DrawText(canvas, box, line, false);
+}
+
 Render :: (pixels: []u8, width: s32, height: s32) {
     canvas := Canvas.{pixels = pixels, width = width, height = height};
     Fill(*canvas, .{w = width, h = height}, PAPER);
@@ -150,8 +171,8 @@ Render :: (pixels: []u8, width: s32, height: s32) {
                 index := it.view.top + row;
                 if index >= it.view.rows.count { break }
                 line := View.Row(*it.view, text, index);
-                DrawText(*canvas, .{x = box.x + View.INSET, y = box.y + View.INSET + row*View.ROW_HEIGHT,
-                                   w = box.w - 2*View.INSET, h = View.ROW_HEIGHT}, line, false);
+                TextRow(*canvas, *it.view, .{x = box.x + View.INSET, y = box.y + View.INSET + row*View.ROW_HEIGHT,
+                                           w = box.w - 2*View.INSET, h = View.ROW_HEIGHT}, line, it.view.rows[index]);
             }
             continue;
         }

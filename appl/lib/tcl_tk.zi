@@ -1,5 +1,6 @@
 // Optional Tk command model, following Inferno libtk and tcl_tk.b. See ../../NOTICE.
 #import "std/vec"
+#import "std/number_text"
 using Tcl :: #import "tcl"
 using T :: #import "tcl_types"
 using UTF :: #import "tcl_tk_text"
@@ -42,6 +43,7 @@ widgets: Vec(Widget);
 attached: bool;
 closed: bool;
 pressed: s64 = -1;
+pressed_range: s64 = -1;
 focused: s64 = -1;
 sequence: s32;
 
@@ -207,6 +209,7 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             unused VecResize(it.name.bytes, 0);
             unused VecResize(it.text.bytes, 0);
             unused VecResize(it.command.bytes, 0);
+            unused VecResize(it.view.tags, 0);
             View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
@@ -341,8 +344,128 @@ TextLayout :: (widget: *Widget) {
     View.Reflow(*widget.view, TextView(widget.text), Maximum(columns, 1), Maximum(height, 1));
 }
 
+TextOffset :: (widget: *Widget, name: string) -> (at: s64, ok: bool) {
+    source := TextView(widget.text);
+    at: s64;
+    if name.count > 0 && name[0] == 64 {
+        for i: 1..name.count-1 {
+            if name[i] != 44 { continue }
+            x, valid_x := ParseInteger(name[1:i]);
+            y, valid_y := ParseInteger(name[i+1:]);
+            if !valid_x || !valid_y || x < -2147483640 || x > 2147483647 || y < -2147483640 || y > 2147483647 { break }
+            TextLayout(widget);
+            at, _ = View.Point(*widget.view, source, cast(s32)x - View.INSET, cast(s32)y - View.INSET, CHAR_WIDTH);
+            return at, true;
+        }
+        return 0, false;
+    }
+    end := name.count;
+    for i: 1..name.count-1 {
+        if name[i] == 43 || name[i] == 45 { end = i; break }
+    }
+    base := name[:end];
+    if base == "end" { at = source.count }
+    else {
+        dot: s64;
+        while dot < base.count && base[dot] != 46 { dot += 1 }
+        if dot >= base.count { return 0, false }
+        line, valid_line := ParseInteger(base[:dot]);
+        column, valid_column := ParseInteger(base[dot+1:]);
+        if !valid_line || !valid_column || line < 1 || column < 0 { return 0, false }
+        at = View.Offset(source, line, column);
+    }
+    if end == name.count { return at, true }
+    if name.count-end < 3 || name[name.count-1] != 99 { return 0, false }
+    count, valid := ParseInteger(name[end+1:name.count-1]);
+    if !valid || count < 0 { return 0, false }
+    if name[end] == 43 {
+        while count > 0 && at < source.count { at = UTF.Next(source, at); count -= 1 }
+    } else {
+        while count > 0 && at > 0 { at = UTF.Previous(source, at); count -= 1 }
+    }
+    return at, true;
+}
+
+TextSearch :: (widget: *Widget, args: []Text, result: *Result) {
+    arg: s64 = 1;
+    backwards: bool;
+    while arg < args.count {
+        option := TextView(args[arg]);
+        if option.count == 0 || option[0] != 45 { break }
+        arg += 1;
+        if option == "--" { break }
+        if option == "-backwards" { backwards = true }
+        else if option == "-forwards" { backwards = false }
+        else if option != "-exact" { SetError(result, "unsupported text search option"); return }
+    }
+    if args.count-arg < 2 || args.count-arg > 3 {
+        SetError(result, "expected search ?-forwards|-backwards? ?-exact? ?--? pattern index ?stopIndex?"); return;
+    }
+    source := TextView(widget.text);
+    pattern := TextView(args[arg]);
+    start, valid := TextOffset(widget, TextView(args[arg+1]));
+    if !valid { SetError(result, "bad text index"); return }
+    stop := ifx backwards then cast(s64)0 else source.count;
+    wrap := args.count-arg == 2;
+    if !wrap {
+        limit, ok := TextOffset(widget, TextView(args[arg+2]));
+        if !ok { SetError(result, "bad text stop index"); return }
+        if (backwards && limit >= start) || (!backwards && limit <= start) { return }
+        stop = ifx backwards then UTF.Next(source, limit) else limit;
+    }
+    found := View.Match(source, pattern, start, stop, backwards);
+    if found < 0 && wrap {
+        if backwards { found = View.Match(source, pattern, source.count, start, true) }
+        else { found = View.Match(source, pattern, 0, start, false) }
+    }
+    if found >= 0 { View.Index(source, found, *result.value.bytes) }
+}
+
+TextTag :: (widget: *Widget, args: []Text, result: *Result) {
+    if args.count < 3 { SetError(result, "expected text tag operation and name"); return }
+    action := TextView(args[1]);
+    name := TextView(args[2]);
+    view := *widget.view;
+    if action == "add" && args.count == 5 {
+        first, valid_first := TextOffset(widget, TextView(args[3]));
+        last, valid_last := TextOffset(widget, TextView(args[4]));
+        if !valid_first || !valid_last { SetError(result, "bad text tag index"); return }
+        tag := View.EnsureTag(view, name);
+        if tag < 0 || !View.AddRange(view, tag, first, last) { SetError(result, "could not add text tag range") }
+        return;
+    }
+    if action == "remove" && args.count == 5 && TextView(args[3]) == "1.0" && TextView(args[4]) == "end" {
+        View.ClearRanges(view, View.FindTag(view, name));
+        return;
+    }
+    underline := action == "configure" && args.count == 5 && TextView(args[3]) == "-underline";
+    bind := action == "bind" && args.count == 5 && TextView(args[3]) == "<ButtonRelease-1>";
+    if underline || bind {
+        value := TextView(args[4]);
+        if underline && value != "0" && value != "1" { SetError(result, "expected 0 or 1 for tag -underline"); return }
+        tag := View.EnsureTag(view, name);
+        if tag < 0 { SetError(result, "could not add text tag"); return }
+        if underline { view.tags[tag].underline = value == "1" }
+        else {
+            script: Text = TextCopy(value);
+            VecSwap(view.tags[tag].release.bytes, script.bytes);
+        }
+        return;
+    }
+    SetError(result, "unsupported text tag operation or arguments");
+}
+
 TextCommand :: (widget: *Widget, args: []Text, result: *Result) {
     command := TextView(args[0]);
+    if command == "search" { TextSearch(widget, args, result); return }
+    if command == "tag" { TextTag(widget, args, result); return }
+    if (command == "index" || command == "see") && args.count == 2 {
+        at, valid := TextOffset(widget, TextView(args[1]));
+        if !valid { SetError(result, "bad text index"); return }
+        if command == "index" { View.Index(TextView(widget.text), at, *result.value.bytes) }
+        else { TextLayout(widget); View.See(*widget.view, at) }
+        return;
+    }
     if command == "yview" {
         TextLayout(widget);
         if args.count == 1 { View.Position(*widget.view, *result.value.bytes); return }
@@ -358,13 +481,23 @@ TextCommand :: (widget: *Widget, args: []Text, result: *Result) {
         }
         SetError(result, "expected yview ?moveto fraction|scroll count units|pages?"); return;
     }
-    if args.count == 3 && TextView(args[1]) == "1.0" && TextView(args[2]) == "end" {
-        if command == "get" { unused BuilderAppend(result.value.bytes, TextView(widget.text)); return }
-        if command == "delete" {
-            unused VecResize(widget.text.bytes, 0);
-            View.Reset(*widget.view);
-            return;
+    if command == "get" && (args.count == 2 || args.count == 3) {
+        source := TextView(widget.text);
+        first, valid_first := TextOffset(widget, TextView(args[1]));
+        last := UTF.Next(source, first);
+        if !valid_first { SetError(result, "bad text index"); return }
+        if args.count == 3 {
+            end, valid := TextOffset(widget, TextView(args[2]));
+            if !valid { SetError(result, "bad text index"); return }
+            last = end;
         }
+        if first < last { unused BuilderAppend(result.value.bytes, source[first:last]) }
+        return;
+    }
+    if command == "delete" && args.count == 3 && TextView(args[1]) == "1.0" && TextView(args[2]) == "end" {
+        unused VecResize(widget.text.bytes, 0);
+        View.Reset(*widget.view);
+        return;
     }
     if command == "insert" && args.count == 3 && TextView(args[1]) == "end" {
         value := TextView(args[2]);
@@ -531,12 +664,31 @@ Over :: (x: s32, y: s32, kind: s64) -> s64 {
     return -1;
 }
 
+BoundRange :: (widget: *Widget, x: s32, y: s32) -> s64 {
+    at, hit := View.Point(*widget.view, TextView(widget.text), x, y, CHAR_WIDTH);
+    if hit {
+        index := widget.view.ranges.count;
+        while index > 0 {
+            index -= 1;
+            range := *widget.view.ranges[index];
+            if at >= range.first && at < range.last && widget.view.tags[range.tag].release.bytes.count > 0 { return index }
+        }
+    }
+    return -1;
+}
+
 PointerDown :: (x: s32, y: s32) {
     pressed = Over(x, y, BUTTON);
+    pressed_range = -1;
     index := Over(x, y, ENTRY);
     if index < 0 {
         index = Over(x, y, TEXT);
-        if index >= 0 { focused = index }
+        if index >= 0 {
+            focused = index;
+            widget := *widgets[index];
+            pressed_range = BoundRange(widget, x-widget.box.x-View.INSET, y-widget.box.y-View.INSET);
+            if pressed_range >= 0 { pressed = index }
+        }
         return;
     }
     focused = index;
@@ -549,9 +701,39 @@ PointerDown :: (x: s32, y: s32) {
 
 PointerUp :: (x: s32, y: s32) -> Text {
     index := pressed;
+    range := pressed_range;
     pressed = -1;
-    if index < 0 || Over(x, y, BUTTON) != index { return TextCopy("") }
-    return TextCopy(TextView(widgets[index].command));
+    pressed_range = -1;
+    if index < 0 { return .{} }
+    if range < 0 {
+        if Over(x, y, BUTTON) == index { return TextCopy(TextView(widgets[index].command)) }
+        return .{};
+    }
+    if Over(x, y, TEXT) != index { return .{} }
+    widget := *widgets[index];
+    local_x := x-widget.box.x;
+    local_y := y-widget.box.y;
+    if BoundRange(widget, local_x-View.INSET, local_y-View.INSET) != range { return .{} }
+    tag := widget.view.ranges[range].tag;
+    output: Text;
+    script := TextView(widget.view.tags[tag].release);
+    digits: [24]u8;
+    i: s64;
+    while i < script.count {
+        if script[i] == 37 && i+1 < script.count {
+            code := script[i+1];
+            if code == 120 || code == 121 {
+                coordinate := ifx code == 120 then local_x else local_y;
+                unused BuilderAppend(output.bytes, FormatInteger(coordinate, digits[:]));
+                i += 2;
+                continue;
+            }
+            if code == 37 { i += 1 }
+        }
+        unused VecPush(output.bytes, script[i]);
+        i += 1;
+    }
+    return output;
 }
 
 Closed :: () -> bool { return closed }

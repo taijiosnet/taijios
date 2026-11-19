@@ -2,11 +2,16 @@
 #import "std/vec"
 using Tcl :: #import "tcl"
 using Window :: #import "tcltk"
+using Tk :: #import "tcl_tk"
+using View :: #import "tcl_tk_view"
+using UTF :: #import "tcl_tk_text"
+using T :: #import "tcl_types"
 using Files :: #import "taijios_files"
 using Man :: #import "man_pages"
+#import "man_roff"
 
 HISTORY_LIMIT :: 64;
-Visit :: struct { query: Text; top: Text; }
+Visit :: struct { query: Text; top: Text; first: Text; last: Text; }
 
 history: Vec(Visit);
 current: s64 = -1;
@@ -23,6 +28,8 @@ AppendVisit :: (query: string) -> bool {
         for i: 1..history.count-1 {
             VecSwap(history[i-1].query.bytes, history[i].query.bytes);
             VecSwap(history[i-1].top.bytes, history[i].top.bytes);
+            VecSwap(history[i-1].first.bytes, history[i].first.bytes);
+            VecSwap(history[i-1].last.bytes, history[i].last.bytes);
         }
         current -= 1;
         unused VecResize(history, history.count-1);
@@ -48,6 +55,7 @@ Navigate :: (action: string, query: string, position: string) -> bool {
     found := Man.Lookup(TextView(history[current].query));
     VecSwap(page.title.bytes, found.title.bytes);
     VecSwap(page.body.bytes, found.body.bytes);
+    VecSwap(page.references, found.references);
     return true;
 }
 
@@ -58,10 +66,50 @@ Command :: (_: s64, args: []Text, result: *Result) {
             if Navigate(action, TextView(args[1]), TextView(args[2])) { return }
         } else if (action == "back" || action == "forward") && args.count == 2 {
             if Navigate(action, "", TextView(args[1])) { return }
+        } else if action == "remember" && args.count == 3 && current >= 0 {
+            Replace(*history[current].first, TextView(args[1]));
+            Replace(*history[current].last, TextView(args[2]));
+            return;
+        } else if action == "length" && args.count == 2 {
+            count := T.Integer(UTF.Count(TextView(args[1])));
+            VecSwap(result.value.bytes, count.value.bytes);
+            return;
+        } else if (action == "decorate" || action == "reference") && args.count >= 2 && args.count <= 3 {
+            id := Tk.Find(TextView(args[1]));
+            if id >= 0 && Tk.widgets[id].kind == Tk.TEXT {
+                widget := *Tk.widgets[id];
+                body := TextView(page.body);
+                if action == "decorate" && args.count == 2 && TextView(widget.text) == body {
+                    tag := View.EnsureTag(*widget.view, "reference");
+                    if tag >= 0 {
+                        for * page.references {
+                            if !View.AddRange(*widget.view, tag, it.first, it.last) {
+                                result.code = .Error;
+                                unused BuilderAppend(result.value.bytes, "could not mark manual references");
+                                return;
+                            }
+                        }
+                        return;
+                    }
+                } else if action == "reference" && args.count == 3 {
+                    at, ok := Tk.TextOffset(widget, TextView(args[2]));
+                    if ok {
+                        for * page.references {
+                            if at >= it.first && at < it.last {
+                                unused BuilderAppend(result.value.bytes, body[it.first:it.last]);
+                                break;
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
         } else if args.count == 1 && current >= 0 {
             value: string;
             if action == "query" { value = TextView(history[current].query) }
             else if action == "top" { value = TextView(history[current].top) }
+            else if action == "matchfirst" { value = TextView(history[current].first) }
+            else if action == "matchlast" { value = TextView(history[current].last) }
             else if action == "title" { value = TextView(page.title) }
             else if action == "body" { value = TextView(page.body) }
             else if action == "backstate" { value = ifx current > 0 then "normal" else "disabled" }

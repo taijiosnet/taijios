@@ -45,6 +45,12 @@ def stop(process):
     process.wait(timeout=5)
 
 
+def color_bounds(image, color):
+    red, green, blue = ImageChops.difference(image, Image.new("RGB", image.size, color)).split()
+    mask = ImageChops.lighter(ImageChops.lighter(red, green), blue).point(lambda n: 0 if n else 255)
+    return mask.getbbox()
+
+
 def launch(env, *args, **options):
     return subprocess.Popen(args, cwd=ROOT, env=env, start_new_session=True, **options)
 
@@ -63,7 +69,8 @@ def reference(env):
             output.extend(data)
         assert len(output) < 8192, "unexpected Inferno Tk transcript size"
         values = output.splitlines()
-        return all(f"#{expected}".encode() in values for expected in ("9 balls", "4", "2", "aßéz", ".f.input.e"))
+        return all(f"#{expected}".encode() in values for expected in
+                   ("9 balls", "4", "2", "aßéz", ".f.input.e", "1.11", "1.0"))
 
     try:
         until(matched, "Inferno tkcmd results differ from the portable model fixture")
@@ -73,7 +80,7 @@ def reference(env):
         stop(app)
         app.stdout.close()
         app.stderr.close()
-    print("Inferno Tk and the portable model agree on button, entry text, character indexes and focus")
+    print("Inferno Tk and the portable model agree on buttons, UTF-8 entry indexes, focus, and two-way text search")
 
 
 def interaction(env, image, script, exercise, *, size=(300, 208)):
@@ -112,11 +119,7 @@ def interaction(env, image, script, exercise, *, size=(300, 208)):
             return Image.open(io.BytesIO(pixels.stdout)).convert("RGB")
 
         def canvas():
-            img = capture()
-            delta = ImageChops.difference(img, Image.new("RGB", img.size, BACKGROUND))
-            red, green, blue = delta.split()
-            mask = ImageChops.lighter(ImageChops.lighter(red, green), blue).point(lambda n: 0 if n else 255)
-            return mask.getbbox()
+            return color_bounds(capture(), BACKGROUND)
 
         def click(x, y):
             command("xdotool", "mousemove", "--sync", "--window", window, str(x), str(y),
@@ -188,6 +191,10 @@ def entry_widget(x, y, click, keys, _type_text, capture, transcript):
 def manual_browser(x, y, click, keys, type_text, capture, _transcript):
     heading = (x + 75, y + 59, x + 425, y + 86)
     body = (x + 29, y + 103, x + 470, y + 336)
+    text_box = (x + 18, y + 86, x + 482, y + 366)
+    status_box = (x + 246, y + 374, x + 394, y + 400)
+    selection = (255, 228, 145)
+    underline = (30, 98, 145)
 
     def current():
         image = capture()
@@ -211,6 +218,18 @@ def manual_browser(x, y, click, keys, type_text, capture, _transcript):
             keys("Return")
         else:
             click(x + 430, y + 35)
+
+    def match_box():
+        return color_bounds(capture().crop(text_box), selection)
+
+    def selected_link():
+        image = capture().crop(text_box)
+        pixels = image.load()
+        for row in range(4, image.height):
+            for column in range(image.width):
+                if pixels[column, row] == underline and pixels[column, row - 4] == selection:
+                    return text_box[0] + column, text_box[1] + row - 4
+        return None
 
     first = current()
     assert min(len(part.getcolors()) for part in first) > 1, "manual did not render heading and content"
@@ -244,6 +263,43 @@ def manual_browser(x, y, click, keys, type_text, capture, _transcript):
     until(lambda: equals(current(), first), "a new search did not open a fresh view")
     click(x + 140, y + 35)
     assert equals(current(), first), "a new search did not discard the forward history"
+
+    query("man(1)", "plumber(1)", enter=True)
+    plumber = changed(first, "plumber(1) did not open by topic")
+    click(x + 60, y + 35)
+    until(lambda: equals(current(), first), "Back did not return to man(1)")
+    query("man(1)", "/man", enter=True)
+    match = until(match_box, "forward search did not highlight a match in man(1)")
+    keys("Return")
+
+    def next_match():
+        found = match_box()
+        return found if found != match else None
+
+    until(next_match, "repeating the search did not find the next occurrence")
+    query("/man", "?man", enter=True)
+    until(lambda: match_box() == match, "backward search did not return to the previous occurrence")
+    found = current()
+    blank_status = capture().crop(status_box)
+    query("?man", "/no-such-text-here", enter=True)
+    until(lambda: ImageChops.difference(blank_status, capture().crop(status_box)).getbbox(),
+          "a missing term did not show feedback")
+    assert equals(current(), found), "a missing term moved the viewport or cleared the match"
+
+    query("/no-such-text-here", "/plumber(1)", enter=False)
+    link = until(selected_link, "the real plumber(1) reference was not underlined and highlighted")
+    before_link = current()
+    match_before_link = match_box()
+    click(*link)
+    until(lambda: equals(current(), plumber), "clicking the reference did not open the same plumber(1) page")
+    click(x + 60, y + 35)
+    until(lambda: equals(current(), before_link) and match_box() == match_before_link,
+          "Back after following a reference did not restore the previous viewport and match")
+    click(x + 140, y + 35)
+    until(lambda: equals(current(), plumber), "Next did not reopen the followed reference")
+    click(x + 60, y + 35)
+    until(lambda: equals(current(), before_link), "Back from the reference did not restore man(1)")
+
     query("man(1)", "canvas(9)", enter=True)
     long_page = changed(first, "the largest installed manual page did not render")
     click(x + 275, y + 186)
@@ -306,7 +362,7 @@ def main():
         interaction(env, image, SOURCES / "entry_test.tcl", entry_widget)
         print("Hosted Tk verified nested layout, UTF-8 editing and submission")
         interaction(env, manual, None, manual_browser, size=(500, 420))
-        print("Hosted Man verified real pages, missing-result recovery, history and scroll restoration")
+        print("Hosted Man verified manual references, text search, missing-result recovery, history and scroll restoration")
     finally:
         os.close(read_fd)
         stop(server)
