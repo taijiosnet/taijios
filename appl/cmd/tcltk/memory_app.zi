@@ -1,0 +1,116 @@
+// Live Inferno arena usage monitor, adapted from appl/wm/memory.b. See NOTICE.
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Canvas :: #import "tcl_tk_canvas"
+using Clock :: #import "taijios_clock"
+using Files :: #import "taijios_files"
+using Memory :: #import "memory_model"
+
+RIGHT :: 230;
+CANVAS_WIDTH :: 240;
+ROW_HEIGHT :: 20;
+FIRST_ROW :: 15;
+REFRESH_MS :: 1000;
+
+GraphRow :: struct {
+    used_bar: s64;
+    high_bar: s64;
+    used_label: s64;
+    count_label: s64;
+    limit_label: s64;
+}
+
+displayed: Memory.Snapshot;
+rows: [Memory.MAX_ARENAS]GraphRow;
+next_refresh: s64;
+canvas_index: s64;
+track_left: s32;
+
+ReadSnapshot :: (out: *Memory.Snapshot) -> bool {
+    bytes: [4096]u8;
+    count := Files.ReadBytesAt("/dev/memory", 0, bytes[:]);
+    return count > 0 && count < bytes.count && Memory.Parse(TextView(bytes[:count]), out);
+}
+
+RowY :: (index: s64) -> s32 { return FIRST_ROW + cast(s32)index * ROW_HEIGHT; }
+
+DrawRow :: (canvas: *Canvas.State, row: *GraphRow, arena: *Memory.Arena, y: s32) -> bool {
+    used := Memory.BarWidth(arena.used, arena.limit, RIGHT-track_left);
+    high := Memory.BarWidth(arena.high_water, arena.limit, RIGHT-track_left);
+    digits: [24]u8;
+    return Canvas.SetCoordinates(canvas, row.used_bar, .{track_left, y+4, track_left+used, y+8}) &&
+           Canvas.SetCoordinates(canvas, row.high_bar, .{track_left, y+4, track_left+high, y+8}) &&
+           Canvas.SetText(canvas, row.used_label, Memory.FormatSize(arena.used, digits[:])) &&
+           Canvas.SetText(canvas, row.count_label, Memory.FormatSize(arena.allocations-arena.frees, digits[:])) &&
+           Canvas.SetText(canvas, row.limit_label, Memory.FormatSize(arena.limit, digits[:]));
+}
+
+Prepare :: () -> bool {
+    canvas_index = Tk.Find(".c");
+    if canvas_index < 0 { return false }
+    widget := *Tk.widgets[canvas_index];
+    canvas := *widget.canvas;
+    canvas.height = RowY(displayed.count);
+    for i: 0..displayed.count-1 {
+        arena := *displayed.arenas[i];
+        id := Canvas.AddText(canvas, 5, RowY(i), .West, TextView(arena.name[:arena.name_length]), Canvas.BLACK);
+        if id < 1 { return false }
+        item := *canvas.items[id-1];
+        bounds := Canvas.Bounds(item);
+        track_left = Tk.Maximum(track_left, bounds.x1);
+    }
+    track_left = Tk.Minimum(RIGHT - 1, track_left+5);
+    for i: 0..displayed.count-1 {
+        y := RowY(i);
+        row := *rows[i];
+        track := Canvas.Coordinates.{track_left, y+4, RIGHT, y+8};
+        if Canvas.AddRectangle(canvas, track, Canvas.WHITE, Canvas.BLACK) < 1 { return false }
+        row.high_bar = Canvas.AddRectangle(canvas, track, Canvas.WHITE, Canvas.BLACK);
+        row.used_bar = Canvas.AddRectangle(canvas, track, Canvas.RED, Canvas.BLACK);
+        row.limit_label = Canvas.AddText(canvas, RIGHT, y-2, .East, "", Canvas.BLACK);
+        row.used_label = Canvas.AddText(canvas, track_left, y-2, .West, "", Canvas.BLACK);
+        row.count_label = Canvas.AddText(canvas, 120, y-2, .West, "", Canvas.RED);
+        if !DrawRow(canvas, row, *displayed.arenas[i], y) { return false }
+    }
+    next_refresh = Clock.Millis() + REFRESH_MS;
+    return true;
+}
+
+Changed :: (before: *Memory.Arena, after: *Memory.Arena) -> bool {
+    return before.used != after.used || before.high_water != after.high_water || before.limit != after.limit ||
+           before.allocations-before.frees != after.allocations-after.frees;
+}
+
+Refresh :: (_: *Tcl.Interpreter, _event: Surface.SurfaceEvent) -> Window.PollResult {
+    now := Clock.Millis();
+    if now < next_refresh { return .Idle }
+    next_refresh = now + REFRESH_MS;
+    current: Memory.Snapshot;
+    if !ReadSnapshot(*current) || current.count != displayed.count { return .Idle }
+    widget := *Tk.widgets[canvas_index];
+    canvas := *widget.canvas;
+    redraw := false;
+    for i: 0..current.count-1 {
+        if !Changed(*displayed.arenas[i], *current.arenas[i]) { continue }
+        if !DrawRow(canvas, *rows[i], *current.arenas[i], RowY(i)) { return .Failed }
+        redraw = true;
+    }
+    displayed = current;
+    return ifx redraw then .Changed else .Idle;
+}
+
+main :: () -> s32 {
+    if !ReadSnapshot(*displayed) { print("memory: could not read /dev/memory\n"); return 1 }
+    script: Text;
+    if Files.ReadFile("/appl/cmd/tcltk/memory.tcl", *script, 16384) != 0 {
+        print("memory: could not read controls\n");
+        return 1;
+    }
+    tcl: Tcl.Interpreter;
+    width: s32 = CANVAS_WIDTH + 2*(Tk.ROOT_INSET+Tk.DEFAULT_PAD_X);
+    height: s32 = RowY(displayed.count) + 2*(Tk.ROOT_INSET+Tk.DEFAULT_PAD_Y);
+    return Window.RunPolled(*tcl, TextView(script), "Memory", width, height, Prepare, Refresh, 250);
+}

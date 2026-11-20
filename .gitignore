@@ -36,6 +36,7 @@ y.debug
 /appl/cmd/tr.zx
 /appl/cmd/coffee.zx
 /appl/cmd/logwindow.zx
+/appl/cmd/memory.zx
 /appl/cmd/tclsh.zx
 /dis/cat.zx
 /dis/echo.zx
@@ -48,11 +49,13 @@ y.debug
 /dis/tclsh.zx
 /dis/wm/stopwatch.zx
 /dis/wm/logwindow.zx
+/dis/wm/memory.zx
 /build/zx-smoke/*
 !/build/zx-smoke/hello.zi
 !/build/zx-smoke/taijios_stdin.zi
 !/build/zx-smoke/filesystem.zi
 !/build/zx-smoke/float64.zi
+!/build/zx-smoke/arena-reuse.zi
 !/build/zx-smoke/run.py
 !/build/zx-smoke/keyevents/
 /build/zx-smoke/keyevents/*

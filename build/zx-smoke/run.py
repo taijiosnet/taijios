@@ -31,6 +31,10 @@ if '--precision' in sys.argv[2:]:
     assert precision.stdout == 'literal true parsed true sum true sqrt(2) 1.4142135623730951\n0\n\n'
     assert not precision.stderr
 
+if '--heap' in sys.argv[2:]:
+    heap = run('zxrun -c /build/zx-smoke/arena-reuse.zx; echo $status')
+    assert heap.stdout == '64 rounds passed\n\n' and not heap.stderr
+
 if '--runtime' in sys.argv[2:]:
     unbound = run('zxrun /build/zx-smoke/linked.zx >[2] /build/zx-smoke/module.stderr; echo $status')
     assert unbound.stdout == 'zx\n' and unbound.stderr == ''

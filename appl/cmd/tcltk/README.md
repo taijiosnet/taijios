@@ -27,6 +27,12 @@ to keep the current view while new lines arrive, or drag the scrollbar to read
 earlier lines. Clear Pop up to keep a tasked window hidden until you restore it
 from the toolbar. [ZX source](logwindow_app.zi) · [Inferno source](../../wm/logwindow.b)
 
+Memory shows the guest's `main`, `heap`, and `image` arenas. It reads
+`/dev/memory` on launch and every second. Each row shows used capacity and
+the arena limit, the allocation count in the original display units, a red usage
+bar, and the high-water mark. The graph uses the shared Ziran Canvas
+widget. [ZX source](memory_app.zi) · [Inferno source](../../wm/memory.b)
+
 ## Run in Taiji
 
 From the TaijiOS root, with `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
@@ -41,6 +47,9 @@ python3 appl/cmd/tcltk/test_tcltk.py --installed
 python3 appl/cmd/tcltk/test_logwindow.py
 (cd appl/cmd && mk install-logwindow-zx)
 python3 appl/cmd/tcltk/test_logwindow.py --installed
+python3 appl/cmd/tcltk/test_memory.py
+install -m 0644 build/tcltk/memory.zx dis/wm/memory.zx
+python3 appl/cmd/tcltk/test_memory.py --installed
 ```
 
 The general Tk launcher reads guest stdin until EOF and accepts scripts up to
@@ -52,6 +61,7 @@ zxrun -w /dis/tcltk.zx < /appl/cmd/tcltk/bounce_controls.tcl
 zxrun -w /dis/man.zx
 zxrun -w /dis/coffee.zx
 zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log
+zxrun -p -w /dis/wm/memory.zx
 ```
 
 Log Window accepts `-e` to close when input ends. By default it prints `Got EOF`
@@ -117,6 +127,12 @@ The stream model checks split UTF-8, idle and failed reads, and passes log
 text directly to the Tk text buffer. Run `--oracle-only` to compare the model and the
 original Dis app without the windowed ZX host bindings.
 
+`test_memory.py` compares Canvas command results with Inferno `tkcmd`. It
+launches the original and ZX Memory apps under private Xvfb, swaps in a new
+arena snapshot through the guest namespace, and checks usage bar and
+high-water mark positions, refreshed size labels, and window close. It also
+launches the ZX app against the guest's real `/dev/memory`.
+
 ## Supported commands
 
 | Command | Options and behavior |
@@ -128,6 +144,11 @@ original Dis app without the windowed ZX host bindings.
 | `frame .path` | Container for nested widgets |
 | `entry .path` | Single-line UTF-8 text, with `-bg white` |
 | `text .path` | Wrapped, scrollable text. `-height` sets the requested height. `-yscrollcommand` receives the first and last visible fractions |
+| `canvas .path` | Integer-pixel `-width` and `-height` |
+| `.canvas create rectangle x0 y0 x1 y1 ?options?` | Add a rectangle with `-fill` and `-outline`. Return its numeric item ID |
+| `.canvas create text x y ?options?` | Add a single-line stroke-font label with `-anchor`, `-text`, and `-fill`. Return its numeric item ID |
+| `.canvas coords id ?coordinates?`, `.canvas bbox id` | Read or set an item's coordinates, or read its painted bounds using Ziran font metrics for text |
+| `.canvas itemconfigure id option value`, `.canvas itemcget id -text` | Set supported item options or read a text item's label |
 | `scrollbar .path` | `-orient vertical` or `horizontal`, and `-command`. Arrows and troughs call `scroll` by units and pages. A held thumb drag calls `moveto` |
 | `.scrollbar set first last`, `.scrollbar get`, `.scrollbar identify x y` | Update or read clamped viewport fractions and identify the part under local coordinates |
 | `scale .path` | `-from`, `-to`, `-resolution`, `-bigincrement`, pixel `-length`, `-orient horizontal` or `vertical`, `-showvalue 0` or `1`, and `-command script` |
@@ -160,12 +181,14 @@ The fixed stroke font displays English letters, digits, spaces, `É`, and
 common punctuation. Lowercase shares the uppercase glyphs. Other code points display
 as `?` and retain their original value in Tcl. Mouse selection, clipboard,
 grapheme navigation, and broader bindings are outside this subset.
+Canvas item colors accept black, white, red, green, blue, `#RRGGBB`, and the
+empty string for transparency.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements a subset of 14 of the 25 commands advertised by the
-[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining 11 are `bitmap`,
-`canvas`, `grab`, `image`, `listbox`, `lower`, `menu`, `menubutton`,
+The port implements a subset of 15 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining 10 are `bitmap`,
+`grab`, `image`, `listbox`, `lower`, `menu`, `menubutton`,
 `radiobutton`, `raise`, and `toplevel`.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
@@ -179,6 +202,9 @@ autorepeat. The remaining panel API includes `-anchor`, `origin`,
 embedded windows, editable selections, and the wider tag API remain open.
 Checkbutton indicator customization and keyboard activation, scrollbar
 `activate`, `delta`, `fraction`, `-jump`, and hold autorepeat remain open.
+Canvas still needs tags, item bindings and hit testing, item deletion and
+stacking, scrolling, fractional coordinates, line and polygon items, ovals,
+arcs, images, embedded windows, and more font, color, and stroke options.
 The text widget still needs horizontal scrolling and `-xscrollcommand`.
 The Tk variable command still needs Inferno's `lasterror` query.
 `listbox` with `curselection`, `get`, `yview`, and its scroll callback is used

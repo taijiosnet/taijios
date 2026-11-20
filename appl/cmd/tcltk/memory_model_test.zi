@@ -1,0 +1,26 @@
+#import "std/vec"
+using Memory :: #import "memory_model"
+
+SAMPLE :: #string MEMORY_SAMPLE_END
+    2097152    33554432     4194304          70          40           6      104857 main
+     524288    33554432      786432          33          12           2       65536 heap
+     262144    16777216      524288          10           2           1       32768 image
+MEMORY_SAMPLE_END;
+
+main :: () -> s32 {
+    snapshot: Memory.Snapshot;
+    if !Memory.Parse(SAMPLE, *snapshot) || snapshot.count != 3 { return 1 }
+    main_arena := *snapshot.arenas[0];
+    if TextView(main_arena.name[:main_arena.name_length]) != "main" || main_arena.used != 2097152 || main_arena.limit != 33554432 ||
+       main_arena.high_water != 4194304 || main_arena.allocations-main_arena.frees != 30 { return 2 }
+    if TextView(snapshot.arenas[1].name[:4]) != "heap" || TextView(snapshot.arenas[2].name[:5]) != "image" { return 3 }
+    if Memory.Parse(SAMPLE[:SAMPLE.count-2], *snapshot) || snapshot.count != 3 { return 4 }
+    if Memory.BarWidth(main_arena.used, main_arena.limit, 160) != 10 ||
+       Memory.BarWidth(main_arena.high_water, main_arena.limit, 160) != 20 ||
+       Memory.BarWidth(1048576, 0, 160) != 0 || Memory.BarWidth(4096, 2048, 160) != 160 { return 5 }
+    digits: [24]u8;
+    if Memory.FormatSize(main_arena.limit, digits[:]) != "32M" ||
+       Memory.FormatSize(snapshot.arenas[1].used, digits[:]) != "512K" { return 6 }
+    print("Memory verified Inferno arena records, used and high-water bar widths, and count and size formatting\n");
+    return 0;
+}

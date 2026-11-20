@@ -1,0 +1,85 @@
+// The guest arena snapshot and graph arithmetic used by Inferno appl/wm/memory.b.
+#import "std/vec"
+#import "std/number_text"
+
+FIELD_WIDTH :: 12;
+FIELD_COUNT :: 7;
+MAX_ARENAS :: 10;
+NAME_BYTES :: 32;
+
+Arena :: struct {
+    name: [NAME_BYTES]u8;
+    name_length: s64;
+    used: s64;
+    limit: s64;
+    high_water: s64;
+    allocations: s64;
+    frees: s64;
+}
+
+Snapshot :: struct {
+    count: s64;
+    arenas: [MAX_ARENAS]Arena;
+}
+
+Field :: (source: string) -> (value: s64, ok: bool) {
+    value: s64;
+    first: s64;
+    while first < source.count && source[first] == 32 { first += 1 }
+    if first == source.count || source[source.count-1] != 32 || first == source.count-1 { return 0, false }
+    for i: first..source.count-2 {
+        digit := source[i];
+        if digit < 48 || digit > 57 { return 0, false }
+        value = value*10 + cast(s64)(digit-48);
+    }
+    return value, true;
+}
+
+Parse :: (source: string, output: *Snapshot) -> bool {
+    snapshot: Snapshot;
+    start: s64;
+    while start < source.count {
+        end := start;
+        while end < source.count && source[end] != 10 { end += 1 }
+        if end == source.count || end-start <= FIELD_WIDTH*FIELD_COUNT || snapshot.count == MAX_ARENAS { return false }
+        values: [FIELD_COUNT]s64;
+        for i: 0..FIELD_COUNT-1 {
+            field := start + i*FIELD_WIDTH;
+            number, ok := Field(source[field:field+FIELD_WIDTH]);
+            if !ok { return false }
+            values[i] = number;
+        }
+        name := source[start+FIELD_WIDTH*FIELD_COUNT:end];
+        if name.count > NAME_BYTES || values[4] > values[3] { return false }
+        arena := *snapshot.arenas[snapshot.count];
+        for i: 0..name.count-1 { arena.name[i] = name[i] }
+        arena.name_length = name.count;
+        arena.used = values[0];
+        arena.limit = values[1];
+        arena.high_water = values[2];
+        arena.allocations = values[3];
+        arena.frees = values[4];
+        snapshot.count += 1;
+        start = end+1;
+    }
+    if snapshot.count == 0 { return false }
+    <<output = snapshot;
+    return true;
+}
+
+BarWidth :: (bytes: s64, limit: s64, width: s32) -> s32 {
+    if limit == 0 || width <= 0 { return 0 }
+    if bytes >= limit { return width }
+    return cast(s32)(bytes * width / limit);
+}
+
+FormatSize :: (value: s64, digits: []u8) -> string {
+    // The legacy presentation uses M for exact multiples of 1024K or >100 MiB.
+    mib := (value/1024) % 1024 == 0 || value > 100*1024*1024;
+    units := value / (ifx mib then 1024*1024 else 1024);
+    number_buffer: [24]u8;
+    number := FormatInteger(units, number_buffer[:]);
+    for i: 0..number.count-1 { digits[i] = number[i] }
+    digits[number.count] = ifx mib then 77 else 75;
+    return TextView(digits[:number.count+1]);
+}

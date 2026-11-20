@@ -1,0 +1,25 @@
+#import "std/vec"
+
+Sample :: (retain: bool) -> Vec(u8) {
+    scratch: Vec(u8);
+    if !VecReserve(scratch, 1048576) { return .{} }
+    survivor: Vec(u8);
+    if retain { unused VecResize(survivor, 4) }
+    return survivor;
+}
+
+main :: () -> s32 {
+    for i: 0..63 { unused Sample(false) }
+    held: Vec(u8);
+    for i: 0..63 {
+        next: Vec(u8) = Sample(true);
+        if next.count != 4 {
+            print("cannot allocate 1 MiB with only % live data bytes on iteration %\n", held.count, i);
+            return 1;
+        }
+        VecFree(held);
+        held = next;
+    }
+    print("64 rounds passed\n");
+    return 0;
+}

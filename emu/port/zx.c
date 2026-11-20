@@ -55,7 +55,8 @@ zxread(void *context, const char *path, ZxModuleImage *image)
 {
 	char *err = context;
 	uchar *bytes, *grown, extra;
-	int fd, length, capacity;
+	Dir *dir;
+	int fd, length, capacity, initial;
 	long count;
 
 	err[0] = '\0';
@@ -65,6 +66,14 @@ zxread(void *context, const char *path, ZxModuleImage *image)
 		if(strstr(err, "does not exist") != nil || strstr(err, "No such file") != nil)
 			return ZX_MODULE_IMAGE_MISSING;
 		return ZX_MODULE_IMAGE_ERROR;
+	}
+	initial = ZxIoBytes;
+	dir = kdirfstat(fd);
+	if(dir != nil){
+		/* Leave room to read EOF without growing the buffer for a regular image. */
+		if(dir->length > 0 && dir->length < ZxMaxImage && (dir->mode & DMDIR) == 0)
+			initial = dir->length + 1;
+		free(dir);
 	}
 	bytes = nil;
 	length = capacity = 0;
@@ -76,7 +85,12 @@ zxread(void *context, const char *path, ZxModuleImage *image)
 					strecpy(err, err+ERRMAX, "ZX image exceeds 32 MiB");
 				break;
 			}
-			capacity = capacity == 0 ? 8192 : capacity * 2;
+			if(capacity == 0)
+				capacity = initial;
+			else if(capacity < ZxMaxImage/2)
+				capacity *= 2;
+			else
+				capacity = ZxMaxImage;
 			grown = realloc(bytes, capacity);
 			if(grown == nil){
 				strecpy(err, err+ERRMAX, "out of memory reading ZX");

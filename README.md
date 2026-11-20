@@ -29,8 +29,9 @@ their own build directory.
 
 ```sh
 make build/bin/zi2c
-make BUILD_DIR=build/linux-386 CC='gcc -m32' CFLAGS='-O2 -fno-pie -fno-pic' \
-    GEN_ZI2C="$PWD/build/bin/zi2c" build/linux-386/libziran.a
+make BUILD_DIR=build/linux-386-engine NATIVE_HOST_ENABLED=0 CC='gcc -m32' \
+    CFLAGS='-O2 -fno-pie -fno-pic' GEN_ZI2C="$PWD/build/bin/zi2c" \
+    build/linux-386-engine/libziran.a
 ```
 
 Set `ZX_INC` and `ZX_LIB` in TaijiOS's `mkconfig` to the absolute paths to that
@@ -139,6 +140,11 @@ Log Window uses these bindings to follow a live guest pipe with its window
 responsive. Install it with `(cd appl/cmd && mk install-logwindow-zx)` and
 run `zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log` from a
 graphical guest shell. See the [Tk applications guide](appl/cmd/tcltk/README.md).
+
+Memory reads `/dev/memory` through `taijios_files` and updates the arena graphs
+using the `taijios_clock` and `zx_surface` bindings. Install it with
+`(cd appl/cmd && mk install-memory-zx)` and run
+`zxrun -p -w /dis/wm/memory.zx` from the graphical guest shell.
 
 ### Build and run ZX `cat`
 
@@ -272,6 +278,15 @@ standard-library fixture and run it inside the installed emulator.
 zi2zx --root build/zx-smoke --entry float64:main \
     -o build/zx-smoke/float64.zx build/zx-smoke/float64.zi
 python3 build/zx-smoke/run.py Linux/386/bin/emu --precision
+```
+
+To verify heap reuse at the emulator's default pool size, build the fixture
+and run the 64-round test in the installed emulator.
+
+```sh
+zi2zx --root build/zx-smoke --entry arena-reuse:main \
+    -o build/zx-smoke/arena-reuse.zx build/zx-smoke/arena-reuse.zi
+python3 build/zx-smoke/run.py Linux/386/bin/emu --heap
 ```
 
 To test guest stdin, build the fixture and add `--stdin` to the smoke command:

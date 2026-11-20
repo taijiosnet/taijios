@@ -8,6 +8,7 @@ using View :: #import "tcl_tk_view"
 using Scale :: #import "tcl_tk_scale"
 using Check :: #import "tcl_tk_check"
 using Scroll :: #import "tcl_tk_scrollbar"
+using Canvas :: #import "tcl_tk_canvas"
 
 MAX_WIDGETS :: 32;
 MAX_ENTRY_BYTES :: 16384;
@@ -20,9 +21,13 @@ SCALE :: 5;
 PANEL :: 6;
 CHECKBUTTON :: 7;
 SCROLLBAR :: 8;
+CANVAS :: 9;
 MAX_PANEL_BYTES :: 16777216;
-CHAR_WIDTH :: 12;
+CHAR_WIDTH :: Canvas.CELL_WIDTH;
 ENTRY_INSET :: 8;
+ROOT_INSET :: 12;
+DEFAULT_PAD_X :: 8;
+DEFAULT_PAD_Y :: 5;
 Box :: struct { x: s32; y: s32; w: s32; h: s32; }
 Packing :: struct {
     side: s32;
@@ -52,6 +57,7 @@ Widget :: struct {
     panel: Panel;
     check: Check.State;
     scroll: Scroll.State;
+    canvas: Canvas.State;
     text_height: s32;
     last_scroll: Scroll.State;
     sent_scroll: bool;
@@ -85,6 +91,7 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
                Tcl.RegisterCommand(interpreter, "panel", Create, PANEL) &&
                Tcl.RegisterCommand(interpreter, "checkbutton", Create, CHECKBUTTON) &&
                Tcl.RegisterCommand(interpreter, "scrollbar", Create, SCROLLBAR) &&
+               Tcl.RegisterCommand(interpreter, "canvas", Create, CANVAS) &&
                Tcl.RegisterCommand(interpreter, "variable", VariableCommand) &&
                Tcl.RegisterPrefix(interpreter, "update", Update) &&
                Tcl.RegisterCommand(interpreter, "pack", Pack) &&
@@ -125,6 +132,7 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     if args.count % 2 != 0 { SetError(result, "expected option and value pairs"); return false }
     if widget.kind == SCALE { return ConfigureScale(widget, args, result) }
     if widget.kind == PANEL { return ConfigurePanel(widget, args, result) }
+    if widget.kind == CANVAS { return Canvas.Configure(*widget.canvas, args, result) }
     if widget.kind == TEXT || widget.kind == SCROLLBAR { return ConfigureScroll(widget, args, result) }
     button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
     for i: 0..args.count/2-1 {
@@ -164,6 +172,7 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     }
     widget := Widget.{name = TextCopy(path), kind = kind, parent = parent};
     if kind == SCALE { widget.scale = Scale.Default() }
+    if kind == CANVAS { widget.canvas = Canvas.Default() }
     if kind == CHECKBUTTON {
         on: Text = TextCopy("1");
         off: Text = TextCopy("0");
@@ -187,6 +196,8 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     saved.disabled = widget.disabled;
     saved.scale = widget.scale;
     saved.scroll = widget.scroll;
+    saved.canvas.width = widget.canvas.width;
+    saved.canvas.height = widget.canvas.height;
     saved.text_height = widget.text_height;
     saved.sent_scroll = false;
     saved.check.selected = widget.check.selected;
@@ -199,7 +210,7 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     View.Reset(*saved.view);
     saved.order = 0;
     saved.box = .{};
-    saved.pack = .{padx = 8, pady = 5};
+    saved.pack = .{padx = DEFAULT_PAD_X, pady = DEFAULT_PAD_Y};
     VecSwap(saved.name.bytes, widget.name.bytes);
     VecSwap(saved.text.bytes, widget.text.bytes);
     VecSwap(saved.command.bytes, widget.command.bytes);
@@ -280,6 +291,7 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             unused VecResize(it.check.off.bytes, 0);
             unused VecResize(it.view.tags, 0);
             unused VecResize(it.panel.pixels, 0);
+            Canvas.Clear(*it.canvas);
             View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
@@ -323,6 +335,7 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     if widget.kind == PANEL { PanelCommand(widget, args, result); return }
     if widget.kind == CHECKBUTTON { CheckCommand(widget, args, result, script); return }
     if widget.kind == SCROLLBAR { ScrollCommand(widget, args, result); return }
+    if widget.kind == CANVAS { Canvas.Command(*widget.canvas, args, result); return }
     if widget.kind == ENTRY { EntryCommand(widget, args, result); return }
     if widget.kind == TEXT {
         TextCommand(widget, args, result);
@@ -675,6 +688,7 @@ Measure :: (parent: s64) -> Box {
             requested = ifx widget.scale.horizontal then Box.{w = length, h = minor} else Box.{w = minor, h = length};
         }
         else if widget.kind == PANEL { requested = .{w = widget.panel.width + 2*widget.panel.border, h = widget.panel.height + 2*widget.panel.border} }
+        else if widget.kind == CANVAS { requested = .{w = widget.canvas.width, h = widget.canvas.height} }
         else if widget.kind == ENTRY { requested = .{w = 168, h = 30} }
         else if widget.kind == TEXT { requested = .{w = 280, h = ifx widget.text_height > 0 then widget.text_height else 150} }
         else if widget.kind == SCROLLBAR {
@@ -759,7 +773,8 @@ Place :: (parent: s64, cavity: Box) {
 Layout :: (width: s32, height: s32) {
     for * widgets { it.box = .{} }
     unused Measure(-1);
-    Place(-1, .{x = 12, y = 12, w = NonNegative(width - 24), h = NonNegative(height - 24)});
+    Place(-1, .{x = ROOT_INSET, y = ROOT_INSET,
+               w = NonNegative(width - 2*ROOT_INSET), h = NonNegative(height - 2*ROOT_INSET)});
 }
 
 EntrySlots :: (box: Box) -> s32 { return NonNegative(box.w - 2 * ENTRY_INSET - 1) / CHAR_WIDTH }
