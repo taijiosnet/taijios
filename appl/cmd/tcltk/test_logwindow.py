@@ -114,10 +114,11 @@ def log_window(env, guest_command):
 
                 def send(data):
                     pending = memoryview(data)
-                    deadline = time.monotonic() + 20
                     while pending:
-                        remaining = max(0, deadline - time.monotonic())
-                        assert select.select([], [writer], [], remaining)[1], "guest stopped reading the test pipe"
+                        # The guest drains and repaints between chunks of a long stream.
+                        assert select.select([], [writer], [], 20)[1], (
+                            f"guest stopped reading the test pipe after {len(data) - len(pending)} of {len(data)} bytes"
+                        )
                         written = writer.write(pending)
                         assert written, "guest test input could not be written"
                         pending = pending[written:]
@@ -159,6 +160,11 @@ def exercise_window(env, guest_command, *, hosted):
         def changed(region, before):
             return ImageChops.difference(capture().crop(region), before).getbbox()
 
+        def toggle(position, region, description):
+            before = capture().crop(region)
+            click(*position)
+            until(lambda: changed(region, before), description)
+
         title = until(tasked, "Log Window did not start as a toolbar task").crop(TASK_LABEL)
         send(b"First log line\n")
         until(lambda: visible(capture(), hosted), "incoming text did not pop up Log Window")
@@ -186,9 +192,7 @@ def exercise_window(env, guest_command, *, hosted):
         send(b"".join(f"initial {n:02d}\n".encode() for n in range(44)))
         until(lambda: changed(bar, initial_bar), "Log Window did not scroll after receiving a full page of logs")
 
-        checked = capture().crop(scroll_button)
-        click(*scroll_click)
-        until(lambda: changed(scroll_button, checked), "Scroll did not toggle while stdin was idle")
+        toggle(scroll_click, scroll_button, "Scroll did not toggle while stdin was idle")
         bottom = capture().crop(log_body)
         if hosted:
             thumb = color_bounds(capture().crop(bar), (255, 255, 255))
@@ -199,6 +203,10 @@ def exercise_window(env, guest_command, *, hosted):
             drag_y = 254
             target_y = 76
         pointer(drag_x, drag_y, "mousedown", "1")
+        if hosted:
+            # Wait for the guest to paint its pressed thumb before sending motion.
+            until(lambda: color_bounds(capture().crop(bar), (188, 213, 231)),
+                  "scrollbar thumb did not enter its pressed state")
         pointer(drag_x, target_y)
         until(lambda: changed(log_body, bottom), "dragging the scrollbar did not move Log Window text")
         pointer(drag_x, target_y, "mouseup", "1")
@@ -207,13 +215,11 @@ def exercise_window(env, guest_command, *, hosted):
         send(b"".join(f"paused {n:02d}\n".encode() for n in range(48)))
         until(lambda: changed(bar, pinned.crop(bar)), "new text did not update the scrollbar thumb")
         assert not changed(log_body, pinned.crop(log_body)), "Scroll off did not preserve the viewport"
-        click(*scroll_click)
+        toggle(scroll_click, scroll_button, "Scroll did not turn back on")
         send(b"Follow once more\n")
         until(lambda: changed(log_body, pinned.crop(log_body)), "Scroll on did not resume following input")
 
-        checked = capture().crop(popup_button)
-        click(*popup_click)
-        until(lambda: changed(popup_button, checked), "Pop up did not toggle while stdin was idle")
+        toggle(popup_click, popup_button, "Pop up did not toggle while stdin was idle")
         click(*task_click)
         until(tasked, "task icon did not hide Log Window")
         send(b"Stay hidden\n")
@@ -221,9 +227,23 @@ def exercise_window(env, guest_command, *, hosted):
         assert tasked(), "new input raised Log Window while Pop up was off"
         click(100, 583)
         until(lambda: visible(capture(), hosted), "toolbar did not restore Log Window")
-        click(*popup_click)
+        toggle(popup_click, popup_button, "Pop up did not turn back on")
         click(*task_click)
-        until(tasked, "Log Window could not be tasked again")
+        hidden_since = None
+
+        def settled_task():
+            nonlocal hidden_since
+            image = tasked()
+            now = time.monotonic()
+            if image is None or ImageChops.difference(image.crop(TASK_LABEL), title).getbbox():
+                hidden_since = None
+                return False
+            if hidden_since is None:
+                hidden_since = now
+            # The toolbar draws before the app receives its visibility event.
+            return now - hidden_since >= 0.4
+
+        until(settled_task, "Log Window did not settle back into its toolbar task")
         send(b"Pop up now\n")
         until(lambda: visible(capture(), hosted), "enabling Pop up did not restore Log Window on input")
         if hosted:

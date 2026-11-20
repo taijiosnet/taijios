@@ -216,10 +216,19 @@ def manual_browser(x, y, click, keys, type_text, capture, _transcript):
 
         return until(poll, description)
 
+    def entry_at(count):
+        # The 194-pixel entry shows 14 cells. Its caret extends beyond the glyphs.
+        caret = x + 192 + 12 * min(count, 14)
+        frame = capture()
+        ink = (25, 47, 67)
+        return all(frame.getpixel((caret, y + row)) == ink for row in (24, 45))
+
     def query(previous, value, enter):
         click(x + 250, y + 35)
         keys("End", *(["BackSpace"] * len(previous)))
+        until(lambda: entry_at(0), "the manual entry did not finish clearing")
         type_text(value)
+        until(lambda: entry_at(len(value)), f"the manual entry did not finish typing {value!r}")
         if enter:
             keys("Return")
         else:

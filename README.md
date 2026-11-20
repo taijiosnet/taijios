@@ -23,8 +23,9 @@ zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
 For the Linux/386 emulator, build the hosted runtime from the Ziran revision
-`81a0bca977988d1e5470bbf277916873d197c6b4`, which fixes binary64 edge values
-needed by Tcl's fixed-point formatter. The GUI package dependencies are
+`be5b40432ee3f31ddf85e367177321f27e977c12`. It includes the binary64 fixes
+for Tcl's fixed-point formatter and the compact execution plan used by
+Stopwatch at the default 32 MiB main pool. The GUI package dependencies are
 pinned separately in `appl/wm/ziran.lock`.
 Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
 Use a host-built `zi2c` for code generation and keep the target objects in
@@ -33,7 +34,7 @@ their own build directory.
 ```sh
 make build/bin/zi2c
 make BUILD_DIR=build/linux-386-engine NATIVE_HOST_ENABLED=0 CC='gcc -m32' \
-    CFLAGS='-O2 -fno-pie -fno-pic' GEN_ZI2C="$PWD/build/bin/zi2c" \
+    CFLAGS='-O2 -fno-pie -fno-pic -DZIRAN_COMPACT_EXEC_PLAN -DZIRAN_EXEC_FRAME_RESERVE_BYTES=6291456 -DZIRAN_EXEC_FRAME_RESERVE_MIN=1048576' GEN_ZI2C="$PWD/build/bin/zi2c" \
     build/linux-386-engine/libziran.a
 ```
 
@@ -86,12 +87,13 @@ From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
     ziran bundle --project --bind-host "${kryon_id}_pixmap" \
         --entry stopwatch:main -o ../../dis/wm/stopwatch.zx stopwatch.zi
 )
-Linux/386/bin/emu -p main=64M -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
 ```
 
-The hosted ZX Stopwatch uses `-p main=64M` to give the engine room to
-load and run the bundle. `wm/stopwatch` without `-zx` runs the original Dis app. To launch any compatible
-bundle in a TaijiOS window manager context, use `zxrun -w /path/to/app.zx`.
+The hosted ZX Stopwatch runs in the default 32 MiB main pool when built with
+the runtime settings above. `wm/stopwatch` without `-zx` runs the original Dis
+app. To launch any compatible bundle in a TaijiOS window manager context, use
+`zxrun -w /path/to/app.zx`.
 
 The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
 `Close` to the guest window manager and Draw. `Present` uploads a packed RGBA8

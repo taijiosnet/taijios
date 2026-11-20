@@ -504,7 +504,8 @@ def graphics():
         raise AssertionError(description)
 
     def launch(app, *args, arena='256M'):
-        return subprocess.Popen([emu, '-p', f'main={arena}', '-r', root, '-g', '800x600',
+        pool = ['-p', f'main={arena}'] if arena else []
+        return subprocess.Popen([emu, *pool, '-r', root, '-g', '800x600',
                                  'wm/wm', app, *args], env=env,
                                 start_new_session=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
@@ -745,7 +746,7 @@ def graphics():
             stop(proc)
 
     def stopwatch():
-        proc = launch('wm/stopwatch', '-zx', arena='64M')
+        proc = launch('wm/stopwatch', '-zx', arena=None)
         status = bytearray()
 
         def returned():
@@ -783,7 +784,7 @@ def graphics():
             stop(proc)
 
     def legacy_stopwatch():
-        proc = launch('wm/stopwatch')
+        proc = launch('wm/stopwatch', arena=None)
         try:
             window = until(owned_window, 'emulator did not map its X window')
 

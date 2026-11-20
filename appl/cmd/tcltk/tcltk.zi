@@ -80,6 +80,7 @@ RunWindow :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, 
         event := Surface.GetEvent(interval);
         if event.kind == Surface.Closed { break }
         redraw := true;
+        entry_only := false;
         if event.kind == Surface.Redraw || event.kind == Surface.Resize {
             width = event.width;
             height = event.height;
@@ -92,6 +93,7 @@ RunWindow :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, 
             if !ExecuteCallback(tcl, Tk.PointerUp(event.x, event.y)) { return 1 }
         } else if event.kind == Surface.TextEvent {
             Tk.TextInput(event.text);
+            entry_only = true;
         } else if event.kind == Surface.Key {
             key: Tk.EntryKey;
             if event.key == Surface.EnterKey { key = .Return }
@@ -107,12 +109,18 @@ RunWindow :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, 
             else if event.key == Surface.DeleteKey { key = .Delete }
             else { continue }
             if !ExecuteCallback(tcl, Tk.KeyDown(key)) { return 1 }
+            entry_only = key != .Return;
         } else { redraw = false }
         if Tk.Closed() { break }
         polled := poll(tcl, event);
         if polled == .Failed { return 1 }
         if Tk.Closed() { break }
-        if redraw || polled == .Changed {
+        // Editing an entry changes its contents and caret, leaving its packed size fixed.
+        if entry_only && polled == .Idle && Tk.focused >= 0 && Tk.widgets[Tk.focused].kind == Tk.ENTRY {
+            pixels := VecSlice(frame.pixels, 0, frame.pixels.count);
+            Paint.RenderFocusedEntry(pixels, width, height);
+            if !Surface.PresentRGBA(width, height, TextView(pixels)) { return 1 }
+        } else if redraw || polled == .Changed {
             if !Draw(tcl, *frame, width, height) { return 1 }
         } else if event.kind == Surface.Idle && animate() {
             pixels := VecSlice(frame.pixels, 0, frame.pixels.count);

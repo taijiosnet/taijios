@@ -180,6 +180,28 @@ TextRow :: (canvas: *Canvas, view: *View.State, box: Tk.Box, line: string, start
     DrawText(canvas, box, line, false);
 }
 
+DrawEntry :: (canvas: *Canvas, widget: *Tk.Widget, active: bool) {
+    box := widget.box;
+    Fill(canvas, box, ifx active then LETTER else BORDER);
+    Fill(canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
+    if box.w > 2 * Tk.ENTRY_INSET && box.h >= 18 {
+        start := Tk.EntryStart(widget);
+        text := TextView(widget.text);
+        inner_x := box.x + Tk.ENTRY_INSET;
+        DrawText(canvas, .{x = inner_x, y = box.y, w = Tk.EntrySlots(box) * Tk.CHAR_WIDTH, h = box.h}, text[start:], false);
+        if active {
+            x := inner_x + UTF.Count(text[start:widget.cursor]) * Tk.CHAR_WIDTH;
+            Fill(canvas, .{x = x, y = box.y+4, w = 1, h = box.h-8}, LETTER);
+        }
+    }
+}
+
+RenderFocusedEntry :: (pixels: []u8, width: s32, height: s32) {
+    canvas := Canvas.{pixels = pixels, width = width, height = height};
+    widget := *Tk.widgets[Tk.focused];
+    if widget.order != 0 && widget.box.w >= 4 && widget.box.h >= 4 { DrawEntry(*canvas, widget, true) }
+}
+
 Render :: (pixels: []u8, width: s32, height: s32) {
     canvas := Canvas.{pixels = pixels, width = width, height = height};
     Fill(*canvas, .{w = width, h = height}, PAPER);
@@ -212,19 +234,7 @@ Render :: (pixels: []u8, width: s32, height: s32) {
             continue;
         }
         if it.kind == Tk.ENTRY {
-            active := it_index == Tk.focused;
-            Fill(*canvas, box, ifx active then LETTER else BORDER);
-            Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
-            if box.w > 2 * Tk.ENTRY_INSET && box.h >= 18 {
-                start := Tk.EntryStart(it);
-                text := TextView(it.text);
-                inner_x := box.x + Tk.ENTRY_INSET;
-                DrawText(*canvas, .{x = inner_x, y = box.y, w = Tk.EntrySlots(box) * Tk.CHAR_WIDTH, h = box.h}, text[start:], false);
-                if active {
-                    x := inner_x + UTF.Count(text[start:it.cursor]) * Tk.CHAR_WIDTH;
-                    Fill(*canvas, .{x = x, y = box.y+4, w = 1, h = box.h-8}, LETTER);
-                }
-            }
+            DrawEntry(*canvas, it, it_index == Tk.focused);
             continue;
         }
         if it.kind == Tk.BUTTON {

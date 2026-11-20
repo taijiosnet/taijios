@@ -112,10 +112,16 @@ def exercise(env, invocation, *, hosted):
         def running(image):
             return image.getpixel((100, 47)) == (224, 234, 242)
 
-        def rows(count):
+        def thumb(image):
+            left = geometry.scrollbar - 2
+            return image.crop((left, top+17, left+5, bottom-17)).tobytes()
+
+        def rows(count, previous_thumb=None):
             def displayed():
                 image = capture()
                 if hosted and running(image):
+                    return None
+                if previous_thumb is not None and thumb(image) == previous_thumb:
                     return None
                 bands = row_bands(image, geometry)
                 return (image, bands) if len(bands) >= count else None
@@ -146,16 +152,16 @@ def exercise(env, invocation, *, hosted):
         order("32")
         # Fill beyond the viewport and force the app to follow the newest results.
         visible = 7 if hosted else 8
-        for index in range(added+1, visible+5):
-            click(*geometry.run)
-            rows(min(index, visible))
-
         at_tail = capture()
+        for index in range(added+1, visible+5):
+            # Once the viewport fills, a row count alone can match the previous frame.
+            previous_thumb = thumb(at_tail) if index > visible else None
+            click(*geometry.run)
+            at_tail, _ = rows(min(index, visible), previous_thumb)
+
         assert at_tail.crop((left, first_bands[0][0], right, first_bands[0][1]+1)).tobytes() != first_text
         click(geometry.scrollbar, top+5)
-        after_arrow = capture()
-        assert after_arrow.crop((geometry.scrollbar-2, top+17, geometry.scrollbar+3, bottom-17)).tobytes() != \
-               at_tail.crop((geometry.scrollbar-2, top+17, geometry.scrollbar+3, bottom-17)).tobytes(), "scrollbar did not move by a row"
+        until(lambda: thumb(capture()) != thumb(at_tail), "scrollbar did not move by a row")
         thumb_y = bottom-39
         mouse(geometry.scrollbar, thumb_y, "mousedown", "1", "sleep", "0.1", "mousemove", "--window", win,
               str(geometry.scrollbar), str(top+22), "sleep", "0.1", "mouseup", "1")
