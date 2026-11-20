@@ -1,0 +1,84 @@
+// Read the shipped compressed m8 and k1 Coffee art from the guest namespace.
+// The block format and palette follow Inferno libmemdraw/cread.c, cload.c,
+// and libdraw/rgb.c. See ../../../NOTICE (MIT).
+#import "std/vec"
+using Files :: #import "taijios_files"
+using T :: #import "tcl_types"
+
+Image :: struct { pixels: Vec(u8); width: s32; height: s32; }
+
+DecodeBlock :: (input: string, pixels: []u8, row_bytes: s64) -> bool {
+    src: s64;
+    dst: s64;
+    while src < input.count && dst < pixels.count {
+        control := cast(s64)input[src];
+        src += 1;
+        if control >= 128 {
+            length := control - 127;
+            if length > input.count-src || length > row_bytes-dst%row_bytes { return false }
+            for i: 0..length-1 { pixels[dst+i] = input[src+i] }
+            src += length;
+            dst += length;
+        } else {
+            if src == input.count { return false }
+            distance := (control & 3)*256 + cast(s64)input[src] + 1;
+            length := (control >> 2) + 3;
+            if distance > dst || length > row_bytes-dst%row_bytes { return false }
+            for i: 0..length-1 { pixels[dst+i] = pixels[dst+i-distance] }
+            src += 1;
+            dst += length;
+        }
+    }
+    return src == input.count && dst == pixels.count;
+}
+
+Load :: (path: string, mask: bool, image: *Image) -> bool {
+    file: Text;
+    if Files.ReadFile(path, *file, 1048576) != 0 { return false }
+    bytes := TextView(file);
+    if bytes.count < 71 || bytes[:11] != "compressed\n" { return false }
+    channel := ifx mask then "         k1 " else "         m8 ";
+    if bytes[11:23] != channel { return false }
+    x, x_ok := T.ParseInteger(bytes[23:35]);
+    y, y_ok := T.ParseInteger(bytes[35:47]);
+    width, w_ok := T.ParseInteger(bytes[47:59]);
+    height, h_ok := T.ParseInteger(bytes[59:71]);
+    if !x_ok || !y_ok || !w_ok || !h_ok || x != 0 || y != 0 || width < 1 || width > 400 || height < 1 || height > 300 { return false }
+    pitch := ifx mask then (width+7)/8 else width;
+    if !VecResizeBounded(image.pixels, pitch * height, 120000) { return false }
+    row: s64;
+    cursor: s64 = 71;
+    while row < height {
+        if bytes.count-cursor < 24 { return false }
+        end, y_valid := T.ParseInteger(bytes[cursor:cursor+12]);
+        size, size_valid := T.ParseInteger(bytes[cursor+12:cursor+24]);
+        cursor += 24;
+        if !y_valid || !size_valid || end <= row || end > height || size < 1 || size > bytes.count-cursor { return false }
+        if !DecodeBlock(bytes[cursor:cursor+size], VecSlice(image.pixels, row*pitch, end*pitch), pitch) { return false }
+        cursor += size;
+        row = end;
+    }
+    image.width = cast(s32)width;
+    image.height = cast(s32)height;
+    return cursor == bytes.count;
+}
+
+// RGBA byte order on the hosted Linux/386 surface.
+Color :: (index: s32) -> u32 {
+    red := index >> 6;
+    v := (index >> 4) & 3;
+    j := (index - v + red) & 15;
+    green := j >> 2;
+    blue := j & 3;
+    maximum := red;
+    if green > maximum { maximum = green }
+    if blue > maximum { maximum = blue }
+    if maximum == 0 { red = 17*v; green = red; blue = red }
+    else {
+        value := 17 * (4*maximum + v);
+        red = red * value / maximum;
+        green = green * value / maximum;
+        blue = blue * value / maximum;
+    }
+    return cast(u32)(red | (green << 8) | (blue << 16)) | 0xff000000;
+}

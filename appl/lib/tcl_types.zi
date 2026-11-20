@@ -38,6 +38,42 @@ NameByte :: (byte: u8) -> bool {
     return Digit(byte) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
 }
 
+NextCharacter :: (text: string, at: s64) -> s64 {
+    if at >= text.count { return text.count }
+    first := text[at];
+    width: s64 = 1;
+    if first >= 194 && first <= 223 { width = 2 }
+    else if first >= 224 && first <= 239 { width = 3 }
+    else if first >= 240 && first <= 244 { width = 4 }
+    if at+width > text.count { return at+1 }
+    for i: at+1..at+width-1 { if (text[i] & 192) != 128 { return at+1 } }
+    return at+width;
+}
+
+CharacterOffset :: (text: string, count: s64) -> s64 {
+    at: s64;
+    while count > 0 && at < text.count { at = NextCharacter(text, at); count -= 1 }
+    return at;
+}
+
+CharacterCount :: (text: string) -> s64 {
+    at: s64;
+    count: s64;
+    while at < text.count { at = NextCharacter(text, at); count += 1 }
+    return count;
+}
+
+CompareText :: (left: string, right: string) -> s64 {
+    common := ifx left.count < right.count then left.count else right.count;
+    for 0..common-1 {
+        if left[it] < right[it] { return -1 }
+        if left[it] > right[it] { return 1 }
+    }
+    if left.count < right.count { return -1 }
+    if left.count > right.count { return 1 }
+    return 0;
+}
+
 // The legacy interpreter's int is signed 32-bit. Wider intermediates let us
 // detect overflow before returning an expression result.
 INT_MIN :: -2147483648;
@@ -75,6 +111,17 @@ Take :: (cursor: *Cursor) -> u8 {
     byte := Peek(cursor);
     cursor.at += 1;
     return byte;
+}
+
+WordIn :: (words: string, target: string) -> bool {
+    at: s64;
+    while at < words.count {
+        start := at;
+        while at < words.count && words[at] != 32 { at += 1 }
+        if start < at && words[start:at] == target { return true }
+        at += 1;
+    }
+    return false;
 }
 
 ContinuesLine :: (cursor: *Cursor) -> bool {

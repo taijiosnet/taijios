@@ -212,6 +212,11 @@ SYSMODULES=\
 	workdir.m\
 
 DISBIN=$ROOT/dis
+ZXLIB=$ROOT/appl/lib
+TCLZX=$ZXLIB/tcl.zi $ZXLIB/tcl_calc.zi $ZXLIB/tcl_lists.zi $ZXLIB/tcl_strings.zi $ZXLIB/tcl_types.zi $ZXLIB/tcl_variables.zi
+TKZX=$ZXLIB/tcl_tk.zi $ZXLIB/tcl_tk_paint.zi $ZXLIB/tcl_tk_scale.zi $ZXLIB/tcl_tk_text.zi $ZXLIB/tcl_tk_view.zi
+COFFEEFRAMES=0 1 2 3 4 5
+COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
@@ -225,6 +230,29 @@ import.dis:	$MODDIR/encoding.m $MODDIR/factotum.m
 basename.dis: $MODDIR/names.m
 cleanname.dis: $MODDIR/names.m
 zxrun.dis: $MODDIR/zx.m $MODDIR/wmclient.m $MODDIR/timers.m $MODDIR/keyboard.m
+cat.zx: cat.zi taijios_args.zi taijios_io.zi
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry cat:main -o $target cat.zi
+
+tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi $TCLZX
+	zi2zx --root . --module-path $ZXLIB --bind-host taijios_stdin --bind-host taijios_files --entry tclsh_stdin:main -o $target tclsh_stdin.zi
+
+coffee.zx: tcltk/coffee_app.zi tcltk/coffee_art.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi taijios_stdin.zi $TCLZX $TKZX
+	zi2zx --root tcltk --module-path $ZXLIB --module-path . --bind-host zx_surface --bind-host taijios_files --entry coffee_app:main -o $target tcltk/coffee_app.zi
+
+install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx
+install-cat-zx:V: $DISBIN/cat.zx
+install-tclsh-zx:V: $DISBIN/tclsh.zx
+install-coffee-zx:V: $DISBIN/coffee.zx tcltk/coffee.tcl $COFFEEART
+
+$DISBIN/cat.zx: cat.zx
+$DISBIN/tclsh.zx: tclsh.zx
+$DISBIN/coffee.zx: coffee.zx
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 "$stem.zx" "$staged" && mv "$staged" "$target"
+
 vacfs.dis:	$MODDIR/vac.m $MODDIR/venti.m
 vacget.dis:	$MODDIR/vac.m $MODDIR/venti.m
 vacput.dis:	$MODDIR/vac.m $MODDIR/venti.m

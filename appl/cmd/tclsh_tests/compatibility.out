@@ -1,0 +1,14 @@
+concat=<one two  three four>
+linsert=one {four five} two three
+lreplace=one {four five} three
+lsearch=1
+lsort=two three six one four five
+split=<a {} b {}>
+splitdefault=< a  b >
+string=<4>:<é>:<ab>:<café>
+format=<hi>:<0f>:<007>
+global=8:8
+info=value:1:0:yes
+switch=bc
+array=2:7:7:1:0
+keys=other word

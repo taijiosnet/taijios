@@ -17,6 +17,7 @@ ROOT = SOURCES.parents[2]
 BUILD = ROOT / "build/tcltk"
 EMU = ROOT / "Linux/386/bin/emu"
 BACKGROUND = (244, 246, 247)
+COFFEE_RESULTS = (".range", "0", "2.5", "-1.5", "horizontal", "0.5", "-4", "5", ".image", "3", "flat")
 
 
 def command(*args, **options):
@@ -55,9 +56,9 @@ def launch(env, *args, **options):
     return subprocess.Popen(args, cwd=ROOT, env=env, start_new_session=True, **options)
 
 
-def reference(env):
+def reference(env, fixture="tk_commands.tcl", expected=None):
     app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c",
-                 "tkcmd < /appl/cmd/tcltk/tk_commands.tcl", stdin=subprocess.DEVNULL,
+                 f"tkcmd < /appl/cmd/tcltk/{fixture}", stdin=subprocess.DEVNULL,
                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = bytearray()
 
@@ -69,7 +70,9 @@ def reference(env):
             output.extend(data)
         assert len(output) < 8192, "unexpected Inferno Tk transcript size"
         values = output.splitlines()
-        return all(f"#{expected}".encode() in values for expected in
+        if expected is not None:
+            return values == [f"#{value}".encode() for value in expected]
+        return all(f"#{value}".encode() in values for value in
                    ("9 balls", "4", "2", "aßéz", ".f.input.e", "1.11", "1.0"))
 
     try:
@@ -80,7 +83,10 @@ def reference(env):
         stop(app)
         app.stdout.close()
         app.stderr.close()
-    print("Inferno Tk and the portable model agree on buttons, UTF-8 entry indexes, focus, and two-way text search")
+    if expected is None:
+        print("Inferno Tk and the portable model agree on buttons, UTF-8 entry indexes, focus, and two-way text search")
+    else:
+        print("Inferno Tk and the portable model agree on scale values, reverse ranges, and panel commands")
 
 
 def interaction(env, image, script, exercise, *, size=(300, 208)):
@@ -321,31 +327,130 @@ def file_and_manual_probe(env):
     print(expected.splitlines()[0])
 
 
+def coffee_window(env, run, *, native):
+    # Window coordinates on each fresh 800x600 Inferno desktop. The ports
+    # share the artwork but use their respective Tk widget metrics.
+    if native:
+        art = (25, 94, 425, 394)
+        button = (29, 43, 107, 79)
+        sliders = ((123, 54, 209, 72), (225, 54, 311, 72), (327, 54, 413, 72))
+        thumbs = (148, 261, 350)
+        close_x = 438
+    else:
+        art = (4, 50, 404, 350)
+        button = (2, 25, 42, 43)
+        close_x = 396
+    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c", run,
+                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        window = until(lambda: command("xdotool", "search", "--onlyvisible", "--name", "^inferno$",
+                                       env=env, capture_output=True, text=True).stdout.strip(),
+                       "Coffee emulator did not map")
+
+        def capture():
+            readable, _, _ = select.select([app.stderr], [], [], 0)
+            if readable:
+                errors = os.read(app.stderr.fileno(), 2048)
+                assert not errors, errors.decode(errors="replace")
+            shot = command("import", "-window", window, "png:-", env=env, capture_output=True, check=True)
+            return Image.open(io.BytesIO(shot.stdout)).convert("RGB")
+
+        def pointer(x, y, *actions):
+            command("xdotool", "mousemove", "--sync", "--window", window, str(x), str(y), *actions,
+                    env=env, check=True)
+
+        def click(x, y):
+            pointer(x, y, "mousedown", "1", "sleep", "0.10", "mouseup", "1")
+
+        def frame():
+            return capture().crop(art)
+
+        def difference(a, b):
+            return ImageChops.difference(a, b).getbbox()
+
+        def artwork():
+            image = frame()
+            colors = image.getcolors(256)
+            return image if colors is None or len(colors) > 32 else None
+
+        first = until(artwork, "Coffee artwork did not render")
+        until(lambda: difference(first, frame()), "Coffee cups did not move")
+        stop_button = capture().crop(button)
+        x, y = (button[0]+button[2])//2, (button[1]+button[3])//2
+        click(x, y)
+        until(lambda: difference(stop_button, capture().crop(button)), "Stop did not change to Go")
+        still = frame()
+        time.sleep(0.3)
+        assert not difference(still, frame()), "the cups moved while paused"
+
+        if native:
+            for slider, thumb in zip(sliders, thumbs, strict=True):
+                _, top, right, bottom = slider
+                middle = (top+bottom)//2
+                before = capture().crop(slider)
+                pointer(thumb, middle, "mousedown", "1")
+                pointer(right-5, middle)
+                until(lambda: capture().getpixel((right-12, middle)) == (188, 213, 231),
+                      "slider thumb did not follow the pointer before release")
+                pointer(right-5, middle, "mouseup", "1")
+                until(lambda: difference(before, capture().crop(slider)), "slider did not retain its new position")
+                assert not difference(still, frame()), "a scale callback resumed the paused animation"
+
+        click(x, y)
+        until(lambda: difference(still, frame()), "Go did not resume the animation")
+        click(close_x, 12)
+        until(lambda: capture().getpixel((art[0], art[1])) == (119, 119, 119), "Coffee did not close")
+        if native:
+            def success():
+                readable, _, _ = select.select([app.stdout], [], [], 0)
+                return readable and os.read(app.stdout.fileno(), 128).splitlines() == [b"0"]
+
+            until(success, "zxrun did not report clean closure")
+        # No cup reaches both edges of the ellipse at its corners.
+        return still.crop((0, 0, 24, 20))
+    finally:
+        stop(app)
+        app.stdout.close()
+        app.stderr.close()
+
+
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--installed", action="store_true", help="exercise /dis/tcltk.zx and /dis/man.zx")
+    cli.add_argument("--installed", action="store_true", help="exercise installed guest images")
+    cli.add_argument("--coffee-only", action="store_true", help="run the Coffee and widget compatibility tests")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     model = BUILD / "tcltk_model_test.zx"
     fixture = (SOURCES / "tk_commands.tcl").read_text()
-    (BUILD / "tcltk_input.zi").write_text(f"Script :: #string TCLTK_SCRIPT_END\n{fixture}TCLTK_SCRIPT_END;\n")
+    coffee_fixture = (SOURCES / "coffee_commands.tcl").read_text()
+    (BUILD / "tcltk_input.zi").write_text(
+        f"Script :: #string TCLTK_SCRIPT_END\n{fixture}TCLTK_SCRIPT_END;\n"
+        f"CoffeeCommands :: #string COFFEE_COMMANDS_END\n{coffee_fixture}COFFEE_COMMANDS_END;\n"
+    )
     compile_image("tcltk_model_test", model)
     portable = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
-    assert portable.stdout == ".f.input.e\naßéz\n0\n" and portable.stderr == "", (portable.stdout, portable.stderr)
+    assert portable.stdout.splitlines() == [".f.input.e", "aßéz", *COFFEE_RESULTS, "0"] and not portable.stderr, (
+        portable.stdout, portable.stderr
+    )
+    coffee = (ROOT / "dis" if args.installed else BUILD) / "coffee.zx"
     if args.installed:
         image = ROOT / "dis/tcltk.zx"
         manual = ROOT / "dis/man.zx"
     else:
         image = BUILD / "tcltk.zx"
-        compile_image("tcltk", image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin")
+        if not args.coffee_only:
+            compile_image("tcltk", image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin")
         manual = BUILD / "man.zx"
-        compile_image("man_app", manual, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
+        if not args.coffee_only:
+            compile_image("man_app", manual, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
+        compile_image("coffee_app", coffee, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
 
     env = os.environ.copy()
     for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"):
         env.pop(key, None)
     env["HARMONY_DESKTOP_RECOVERY"] = "0"
-    file_and_manual_probe(env)
+    if not args.coffee_only:
+        file_and_manual_probe(env)
     read_fd, write_fd = os.pipe()
     server = launch(env, "Xvfb", "-displayfd", str(write_fd), "-screen", "0", "1024x768x24",
                     "-nolisten", "tcp", pass_fds=(write_fd,))
@@ -356,13 +461,20 @@ def main():
         display = os.read(read_fd, 32).decode().strip()
         assert display.isdecimal(), f"invalid Xvfb display {display!r}"
         env["DISPLAY"] = f":{display}"
-        reference(env)
-        interaction(env, image, SOURCES / "bounce_controls.tcl", bounce)
-        print("Hosted Tk loaded Bounce from guest stdin and verified clicks, redraw and closure")
-        interaction(env, image, SOURCES / "entry_test.tcl", entry_widget)
-        print("Hosted Tk verified nested layout, UTF-8 editing and submission")
-        interaction(env, manual, None, manual_browser, size=(500, 420))
-        print("Hosted Man verified manual references, text search, missing-result recovery, history and scroll restoration")
+        reference(env, "coffee_commands.tcl", COFFEE_RESULTS)
+        legacy_art = coffee_window(env, "wm/coffee", native=False)
+        hosted_art = coffee_window(env, f"zxrun -w /{coffee.relative_to(ROOT)}", native=True)
+        assert ImageChops.difference(legacy_art, hosted_art).getbbox() is None, "Coffee artwork colors differ from Dis"
+        print("Infernal Coffee Dis and ZX verified animation, Stop/Go, matching artwork, and closure")
+        print("Hosted Coffee verified all three slider drags and frozen pixels while paused")
+        if not args.coffee_only:
+            reference(env)
+            interaction(env, image, SOURCES / "bounce_controls.tcl", bounce)
+            print("Hosted Tk loaded Bounce from guest stdin and verified clicks, redraw and closure")
+            interaction(env, image, SOURCES / "entry_test.tcl", entry_widget)
+            print("Hosted Tk verified nested layout, UTF-8 editing and submission")
+            interaction(env, manual, None, manual_browser, size=(500, 420))
+            print("Hosted Man verified manual references, text search, missing-result recovery, history and scroll restoration")
     finally:
         os.close(read_fd)
         stop(server)

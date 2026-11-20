@@ -13,9 +13,11 @@ SurfaceEvent :: struct {
     text: string;
 }
 
+Idle :: 0;
 Closed :: 1;
 Redraw :: 2;
 Resize :: 3;
+Move :: 4;
 Down :: 5;
 Up :: 6;
 Key :: 7;

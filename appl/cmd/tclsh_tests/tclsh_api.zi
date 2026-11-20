@@ -13,6 +13,15 @@ WidgetProbe :: (context: s64, args: []Text, result: *Types.Result) {
     unused BuilderAppend(result.value.bytes, "extension called");
 }
 
+LoadFixture :: (context: s64, path: string, result: *Types.Result) {
+    if context == 37 && path == "fixture.tcl" {
+        unused BuilderAppend(result.value.bytes, "incr value 3");
+        return;
+    }
+    result.code = .Error;
+    unused BuilderAppend(result.value.bytes, "fixture not found");
+}
+
 main :: () -> s32 {
     tcl: Tcl.Interpreter;
     other: Tcl.Interpreter;
@@ -37,6 +46,13 @@ main :: () -> s32 {
     if next.code != .OK || TextView(next.value) != ".widget" { return 10 }
     removed := Tcl.Eval(*tcl, "set x a; set y b; unset x; set y");
     if removed.code != .OK || TextView(removed.value) != "b" { return 11 }
+    Tcl.SetSourceLoader(*tcl, LoadFixture, 37);
+    sourced := Tcl.Eval(*tcl, "proc add {value} {source fixture.tcl; return $value}; add 5");
+    if sourced.code != .OK || TextView(sourced.value) != "8" { return 12 }
+    unavailable := Tcl.Eval(*tcl, "source unknown.tcl");
+    if unavailable.code != .Error || TextView(unavailable.value) != "fixture not found" { return 13 }
+    unconfigured := Tcl.Eval(*other, "source fixture.tcl");
+    if unconfigured.code != .Error || TextView(unconfigured.value) != "source requires a script loader" { return 14 }
     print("Tcl API OK\n");
     return 0;
 }

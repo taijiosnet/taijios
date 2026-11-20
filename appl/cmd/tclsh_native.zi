@@ -4,9 +4,21 @@
 #import "std/stdio_linux"
 #import "std/file"
 using Tcl :: #import "tcl"
+using Types :: #import "tcl_types"
+
+LoadScript :: (context: s64, path: string, result: *Types.Result) {
+    script, ok := ReadEntireFile(path);
+    if ok && script.count <= 1048576 {
+        if BuilderAppend(result.value.bytes, script) { return }
+    }
+    failure := Types.QuotedError("could not read Tcl script \"", path, "\"");
+    result.code = failure.code;
+    VecSwap(result.value.bytes, failure.value.bytes);
+}
 
 Run :: (script: string) -> s32 {
     interpreter: Tcl.Interpreter;
+    Tcl.SetSourceLoader(*interpreter, LoadScript);
     result := Tcl.Eval(*interpreter, script);
     output: Text = Tcl.TakeOutput(*interpreter);
     WriteOutput(TextView(output));

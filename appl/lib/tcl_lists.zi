@@ -86,20 +86,99 @@ Index :: (word: string, length: s64) -> (index: s64, valid: bool) {
     return number, ok;
 }
 
+LIST_COMMANDS :: "concat join lindex linsert list llength lrange lreplace lsearch lsort split";
+
+IsListCommand :: (name: string) -> bool { return WordIn(LIST_COMMANDS, name) }
+
+AppendWords :: (output: *Text, words: []Text) {
+    for 0..words.count-1 { AppendElement(*output.bytes, TextView(words[it]), output.bytes.count > 0) }
+}
+
+Split :: (args: []Text) -> Result {
+    if args.count < 1 || args.count > 2 { return WrongArgs("split string ?splitChars?") }
+    source := TextView(args[0]);
+    if args.count == 1 { return Success(source) } // Inferno's default form preserves the input.
+    separators := TextView(args[1]);
+    result: Text;
+    start: s64;
+    at: s64;
+    while at < source.count {
+        next := NextCharacter(source, at);
+        if separators == "" { AppendElement(*result.bytes, source[at:next], at > 0) }
+        else {
+            separator: s64;
+            while separator < separators.count {
+                after := NextCharacter(separators, separator);
+                if source[at:next] == separators[separator:after] {
+                    AppendElement(*result.bytes, source[start:at], result.bytes.count > 0);
+                    start = next;
+                    break;
+                }
+                separator = after;
+            }
+        }
+        at = next;
+    }
+    if separators != "" && source != "" { AppendElement(*result.bytes, source[start:], result.bytes.count > 0) }
+    return .{value = result};
+}
+
+Sort :: (args: []Text) -> Result {
+    if args.count < 1 || args.count > 2 { return WrongArgs("lsort ?-decreasing? list") }
+    if args.count == 2 && TextView(args[0]) != "-decreasing" { return Failure("unsupported lsort option") }
+    descending := args.count == 2;
+    parsed := ParseList(TextView(args[args.count-1]));
+    if parsed.problem != "" { return Failure(parsed.problem) }
+    words := VecSlice(parsed.words, 0, parsed.words.count);
+    gap := words.count;
+    while gap > 1 {
+        gap = ifx gap < 5 then 1 else (5*gap-1)/11;
+        for i: gap..words.count-1 {
+            at := i;
+            while at >= gap {
+                order := CompareText(TextView(words[at-gap]), TextView(words[at]));
+                if (descending && order >= 0) || (!descending && order <= 0) { break }
+                VecSwap(words[at-gap].bytes, words[at].bytes);
+                at -= gap;
+            }
+        }
+    }
+    result: Text;
+    AppendWords(*result, words);
+    return .{value = result};
+}
+
 RunList :: (name: string, args: []Text) -> Result {
     if name == "list" {
         result: Text;
         for 0..args.count-1 { AppendElement(*result.bytes, TextView(args[it]), it > 0) }
         return .{value = result};
     }
+    if name == "concat" {
+        result: Text;
+        for i: 0..args.count-1 {
+            if i > 0 { unused VecPush(result.bytes, cast(u8)32) }
+            unused BuilderAppend(result.bytes, TextView(args[i]));
+        }
+        return .{value = result};
+    }
+    if name == "split" { return Split(args) }
+    if name == "lsort" { return Sort(args) }
     if name == "join" && (args.count < 1 || args.count > 2) { return WrongArgs("join list ?joinString?") }
     if name == "llength" && args.count != 1 { return WrongArgs("llength list") }
     if name == "lindex" && args.count != 2 { return WrongArgs("lindex list index") }
     if name == "lrange" && args.count != 3 { return WrongArgs("lrange list first last") }
+    if name == "linsert" && args.count < 3 { return WrongArgs("linsert list index element ?element ...?") }
+    if name == "lreplace" && args.count < 3 { return WrongArgs("lreplace list first last ?element ...?") }
+    if name == "lsearch" && args.count != 2 { return WrongArgs("lsearch list pattern") }
     parsed := ParseList(TextView(args[0]));
     if parsed.problem != "" { return Failure(parsed.problem) }
     length := parsed.words.count;
     if name == "llength" { return Integer(length) }
+    if name == "lsearch" {
+        for 0..length-1 { if TextView(parsed.words[it]) == TextView(args[1]) { return Integer(it) } }
+        return Integer(-1);
+    }
     if name == "join" {
         result: Text;
         separator: string = " ";
@@ -116,9 +195,30 @@ RunList :: (name: string, args: []Text) -> Result {
         if first < 0 || first >= length { return Success() }
         return Success(TextView(parsed.words[first]));
     }
+    if first < 0 { first = 0 }
+    if name == "linsert" {
+        if first > length || TextView(args[1]) == "end" { first = length }
+        result: Text;
+        words := VecSlice(parsed.words, 0, length);
+        AppendWords(*result, words[:first]);
+        AppendWords(*result, args[2:]);
+        AppendWords(*result, words[first:]);
+        return .{value = result};
+    }
     last, valid_last := Index(TextView(args[2]), length);
     if !valid_last { return Failure("bad list index") }
-    if first < 0 { first = 0 }
+    if name == "lreplace" {
+        if last < 0 { return Success() }
+        if first > last { return Failure("first index must not be greater than second") }
+        if first > length { return Failure("list doesn't contain the first element") }
+        if last >= length { last = length-1 }
+        result: Text;
+        words := VecSlice(parsed.words, 0, length);
+        AppendWords(*result, words[:first]);
+        AppendWords(*result, args[3:]);
+        AppendWords(*result, words[last+1:]);
+        return .{value = result};
+    }
     if last >= length { last = length - 1 }
     result: Text;
     for first..last { AppendElement(*result.bytes, TextView(parsed.words[it]), it > first) }

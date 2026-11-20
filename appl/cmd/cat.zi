@@ -1,0 +1,50 @@
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+
+Diagnostic :: (prefix: string, path: string, include_path: bool) {
+    problem := Io.LastError();
+    unused Io.WriteBytes(2, prefix);
+    if include_path {
+        unused Io.WriteBytes(2, path);
+        unused Io.WriteBytes(2, ": ");
+    }
+    unused Io.WriteBytes(2, problem);
+    unused Io.WriteBytes(2, "\n");
+}
+
+Copy :: (handle: s32, file: string) -> s32 {
+    buffer: [8192]u8;
+    while true {
+        count := Io.ReadBytes(handle, buffer[:]);
+        if count < 0 {
+            Diagnostic("cat: error reading ", file, true);
+            return 1;
+        }
+        if count == 0 { return 0 }
+        if Io.WriteBytes(1, TextView(buffer[:count])) < count {
+            Diagnostic("cat: write error: ", "", false);
+            return 1;
+        }
+    }
+}
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 { return Copy(0, "<stdin>") }
+    for i: 0..count-1 {
+        path := Args.Operand(cast(s32)i);
+        if path == "-" {
+            if Copy(0, "<stdin>") != 0 { return 1 }
+        } else {
+            handle := Io.OpenFile(path, 0);
+            if handle < 0 {
+                Diagnostic("cat: cannot open ", path, true);
+                return 1;
+            }
+            status := Copy(handle, path);
+            unused Io.CloseFile(handle);
+            if status != 0 { return status }
+        }
+    }
+    return 0;
+}

@@ -5,8 +5,7 @@ using L :: #import "tcl_lists"
 using C :: #import "tcl_calc"
 using S :: #import "tcl_strings"
 
-Variable :: struct { name: Text; value: Text; }
-Frame :: struct { variables: Vec(Variable); }
+#import "tcl_variables"
 Parameter :: struct { name: Text; fallback: Text; optional: bool; }
 Procedure :: struct { name: Text; parameters: Vec(Parameter); body: Text; variadic: bool; }
 
@@ -20,11 +19,15 @@ Extension :: struct { name: Text; context: s64; handler: CommandHandler; }
 PrefixHandler :: #type (context: s64, name: string, args: []Text, result: *Result, script: *Text) -> void;
 CommandPrefix :: struct { name: Text; context: s64; handler: PrefixHandler; }
 
+SourceLoader :: #type (context: s64, path: string, result: *Result) -> void;
+
 Interpreter :: struct {
     globals: Frame;
     procedures: Vec(Procedure);
     extensions: Vec(Extension);
     prefixes: Vec(CommandPrefix);
+    source_loader: SourceLoader;
+    source_context: s64;
     output: Text;
     steps: s64;
 }
@@ -42,6 +45,11 @@ TakeOutput :: (interpreter: *Interpreter) -> Text {
     result: Text;
     VecSwap(result.bytes, interpreter.output.bytes);
     return result;
+}
+
+SetSourceLoader :: (interpreter: *Interpreter, loader: SourceLoader, context: s64 = 0) {
+    interpreter.source_loader = loader;
+    interpreter.source_context = context;
 }
 
 RegisterCommand :: (interpreter: *Interpreter, name: string, handler: CommandHandler, context: s64 = 0) -> bool {
@@ -71,66 +79,12 @@ CopyResult :: (result: *Result) -> Result {
     return .{code = result.code, value = TextCopy(TextView(result.value))};
 }
 
-IsListCommand :: (name: string) -> bool {
-    return name == "list" || name == "llength" || name == "lindex" || name == "lrange" || name == "join";
-}
+CORE_COMMANDS :: "append array break calc catch continue error eval expr for foreach format global if incr info lappend level proc puts return set source string switch unset uplevel upvar while";
 
-IsBuiltin :: (name: string) -> bool {
-    return IsListCommand(name) || name == "set" || name == "unset" || name == "incr" ||
-        name == "append" || name == "lappend" || name == "proc" || name == "if" || name == "while" ||
-        name == "for" || name == "foreach" || name == "catch" || name == "eval" || name == "error" ||
-        name == "return" || name == "break" || name == "continue" || name == "puts" ||
-        name == "expr" || name == "calc" || name == "string";
-}
+IsBuiltin :: (name: string) -> bool { return IsListCommand(name) || WordIn(CORE_COMMANDS, name) }
 
-ScalarName :: (name: string) -> bool {
-    if name.count > 0 && name[name.count-1] == 41 {
-        for name { if it == 40 { return false } }
-    }
-    for 1..name.count-1 { if name[it-1] == 58 && name[it] == 58 { return false } }
-    return true;
-}
-
-FindVariable :: (frame: *Frame, name: string) -> s64 {
-    for * frame.variables { if TextView(it.name) == name { return it_index } }
-    return -1;
-}
-
-ReadVariable :: (frame: *Frame, name: string) -> Result {
-    if !ScalarName(name) { return Failure("array and namespace variables are unsupported") }
-    index := FindVariable(frame, name);
-    if index >= 0 { return Success(TextView(frame.variables[index].value)) }
-    return QuotedError("can't read \"", name, "\": no such variable");
-}
-
-StoreVariable :: (frame: *Frame, name: string, value: string) -> Result {
-    if !ScalarName(name) { return Failure("array and namespace variables are unsupported") }
-    index := FindVariable(frame, name);
-    if index >= 0 {
-        copy: Text = TextCopy(value);
-        VecSwap(frame.variables[index].value.bytes, copy.bytes);
-    } else if !VecPush(frame.variables, Variable.{name = TextCopy(name), value = TextCopy(value)}) {
-        return Failure("cannot allocate variable");
-    }
-    return Success(value);
-}
-
-RemoveVariable :: (frame: *Frame, name: string) -> Result {
-    if !ScalarName(name) { return Failure("array and namespace variables are unsupported") }
-    index := FindVariable(frame, name);
-    if index < 0 {
-        return QuotedError("can't unset \"", name, "\": no such variable");
-    }
-    last := frame.variables.count - 1;
-    if index != last {
-        VecSwap(frame.variables[index].name.bytes, frame.variables[last].name.bytes);
-        VecSwap(frame.variables[index].value.bytes, frame.variables[last].value.bytes);
-    }
-    unused VecResize(frame.variables, last);
-    return Success();
-}
-
-VariableSubstitution :: (frame: *Frame, cursor: *Cursor) -> Result {
+VariableSubstitution :: (interpreter: *Interpreter, frame: *Frame, cursor: *Cursor, depth: s32) -> Result {
+    if depth > 48 { return Failure("script nesting limit exceeded") }
     cursor.at += 1;
     if Has(cursor) && Peek(cursor) == 123 {
         cursor.at += 1;
@@ -150,8 +104,23 @@ VariableSubstitution :: (frame: *Frame, cursor: *Cursor) -> Result {
         break;
     }
     if start == cursor.at { return Success("$") }
-    if Has(cursor) && Peek(cursor) == 40 { return Failure("array variables are unsupported") }
-    return ReadVariable(frame, cursor.text[start:cursor.at]);
+    if !Has(cursor) || Peek(cursor) != 40 { return ReadVariable(frame, cursor.text[start:cursor.at]) }
+    cursor.at += 1;
+    name: Text = TextCopy(cursor.text[start:cursor.at]);
+    nesting: s64 = 1;
+    while Has(cursor) {
+        byte := Peek(cursor);
+        if byte == 40 { nesting += 1 }
+        if byte == 41 { nesting -= 1 }
+        if nesting == 0 {
+            cursor.at += 1;
+            unused VecPush(name.bytes, cast(u8)41);
+            return ReadVariable(frame, TextView(name));
+        }
+        part := Substitute(interpreter, frame, cursor, depth + 1, *name.bytes);
+        if part.code != .OK { return part }
+    }
+    return Failure("missing close-parenthesis for variable name");
 }
 
 AtEnd :: (cursor: *Cursor, nested: bool) -> bool {
@@ -208,7 +177,7 @@ Substitute :: (interpreter: *Interpreter, frame: *Frame, cursor: *Cursor, depth:
 }
 
 SubstitutionValue :: (interpreter: *Interpreter, frame: *Frame, cursor: *Cursor, depth: s32) -> Result {
-    if Peek(cursor) == 36 { return VariableSubstitution(frame, cursor) }
+    if Peek(cursor) == 36 { return VariableSubstitution(interpreter, frame, cursor, depth) }
     cursor.at += 1;
     return EvalCursor(interpreter, frame, cursor, depth + 1, true);
 }
@@ -319,8 +288,8 @@ DefineProcedure :: (interpreter: *Interpreter, args: []Text) -> Result {
     return Success();
 }
 
-CallProcedure :: (interpreter: *Interpreter, index: s64, args: []Text, depth: s32) -> Result {
-    frame: Frame;
+CallProcedure :: (interpreter: *Interpreter, caller: *Frame, index: s64, args: []Text, depth: s32) -> Result {
+    frame := Frame.{parent = caller, level = caller.level+1};
     procedure := *interpreter.procedures[index];
     argc := procedure.parameters.count;
     for 0..argc-1 {
@@ -424,12 +393,12 @@ RunForeach :: (interpreter: *Interpreter, frame: *Frame, args: []Text, depth: s3
 Increment :: (frame: *Frame, args: []Text) -> Result {
     if args.count < 1 || args.count > 2 { return WrongArgs("incr varName ?increment?") }
     name := TextView(args[0]);
-    if !ScalarName(name) { return Failure("array and namespace variables are unsupported") }
-    index := FindVariable(frame, name);
     value: s64;
     delta: s64 = 1;
-    if index >= 0 {
-        parsed, valid := ParseInteger(TextView(frame.variables[index].value));
+    if VariableExists(frame, name) {
+        existing := ReadVariable(frame, name);
+        if existing.code != .OK { return CopyResult(*existing) }
+        parsed, valid := ParseInteger(TextView(existing.value));
         if !valid { return Failure("expected integer variable value") }
         value = parsed;
     }
@@ -449,11 +418,11 @@ AppendVariable :: (frame: *Frame, args: []Text, as_list: bool) -> Result {
         return WrongArgs("append varName ?value ...?");
     }
     name := TextView(args[0]);
-    if !ScalarName(name) { return Failure("array and namespace variables are unsupported") }
-    index := FindVariable(frame, name);
     result: Text;
-    if index >= 0 {
-        existing := TextView(frame.variables[index].value);
+    if VariableExists(frame, name) {
+        read := ReadVariable(frame, name);
+        if read.code != .OK { return CopyResult(*read) }
+        existing := TextView(read.value);
         if as_list {
             items := ParseList(existing);
             if items.problem != "" { return Failure(items.problem) }
@@ -476,11 +445,136 @@ JoinWords :: (args: []Text) -> Text {
     return result;
 }
 
+SelectSwitch :: (interpreter: *Interpreter, frame: *Frame, value: string, pairs: []Text, depth: s32) -> Result {
+    if pairs.count%2 != 0 { return Failure("extra switch pattern with no body") }
+    for i: 0..pairs.count/2-1 {
+        at := i*2;
+        pattern := TextView(pairs[at]);
+        if pattern != value && !(at == pairs.count-2 && pattern == "default") { continue }
+        while at < pairs.count && TextView(pairs[at+1]) == "-" { at += 2 }
+        if at == pairs.count { return Failure("switch fallthrough has no body") }
+        return EvalScript(interpreter, frame, TextView(pairs[at+1]), depth+1);
+    }
+    return Success();
+}
+
+RunSwitch :: (interpreter: *Interpreter, frame: *Frame, args: []Text, depth: s32) -> Result {
+    if args.count < 2 { return WrongArgs("switch string pattern body ... ?default body?") }
+    value := TextView(args[0]);
+    if args.count == 2 {
+        parsed := ParseList(TextView(args[1]));
+        if parsed.problem != "" { return Failure(parsed.problem) }
+        return SelectSwitch(interpreter, frame, value, VecSlice(parsed.words, 0, parsed.words.count), depth);
+    }
+    return SelectSwitch(interpreter, frame, value, args[1:], depth);
+}
+
+RunInfo :: (interpreter: *Interpreter, frame: *Frame, args: []Text) -> Result {
+    if args.count < 1 || args.count > 2 { return WrongArgs("info option ?arg?") }
+    option := TextView(args[0]);
+    if option == "exists" {
+        if args.count != 2 { return WrongArgs("info exists varName") }
+        return Integer(ifx VariableExists(frame, TextView(args[1])) then 1 else 0);
+    }
+    if option == "args" || option == "body" {
+        if args.count != 2 { return WrongArgs("info args|body procname") }
+        name := TextView(args[1]);
+        index := FindProcedure(interpreter, name);
+        if index < 0 { return QuotedError("", name, " isn't a procedure.") }
+        procedure := *interpreter.procedures[index];
+        if option == "body" { return Success(TextView(procedure.body)) }
+        names: Text;
+        for * procedure.parameters { AppendElement(*names.bytes, TextView(it.name), it_index > 0) }
+        if procedure.variadic { AppendElement(*names.bytes, "args", names.bytes.count > 0) }
+        return .{value = names};
+    }
+    if option == "commands" || option == "procs" {
+        // The Limbo optional pattern is accepted but does not filter results.
+        names: Text;
+        if option == "commands" {
+            unused BuilderAppend(names.bytes, CORE_COMMANDS);
+            unused BuilderAppend(names.bytes, " ");
+            unused BuilderAppend(names.bytes, LIST_COMMANDS);
+            for * interpreter.extensions { AppendElement(*names.bytes, TextView(it.name)) }
+        }
+        for * interpreter.procedures { AppendElement(*names.bytes, TextView(it.name), names.bytes.count > 0) }
+        return .{value = names};
+    }
+    return Failure("bad info option: expected args, body, commands, exists or procs");
+}
+
+FrameLevel :: (frame: *Frame, word: string) -> (target: *Frame, is_level: bool) {
+    absolute := word.count > 0 && word[0] == 35;
+    offset := ifx absolute then 1 else 0;
+    amount, valid := ParseInteger(word[offset:]);
+    missing: *Frame;
+    if !valid { return missing, absolute }
+    level := amount;
+    if !absolute { level = frame.level - (ifx amount < 0 then -amount else amount) }
+    if level < 0 || level > frame.level { return missing, true }
+    while frame != null && frame.level > level { frame = frame.parent }
+    return frame, true;
+}
+
+RunFrameCommand :: (interpreter: *Interpreter, frame: *Frame, name: string, args: []Text, depth: s32) -> Result {
+    if name == "global" {
+        if args.count == 0 { return WrongArgs("global varName ?varName ...?") }
+        if frame.level == 0 { return Success() }
+        for i: 0..args.count-1 {
+            variable := TextView(args[i]);
+            linked := LinkVariable(frame, variable, *interpreter.globals, variable);
+            if linked.code != .OK { return linked }
+        }
+        return Success();
+    }
+    if name == "upvar" {
+        if args.count < 2 || args.count > 3 { return WrongArgs("upvar ?level? otherVar localVar") }
+        target := frame.parent;
+        if args.count == 3 { target, _ = FrameLevel(frame, TextView(args[0])) }
+        if target == null { return Failure("bad stack level") }
+        return LinkVariable(frame, TextView(args[args.count-1]), target, TextView(args[args.count-2]));
+    }
+    if args.count == 0 { return WrongArgs("uplevel ?level? command ?arg ...?") }
+    target := frame.parent;
+    start: s64;
+    if args.count > 1 {
+        selected, is_level := FrameLevel(frame, TextView(args[0]));
+        if is_level { target = selected; start = 1 }
+    }
+    if target == null { return Failure("bad stack level") }
+    script: Text = JoinWords(args[start:]);
+    return EvalScript(interpreter, target, TextView(script), depth+1);
+}
+
+RunSource :: (interpreter: *Interpreter, frame: *Frame, args: []Text, depth: s32) -> Result {
+    if args.count != 1 { return WrongArgs("source fileName") }
+    loader := interpreter.source_loader;
+    if loader == null { return Failure("source requires a script loader") }
+    loaded: Result;
+    loader(interpreter.source_context, TextView(args[0]), *loaded);
+    if loaded.code != .OK { return CopyResult(*loaded) }
+    return EvalScript(interpreter, frame, TextView(loaded.value), depth+1);
+}
+
 Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32) -> Result {
     name := TextView(words[0]);
     args := words[1:];
     if IsListCommand(name) { return RunList(name, args) }
     if name == "string" { return RunString(args) }
+    if name == "format" { return RunFormat(args) }
+    if name == "info" { return RunInfo(interpreter, frame, args) }
+    if name == "array" { return RunArray(frame, args) }
+    if name == "source" { return RunSource(interpreter, frame, args, depth) }
+    if name == "switch" { return RunSwitch(interpreter, frame, args, depth) }
+    if name == "global" || name == "upvar" || name == "uplevel" { return RunFrameCommand(interpreter, frame, name, args, depth) }
+    if name == "level" {
+        if args.count != 0 { return WrongArgs("level") }
+        number := Integer(frame.level);
+        text: Text;
+        unused BuilderAppend(text.bytes, "Current Stack level is ");
+        unused BuilderAppend(text.bytes, TextView(number.value));
+        return .{value = text};
+    }
     if name == "set" {
         if args.count == 1 { return ReadVariable(frame, TextView(args[0])) }
         if args.count == 2 { return StoreVariable(frame, TextView(args[0]), TextView(args[1])) }
@@ -549,7 +643,7 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
         return Success();
     }
     index := FindProcedure(interpreter, name);
-    if index >= 0 { return CallProcedure(interpreter, index, args, depth) }
+    if index >= 0 { return CallProcedure(interpreter, frame, index, args, depth) }
     for * interpreter.extensions {
         if TextView(it.name) != name { continue }
         result: Result;

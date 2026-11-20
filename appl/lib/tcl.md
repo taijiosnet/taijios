@@ -16,7 +16,8 @@ main :: () -> s32 {
 ```
 
 `Eval` retains variables and procedure definitions on each interpreter.
-Procedure calls have independent local variables. Results own their text.
+Procedure calls have independent local variables and can link to other frames.
+Results own their text.
 `TakeOutput` takes and clears the text accumulated by `puts`, including
 output written before an error. An evaluation has a 10,000-command budget
 that also charges loop iterations, and permits 48 nested script levels.
@@ -24,39 +25,61 @@ that also charges loop iterations, and permits 48 nested script levels.
 ## Supported Tcl
 
 - Command separators, comments, nested braces, quoted and empty words,
-  basic backslash escapes and line continuations, scalar substitution with
-  `$name` and `${name}`, and nested command substitution with `[script]`.
+  basic backslash escapes and line continuations, variable substitution with
+  `$name`, `${name}` and `$array(key)`, and nested command substitution with
+  `[script]`. Array keys support substitution inside parentheses.
 - `set`, `unset`, `incr`, `append`, `lappend`, `proc`, `return`, `if`,
   `while`, `for`, `foreach`, `break`, `continue`, `catch`, `error` and `eval`.
   Procedures accept defaults and a trailing `args`. `foreach` accepts a
   variable list and one value list. `catch` accepts an optional result variable.
-- `list`, `llength`, `lindex`, `lrange`, `join`, and `string compare`,
-  `equal`, `length`, `index` and `range`. Indexes are decimal integers,
-  `end` or `end-N`. String lengths, comparisons and indexes use UTF-8 bytes.
+- `array names` and `array size`, `global`, `upvar` for one linked variable,
+  `uplevel`, `level`, `switch` with exact patterns, `-` fallthrough and a
+  final `default`, and `info args`, `body`, `commands`, `exists` and `procs`.
+  Frame selection accepts absolute levels such as `#0` or relative levels
+  such as `-1` and `1` for the caller. `info commands` and `info procs` accept
+  the optional Limbo pattern argument without filtering. Prefix extensions
+  supply command names dynamically and cannot be enumerated.
+- `list`, `llength`, `lindex`, `lrange`, `join`, `concat`, `linsert`,
+  `lreplace`, exact `lsearch`, `lsort` with optional `-decreasing`, and
+  `split`. One-argument `split` preserves the string, following Limbo.
+- `string compare`, `equal`, `length`, `index`, `range`, `first`, `last`,
+  `tolower`, `toupper`, `trim`, `trimleft` and `trimright`. Lengths and
+  indexes count UTF-8 characters. Case conversion and trim use ASCII rules.
+  List and string indexes accept decimal integers, `end` and `end-N`.
+  A numeric last index in `string range` is exclusive, following Limbo.
+  `end` and `end-N` are inclusive.
+- `format` supports `%%`, `%s`, `%d` and `%x`, with width, left alignment,
+  zero padding and precision. Literal text is preserved between fields.
 - `expr` and the Inferno `calc` alias accept signed 32-bit decimal integers,
   `true`/`false`, `yes`/`no`, `on`/`off`, parentheses, unary `+ - !`, binary
   `+ - * / %`, and numeric comparisons `== != < <= > >=`. Substitutions
   inside an expression must yield a single integer or boolean. Overflow and
   division by zero return errors.
 - `puts string` and `puts -nonewline string` write to the output buffer.
+- `source fileName` evaluates the loaded script in the current frame and
+  shares the command and nesting budgets. Library callers can supply the
+  reader with `SetSourceLoader`. The callback receives its context ID,
+  the path and a pointer to a `Result`. It sets the result's owned value
+  to the script on success or returns an error with `code = .Error`.
+  The native and Taiji stdin shells provide file loaders with a 1 MiB limit.
+  The Taiji loader resolves paths in the invoking guest namespace.
 
-This slice omits arrays, namespaces, cross-frame variable access, `{*}` word
-expansion, numeric and Unicode backslash escapes, wide integers, floating-point
-and lazy expression operators, Tcl packages, channels, `source`, and Tk.
-Commands outside the list above and extra options on those commands are outside
-the supported language subset.
+Namespaces, `{*}` word expansion, numeric and Unicode backslash escapes, wide
+integers, floating-point and lazy expression operators, Tcl packages and channels
+are unsupported. The headless library can be imported by itself or used with
+the optional Tk module below.
 
 ### Comparison with shipped Inferno Tcl
 
-The [Limbo core](tcl_core.b) also registers `array`, `dumpstack`, `exit`,
-`global`, `info`, `level`, `load`, `source`, `switch`, `time`, `uplevel`, and
-`upvar`. The Ziran list subset lacks the shipped `concat`, `linsert`,
-`lreplace`, `lsearch`, `lsort`, and `split`. The shipped string library adds
-`format`, search and matching, case conversion, trimming, and word indexes.
-The shipped calculator supports floating-point math and named functions. The
-shipped I/O module adds `close`, `eof`, `file`, `flush`, `gets`, `open`,
-`read`, `seek`, and `tell`, as well as channel arguments for `puts`. Those
-commands and options are outside the current Ziran subset.
+The shipped Limbo interpreter additionally registers `dumpstack`, `exit`,
+`load`, `time`, `close`, `eof`, `file`, `flush`, `gets`, `open`, `read`,
+`seek` and `tell`, and accepts channel arguments for `puts`. Limbo `load`
+requires a Dis module. The shipped calculator supports floating-point math
+and named functions. These commands, options and arithmetic features still
+need a port. `string match`, `wordstart` and `wordend` are empty stubs in
+the shipped interpreter and are unsupported here. The Ziran implementation
+also handles ASCII `string toupper`, string search and trim, and `format`
+literal text where the Limbo implementation has stubs or bugs.
 
 ## Build, test and run
 
@@ -69,19 +92,18 @@ build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
 ```
 
 The native shell also reads stdin with `-` or when given no filename. The
-test runner compares the same reference script with the existing Limbo
-`tclsh`, runs both fixtures under ZX and hosted Taiji, and tests the library
+test runner compares the reference and compatibility scripts with the existing
+Limbo `tclsh`, runs the scripts under ZX and hosted Taiji, and tests the library
 API separately. `zxrun` prints a final scalar `0` on success and `1` on a Tcl
 error.
 
-With a Taiji emulator that provides `taijios_stdin.Read`, build the shell that
+With a Taiji emulator that provides `taijios_stdin.Read` and
+`taijios_files.ReadAt`, build the shell that
 reads a script from the guest's standard input. It evaluates after EOF and
 accepts scripts up to 1 MiB.
 
 ```sh
-zi2zx --root appl/cmd --module-path appl/lib --bind-host taijios_stdin \
-    --entry tclsh_stdin:main -o build/tcl/tclsh-stdin.zx appl/cmd/tclsh_stdin.zi
-install -m 0644 build/tcl/tclsh-stdin.zx dis/tclsh.zx
+(cd appl/cmd && mk zxrun.install install-tclsh-zx)
 python3 appl/cmd/tclsh_tests/run.py --stdin /dis/tclsh.zx
 ```
 

@@ -2,6 +2,7 @@
 using Tk :: #import "tcl_tk"
 using UTF :: #import "tcl_tk_text"
 using View :: #import "tcl_tk_view"
+using Scale :: #import "tcl_tk_scale"
 #import "std/vec"
 
 Canvas :: struct { pixels: []u8; width: s32; height: s32; }
@@ -162,6 +163,8 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         if it.order == 0 || it.box.w < 4 || it.box.h < 4 { continue }
         box := it.box;
         if it.kind == Tk.FRAME { continue }
+        if it.kind == Tk.SCALE { DrawScale(*canvas, it, it_index); continue }
+        if it.kind == Tk.PANEL { DrawPanel(*canvas, it); continue }
         if it.kind == Tk.TEXT {
             Fill(*canvas, box, ifx it_index == Tk.focused then LETTER else BORDER);
             Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
@@ -198,5 +201,58 @@ Render :: (pixels: []u8, width: s32, height: s32) {
                  ifx it_index == Tk.pressed then PRESSED else BUTTON);
         }
         DrawText(*canvas, box, TextView(it.text), true, ifx it.disabled then MUTED else LETTER);
+    }
+}
+
+DrawScale :: (canvas: *Canvas, widget: *Tk.Widget, index: s64) {
+    box := widget.box;
+    track := Tk.ScaleTrack(widget);
+    Fill(canvas, track, BORDER);
+    Fill(canvas, .{x = track.x+1, y = track.y+1, w = track.w-2, h = track.h-2}, BUTTON);
+    offset := Scale.Position(*widget.scale, Tk.ScaleLength(widget));
+    thumb := track;
+    if widget.scale.horizontal {
+        thumb.x += offset;
+        thumb.w = Tk.Minimum(Scale.SLIDER, track.w-offset);
+    } else {
+        thumb.y += offset;
+        thumb.h = Tk.Minimum(Scale.SLIDER, track.h-offset);
+    }
+    Fill(canvas, thumb, ifx index == Tk.focused then LETTER else BORDER);
+    Fill(canvas, .{x = thumb.x+1, y = thumb.y+1, w = thumb.w-2, h = thumb.h-2},
+         ifx index == Tk.pressed then PRESSED else ENTRY);
+    if widget.scale.show_value {
+        if widget.scale.horizontal { box.h -= track.h } else { box.w -= track.w }
+        value: Text;
+        Scale.Append(*value, widget.scale.value);
+        DrawText(canvas, box, TextView(value));
+    }
+}
+
+DrawPanel :: (canvas: *Canvas, widget: *Tk.Widget) {
+    panel := *widget.panel;
+    box := widget.box;
+    if panel.width == 0 || panel.height == 0 { return }
+    inner_w := Tk.NonNegative(box.w - 2*panel.border);
+    inner_h := Tk.NonNegative(box.h - 2*panel.border);
+    w := Tk.Minimum(inner_w, panel.width);
+    h := Tk.Minimum(inner_h, panel.height);
+    x_start := box.x + panel.border + (inner_w-w)/2;
+    y_start := box.y + panel.border + (inner_h-h)/2;
+    x_source := (panel.width-w)/2;
+    y_source := (panel.height-h)/2;
+    source := VecSlice(panel.pixels, 0, panel.pixels.count);
+    for y: 0..h-1 {
+        src := (cast(s64)(y_source+y) * panel.width + x_source) * 4;
+        dst := (cast(s64)(y_start+y) * canvas.width + x_start) * 4;
+        for byte: 0..cast(s64)w*4-1 { canvas.pixels[dst+byte] = source[src+byte] }
+    }
+}
+
+// Animated panels can refresh their existing rectangles between layout changes.
+RenderPanels :: (pixels: []u8, width: s32, height: s32) {
+    canvas := Canvas.{pixels = pixels, width = width, height = height};
+    for * Tk.widgets {
+        if it.kind == Tk.PANEL && it.order > 0 && it.box.w > 0 && it.box.h > 0 { DrawPanel(*canvas, it) }
     }
 }

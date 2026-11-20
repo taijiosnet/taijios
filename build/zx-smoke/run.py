@@ -47,6 +47,35 @@ if '--stdin' in sys.argv[2:]:
     read_error = run(f'zxrun {stdin_image} >[0] /build/zx-smoke/stdin.writeonly')
     assert read_error.stdout == 'read error\n1\n' and not read_error.stderr
 
+if '--cat' in sys.argv[2:]:
+    binary = bytes(range(256)) * 96
+    (files / 'cat input.bin').write_bytes(binary)
+    (files / 'cat café.txt').write_bytes(b'UTF-8 path\n')
+    (files / 'cat empty').write_bytes(b'')
+    zx_cat = 'zxrun -c /dis/cat.zx'
+    prefix = 'bind -c /build/zx-smoke /chan; cd /chan; '
+    for command in ('cat', zx_cat):
+        files_and_stdin = run(prefix + f"{command} 'cat café.txt' 'cat empty' - 'cat input.bin' "
+                              "- < 'cat input.bin' > cat.out; echo $status; echo CAT_OK")
+        assert files_and_stdin.stdout == '\nCAT_OK\n' and not files_and_stdin.stderr
+        assert (files / 'cat.out').read_bytes() == b'UTF-8 path\n' + binary * 2
+        piped = run(prefix + f"cat 'cat input.bin' | {command} | cat > cat.pipe; echo $status; echo PIPE_OK")
+        assert piped.stdout == '\nPIPE_OK\n' and not piped.stderr
+        assert (files / 'cat.pipe').read_bytes() == binary
+
+    for args, legacy_status, expected in (
+            ("'cat missing' 'cat input.bin'", 'bad open', 'cat: cannot open cat missing: '),
+            ("''", 'bad open', 'cat: cannot open : '),
+            ('>[0] cat.writeonly', 'read error', 'cat: error reading <stdin>: '),
+            ("'cat input.bin' <[1] 'cat empty'", 'write error', 'cat: write error: ')):
+        legacy = run(prefix + f'cat {args} >[2] cat.dis.err; echo $status')
+        converted = run(prefix + f'{zx_cat} {args} >[2] cat.zx.err; echo $status')
+        assert legacy.stdout == legacy_status + '\n' and not legacy.stderr
+        assert converted.stdout == '1\n' and not converted.stderr
+        legacy_error = (files / 'cat.dis.err').read_text()
+        assert legacy_error.startswith(expected)
+        assert (files / 'cat.zx.err').read_text() == legacy_error
+
 
 def graphics():
     import io
@@ -58,11 +87,12 @@ def graphics():
     from PIL import Image, ImageChops
 
     env = {k: v for k, v in os.environ.items() if k not in (
-        'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS')}
+        'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
+        'XDG_RUNTIME_DIR', 'SESSION_MANAGER')}
     env['HARMONY_DESKTOP_RECOVERY'] = '0'
     reader, writer = os.pipe()
     xvfb = subprocess.Popen(['Xvfb', '-displayfd', str(writer), '-screen', '0',
-                            '1024x768x24', '-nolisten', 'tcp'],
+                            '1024x768x24', '-nolisten', 'tcp', '-noreset'],
                            pass_fds=(writer,), env=env)
     os.close(writer)
 

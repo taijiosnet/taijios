@@ -2,12 +2,26 @@
 #import "std/vec"
 using Tcl :: #import "tcl"
 using Stdin :: #import "taijios_stdin"
+using Files :: #import "taijios_files"
+using Types :: #import "tcl_types"
+
+LoadScript :: (context: s64, path: string, result: *Types.Result) {
+    script: Text;
+    if Files.ReadFile(path, *script, 1048576) == 0 {
+        VecSwap(result.value.bytes, script.bytes);
+        return;
+    }
+    failure := Types.QuotedError("could not read Tcl script \"", path, "\"");
+    result.code = failure.code;
+    VecSwap(result.value.bytes, failure.value.bytes);
+}
 
 main :: () -> s32 {
     source: Text;
     error := Stdin.ReadScript(*source);
     if error != "" { print("tclsh: %\n", error); return 1 }
     tcl: Tcl.Interpreter;
+    Tcl.SetSourceLoader(*tcl, LoadScript);
     result := Tcl.Eval(*tcl, TextView(source));
     output: Text = Tcl.TakeOutput(*tcl);
     print("%", TextView(output));

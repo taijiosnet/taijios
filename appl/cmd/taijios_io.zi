@@ -1,0 +1,14 @@
+host_api :: #system_library "host_api";
+
+#scope_export
+Open :: (path: string, mode: s32) -> s32 #foreign host_api;
+Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
+Write :: (handle: s32, data: string) -> s32 #foreign host_api;
+Close :: (handle: s32) -> s32 #foreign host_api;
+Error :: () -> string #foreign host_api;
+
+OpenFile :: (path: string, mode: s32) -> s32 { return Open(path, mode) }
+ReadBytes :: (handle: s32, buffer: []u8) -> s32 { return Read(handle, buffer) }
+WriteBytes :: (handle: s32, data: string) -> s32 { return Write(handle, data) }
+CloseFile :: (handle: s32) -> s32 { return Close(handle) }
+LastError :: () -> string { return Error() }

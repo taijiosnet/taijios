@@ -55,7 +55,34 @@ main :: () -> s32 {
     if cancelled.bytes.count != 0 { return 6 }
     destroyed := Tcl.Eval(*interpreter, ".more cget -text");
     if destroyed.code != .Error { return 7 }
+    if !CoffeeCommands(*interpreter) { return 22 }
     root := Tcl.Eval(*interpreter, "destroy .");
     if root.code != .OK || !Tk.Closed() { return 8 }
     return 0;
+}
+
+CoffeeCommands :: (interpreter: *Tcl.Interpreter) -> bool {
+    input := Input.CoffeeCommands;
+    first: s64;
+    for i: 0..input.count-1 {
+        if input[i] != 10 { continue }
+        result := Tcl.Eval(interpreter, input[first:i]);
+        if result.code != .OK { print("%\n", TextView(result.value)); return false }
+        if result.value.bytes.count > 0 { print("%\n", TextView(result.value)) }
+        first = i + 1;
+    }
+    Tk.Layout(448, 380);
+    index := Tk.Find(".range");
+    widget := *Tk.widgets[index];
+    track := Tk.ScaleTrack(widget);
+    if track.x < 12 || widget.scale.value != 5000 { return false }
+    y := track.y + track.h/2;
+    x := track.x + 7;
+    unused Tk.PointerPress(x, y);
+    result: Text = Tk.PointerMove(x+30, y);
+    if TextView(result) == "" || widget.scale.value >= 5000 { return false }
+    unused Tk.PointerUp(x+30, y);
+    invalid := Tcl.Eval(interpreter, ".range configure -from 99 -orient unknown");
+    if invalid.code != .Error || widget.scale.first != 5000 { return false }
+    return true;
 }

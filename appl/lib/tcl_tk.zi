@@ -5,6 +5,7 @@ using Tcl :: #import "tcl"
 using T :: #import "tcl_types"
 using UTF :: #import "tcl_tk_text"
 using View :: #import "tcl_tk_view"
+using Scale :: #import "tcl_tk_scale"
 
 MAX_WIDGETS :: 32;
 MAX_ENTRY_BYTES :: 16384;
@@ -13,6 +14,9 @@ BUTTON :: 1;
 FRAME :: 2;
 ENTRY :: 3;
 TEXT :: 4;
+SCALE :: 5;
+PANEL :: 6;
+MAX_PANEL_BYTES :: 16777216;
 CHAR_WIDTH :: 12;
 ENTRY_INSET :: 8;
 Box :: struct { x: s32; y: s32; w: s32; h: s32; }
@@ -22,6 +26,14 @@ Packing :: struct {
     pady: s32;
     fill: s32;
     expand: s32;
+    anchor_x: s32;
+    anchor_y: s32;
+}
+Panel :: struct {
+    pixels: Vec(u8);
+    width: s32;
+    height: s32;
+    border: s32;
 }
 Widget :: struct {
     name: Text;
@@ -32,6 +44,8 @@ Widget :: struct {
     parent: s64;
     cursor: s64;
     view: View.State;
+    scale: Scale.State;
+    panel: Panel;
     disabled: bool;
     requested: Box;
     order: s32;
@@ -46,6 +60,8 @@ pressed: s64 = -1;
 pressed_range: s64 = -1;
 focused: s64 = -1;
 sequence: s32;
+drag_start: s32;
+drag_value: s64;
 
 Attach :: (interpreter: *Tcl.Interpreter) -> bool {
     if attached { return false }
@@ -56,6 +72,9 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
                Tcl.RegisterCommand(interpreter, "frame", Create, FRAME) &&
                Tcl.RegisterCommand(interpreter, "entry", Create, ENTRY) &&
                Tcl.RegisterCommand(interpreter, "text", Create, TEXT) &&
+               Tcl.RegisterCommand(interpreter, "scale", Create, SCALE) &&
+               Tcl.RegisterCommand(interpreter, "panel", Create, PANEL) &&
+               Tcl.RegisterCommand(interpreter, "update", Update) &&
                Tcl.RegisterCommand(interpreter, "pack", Pack) &&
                Tcl.RegisterCommand(interpreter, "focus", Focus) &&
                Tcl.RegisterCommand(interpreter, "bind", Bind) &&
@@ -92,6 +111,8 @@ SetError :: (result: *Result, message: string) {
 
 Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     if args.count % 2 != 0 { SetError(result, "expected option and value pairs"); return false }
+    if widget.kind == SCALE { return ConfigureScale(widget, args, result) }
+    if widget.kind == PANEL { return ConfigurePanel(widget, args, result) }
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
         if option == "-text" && (widget.kind == LABEL || widget.kind == BUTTON) { continue }
@@ -126,7 +147,11 @@ Create :: (kind: s64, args: []Text, result: *Result) {
         if parent < 0 || widgets[parent].kind != FRAME { SetError(result, "expected a frame parent"); return }
     }
     widget := Widget.{name = TextCopy(path), kind = kind, parent = parent};
+    if kind == SCALE { widget.scale = Scale.Default() }
     if !Configure(*widget, args[1:], result) { return }
+    if kind == SCALE && widget.scale.big_increment == 0 {
+        widget.scale.big_increment = ((widget.scale.last - widget.scale.first) / Scale.UNIT / 10) * Scale.UNIT;
+    }
     slot := widgets.count;
     for * widgets { if it.name.bytes.count == 0 { slot = it_index; break } }
     if slot == widgets.count {
@@ -138,6 +163,10 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     saved.parent = widget.parent;
     saved.cursor = 0;
     saved.disabled = widget.disabled;
+    saved.scale = widget.scale;
+    saved.panel.border = widget.panel.border;
+    saved.panel.width = 0;
+    saved.panel.height = 0;
     View.Reset(*saved.view);
     saved.order = 0;
     saved.box = .{};
@@ -151,7 +180,7 @@ Create :: (kind: s64, args: []Text, result: *Result) {
 Pack :: (_: s64, args: []Text, result: *Result) {
     if args.count == 0 { SetError(result, "expected pack path ?path ...? ?options?"); return }
     count: s64;
-    options := Packing.{side = -1, padx = -1, pady = -1, fill = -1, expand = -1};
+    options := Packing.{side = -1, padx = -1, pady = -1, fill = -1, expand = -1, anchor_x = -2, anchor_y = -2};
     while count < args.count && ParentEnd(TextView(args[count])) >= 0 {
         if Find(TextView(args[count])) < 0 { SetError(result, "cannot pack unknown widget"); return }
         count += 1;
@@ -176,6 +205,13 @@ Pack :: (_: s64, args: []Text, result: *Result) {
             else if value == "y" { options.fill = 2 }
             else if value == "both" { options.fill = 3 }
             else { SetError(result, "unknown pack fill"); return }
+        } else if option == "-anchor" {
+            if value == "center" { options.anchor_x = 0; options.anchor_y = 0 }
+            else if value == "w" || value == "e" || value == "n" || value == "s" ||
+                    value == "nw" || value == "ne" || value == "sw" || value == "se" {
+                options.anchor_x = ifx value[value.count-1] == 119 then -1 else ifx value[value.count-1] == 101 then 1 else 0;
+                options.anchor_y = ifx value[0] == 110 then -1 else ifx value[0] == 115 then 1 else 0;
+            } else { SetError(result, "unknown pack anchor"); return }
         } else if option == "-expand" {
             if value == "1" { options.expand = 1 }
             else if value == "0" { options.expand = 0 }
@@ -191,6 +227,7 @@ Pack :: (_: s64, args: []Text, result: *Result) {
         if options.pady >= 0 { widget.pack.pady = options.pady }
         if options.fill >= 0 { widget.pack.fill = options.fill }
         if options.expand >= 0 { widget.pack.expand = options.expand }
+        if options.anchor_x >= -1 { widget.pack.anchor_x = options.anchor_x; widget.pack.anchor_y = options.anchor_y }
     }
 }
 
@@ -210,6 +247,7 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             unused VecResize(it.text.bytes, 0);
             unused VecResize(it.command.bytes, 0);
             unused VecResize(it.view.tags, 0);
+            unused VecResize(it.panel.pixels, 0);
             View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
@@ -245,6 +283,8 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
         if !widget.disabled { unused BuilderAppend(script.bytes, TextView(widget.command)) }
         return;
     }
+    if widget.kind == SCALE { ScaleCommand(widget, args, result); return }
+    if widget.kind == PANEL { PanelCommand(widget, args, result); return }
     if widget.kind == ENTRY { EntryCommand(widget, args, result); return }
     if widget.kind == TEXT { TextCommand(widget, args, result); return }
     SetError(result, "unsupported widget subcommand or arguments");
@@ -257,8 +297,8 @@ Focus :: (_: s64, args: []Text, result: *Result) {
     }
     if args.count != 1 { SetError(result, "expected focus ?widget?"); return }
     index := Find(TextView(args[0]));
-    if closed || index < 0 || (widgets[index].kind != ENTRY && widgets[index].kind != TEXT) {
-        SetError(result, "expected an open entry or text path"); return;
+    if closed || index < 0 || (widgets[index].kind != ENTRY && widgets[index].kind != TEXT && widgets[index].kind != SCALE) {
+        SetError(result, "expected a focusable widget path"); return;
     }
     focused = index;
 }
@@ -515,6 +555,11 @@ EntryKey :: enum s32 { Return; Backspace; Delete; Left; Right; Home; End; Up; Do
 KeyDown :: (key: EntryKey) -> Text {
     if focused < 0 { return TextCopy("") }
     entry := *widgets[focused];
+    if entry.kind == SCALE {
+        if key == .Up || key == .Left { return ScaleInput(entry, Scale.Step(*entry.scale, -1)) }
+        if key == .Down || key == .Right { return ScaleInput(entry, Scale.Step(*entry.scale, 1)) }
+        return .{};
+    }
     if entry.kind == TEXT {
         if key == .Up { View.Move(*entry.view, -1) }
         if key == .Down { View.Move(*entry.view, 1) }
@@ -568,6 +613,13 @@ Measure :: (parent: s64) -> Box {
         widget := *widgets[index];
         requested: Box;
         if widget.kind == FRAME { requested = Measure(index) }
+        else if widget.kind == SCALE {
+            length := widget.scale.length + 2 * Scale.INSET;
+            minor: s32 = Scale.MINOR;
+            if widget.scale.show_value { minor += ifx widget.scale.horizontal then Scale.VALUE_HEIGHT else 120 }
+            requested = ifx widget.scale.horizontal then Box.{w = length, h = minor} else Box.{w = minor, h = length};
+        }
+        else if widget.kind == PANEL { requested = .{w = widget.panel.width + 2*widget.panel.border, h = widget.panel.height + 2*widget.panel.border} }
         else if widget.kind == ENTRY { requested = .{w = 168, h = 30} }
         else if widget.kind == TEXT { requested = .{w = 280, h = 150} }
         else {
@@ -632,7 +684,12 @@ Place :: (parent: s64, cavity: Box) {
         inner_h := NonNegative(available.h - pack.pady * 2);
         w := ifx (pack.fill & 1) != 0 then inner_w else Minimum(widget.requested.w, inner_w);
         h := ifx (pack.fill & 2) != 0 then inner_h else Minimum(widget.requested.h, inner_h);
-        widget.box = .{x = available.x + (available.w-w)/2, y = available.y + (available.h-h)/2, w = w, h = h};
+        x := available.x + pack.padx + (inner_w-w)*(1+pack.anchor_x)/2;
+        y := available.y + pack.pady + (inner_h-h)*(1+pack.anchor_y)/2;
+        // Keep cramped parcels centered even when padding consumes the cavity.
+        if inner_w == 0 { x = available.x + available.w/2 }
+        if inner_h == 0 { y = available.y + available.h/2 }
+        widget.box = .{x = x, y = y, w = w, h = h};
         if widget.kind == FRAME { Place(index, widget.box) }
         else if widget.kind == TEXT { TextLayout(widget) }
         index = NextChild(parent, widget.order);
@@ -705,6 +762,10 @@ PointerUp :: (x: s32, y: s32) -> Text {
     pressed = -1;
     pressed_range = -1;
     if index < 0 { return .{} }
+    if widgets[index].kind == SCALE {
+        widget := *widgets[index];
+        return ScaleDrag(widget, x, y);
+    }
     if range < 0 {
         if Over(x, y, BUTTON) == index { return TextCopy(TextView(widgets[index].command)) }
         return .{};
@@ -737,3 +798,176 @@ PointerUp :: (x: s32, y: s32) -> Text {
 }
 
 Closed :: () -> bool { return closed }
+
+ConfigureScale :: (widget: *Widget, args: []Text, result: *Result) -> bool {
+    scale := widget.scale;
+    command: string;
+    replace_command := false;
+    for i: 0..args.count/2-1 {
+        option := TextView(args[2*i]);
+        value := TextView(args[2*i+1]);
+        if option == "-command" {
+            command = value;
+            replace_command = true;
+        } else if option == "-orient" && (value == "horizontal" || value == "vertical") {
+            scale.horizontal = value == "horizontal";
+        } else if option == "-showvalue" && (value == "0" || value == "1") {
+            scale.show_value = value == "1";
+        } else if option == "-length" {
+            length, ok := ParseInteger(value);
+            if !ok || length < 1 || length > 4090 { SetError(result, "invalid scale length"); return false }
+            scale.length = cast(s32)length;
+        } else {
+            number, ok := Scale.Parse(value);
+            if ok && option == "-from" { scale.first = number }
+            else if ok && option == "-to" { scale.last = number }
+            else if ok && number >= 0 && option == "-resolution" { scale.resolution = number }
+            else if ok && number >= 0 && option == "-bigincrement" { scale.big_increment = number }
+            else { SetError(result, "unsupported scale option or value"); return false }
+        }
+    }
+    scale.value = Scale.Bound(*scale, scale.value);
+    if replace_command {
+        copy: Text = TextCopy(command);
+        if copy.bytes.count != command.count { SetError(result, "could not allocate scale command"); return false }
+        VecSwap(widget.command.bytes, copy.bytes);
+    }
+    widget.scale = scale;
+    return true;
+}
+
+ScaleCommand :: (widget: *Widget, args: []Text, result: *Result) {
+    subcommand := TextView(args[0]);
+    scale := *widget.scale;
+    if subcommand == "get" && args.count == 1 { Scale.Append(*result.value, scale.value); return }
+    if subcommand == "set" && args.count == 2 {
+        value, ok := Scale.Parse(TextView(args[1]));
+        if !ok { SetError(result, "invalid scale value"); return }
+        scale.value = Scale.Bound(scale, value);
+        return;
+    }
+    if subcommand == "cget" && args.count == 2 {
+        option := TextView(args[1]);
+        if option == "-from" { Scale.Append(*result.value, scale.first); return }
+        if option == "-to" { Scale.Append(*result.value, scale.last); return }
+        if option == "-resolution" { Scale.Append(*result.value, scale.resolution); return }
+        if option == "-bigincrement" { Scale.Append(*result.value, scale.big_increment); return }
+        if option == "-length" { Scale.Append(*result.value, cast(s64)scale.length * Scale.UNIT); return }
+        if option == "-command" { unused BuilderAppend(result.value.bytes, TextView(widget.command)); return }
+        if option == "-orient" { unused BuilderAppend(result.value.bytes, ifx scale.horizontal then "horizontal" else "vertical"); return }
+        if option == "-showvalue" { unused BuilderAppend(result.value.bytes, ifx scale.show_value then "1" else "0"); return }
+    }
+    SetError(result, "unsupported scale subcommand or arguments");
+}
+
+ScaleLength :: (widget: *Widget) -> s32 { return ifx widget.scale.horizontal then widget.box.w else widget.box.h }
+
+ScaleCoordinate :: (widget: *Widget, x: s32, y: s32) -> s32 {
+    return ifx widget.scale.horizontal then x else y;
+}
+
+ScaleInput :: (widget: *Widget, value: s64) -> Text {
+    if widget.scale.value == value { return .{} }
+    widget.scale.value = value;
+    script: Text = TextCopy(TextView(widget.command));
+    if script.bytes.count > 0 {
+        unused BuilderAppend(script.bytes, " ");
+        Scale.Append(*script, value);
+    }
+    return script;
+}
+
+ScaleTrack :: (widget: *Widget) -> Box {
+    box := widget.box;
+    if widget.scale.horizontal {
+        return .{x = box.x, y = box.y + NonNegative(box.h - Scale.MINOR), w = box.w, h = Minimum(box.h, Scale.MINOR)};
+    }
+    return .{x = box.x + NonNegative(box.w - Scale.MINOR), y = box.y, w = Minimum(box.w, Scale.MINOR), h = box.h};
+}
+
+PointerPress :: (x: s32, y: s32) -> Text {
+    PointerDown(x, y);
+    index := Over(x, y, SCALE);
+    if index < 0 { return .{} }
+    focused = index;
+    widget := *widgets[index];
+    track := ScaleTrack(widget);
+    if x < track.x || y < track.y || x >= track.x + track.w || y >= track.y + track.h { return .{} }
+    position := ScaleCoordinate(widget, x-widget.box.x, y-widget.box.y);
+    thumb := Scale.Position(*widget.scale, ScaleLength(widget));
+    if position < thumb || position >= thumb + Scale.SLIDER {
+        return ScaleInput(widget, Scale.Step(*widget.scale, ifx position < thumb then -1 else 1));
+    }
+    pressed = index;
+    drag_start = ScaleCoordinate(widget, x, y);
+    drag_value = widget.scale.value;
+    return .{};
+}
+
+DraggingScale :: () -> bool { return pressed >= 0 && widgets[pressed].kind == SCALE }
+
+PointerMove :: (x: s32, y: s32) -> Text {
+    if !DraggingScale() { return .{} }
+    return ScaleDrag(*widgets[pressed], x, y);
+}
+
+ScaleDrag :: (widget: *Widget, x: s32, y: s32) -> Text {
+    return ScaleInput(widget, Scale.Drag(*widget.scale, ScaleLength(widget), ScaleCoordinate(widget, x, y) - drag_start, drag_value));
+}
+
+ConfigurePanel :: (widget: *Widget, args: []Text, result: *Result) -> bool {
+    border := widget.panel.border;
+    for i: 0..args.count/2-1 {
+        option := TextView(args[2*i]);
+        value := TextView(args[2*i+1]);
+        if option == "-relief" && value == "flat" { continue }
+        if option == "-bd" || option == "-borderwidth" {
+            pixels, ok := ParseInteger(value);
+            if ok && pixels >= 0 && pixels <= 512 { border = cast(s32)pixels; continue }
+        }
+        SetError(result, "unsupported panel option or value");
+        return false;
+    }
+    widget.panel.border = border;
+    return true;
+}
+
+PanelCommand :: (widget: *Widget, args: []Text, result: *Result) {
+    subcommand := TextView(args[0]);
+    if subcommand == "dirty" && (args.count == 1 || args.count == 5) {
+        for i: 1..args.count-1 {
+            _, ok := ParseInteger(TextView(args[i]));
+            if !ok { SetError(result, "invalid panel dirty rectangle"); return }
+        }
+        // The surface renderer presents the entire widget tree after callbacks.
+        return;
+    }
+    if subcommand == "cget" && args.count == 2 {
+        option := TextView(args[1]);
+        if option == "-relief" { unused BuilderAppend(result.value.bytes, "flat"); return }
+        if option == "-bd" || option == "-borderwidth" {
+            digits: [24]u8;
+            unused BuilderAppend(result.value.bytes, FormatInteger(widget.panel.border, digits[:]));
+            return;
+        }
+    }
+    SetError(result, "unsupported panel subcommand or arguments");
+}
+
+// Allocate a writable RGBA8 image for the panel and return its widget index.
+// Callers take a fresh pixel view while the widget is alive.
+PanelImage :: (name: string, width: s32, height: s32) -> s64 {
+    index := Find(name);
+    if closed || index < 0 || widgets[index].kind != PANEL || width < 1 || height < 1 || width > 4096 || height > 4096 { return -1 }
+    panel := *widgets[index].panel;
+    count := cast(s64)width * cast(s64)height * 4;
+    if !VecResizeBounded(panel.pixels, count, MAX_PANEL_BYTES) { return -1 }
+    panel.width = width;
+    panel.height = height;
+    return index;
+}
+
+Update :: (_: s64, args: []Text, result: *Result) {
+    if args.count != 0 { SetError(result, "expected update"); return }
+    // Window frontends present after each Tcl evaluation or animation tick.
+}

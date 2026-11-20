@@ -3,17 +3,6 @@
 using T :: #import "tcl_types"
 using L :: #import "tcl_lists"
 
-Compare :: (left: string, right: string) -> s64 {
-    common := ifx left.count < right.count then left.count else right.count;
-    for 0..common-1 {
-        if left[it] < right[it] { return -1 }
-        if left[it] > right[it] { return 1 }
-    }
-    if left.count < right.count { return -1 }
-    if left.count > right.count { return 1 }
-    return 0;
-}
-
 RunString :: (args: []Text) -> Result {
     if args.count < 1 { return WrongArgs("string option arg ?arg ...?") }
     option := TextView(args[0]);
@@ -22,30 +11,146 @@ RunString :: (args: []Text) -> Result {
             if option == "compare" { return WrongArgs("string compare string1 string2") }
             return WrongArgs("string equal string1 string2");
         }
-        comparison := Compare(TextView(args[1]), TextView(args[2]));
+        comparison := CompareText(TextView(args[1]), TextView(args[2]));
         if option == "equal" { return Integer(ifx comparison == 0 then 1 else 0) }
         return Integer(comparison);
     }
     if option == "length" {
         if args.count != 2 { return WrongArgs("string length string") }
-        return Integer(TextView(args[1]).count);
+        return Integer(CharacterCount(TextView(args[1])));
+    }
+    if option == "tolower" || option == "toupper" {
+        if args.count != 2 { return WrongArgs("string tolower|toupper string") }
+        result: Text;
+        upper := option == "toupper";
+        for TextView(args[1]) {
+            byte := it;
+            if upper && byte >= 97 && byte <= 122 { byte -= 32 }
+            if !upper && byte >= 65 && byte <= 90 { byte += 32 }
+            unused VecPush(result.bytes, byte);
+        }
+        return .{value = result};
+    }
+    if option == "first" || option == "last" {
+        if args.count != 3 { return WrongArgs("string first|last needle haystack") }
+        needle := TextView(args[1]);
+        value := TextView(args[2]);
+        found: s64 = -1;
+        offset: s64;
+        character: s64;
+        while offset+needle.count <= value.count {
+            if value[offset:offset+needle.count] == needle {
+                found = character;
+                if option == "first" { break }
+            }
+            if offset == value.count { break }
+            offset = NextCharacter(value, offset);
+            character += 1;
+        }
+        return Integer(found);
+    }
+    if option == "trim" || option == "trimleft" || option == "trimright" {
+        if args.count != 2 { return WrongArgs("string trim|trimleft|trimright string") }
+        value := TextView(args[1]);
+        first: s64;
+        last := value.count;
+        if option != "trimright" { while first < last && Space(value[first]) { first += 1 } }
+        if option != "trimleft" { while last > first && Space(value[last-1]) { last -= 1 } }
+        return Success(value[first:last]);
     }
     if option == "index" || option == "range" {
         if option == "index" && args.count != 3 { return WrongArgs("string index string charIndex") }
         if option == "range" && args.count != 4 { return WrongArgs("string range string first last") }
         value := TextView(args[1]);
-        first, valid_first := Index(TextView(args[2]), value.count);
+        length := CharacterCount(value);
+        first, valid_first := Index(TextView(args[2]), length);
         if !valid_first { return Failure("bad string index") }
         if option == "index" {
-            if first < 0 || first >= value.count { return Success() }
-            return Success(value[first:first+1]);
+            if first < 0 || first >= length { return Success() }
+            at := CharacterOffset(value, first);
+            return Success(value[at:NextCharacter(value, at)]);
         }
-        last, valid_last := Index(TextView(args[3]), value.count);
+        end := TextView(args[3]);
+        last, valid_last := Index(end, length);
         if !valid_last { return Failure("bad string index") }
+        // Limbo treats a numeric last character as exclusive. Preserve the
+        // inclusive end-N extension already supported by the Ziran port.
+        if end.count >= 3 && end[:3] == "end" { last += 1 }
         if first < 0 { first = 0 }
-        if last >= value.count { last = value.count - 1 }
-        if first > last { return Success() }
-        return Success(value[first:last+1]);
+        if first >= last { return Success() }
+        return Success(value[CharacterOffset(value, first):CharacterOffset(value, last)]);
     }
     return Failure("unsupported string option");
+}
+
+FormatNumber :: (cursor: *Cursor) -> s64 {
+    number: s64;
+    while Has(cursor) && Digit(Peek(cursor)) {
+        number = number*10 + cast(s64)(Take(cursor)-48);
+        if number > 4096 { return -1 }
+    }
+    return number;
+}
+
+RunFormat :: (args: []Text) -> Result {
+    if args.count == 0 { return WrongArgs("format formatString ?arg ...?") }
+    cursor := Cursor.{text = TextView(args[0])};
+    output: Text;
+    arg: s64 = 1;
+    while Has(*cursor) {
+        byte := Take(*cursor);
+        if byte != 37 { unused VecPush(output.bytes, byte); continue }
+        if Has(*cursor) && Peek(*cursor) == 37 {
+            cursor.at += 1;
+            unused VecPush(output.bytes, cast(u8)37);
+            continue;
+        }
+        left := Has(*cursor) && Peek(*cursor) == 45;
+        if left { cursor.at += 1 }
+        zero := Has(*cursor) && Peek(*cursor) == 48;
+        width := FormatNumber(*cursor);
+        precision: s64 = -1;
+        if Has(*cursor) && Peek(*cursor) == 46 {
+            cursor.at += 1;
+            precision = FormatNumber(*cursor);
+            if precision < 0 { return Failure("format precision exceeds limit") }
+        }
+        if width < 0 || !Has(*cursor) { return Failure("invalid format field") }
+        if arg >= args.count { return Failure("not enough arguments for format") }
+        kind := Take(*cursor);
+        value := TextView(args[arg]);
+        arg += 1;
+        negative: bool;
+        zeros: s64;
+        digits: [32]u8;
+        if kind == 115 {
+            if precision >= 0 { value = value[:CharacterOffset(value, precision)] }
+        } else if kind == 100 || kind == 120 {
+            number, valid := ParseInteger(value);
+            if !valid { return Failure("expected integer format argument") }
+            negative = kind == 100 && number < 0;
+            if negative { number = -number }
+            if kind == 120 && number < 0 { number += 4294967296 }
+            base: s64 = ifx kind == 100 then 10 else 16;
+            at: s64 = digits.count-1;
+            digits[at] = "0123456789abcdef"[number%base];
+            number /= base;
+            while number > 0 {
+                at -= 1;
+                digits[at] = "0123456789abcdef"[number%base];
+                number /= base;
+            }
+            value = TextView(digits[at:]);
+            zeros = precision-value.count;
+            if zero && !left && precision < 0 { zeros = width-value.count-cast(s64)negative }
+            if zeros < 0 { zeros = 0 }
+        } else { return Failure("unsupported format conversion") }
+        padding := width-CharacterCount(value)-zeros-cast(s64)negative;
+        if !left { for 0..padding-1 { unused VecPush(output.bytes, cast(u8)32) } }
+        if negative { unused VecPush(output.bytes, cast(u8)45) }
+        for 0..zeros-1 { unused VecPush(output.bytes, cast(u8)48) }
+        unused BuilderAppend(output.bytes, value);
+        if left { for 0..padding-1 { unused VecPush(output.bytes, cast(u8)32) } }
+    }
+    return .{value = output};
 }

@@ -14,15 +14,23 @@ display, and history from Inferno's [manual browser](../../wm/man.b) and
 [lookup library](../../lib/man.b). This port uses the Inferno
 [MIT notice](../../../NOTICE).
 
+Infernal Coffee keeps all six masked cups, the original background, Stop/Go,
+and Rate, Jitter, and Skip sliders. It reads the shipped
+`/icons/bigdelight.bit` and `/icons/coffee*` artwork through the same guest file
+service as Man. Ziran decodes the compressed images, composites each frame,
+and renders the Tk widgets. The guest surface supplies window events and
+presents the resulting pixels. [ZX source](coffee_app.zi) · [Inferno source](../../wm/coffee.b)
+
 ## Run in Taiji
 
-From the TaijiOS root, with `zi2zx`, Xvfb, `xdotool`, ImageMagick `import`,
+From the TaijiOS root, with `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
 Python Pillow, and a ZX-enabled Linux/386 emulator built from this checkout:
 
 ```sh
 python3 appl/cmd/tcltk/test_tcltk.py
 install -m 0644 build/tcltk/tcltk.zx dis/tcltk.zx
 install -m 0644 build/tcltk/man.zx dis/man.zx
+(cd appl/cmd && mk install-coffee-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
 ```
 
@@ -33,6 +41,7 @@ Taiji graphical shell run:
 ```sh
 zxrun -w /dis/tcltk.zx < /appl/cmd/tcltk/bounce_controls.tcl
 zxrun -w /dis/man.zx
+zxrun -w /dis/coffee.zx
 ```
 
 To start the manual browser directly from the project root:
@@ -64,7 +73,7 @@ roff layout are outside this port.
 
 ### Guest file service
 
-The browser uses `taijios_files.ReadAt(path: string, offset: s64, buffer: []u8)
+Man and Coffee use `taijios_files.ReadAt(path: string, offset: s64, buffer: []u8)
 -> s32`. Each call opens the path for reading in the caller's guest namespace,
 reads up to 4096 bytes at the given offset, and closes it. The result is the
 byte count, `0` at EOF or for a zero-length buffer, `-2` for a missing path,
@@ -76,7 +85,13 @@ The tests compare the same widget commands with Inferno `tkcmd`. On private
 Xvfb they exercise Bounce, the UTF-8 entry, manual lookup, a real manual link,
 forward and backward text search, missing results, and history and scroll
 restoration. A hosted probe checks namespace mounts, file offsets and errors,
-and representative content from the real manuals.
+and representative content from the real manuals. For Coffee, the tests compare
+scale values and panel commands against `tkcmd`, run the original `wm/coffee`
+alongside separate ZX runs, and verify motion, Stop/Go, and matching artwork.
+The ZX run also verifies that each slider tracks a held drag, retains its value,
+and leaves the paused frame frozen. To run the Coffee tests alone, use
+`python3 appl/cmd/tcltk/test_tcltk.py --coffee-only` and add `--installed` to
+exercise `/dis/coffee.zx`.
 
 ## Supported commands
 
@@ -87,11 +102,16 @@ and representative content from the real manuals.
 | `frame .path` | Container for nested widgets |
 | `entry .path` | Single-line UTF-8 text, with `-bg white` |
 | `text .path` | Wrapped, scrollable text. Tcl scripts supply the text |
-| `pack .path ?path ...?` | `-side top`, `bottom`, `left` or `right`, `-padx pixels`, `-pady pixels`, `-fill none`, `x`, `y` or `both`, and `-expand 0` or `1` |
-| `focus ?path?` | Read or set the focused entry or text view |
+| `scale .path` | `-from`, `-to`, `-resolution`, `-bigincrement`, pixel `-length`, `-orient horizontal` or `vertical`, `-showvalue 0` or `1`, and `-command script` |
+| `.scale set value`, `.scale get` | Set or read a fixed-point value with up to three decimal places. `set` quantizes and clamps silently. Pointer drags and trough or arrow-key steps append the changed value to the callback |
+| `panel .path` | `-bd` or `-borderwidth` in pixels and `-relief flat`. `Tk.PanelImage` allocates a writable RGBA8 backing image centered and clipped to the panel |
+| `.panel dirty ?x0 y0 x1 y1?` | Accept a redraw request for the panel. The surface presents the current pixels on refresh |
+| `update` | Request the regular surface refresh after the Tcl evaluation |
+| `pack .path ?path ...?` | `-side top`, `bottom`, `left` or `right`, `-padx pixels`, `-pady pixels`, `-fill none`, `x`, `y` or `both`, `-expand 0` or `1`, and `-anchor center`, `n`, `ne`, `e`, `se`, `s`, `sw`, `w` or `nw` |
+| `focus ?path?` | Read or set the focused entry, text view, or scale |
 | `bind .entry <Return> script` | Set an entry's Enter callback. Inferno's `<Key-\n>` spelling also works |
 | `.path configure option value` | Set one or more of that widget's supported options |
-| `.path cget option` | Read text, an entry's background, or a button's script |
+| `.path cget option` | Read a supported option from the widget |
 | `.entry get`, `insert index text`, `delete first ?last?`, `index index`, `icursor index` | Read or edit an entry using decimal character indexes, `insert`, or `end` |
 | `.text get first ?last?`, `insert end text`, `delete 1.0 end` | Read one character or a range, append text, or clear the document |
 | `.text index index`, `see index` | Normalize an index or scroll to reveal it. Indexes are `line.column`, `end`, or `@x,y` relative to the widget. Logical indexes accept `+Nc` and `-Nc`. Columns count Unicode code points |
@@ -114,13 +134,23 @@ grapheme navigation, and broader bindings are outside this subset.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements nine of the 25 commands advertised by the [Limbo Tcl/Tk
-bridge](../../lib/tcl_tk.b). The other 16 are `bitmap`, `canvas`, `checkbutton`,
-`grab`, `image`, `listbox`, `lower`, `menu`, `menubutton`, `radiobutton`,
-`raise`, `scale`, `scrollbar`, `toplevel`, `update`, and `variable`.
-The independent [Inferno Tk engine](../../../libtk/utils.c) has additional
-commands such as `choicebutton`, `cursor`, `grid`, `panel`, `send`, and
-`winfo`. Those are outside this subset, as are Tk's case-insensitive text
-search, marks, embedded windows, editable selections and wider tag API.
+The port implements a subset of 11 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining 14 are `bitmap`,
+`canvas`, `checkbutton`, `grab`, `image`, `listbox`, `lower`, `menu`,
+`menubutton`, `radiobutton`, `raise`, `scrollbar`, `toplevel`, and `variable`.
+The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
+available in Ziran with the backing-image and redraw subset above. Its other
+commands include `choicebutton`, `cursor`, `grid`, `send`, and `winfo`.
+
+The remaining scale API includes coordinate-based `get`, `coords`,
+`identify`, `-jump`, `-label`, tick marks, slider size and relief, and trough
+autorepeat. The remaining panel API includes `-anchor`, `origin`,
+`panelx`/`panely`, `screenx`/`screeny`, mattes, and partial damage tracking.
+`pack forget` and `pack propagate`, case-insensitive text search, marks,
+embedded windows, editable selections, and the wider tag API remain open.
+`checkbutton` with `-variable` and `scrollbar` with text `-yscrollcommand`
+are used together by the shipped [Log Window](../../wm/logwindow.b).
+`listbox` with `curselection`, `get`, `yview`, and its scroll callback is used
+by [Unicode Browser](../../wm/unibrowse.b).
 See the [Tcl command comparison](../../lib/tcl.md#comparison-with-shipped-inferno-tcl)
 for the headless interpreter.

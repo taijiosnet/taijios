@@ -27,6 +27,12 @@ y.debug
 /appl/**/*.sbl
 /appl/wm/ziran.local.toml
 /appl/wm/build/
+/appl/cmd/cat.zx
+/appl/cmd/coffee.zx
+/appl/cmd/tclsh.zx
+/dis/cat.zx
+/dis/coffee.zx
+/dis/tclsh.zx
 /dis/wm/stopwatch.zx
 /build/zx-smoke/*
 !/build/zx-smoke/hello.zi

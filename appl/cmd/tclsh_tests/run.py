@@ -49,7 +49,16 @@ def stdin_suite(image):
     expect(guest(f"echo 'puts from-pipe' | zxrun {image}"), "from-pipe\n0\n", codes=(0, -9))
     expect(guest(f"zxrun {image} < /dev/null"), "0\n", codes=(0, -9))
     expect(guest(f"echo 'error intentional' | zxrun {image}"), "tclsh: intentional\n1\n", codes=(0, -9))
-    print("Hosted Tcl stdin passed file redirection, multiple reads, pipes, EOF and error status")
+    path = "/appl/cmd/tclsh_tests/sourced.tcl"
+    (BUILD / "source-script.tcl").write_text(source_script(path))
+    expect(guest(f"zxrun {image} < /build/tcl/source-script.tcl"), "sourced=8\n0\n", codes=(0, -9))
+    expect(guest(f"echo 'source {path}.missing' | zxrun {image}"),
+           f'tclsh: could not read Tcl script "{path}.missing"\n1\n', codes=(0, -9))
+    print("Hosted Tcl stdin passed file redirection, multiple reads, pipes, EOF, source and error status")
+
+
+def source_script(path):
+    return f"proc loadScript {{value}} {{source {{{path}}}; return $value}}\nputs sourced=[loadScript 5]\n"
 
 
 def main():
@@ -63,14 +72,14 @@ def main():
                     "-o", native, "appl/cmd/tclsh_native.zi"], cwd=ROOT, env=ENV, check=True)
     shell = native / "tclsh_native"
 
-    for name in ("core", "reference"):
+    for name in ("core", "reference", "compatibility"):
         fixture = FIXTURES / f"{name}.tcl"
         script = fixture.read_text()
         expected = fixture.with_suffix(".out").read_text()
         expect(capture([shell, fixture]), expected)
         (BUILD / "tcl_input.zi").write_text("Script :: #string TCL_SCRIPT_END\n" +
                                             script + "TCL_SCRIPT_END;\n")
-        image = BUILD / ("tclsh.zx" if name == "reference" else "core.zx")
+        image = BUILD / ("tclsh.zx" if name == "reference" else f"{name}.zx")
         compile_zx(ROOT / "appl/cmd/tclsh.zi", "tclsh:main", image, BUILD)
         expect(capture(["zi2zx", "run", "--backend", "engine", image]), expected + "0\n")
         expect(guest(f"zxrun /build/tcl/{image.name}"), expected + "0\n", codes=(0, -9))
@@ -85,12 +94,26 @@ def main():
     expect(legacy, reference.replace('invalid command name "noSuchCommand"', dis_error), codes=(0, -9))
     print("reference.tcl matched Limbo Dis, including its extra error annotation")
 
+    script = (FIXTURES / "compatibility.tcl").read_text()
+    (BUILD / "legacy-compatibility.tcl").write_text(script + "exit\n")
+    expect(guest("tclsh /build/tcl/legacy-compatibility.tcl"),
+           (FIXTURES / "compatibility.out").read_text(), codes=(0, -9))
+    print("compatibility.tcl matched Limbo Dis for arrays, global, info, switch, lists and strings")
+
+    expect(capture([shell, "-"], source_script(FIXTURES / "sourced.tcl")), "sourced=8\n")
+    (BUILD / "source-script.tcl").write_text(source_script("/appl/cmd/tclsh_tests/sourced.tcl") + "exit\n")
+    expect(guest("tclsh /build/tcl/source-script.tcl"), "sourced=8\n", codes=(0, -9))
+    print("source evaluated in the calling procedure on native Ziran and Limbo Dis")
+
     for script, diagnostic in (
         ('puts before; set v "unfinished', "missing close-quote"),
         ('puts before; set v "bad"suffix', "extra characters after close-quote"),
         ('puts before; set v {bad}suffix', "extra characters after close-brace"),
         ('puts before; break', 'invoked "break" outside of a loop'),
-        ('puts before; set x $array(key)', "array variables are unsupported"),
+        ('puts before; set x $array(key', "missing close-parenthesis for variable name"),
+        ('puts before; set x $' + 'a($' * 50 + 'leaf' + ')' * 50, "script nesting limit exceeded"),
+        ('puts before; switch a {a -}', "switch fallthrough has no body"),
+        ('puts before; uplevel 1 {set x}', "bad stack level"),
     ):
         expect(capture([shell, "-"], script), "before\n", codes=(1,), error=diagnostic + "\n")
     print("Malformed and unsupported scripts returned the expected errors")

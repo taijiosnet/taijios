@@ -1,0 +1,136 @@
+// Infernal Coffee animation adapted from Inferno appl/wm/coffee.b (MIT).
+#import "std/vec"
+using Tcl :: #import "tcl"
+using T :: #import "tcl_types"
+using Tk :: #import "tcl_tk"
+using Window :: #import "tcltk"
+using Files :: #import "taijios_files"
+using Art :: #import "coffee_art"
+
+WIDTH :: 400;
+HEIGHT :: 300;
+CUPS :: 6;
+
+Sprite :: struct { image: Art.Image; mask: Art.Image; }
+background: Art.Image;
+sprites: [CUPS]Sprite;
+palette: [256]u32;
+panel_index: s64 = -1;
+step: s32;
+angle: s32;
+rate: s32 = 3;
+jitter: s32 = 2;
+skip: s32 = 5;
+paused: bool;
+
+Load :: (path: string, mask: bool, image: *Art.Image) -> bool {
+    if Art.Load(path, mask, image) { return true }
+    print("coffee: could not read artwork %\n", path);
+    return false;
+}
+
+Prepare :: () -> bool {
+    if !Load("/icons/bigdelight.bit", false, *background) || background.width != WIDTH || background.height != HEIGHT { return false }
+    images := string.["/icons/coffee0.bit", "/icons/coffee1.bit", "/icons/coffee2.bit", "/icons/coffee3.bit", "/icons/coffee4.bit", "/icons/coffee5.bit"];
+    masks := string.["/icons/coffee0.mask", "/icons/coffee1.mask", "/icons/coffee2.mask", "/icons/coffee3.mask", "/icons/coffee4.mask", "/icons/coffee5.mask"];
+    for i: 0..CUPS-1 {
+        sprite := *sprites[i];
+        if !Load(images[i], false, *sprite.image) || !Load(masks[i], true, *sprite.mask) { return false }
+        if sprite.image.width != sprite.mask.width || sprite.image.height != sprite.mask.height { return false }
+    }
+    for i: 0..255 { palette[i] = Art.Color(cast(s32)i) }
+    panel_index = Tk.PanelImage(".f.p", WIDTH, HEIGHT);
+    if panel_index < 0 { return false }
+    return Animate();
+}
+
+Command :: (_: s64, args: []Text, result: *Result) {
+    if args.count == 1 {
+        action := TextView(args[0]);
+        if action == "stop" || action == "go" { paused = action == "stop"; return }
+    }
+    if args.count == 2 {
+        action := TextView(args[0]);
+        value, ok := T.ParseInteger(TextView(args[1]));
+        if ok && action == "rate" && value >= 1 && value <= 10 { rate = cast(s32)value; return }
+        if ok && action == "jitter" && value >= 0 && value <= 5 { jitter = cast(s32)value; return }
+        if ok && action == "skip" && value >= 0 && value <= 25 { skip = cast(s32)value; return }
+    }
+    Tk.SetError(result, "expected coffee stop, go, or rate/jitter/skip value");
+}
+
+// Sine samples used by the original animation, scaled by 1000.
+SINE :: s32.[
+     0,  17,  35,  52,  70,  87, 105, 122, 139, 156,
+   174, 191, 208, 225, 242, 259, 276, 292, 309, 326,
+   342, 358, 375, 391, 407, 423, 438, 454, 469, 485,
+   500, 515, 530, 545, 559, 574, 588, 602, 616, 629,
+   643, 656, 669, 682, 695, 707, 719, 731, 743, 755,
+   766, 777, 788, 799, 809, 819, 829, 839, 848, 857,
+   866, 875, 883, 891, 899, 906, 914, 921, 927, 934,
+   940, 946, 951, 956, 961, 966, 970, 974, 978, 982,
+   985, 988, 990, 993, 995, 996, 998, 999, 999, 1000, 1000,
+];
+
+Sin :: (degrees: s32) -> s32 {
+    a := degrees % 360;
+    if a <= 90 { return SINE[a] }
+    if a <= 180 { return SINE[180-a] }
+    if a <= 270 { return -SINE[a-180] }
+    return -SINE[360-a];
+}
+
+SetPixel :: (rgba: []u8, at: s64, color: u32) {
+    rgba[at] = cast(u8)color;
+    rgba[at+1] = cast(u8)(color >> 8);
+    rgba[at+2] = cast(u8)(color >> 16);
+    rgba[at+3] = 255;
+}
+
+DrawCup :: (sprite: *Sprite, target: []u8, x: s32, y: s32) {
+    width := sprite.image.width;
+    height := sprite.image.height;
+    x0 := Tk.NonNegative(-x);
+    x1 := Tk.Minimum(width, WIDTH-x);
+    y0 := Tk.NonNegative(-y);
+    y1 := Tk.Minimum(height, HEIGHT-y);
+    pitch := (width+7)/8;
+    image := VecSlice(sprite.image.pixels, 0, sprite.image.pixels.count);
+    mask := VecSlice(sprite.mask.pixels, 0, sprite.mask.pixels.count);
+    for row: y0..y1-1 {
+        for column: x0..x1-1 {
+            bit := (mask[row*pitch+column/8] >> (7-column%8)) & 1;
+            if bit != 0 { SetPixel(target, ((y+row)*WIDTH+x+column)*4, palette[image[row*width+column]]) }
+        }
+    }
+}
+
+Animate :: () -> bool {
+    if paused { return false }
+    angle = (angle + 360 + (ifx step > 25-skip then -rate else rate)) % 360;
+    drift := jitter*(step%5);
+    step = (step+1)%25;
+    panel := *Tk.widgets[panel_index].panel;
+    pixels := VecSlice(panel.pixels, 0, WIDTH*HEIGHT*4);
+    fill := VecSlice(background.pixels, 0, background.pixels.count);
+    for i: 0..WIDTH*HEIGHT-1 { SetPixel(pixels, i*4, palette[fill[i]]) }
+    for i: 0..CUPS-1 {
+        sprite := *sprites[i];
+        phase := angle + cast(s32)i*(360/CUPS);
+        x := WIDTH/2 + Sin(phase)*150/1000 + drift - sprite.image.width/2;
+        y := HEIGHT/2 + Sin(phase+90)*100/1000 + drift - sprite.image.height/2;
+        DrawCup(sprite, pixels, x, y);
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    script: Text;
+    if Files.ReadFile("/appl/cmd/tcltk/coffee.tcl", *script, 16384) != 0 {
+        print("coffee: could not read controls\n");
+        return 1;
+    }
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "coffee", Command) { return 1 }
+    return Window.RunAnimated(*tcl, TextView(script), "Infernal Coffee", 448, 386, Prepare, Animate, 24);
+}

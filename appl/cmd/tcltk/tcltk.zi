@@ -15,6 +15,10 @@ Execute :: (tcl: *Tcl.Interpreter, script: string) -> bool {
     return false;
 }
 
+ExecuteCallback :: (tcl: *Tcl.Interpreter, script: Text) -> bool {
+    return script.bytes.count == 0 || Execute(tcl, TextView(script));
+}
+
 Frame :: struct { pixels: Vec(u8); }
 
 Draw :: (frame: *Frame, width: s32, height: s32) -> bool {
@@ -34,25 +38,39 @@ main :: () -> s32 {
     return Run(*tcl, TextView(source), "Tk", 300, 208);
 }
 
+Prepare :: #type () -> bool;
+Animate :: #type () -> bool;
+
+NoPrepare :: () -> bool { return true }
+NoAnimation :: () -> bool { return false }
+
 Run :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, height: s32) -> s32 {
+    return RunAnimated(tcl, script, title, width, height, NoPrepare, NoAnimation, 500);
+}
+
+RunAnimated :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, height: s32,
+                prepare: Prepare, animate: Animate, interval: s32) -> s32 {
     if !Tk.Attach(tcl) { return 1 }
     if !Execute(tcl, script) { return 1 }
     if Tk.Closed() { return 0 }
     if !Surface.OpenWindow(title, width, height) { return 1 }
     defer Surface.CloseWindow();
+    if !prepare() { return 1 }
     frame: Frame;
     if !Draw(*frame, width, height) { return 1 }
     while !Tk.Closed() {
-        event := Surface.GetEvent(500);
+        event := Surface.GetEvent(interval);
         if event.kind == Surface.Closed { break }
         if event.kind == Surface.Redraw || event.kind == Surface.Resize {
             width = event.width;
             height = event.height;
         } else if event.kind == Surface.Down && event.button == 1 {
-            Tk.PointerDown(event.x, event.y);
+            if !ExecuteCallback(tcl, Tk.PointerPress(event.x, event.y)) { return 1 }
+        } else if event.kind == Surface.Move {
+            if !ExecuteCallback(tcl, Tk.PointerMove(event.x, event.y)) { return 1 }
+            if !Tk.DraggingScale() { continue }
         } else if event.kind == Surface.Up && event.button == 1 {
-            script: Text = Tk.PointerUp(event.x, event.y);
-            if script.bytes.count > 0 && !Execute(tcl, TextView(script)) { return 1 }
+            if !ExecuteCallback(tcl, Tk.PointerUp(event.x, event.y)) { return 1 }
         } else if event.kind == Surface.TextEvent {
             Tk.TextInput(event.text);
         } else if event.kind == Surface.Key {
@@ -69,8 +87,14 @@ Run :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, height
             else if event.key == Surface.BackspaceKey { key = .Backspace }
             else if event.key == Surface.DeleteKey { key = .Delete }
             else { continue }
-            script: Text = Tk.KeyDown(key);
-            if script.bytes.count > 0 && !Execute(tcl, TextView(script)) { return 1 }
+            if !ExecuteCallback(tcl, Tk.KeyDown(key)) { return 1 }
+        } else if event.kind == Surface.Idle {
+            if animate() {
+                pixels := VecSlice(frame.pixels, 0, frame.pixels.count);
+                Paint.RenderPanels(pixels, width, height);
+                if !Surface.PresentRGBA(width, height, TextView(pixels)) { return 1 }
+            }
+            continue;
         } else { continue }
         if !Tk.Closed() && !Draw(*frame, width, height) { return 1 }
     }

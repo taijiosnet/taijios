@@ -18,6 +18,8 @@ enum {
 	ZxSteps = 16000000,
 	ZxTitleBytes = 512,
 	ZxGuestPathBytes = 1024,
+	ZxIoBytes = 8192,
+	ZxOpenFiles = 32,
 };
 
 static int
@@ -28,7 +30,7 @@ zxwrite(void *context, int fd, const void *data, size_t size)
 
 	USED(context);
 	while(size != 0){
-		count = kwrite(fd, (void *)bytes, size > 8192 ? 8192 : size);
+		count = kwrite(fd, (void *)bytes, size > ZxIoBytes ? ZxIoBytes : size);
 		if(count <= 0)
 			return 0;
 		bytes += count;
@@ -396,6 +398,198 @@ zxfilereadat(void *context, const char *module, const char *function,
 	return 1;
 }
 
+typedef struct ZxCommand ZxCommand;
+struct ZxCommand {
+	HostValue *args;
+	int argc;
+	int fd[ZxOpenFiles];
+	char err[ERRMAX];
+};
+
+static int
+zxcopyargs(ZxCommand *command, List *args)
+{
+	List *arg;
+	String *s;
+	HostValue *value;
+	char *bytes, *end;
+	size_t length;
+	int count, i;
+
+	for(arg = args, count = 0; arg != H; arg = arg->tail)
+		count++;
+	if(count == 0)
+		return 1;
+	command->args = calloc(count, sizeof(*command->args));
+	if(command->args == nil)
+		return 0;
+	command->argc = count;
+	for(arg = args, value = command->args; arg != H; arg = arg->tail, value++){
+		s = *(String **)arg->data;
+		value->kind = HOST_STRING;
+		value->type = "string";
+		if(s == H)
+			continue;
+		length = s->len >= 0 ? s->len : runenlen(s->Srune, -s->len);
+		bytes = malloc(length + 1);
+		if(bytes == nil)
+			return 0;
+		if(s->len >= 0)
+			memmove(bytes, s->Sascii, length);
+		else
+			for(i = 0, end = bytes; i < -s->len; i++)
+				end += runetochar(end, &s->Srune[i]);
+		bytes[length] = 0;
+		value->data = (uchar *)bytes;
+		value->length = length;
+	}
+	return 1;
+}
+
+static void
+zxfreeargs(ZxCommand *command)
+{
+	int i;
+
+	for(i = 0; i < command->argc; i++)
+		free((void *)command->args[i].data);
+	free(command->args);
+}
+
+static int
+zxs32(HostValue *result, int value)
+{
+	result->kind = HOST_INTEGER;
+	result->type = "s32";
+	result->integer = value;
+	return 1;
+}
+
+static int
+zxisindex(const HostValue *value)
+{
+	return value->kind == HOST_INTEGER && value->type != nil &&
+		strcmp(value->type, "s32") == 0 &&
+		value->integer >= INT32_MIN && value->integer <= INT32_MAX;
+}
+
+static int
+zxargs(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	int i;
+
+	USED(module);
+	if(strcmp(function, "Count") == 0)
+		return n == 0 && zxs32(result, command->argc);
+	if(n != 1 || !zxisindex(args))
+		return 0;
+	i = args[0].integer;
+	*result = (i >= 0 && i < command->argc) ? command->args[i] :
+		(HostValue){.kind = HOST_STRING, .type = "string"};
+	return 1;
+}
+
+static int
+zxioerror(ZxCommand *command, HostValue *result, const char *message)
+{
+	if(message == nil)
+		kgerrstr(command->err, sizeof(command->err));
+	else
+		snprint(command->err, sizeof(command->err), "%s", message);
+	return zxs32(result, -1);
+}
+
+static int
+zxioopen(ZxCommand *command, const HostValue *args, int n, HostValue *result)
+{
+	static const int modes[] = {OREAD, OWRITE, ORDWR};
+	char path[ZxGuestPathBytes + 1];
+	int slot, mode, fd;
+
+	if(n != 2 || args[0].kind != HOST_STRING || !zxisindex(args + 1))
+		return 0;
+	if(args[0].length > ZxGuestPathBytes || (args[0].length != 0 &&
+	   (args[0].data == nil || memchr(args[0].data, 0, args[0].length) != nil)))
+		return zxioerror(command, result, "invalid file name");
+	mode = args[1].integer;
+	if(mode < 0 || mode >= nelem(modes))
+		return zxioerror(command, result, "invalid open mode");
+	for(slot = 0; slot < nelem(command->fd) && command->fd[slot] >= 0; slot++)
+		;
+	if(slot == nelem(command->fd))
+		return zxioerror(command, result, "too many open ZX files");
+	if(args[0].length != 0)
+		memmove(path, args[0].data, args[0].length);
+	path[args[0].length] = 0;
+	fd = kopen(path, modes[mode]);
+	if(fd < 0)
+		return zxioerror(command, result, nil);
+	command->fd[slot] = fd;
+	return zxs32(result, slot + 3);
+}
+
+static int
+zxio(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	const HostValue *buffer;
+	uchar bytes[ZxIoBytes];
+	size_t length;
+	long count, i;
+	int handle, fd;
+
+	USED(module);
+	if(strcmp(function, "Error") == 0){
+		if(n != 0)
+			return 0;
+		*result = (HostValue){.kind = HOST_STRING, .type = "string",
+			.data = (uchar *)command->err, .length = strlen(command->err)};
+		return 1;
+	}
+	if(strcmp(function, "Open") == 0)
+		return zxioopen(command, args, n, result);
+	if(n < 1 || !zxisindex(args))
+		return 0;
+	handle = args[0].integer;
+	if(handle >= 0 && handle < 3)
+		fd = handle;
+	else if(handle >= 3 && handle - 3 < nelem(command->fd))
+		fd = command->fd[handle - 3];
+	else
+		fd = -1;
+	if(fd < 0)
+		return zxioerror(command, result, "invalid ZX file handle");
+	if(strcmp(function, "Close") == 0){
+		if(n != 1)
+			return 0;
+		if(handle < 3)
+			return zxioerror(command, result, "cannot close a standard stream");
+		command->fd[handle - 3] = -1;
+		return kclose(fd) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
+	}
+	if(n != 2)
+		return 0;
+	buffer = args + 1;
+	length = buffer->length > sizeof(bytes) ? sizeof(bytes) : buffer->length;
+	if(strcmp(function, "Read") == 0){
+		if(buffer->kind != HOST_SLICE || buffer->type == nil ||
+		   strcmp(buffer->type, "[]u8") != 0 ||
+		   (length != 0 && buffer->elements == nil))
+			return 0;
+		count = length == 0 ? 0 : kread(fd, bytes, length);
+		for(i = 0; i < count; i++)
+			buffer->elements[i].bits = bytes[i];
+	}else{
+		if(buffer->kind != HOST_STRING || (length != 0 && buffer->data == nil))
+			return 0;
+		count = length == 0 ? 0 : kwrite(fd, (void *)buffer->data, length);
+	}
+	return count < 0 ? zxioerror(command, result, nil) : zxs32(result, count);
+}
+
 /* Package builds prefix the module leaf with p and 16 hexadecimal digits. */
 static int
 zxmodule(const char *actual, const char *leaf)
@@ -413,9 +607,10 @@ zxmodule(const char *actual, const char *leaf)
 }
 
 static size_t
-zxbindings(Bundle *bundle, ZxSurface *surface, HostBinding *bindings)
+zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *bindings)
 {
 	static const char *names[] = {"Open", "Event", "Present", "Close"};
+	static const char *io[] = {"Open", "Read", "Write", "Close", "Error"};
 	BundleCapabilityAbi abi;
 	size_t i, count = 0;
 	int j;
@@ -433,6 +628,19 @@ zxbindings(Bundle *bundle, ZxSurface *surface, HostBinding *bindings)
 		}
 		if(zxmodule(abi.module, "taijios_clock") && strcmp(abi.function, "MonotonicMillis") == 0){
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxclock, nil};
+			continue;
+		}
+		if(zxmodule(abi.module, "taijios_args")){
+			if(strcmp(abi.function, "Count") == 0 || strcmp(abi.function, "At") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxargs, command};
+			continue;
+		}
+		if(zxmodule(abi.module, "taijios_io")){
+			for(j = 0; j < nelem(io); j++)
+				if(strcmp(abi.function, io[j]) == 0){
+					bindings[count++] = (HostBinding){abi.module, abi.function, zxio, command};
+					break;
+				}
 			continue;
 		}
 		if(surface->win == H || !zxmodule(abi.module, "zx_surface"))
@@ -453,12 +661,14 @@ struct ZxResult {
 };
 
 static ZxResult
-zxrun(String *s, ZX_Window *win)
+zxrun(String *s, List *args, ZX_Window *win)
 {
 	static const char *const roots[] = {"/dis/lib"};
 	ZxSurface surface = {0};
+	ZxCommand command = {0};
 	HostBinding *bindings;
 	size_t count;
+	int i;
 	ZxResult result = {0, -1, ""};
 	Bundle *bundle;
 	ZxModuleLoader *loader;
@@ -477,6 +687,13 @@ zxrun(String *s, ZX_Window *win)
 	path = strdup(string2c(s));
 	if(path == nil)
 		error("out of memory copying ZX path");
+	if(!zxcopyargs(&command, args)){
+		free(path);
+		zxfreeargs(&command);
+		error("out of memory copying ZX arguments");
+	}
+	for(i = 0; i < nelem(command.fd); i++)
+		command.fd[i] = -1;
 	surface.win = win;
 	release();
 	bundle = zxopen(path, result.problem);
@@ -489,7 +706,7 @@ zxrun(String *s, ZX_Window *win)
 		if(count != 0 && count <= SIZE_MAX / sizeof(*bindings))
 			bindings = malloc(count * sizeof(*bindings));
 		if(loader != nil && (count == 0 || bindings != nil)){
-			count = zxbindings(bundle, &surface, bindings);
+			count = zxbindings(bundle, &surface, &command, bindings);
 			program = ZxModuleProgramOpen(loader, bundle, bindings, count);
 		}
 		if(program == nil || !ZxModuleProgramRun(program, &result.value, &result.status)){
@@ -509,6 +726,10 @@ zxrun(String *s, ZX_Window *win)
 		free(bindings);
 		BundleClose(bundle);
 	}
+	for(i = 0; i < nelem(command.fd); i++)
+		if(command.fd[i] >= 0)
+			kclose(command.fd[i]);
+	zxfreeargs(&command);
 	acquire();
 	return result;
 }
@@ -517,7 +738,17 @@ void
 ZX_run(void *fp)
 {
 	F_ZX_run *f = fp;
-	ZxResult result = zxrun(f->path, H);
+	ZxResult result = zxrun(f->path, H, H);
+	f->ret->t0 = result.value;
+	f->ret->t1 = result.status;
+	retstr(result.problem, &f->ret->t2);
+}
+
+void
+ZX_runargs(void *fp)
+{
+	F_ZX_runargs *f = fp;
+	ZxResult result = zxrun(f->path, f->args, H);
 
 	f->ret->t0 = result.value;
 	f->ret->t1 = result.status;
@@ -532,7 +763,7 @@ ZX_runwindow(void *fp)
 
 	if(f->win == H || f->win->request == H || f->win->reply == H)
 		error("invalid ZX window channels");
-	result = zxrun(f->path, f->win);
+	result = zxrun(f->path, H, f->win);
 	f->ret->t0 = result.value;
 	f->ret->t1 = result.status;
 	retstr(result.problem, &f->ret->t2);

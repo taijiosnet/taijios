@@ -111,6 +111,54 @@ rest of the buffer. For a nonempty buffer, the call returns `0` at EOF or
 `-1` on a read error. An empty buffer returns `0` without reading. Dis pipes and input
 redirection supply the stream in both console and windowed runs.
 
+### Build and run ZX `cat`
+
+With `zi2zx`, `mk`, and `limbo` on `PATH`, build and install the hosted
+emulator as above, then install the command and its launcher.
+
+```sh
+(cd appl/cmd && mk zxrun.install install-cat-zx)
+Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'echo hello | zxrun -c /dis/cat.zx'
+```
+
+In the guest, use `zxrun -c /dis/cat.zx [file ...]`. Each `-` operand reads
+stdin. With no operands the command reads stdin once. `cat` still launches
+the Dis command. `zxrun -c` accepts void or zero as success and puts a
+nonzero return value in the shell's `$status`. `zxrun file.zx [args ...]`
+prints a returned value as before.
+
+ZX commands use two typed capabilities declared in `appl/cmd`.
+
+- `taijios_args.Count()` returns the number of operands and `At(index)`
+  returns a zero-based operand as a UTF-8 string. Out-of-range indices return
+  an empty string.
+- `taijios_io.Open(path, mode)` opens an existing file in the caller's guest
+  namespace. Modes `0`, `1`, and `2` mean read, write, and read/write.
+  `Read(handle, buffer)` and `Write(handle, data)` transfer up to 8192 bytes
+  per call. Handles `0`, `1`, and `2` refer to the caller's standard streams.
+  `Close(handle)` closes a file opened by `Open`. The runner also closes
+  those handles when the bundle exits. Operations return `-1` on error and
+  `Error()` returns the last I/O error. A read into a nonempty buffer returns
+  zero at EOF.
+
+Test the command against its Dis counterpart with
+`python3 -u build/zx-smoke/run.py Linux/386/bin/emu --cat`.
+
+### Dis command migration order
+
+On the hosted tree used for this port, 376 of 845 installed Dis files loaded
+with the shell's `Command.init` signature. That includes 160 entries directly
+under `/dis` and 52 under `/dis/wm`. This inventory checks the entry
+signature without invoking each program.
+
+| Order | Existing commands | Capabilities to exercise or add |
+| --- | --- | --- |
+| 1 | `echo`, `basename`, `cleanname` | Argument handling, text output, path-string operations |
+| 2 | `wc`, `uniq`, `tr` | Guest stdin, stdout, and sequential file access |
+| 3 | `test`, `ls`, `tee`, `cp` | File metadata, directory reads, and file creation |
+| 4 | `wm/about`, `wm/clock`, `wm/colors` | Guest surfaces and input, wall-clock time, and display sampling as needed |
+| 5 | `sh`, `wm/wm`, compiler and service commands | Process control, namespaces, window management, and service-specific APIs |
+
 ### Verify the hosted runner
 
 Build the console fixture and put the Kryon hosted surface example bundle at

@@ -4,6 +4,7 @@ ZX: module
 
 	# The integer is 1 for a returned value, 0 for void and -1 on error.
 	run:	fn(path: string): (big, int, string);
+	runargs:	fn(path: string, args: list of string): (big, int, string);
 
 	# Requests from the engine to the window process.
 	Open, Event, Buffer, Present, Close: con iota;

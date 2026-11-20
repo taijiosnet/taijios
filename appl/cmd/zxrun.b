@@ -38,19 +38,21 @@ init(ctxt: ref Draw->Context, args: list of string)
 	stderr := sys->fildes(2);
 	path: string;
 	window := 0;
-	if(args != nil && tl args != nil){
+	command := 0;
+	if(args != nil)
 		args = tl args;
-		if(hd args == "-w" && tl args != nil){
-			window = 1;
-			args = tl args;
+	if(args != nil){
+		case hd args {
+		"-w" => window = 1; args = tl args;
+		"-c" => command = 1; args = tl args;
 		}
-		if(tl args == nil)
-			path = hd args;
 	}
-	if(path == nil){
-		sys->fprint(stderr, "usage: zxrun [-w] file.zx\n");
+	if(args == nil || hd args == nil || (window && tl args != nil)){
+		sys->fprint(stderr, "usage: zxrun [-c] file.zx [args ...]\n       zxrun -w file.zx\n");
 		raise "fail:usage";
 	}
+	path = hd args;
+	args = tl args;
 
 	zx := load ZX ZX->PATH;
 	if(zx == nil){
@@ -63,11 +65,18 @@ init(ctxt: ref Draw->Context, args: list of string)
 	problem: string;
 	if(window)
 		(value, status, problem) = runwindow(zx, ctxt, path);
+	else if(command || args != nil)
+		(value, status, problem) = zx->runargs(path, args);
 	else
 		(value, status, problem) = zx->run(path);
 	if(status < 0){
 		sys->fprint(stderr, "zxrun: %s: %s\n", path, problem);
 		raise "fail:zx";
+	}
+	if(command){
+		if(status > 0 && value != big 0)
+			raise sys->sprint("fail:%bd", value);
+		return;
 	}
 	if(status > 0 && sys->print("%bd\n", value) < 0){
 		sys->fprint(stderr, "zxrun: write error: %r\n");

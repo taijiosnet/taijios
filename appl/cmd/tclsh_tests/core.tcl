@@ -66,3 +66,31 @@ puts $message
 set expressionText {1 + 2}
 puts [catch {expr {$expressionText}} message]
 puts $message
+
+set data({literal}) 4
+set key {{literal}}
+set data() 2
+proc edit_element {part} {
+    upvar #0 data($part) cell
+    incr cell 3
+    return $cell
+}
+proc scopes {value} {
+    proc outer_scope {} {
+        upvar value local
+        incr local 2
+        uplevel -1 {incr value 4}
+    }
+    outer_scope
+    return $value
+}
+puts "scopes=[scopes 5]:[edit_element $key]:$data($key):$data([set key]):$data()"
+puts "array=[array size data]:[llength [array names data]]:[info exists data]"
+unset data()
+puts "remaining=[array size data]:[info exists data()]"
+unset data
+puts "removed=[info exists data]"
+puts "format=<[format {%s:%02x:%03d:%%:%-5.2s} hi 15 -7 café]>"
+puts "string=<[string trim {  café  }]>:[string first é café]:[string last é {é café}]:[string toupper Taiji]"
+puts "split-chars=[llength [split café {}]]:[lindex [split café {}] end]"
+puts "info=[info args edit_element]:[expr {[lsearch [info commands] switch] >= 0}]"
