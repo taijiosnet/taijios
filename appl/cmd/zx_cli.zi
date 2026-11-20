@@ -17,6 +17,7 @@ PrintLine :: (text: string) {
 
 Usage :: (text: string) -> s32 {
     unused WriteAll(2, text);
+    unused Args.SetFailure("usage");
     return 1;
 }
 

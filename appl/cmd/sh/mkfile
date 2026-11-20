@@ -41,6 +41,7 @@ SYSMODULES=\
 	sys.m\
 	tk.m\
 	tkclient.m\
+	zx.m
 
 DISBIN=$ROOT/dis/sh
 
@@ -48,8 +49,9 @@ DISBIN=$ROOT/dis/sh
 
 all:V:		$TARG
 
-install:V:	$INS
-	cp $DISBIN/sh.dis $DISBIN/..
+install:V:	$INS sh.install
+
+sh.install:V:	$ROOT/dis/sh.dis $DISBIN/sh.dis
 
 nuke:V: clean
 	rm -f $INS
@@ -61,6 +63,8 @@ uninstall:V:
 	rm -f $INS
 
 $ROOT/dis/sh.dis:	sh.dis
-	rm -f $ROOT/dis/sh.dis && cp sh.dis $ROOT/dis/sh.dis
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 sh.dis "$staged" && mv "$staged" "$target"
 
 %.dis: ${SYSMODULES:%=$MODDIR/%}

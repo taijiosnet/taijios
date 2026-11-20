@@ -4,6 +4,7 @@ include "sys.m";
 	sys: Sys;
 	sprint: import sys;
 include "draw.m";
+include "zx.m";
 include "bufio.m";
 	bufio: Bufio;
 include "string.m";
@@ -777,9 +778,16 @@ runexternal(ctxt: ref Context, args: list of ref Listnode, last: int): string
 		npath := path;
 		if (!disfile)
 			npath += ".dis";
+		zxfile: string;
+		if (!disfile)
+			zxfile = commandzx(path);
+		if (zxfile != nil)
+			npath = "/dis/zxrun.dis";
 		mod := load Command npath;
 		if (mod != nil) {
 			argv := list2stringlist(args);
+			if (zxfile != nil)
+				argv = "zxrun" :: "-s" :: zxfile :: tl argv;
 			export(ctxt.env.localenv);
 
 			if (last) {
@@ -801,6 +809,10 @@ runexternal(ctxt: ref Context, args: list of ref Listnode, last: int): string
 			return waitfor(ctxt, pid :: nil);
 		}
 		err = sys->sprint("%r");
+		if (zxfile != nil) {
+			err = sys->sprint("cannot load %s: %s", npath, err);
+			break;
+		}
 		if (nonexistent(err)) {
 			# try and run it as a shell script
 			if (!disfile && (fd := sys->open(path, Sys->OREAD)) != nil) {
@@ -1985,7 +1997,7 @@ whatisit(ctxt: ref Context, el: ref Listnode): string
 		if (len name >= 4 && name[len name-4:] == ".dis")
 			disfile = 1;
 		pathlist: list of string;
-		if (len name >= 2 && (name[0] == '/' || name[0:2] == "./"))
+		if (absolute(name))
 			pathlist = list of {""};
 		else if ((pl := ctxt.get("path")) != nil)
 			pathlist = list2stringlist(pl);
@@ -1999,6 +2011,10 @@ whatisit(ctxt: ref Context, el: ref Listnode): string
 				path = hd pathlist + "/" + name;
 			else
 				path = name;
+			if (!disfile && (zxfile := commandzx(path)) != nil) {
+				foundpath = zxfile;
+				break;
+			}
 			if (!disfile && (fd := sys->open(path, Sys->OREAD)) != nil) {
 				if (executable(sys->fstat(fd), 8r111)) {
 					foundpath = path;
@@ -2112,6 +2128,15 @@ executable(s: (int, Sys->Dir), mode: int): int
 	(ok, info) := s;
 	return ok != -1 && (info.mode & Sys->DMDIR) == 0
 			&& (info.mode & mode) != 0;
+}
+
+commandzx(path: string): string
+{
+	if (len path < 3 || path[len path-3:] != ".zx")
+		path += ".zx";
+	if (executable(sys->stat(path), 8r111) && (load ZX ZX->PATH) != nil)
+		return path;
+	return nil;
 }
 
 quoted(val: list of ref Listnode, quoteblocks: int): string

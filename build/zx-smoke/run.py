@@ -54,7 +54,7 @@ if '--cat' in sys.argv[2:]:
     (files / 'cat empty').write_bytes(b'')
     zx_cat = 'zxrun -c /dis/cat.zx'
     prefix = 'bind -c /build/zx-smoke /chan; cd /chan; '
-    for command in ('cat', zx_cat):
+    for command in ('/dis/cat.dis', zx_cat):
         files_and_stdin = run(prefix + f"{command} 'cat café.txt' 'cat empty' - 'cat input.bin' "
                               "- < 'cat input.bin' > cat.out; echo $status; echo CAT_OK")
         assert files_and_stdin.stdout == '\nCAT_OK\n' and not files_and_stdin.stderr
@@ -68,7 +68,7 @@ if '--cat' in sys.argv[2:]:
             ("''", 'bad open', 'cat: cannot open : '),
             ('>[0] cat.writeonly', 'read error', 'cat: error reading <stdin>: '),
             ("'cat input.bin' <[1] 'cat empty'", 'write error', 'cat: write error: ')):
-        legacy = run(prefix + f'cat {args} >[2] cat.dis.err; echo $status')
+        legacy = run(prefix + f'/dis/cat.dis {args} >[2] cat.dis.err; echo $status')
         converted = run(prefix + f'{zx_cat} {args} >[2] cat.zx.err; echo $status')
         assert legacy.stdout == legacy_status + '\n' and not legacy.stderr
         assert converted.stdout == '1\n' and not converted.stderr
@@ -76,6 +76,52 @@ if '--cat' in sys.argv[2:]:
         assert legacy_error.startswith(expected)
         assert (files / 'cat.zx.err').read_text() == legacy_error
 
+
+if '--stock-zx' in sys.argv[2:]:
+    from shutil import copyfile
+    from tempfile import TemporaryDirectory
+
+    lookup = run('whatis cat echo basename cleanname wc /dis/cat.dis /dis/cat.zx')
+    assert lookup.stdout.splitlines() == ['/dis/cat.zx', '/dis/echo.zx', '/dis/basename.zx',
+                                          '/dis/cleanname.zx', '/dis/wc.dis', '/dis/cat.dis',
+                                          '/dis/cat.zx']
+    assert not lookup.stderr
+
+    result = run("echo -n 'café' '' x | cat | /dis/cat.dis; echo; "
+                 "basename 'é.tar' .tar; cleanname -d /a b/../c")
+    assert result.stdout == 'café  x\né\n/a/c\n' and not result.stderr
+
+    result = run("cat /absent-zx-smoke >[2] /dev/null; echo $status; "
+                 "cat >[0] /build/zx-smoke/cat.writeonly >[2] /dev/null; echo $status; "
+                 "echo hello <[1] /dev/null >[2] /dev/null; echo $status; "
+                 "basename -x a >[2] /dev/null; echo $status; "
+                 "cleanname -d >[2] /dev/null; echo $status; "
+                 "zxrun -c /dis/basename.zx -x a >[2] /dev/null; echo $status")
+    assert result.stdout == 'bad open\nread error\nwrite error\nusage\nusage\n1\n' and not result.stderr
+
+    with TemporaryDirectory(dir=files, prefix='stock-') as directory:
+        directory = Path(directory)
+        guest = '/' + str(directory.relative_to(root))
+        copyfile(root / 'dis' / 'echo.dis', directory / 'echo.dis')
+        (directory / 'echo.zx').write_bytes(b'not a ZX bundle\n')
+        prefix = f'path=({guest} /dis); '
+        fallback = run(prefix + 'whatis echo; echo fallback')
+        assert fallback.stdout == f'{guest}/echo.dis\nfallback\n' and not fallback.stderr
+        (directory / 'echo.zx').chmod(0o755)
+        rejected = run(prefix + 'whatis echo; echo rejected >[2] /dev/null; /dis/echo.dis $status')
+        assert rejected.stdout == f'{guest}/echo.zx\nzx\n', rejected
+        (directory / 'echo.zx').unlink()
+        (directory / 'echo.zx').mkdir()
+        directory_fallback = run(prefix + 'whatis echo; echo fallback')
+        assert directory_fallback.stdout == f'{guest}/echo.dis\nfallback\n' and not directory_fallback.stderr
+
+        copyfile(root / 'dis' / 'echo.zx', directory / 'echo data.zx')
+        (directory / 'echo data.zx').chmod(0o755)
+        direct = run(f"cd {guest}; whatis './echo data.zx'; './echo data.zx' 'direct €'")
+        assert direct.stdout == './echo data.zx\ndirect €\n' and not direct.stderr
+    builtin = run('load /dis/sh/echo.dis; whatis echo; echo builtin')
+    assert builtin.stdout == 'load /dis/sh/echo.dis; echo\nbuiltin\n' and not builtin.stderr
+    print('Stock ZX: lookup, UTF-8 argv, pipeline, named errors, path precedence and Dis fallback')
 
 if '--utilities' in sys.argv[2:]:
     cases = [

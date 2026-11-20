@@ -3,6 +3,7 @@ ZX: module
 	PATH:	con "$ZX";
 
 	# The integer is 1 for a returned value, 0 for void and -1 on error.
+	# The string holds a runtime error or an optional name for a nonzero result.
 	run:	fn(path: string): (big, int, string);
 	runargs:	fn(path: string, args: list of string): (big, int, string);
 

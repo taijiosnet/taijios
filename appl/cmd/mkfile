@@ -213,6 +213,7 @@ SYSMODULES=\
 
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
+ZXCOMMANDS=cat echo basename cleanname
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 NAMEZX=$ZXLIB/taijios_names.zi
 TCLZX=$ZXLIB/tcl.zi $ZXLIB/tcl_calc.zi $ZXLIB/tcl_io.zi $ZXLIB/tcl_lists.zi $ZXLIB/tcl_strings.zi $ZXLIB/tcl_types.zi $ZXLIB/tcl_variables.zi
@@ -254,24 +255,29 @@ logwindow.zx: tcltk/logwindow_app.zi tcltk/logwindow_input.zi tcltk/logwindow_st
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --bind-host zx_surface --bind-host taijios_args --bind-host taijios_files --bind-host taijios_stdin --entry logwindow_app:main -o $target tcltk/logwindow_app.zi
 
 install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-logwindow-zx install-utilities-zx
+	(cd sh && mk sh.install)
 install-cat-zx:V: $DISBIN/cat.zx
 install-tclsh-zx:V: $DISBIN/tclsh.zx
 install-coffee-zx:V: $DISBIN/coffee.zx tcltk/coffee.tcl $COFFEEART
 install-logwindow-zx:V: $DISBIN/wm/logwindow.zx tcltk/logwindow.tcl
 install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
 
-$DISBIN/cat.zx: cat.zx
+$DISBIN/cat.zx: cat.zx mkfile
 $DISBIN/tclsh.zx: tclsh.zx
 $DISBIN/coffee.zx: coffee.zx
 $DISBIN/wm/logwindow.zx: logwindow.zx
-$DISBIN/echo.zx: echo.zx
-$DISBIN/basename.zx: basename.zx
-$DISBIN/cleanname.zx: cleanname.zx
+$DISBIN/echo.zx: echo.zx mkfile
+$DISBIN/basename.zx: basename.zx mkfile
+$DISBIN/cleanname.zx: cleanname.zx mkfile
 
 $DISBIN/%.zx: %.zx
+	mode=0644
+	case " $ZXCOMMANDS " in
+		*" $stem "*) mode=0755 ;;
+	esac
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 "$stem.zx" "$staged" && mv "$staged" "$target"
+	install -m "$mode" "$stem.zx" "$staged" && mv "$staged" "$target"
 
 $DISBIN/wm/%.zx: %.zx
 	staged=$(mktemp "$target.XXXXXX") &&

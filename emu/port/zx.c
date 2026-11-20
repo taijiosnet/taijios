@@ -430,6 +430,7 @@ struct ZxCommand {
 	int argc;
 	int fd[ZxOpenFiles];
 	char err[ERRMAX];
+	char failure[ERRMAX];
 };
 
 static int
@@ -509,6 +510,17 @@ zxargs(void *context, const char *module, const char *function,
 	USED(module);
 	if(strcmp(function, "Count") == 0)
 		return n == 0 && zxs32(result, command->argc);
+	if(strcmp(function, "SetFailure") == 0){
+		if(n != 1 || args[0].kind != HOST_STRING)
+			return 0;
+		if(args[0].length >= sizeof(command->failure) || (args[0].length != 0 &&
+		   (args[0].data == nil || memchr(args[0].data, 0, args[0].length) != nil)))
+			return zxs32(result, -1);
+		if(args[0].length != 0)
+			memmove(command->failure, args[0].data, args[0].length);
+		command->failure[args[0].length] = 0;
+		return zxs32(result, 0);
+	}
 	if(n != 1 || !zxisindex(args))
 		return 0;
 	i = args[0].integer;
@@ -731,7 +743,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_args")){
-			if(strcmp(abi.function, "Count") == 0 || strcmp(abi.function, "At") == 0)
+			if(strcmp(abi.function, "Count") == 0 || strcmp(abi.function, "At") == 0 ||
+			   strcmp(abi.function, "SetFailure") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxargs, command};
 			continue;
 		}
@@ -819,7 +832,9 @@ zxrun(String *s, List *args, ZX_Window *win)
 				strecpy(result.problem, result.problem+sizeof(result.problem),
 					program == nil ? "cannot initialize ZX program" : "ZX execution failed");
 			result.status = -1;
-		}else
+		}else if(result.status > 0 && result.value != 0)
+			strecpy(result.problem, result.problem+sizeof(result.problem), command.failure);
+		else
 			result.problem[0] = '\0';
 		if(program != nil)
 			ZxModuleProgramClose(program);

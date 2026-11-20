@@ -24,5 +24,6 @@ main :: () -> s32 {
     unused Cli.WriteAll(2, "echo: write error: ");
     unused Cli.WriteAll(2, problem);
     unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("write error");
     return 1;
 }

@@ -40,18 +40,20 @@ init(ctxt: ref Draw->Context, args: list of string)
 	path: string;
 	window := 0;
 	command := 0;
+	namedstatus := 0;
 	newgroup := 0;
 	if(args != nil)
 		args = tl args;
-	while(args != nil && (hd args == "-w" || hd args == "-c" || hd args == "-p")){
+	while(args != nil && (hd args == "-w" || hd args == "-c" || hd args == "-p" || hd args == "-s")){
 		case hd args {
 		"-w" => window = 1; args = tl args;
 		"-c" => command = 1; args = tl args;
+		"-s" => command = namedstatus = 1; args = tl args;
 		"-p" => newgroup = 1; args = tl args;
 		}
 	}
 	if(args == nil || hd args == nil){
-		sys->fprint(stderr, "usage: zxrun [-c] [-w] [-p] file.zx [args ...]\n");
+		sys->fprint(stderr, "usage: zxrun [-c|-s] [-w] [-p] file.zx [args ...]\n");
 		raise "fail:usage";
 	}
 	path = hd args;
@@ -81,8 +83,11 @@ init(ctxt: ref Draw->Context, args: list of string)
 		raise "fail:zx";
 	}
 	if(command){
-		if(status > 0 && value != big 0)
+		if(status > 0 && value != big 0){
+			if(namedstatus && problem != nil)
+				raise "fail:" + problem;
 			raise sys->sprint("fail:%bd", value);
+		}
 		return;
 	}
 	if(status > 0 && sys->print("%bd\n", value) < 0){

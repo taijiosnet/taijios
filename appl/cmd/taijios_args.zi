@@ -1,6 +1,7 @@
 host_api :: #system_library "host_api";
 
 #scope_export
+SetFailure :: (message: string) -> s32 #foreign host_api;
 Count :: () -> s32 #foreign host_api;
 At :: (index: s32) -> string #foreign host_api;
 

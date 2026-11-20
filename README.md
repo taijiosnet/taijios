@@ -137,24 +137,25 @@ graphical guest shell. See the [Tk applications guide](appl/cmd/tcltk/README.md)
 ### Build and run ZX `cat`
 
 With `zi2zx`, `mk`, and `limbo` on `PATH`, build and install the hosted
-emulator as above, then install the command and its launcher.
+emulator as above, then install the ZX commands, launcher, and shell.
 
 ```sh
-(cd appl/cmd && mk zxrun.install install-cat-zx)
-Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'echo hello | zxrun -c /dis/cat.zx'
+(cd appl/cmd && mk install-zx)
+Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'whatis cat; echo hello | cat'
 ```
 
-In the guest, use `zxrun -c /dis/cat.zx [file ...]`. Each `-` operand reads
-stdin. With no operands the command reads stdin once. `cat` still launches
-the Dis command. `zxrun -c` accepts void or zero as success and puts a
-nonzero return value in the shell's `$status`. `zxrun file.zx [args ...]`
-prints a returned value as before.
+Each `-` operand reads stdin. With no operands `cat` reads stdin once.
+Use `/dis/cat.dis` to run the Dis version. `zxrun -c /dis/cat.zx [file ...]`
+accepts void or zero as success and puts a nonzero return value in `$status`.
+`zxrun file.zx [args ...]` prints the returned value.
 
 ZX commands use two typed capabilities declared in `appl/cmd`.
 
 - `taijios_args.Count()` returns the number of operands and `At(index)`
   returns a zero-based operand as a UTF-8 string. Out-of-range indices return
-  an empty string.
+  an empty string. `SetFailure(message)` supplies a named shell status when
+  the program returns a nonzero value. `zxrun -s` uses this message when
+  present and uses the numeric return value otherwise.
 - `taijios_io.Open(path, mode)` opens an existing file in the caller's guest
   namespace. Modes `0`, `1`, and `2` mean read, write, and read/write.
   `Read(handle, buffer)` and `Write(handle, data)` transfer up to 8192 bytes
@@ -175,14 +176,18 @@ Test the command against its Dis counterpart with
 
 ### Build and run ZX `echo`, `basename`, and `cleanname`
 
-`mk install-zx` in `appl/cmd` installs all three bundles. To install just
-these bundles and the launcher, run `(cd appl/cmd && mk zxrun.install install-utilities-zx)`.
+`mk install-zx` installs `cat`, `echo`, `basename`, and `cleanname` as
+executable bundles. For each directory in `$path`, `sh` tries an executable
+`.zx` when the ZX runtime is available, followed by `.dis` and the executable
+script form. Built-ins retain first priority. A name ending in `.dis`
+selects the Dis module. The shell launches a ZX command with `zxrun -s`,
+so existing scripts keep named errors such as `usage` and `bad open`.
 They use `taijios_args` for operands and `taijios_io` for output and diagnostics.
 `basename` and `cleanname` share the Ziran path functions in `appl/lib/taijios_names.zi`.
 
 ```sh
-Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'zxrun -c /dis/echo.zx hello; zxrun -c /dis/basename.zx /a/file.txt .txt; zxrun -c /dis/cleanname.zx -d /a b/../c'
-python3 -u build/zx-smoke/run.py Linux/386/bin/emu --utilities
+Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'echo hello; basename /a/file.txt .txt; cleanname -d /a b/../c'
+python3 -u build/zx-smoke/run.py Linux/386/bin/emu --stock-zx --cat --utilities
 ```
 
 ### Dis command migration order

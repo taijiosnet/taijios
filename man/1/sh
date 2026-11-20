@@ -78,20 +78,25 @@ looks for an external program to execute.
 If the name ends in
 .BR .dis ,
 .I sh
-looks for a Dis module of that name; otherwise
-it tries first to find a Dis module of
-that name with
+looks for a Dis module of that name.
+For other names, it first tries an executable
+.B .zx
+bundle when the ZX runtime is available.
+It then tries a Dis module with
 .B .dis
-appended and failing that, it looks for
-an executable file of the same name, which should
-be a readable, executable script file.
-If the name does not start with a slash
-.RB ( / )
-or dot-slash
-.RB ( ./ ),
-then the name is first looked for relative to
-.BR /dis ,
-and then relative to the current directory.
+appended, followed by a readable, executable script of the original name.
+Relative command names use the directories in
+.BR $path ,
+which defaults to
+.B /dis
+and the current directory.
+Paths beginning with
+.BR / ,
+.BR # ,
+.BR ./ ,
+or
+.B ../
+are used directly.
 A Dis module will be executed only if it
 implements the
 .B Command
@@ -118,15 +123,21 @@ stopping the search when one is found:
 a built-in command named
 .RB `` ls ''.
 .IP 2)
+an executable ZX bundle named
+.RB `` /dis/ls.zx '',
+.IP 3)
 a Dis module named
 .RB `` /dis/ls.dis '',
-.IP 3)
+.IP 4)
 an executable script file named
 .RB `` /dis/ls '',
-.IP 4)
+.IP 5)
+an executable ZX bundle named
+.RB `` ./ls.zx '',
+.IP 6)
 a Dis module named
 .RB `` ./ls.dis '',
-.IP 5)
+.IP 7)
 an executable script file named
 .RB `` ./ls ''.
 .RE
