@@ -1,0 +1,71 @@
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Stat :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+Warn :: (prefix: string, path: string, detail: string, suffix: string = "") {
+    unused Cli.WriteAll(2, prefix);
+    unused Cli.WriteAll(2, path);
+    unused Cli.WriteAll(2, detail);
+    unused Cli.WriteAll(2, suffix);
+    unused Cli.WriteAll(2, "\n");
+}
+
+CreateDirectory :: (path: string) -> bool {
+    handle := Io.CreateFile(path, 0, cast(s32)(Stat.Directory | 511));
+    if handle < 0 {
+        Warn("mkdir: can't create ", path, ": ", Io.LastError());
+        return false;
+    }
+    unused Io.CloseFile(handle);
+    return true;
+}
+
+CreatePath :: (name: string) -> bool {
+    path: Text;
+    if name.count > 0 && name[0] != #char "/" && !BuilderAppend(path.bytes, ".") { return false }
+    index: s64;
+    metadata: [12]u8;
+    while index < name.count {
+        if name[index] == #char "/" {
+            index += 1;
+            continue;
+        }
+        start := index;
+        while index < name.count && name[index] != #char "/" { index += 1 }
+        if !BuilderAppend(path.bytes, "/") || !BuilderAppend(path.bytes, name[start:index]) { return false }
+        current := TextView(path);
+        if Io.StatFile(current, metadata[:]) < 0 {
+            if !CreateDirectory(current) { return false }
+        } else if (Stat.Uint(metadata[:], 8, 4) & Stat.Directory) == 0 {
+            unused Cli.WriteAll(2, "mkdir: can't create ");
+            Warn(name, ": ", current, " not a directory");
+            return false;
+        }
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    parents := count > 0 && Args.Operand(0) == "-p";
+    first: s32 = ifx parents then 1 else 0;
+    failed := false;
+    metadata: [12]u8;
+    for index: first..count-1 {
+        name := Args.Operand(index);
+        if parents {
+            if !CreatePath(name) { failed = true }
+        } else if Io.StatFile(name, metadata[:]) < 0 {
+            if !CreateDirectory(name) { failed = true }
+        } else {
+            Warn("mkdir: ", name, " already exists");
+            failed = true;
+        }
+    }
+    if failed {
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    return 0;
+}

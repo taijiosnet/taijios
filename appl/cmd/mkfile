@@ -213,7 +213,7 @@ SYSMODULES=\
 
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
-ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls
+ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 RUNESZX=zx_runes.zi
 NAMEZX=$ZXLIB/taijios_names.zi
@@ -267,6 +267,9 @@ test.zx: test.zi taijios_stat.zi $UTILZX
 ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 	zi2zx --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --entry ls:main -o $target ls.zi
 
+mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
+
 tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi ../wm/taijios_clock.zi $TCLZX
 	zi2zx --root . --module-path $ZXLIB --module-path ../wm --bind-host taijios_stdin --bind-host taijios_files --bind-host taijios_io --bind-host taijios_clock --entry tclsh_stdin:main -o $target tclsh_stdin.zi
 
@@ -299,7 +302,7 @@ install-memory-zx:V: $DISBIN/wm/memory.zx tcltk/memory.tcl
 install-linbench-zx:V: $DISBIN/math/linbench.zx $DISBIN/tcltk.zx tcltk/linbench.tcl
 install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
 install-streams-zx:V: $DISBIN/wc.zx $DISBIN/uniq.zx $DISBIN/tr.zx
-install-file-commands-zx:V: $DISBIN/tee.zx $DISBIN/cp.zx $DISBIN/test.zx $DISBIN/ls.zx
+install-file-commands-zx:V: $DISBIN/tee.zx $DISBIN/cp.zx $DISBIN/test.zx $DISBIN/ls.zx $DISBIN/mkdir.zx
 
 $DISBIN/cat.zx: cat.zx mkfile
 $DISBIN/tclsh.zx: tclsh.zx
@@ -322,6 +325,7 @@ $DISBIN/tee.zx: tee.zx mkfile
 $DISBIN/cp.zx: cp.zx mkfile
 $DISBIN/test.zx: test.zx mkfile
 $DISBIN/ls.zx: ls.zx mkfile
+$DISBIN/mkdir.zx: mkdir.zx mkfile
 
 $DISBIN/%.zx: %.zx
 	mode=0644

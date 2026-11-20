@@ -226,6 +226,8 @@ file metadata, descriptor paths, and named shell statuses. `ls` reads packed
 directory entries through `taijios_io` and keeps union-directory order,
 metadata, sorting, and formatting in Ziran. The Dis versions are available
 as `/dis/tee.dis`, `/dis/cp.dis`, `/dis/test.dis`, and `/dis/ls.dis`.
+`mkdir` creates directories and supports `-p` using the guest namespace.
+The original command remains available as `/dis/mkdir.dis`.
 
 ```sh
 (cd appl/cmd && mk install-file-commands-zx)

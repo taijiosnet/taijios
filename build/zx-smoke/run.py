@@ -247,8 +247,33 @@ if '--file-commands' in sys.argv[2:]:
         with path.open('rb') as stream:
             return file_digest(stream, 'sha256').digest()
 
-    resolved = run('whatis cp; whatis test')
-    assert resolved.stdout == '/dis/cp.zx\n/dis/test.zx\n' and not resolved.stderr
+    resolved = run('whatis cp; whatis test; whatis mkdir /dis/mkdir.dis')
+    assert resolved.stdout == '/dis/cp.zx\n/dis/test.zx\n/dis/mkdir.zx\n/dis/mkdir.dis\n' and not resolved.stderr
+    with TemporaryDirectory(dir=files, prefix='mkdir-') as directory:
+        directory = Path(directory)
+        for label in ('dis', 'zx'):
+            (directory / label).mkdir()
+            (directory / label / 'file').write_text('keep')
+        cases = (
+            ('', ''), ('-p', ''), ("basic 'café blanc' -p", ''),
+            ('-p basic/nested//leaf basic/nested/leaf /chan/absolute/path', ''),
+            ("-p / // '' . ./basic/../basic/relative", ''),
+            ('basic file then-made', 'error'), ('missing/leaf other-dir', 'error'),
+            ('-p file/sub basic/after-error', 'error'), ('-p /chan/file/sub', 'error'),
+        )
+        for arguments, status in cases:
+            results = []
+            for label, tool in (('dis', '/dis/mkdir.dis'), ('zx', 'mkdir')):
+                host = directory / label
+                guest = '/' + str(host.relative_to(root))
+                result = run(f'bind -c {guest} /chan; cd /chan; {tool} {arguments} >[2] diagnostic; echo $status')
+                assert result.stdout == status + '\n' and not result.stderr, (tool, arguments, result)
+                entries = [(str(entry.relative_to(host)), S_IMODE(entry.stat().st_mode))
+                           for entry in sorted(host.rglob('*')) if entry.is_dir()]
+                results.append((entries, (host / 'diagnostic').read_text()))
+                assert (host / 'file').read_text() == 'keep'
+            assert results[0] == results[1], (arguments, results)
+        print(f'mkdir ZX matched {len(cases)} Dis cases for guest paths, modes, diagnostics and continuation')
     with TemporaryDirectory(dir=files, prefix='file-commands-') as directory:
         directory = Path(directory)
         src = directory / 'src'
