@@ -213,6 +213,8 @@ SYSMODULES=\
 
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
+UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
+NAMEZX=$ZXLIB/taijios_names.zi
 TCLZX=$ZXLIB/tcl.zi $ZXLIB/tcl_calc.zi $ZXLIB/tcl_lists.zi $ZXLIB/tcl_strings.zi $ZXLIB/tcl_types.zi $ZXLIB/tcl_variables.zi
 TKZX=$ZXLIB/tcl_tk.zi $ZXLIB/tcl_tk_paint.zi $ZXLIB/tcl_tk_scale.zi $ZXLIB/tcl_tk_text.zi $ZXLIB/tcl_tk_view.zi
 COFFEEFRAMES=0 1 2 3 4 5
@@ -233,20 +235,33 @@ zxrun.dis: $MODDIR/zx.m $MODDIR/wmclient.m $MODDIR/timers.m $MODDIR/keyboard.m
 cat.zx: cat.zi taijios_args.zi taijios_io.zi
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry cat:main -o $target cat.zi
 
+echo.zx: echo.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry echo:main -o $target echo.zi
+
+basename.zx: basename.zi $UTILZX $NAMEZX
+	zi2zx --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --entry basename:main -o $target basename.zi
+
+cleanname.zx: cleanname.zi $UTILZX $NAMEZX
+	zi2zx --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --entry cleanname:main -o $target cleanname.zi
+
 tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi $TCLZX
 	zi2zx --root . --module-path $ZXLIB --bind-host taijios_stdin --bind-host taijios_files --entry tclsh_stdin:main -o $target tclsh_stdin.zi
 
 coffee.zx: tcltk/coffee_app.zi tcltk/coffee_art.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi taijios_stdin.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --bind-host zx_surface --bind-host taijios_files --entry coffee_app:main -o $target tcltk/coffee_app.zi
 
-install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx
+install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-utilities-zx
 install-cat-zx:V: $DISBIN/cat.zx
 install-tclsh-zx:V: $DISBIN/tclsh.zx
 install-coffee-zx:V: $DISBIN/coffee.zx tcltk/coffee.tcl $COFFEEART
+install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
 
 $DISBIN/cat.zx: cat.zx
 $DISBIN/tclsh.zx: tclsh.zx
 $DISBIN/coffee.zx: coffee.zx
+$DISBIN/echo.zx: echo.zx
+$DISBIN/basename.zx: basename.zx
+$DISBIN/cleanname.zx: cleanname.zx
 
 $DISBIN/%.zx: %.zx
 	staged=$(mktemp "$target.XXXXXX") &&

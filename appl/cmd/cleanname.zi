@@ -1,0 +1,28 @@
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Cli :: #import "zx_cli";
+using Names :: #import "taijios_names";
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    options := Cli.ParseNameOptions(count, true);
+    if !options.valid || options.next == count {
+        return Cli.Usage("usage: cleanname [-d pwd] name ...\n");
+    }
+    joined: Text;
+    cleaned: Text;
+    i := options.next;
+    while i < count {
+        path := Args.Operand(i);
+        i += 1;
+        if options.base.count != 0 && path.count != 0 && path[0] != #char "/" && path[0] != #char "#" {
+            unused VecResize(joined.bytes, 0);
+            if !BuilderAppend(joined.bytes, options.base) || !BuilderAppend(joined.bytes, "/") ||
+                !BuilderAppend(joined.bytes, path) { return 1 }
+            path = TextView(joined);
+        }
+        if !Names.Clean(path, *cleaned) { return 1 }
+        Cli.PrintLine(TextView(cleaned));
+    }
+    return 0;
+}

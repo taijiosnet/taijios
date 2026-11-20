@@ -77,6 +77,41 @@ if '--cat' in sys.argv[2:]:
         assert (files / 'cat.zx.err').read_text() == legacy_error
 
 
+if '--utilities' in sys.argv[2:]:
+    cases = [
+        ('echo', '', '\n'),
+        ('echo', "-n 'café' '' x", 'café  x'),
+        ('echo', '-- -n hé', '-n hé\n'),
+        ('echo', "-n -- 'a b'", '-- a b'),
+        ('basename', '/a/b/', '\n'),
+        ('basename', '-ddd /a//', '/a/\n'),
+        ('basename', 'é.tar .tar', 'é\n'),
+        ('basename', 'foo foo', '\n'),
+        ('basename', '-- -n', '-n\n'),
+        ('basename', '-d x extra', None),
+        ('cleanname', "-d/pwd a/../b / '#é/ref/..' '../x' '' /../../ '#/' '#/a/..'",
+         '/pwd/b\n/\n#é\n/x\n.\n/\n#/\n#/a\n'),
+        ('cleanname', "a/../../b //a///b/.././ '#x/user/../../..' '#é/../a' '#/../x'",
+         '../b\n/a\n#x\n#é/a\n#/../x\n'),
+        ('cleanname', '-d -- name', '--/name\n'),
+        ('cleanname', '-d', None),
+    ]
+    usage = {
+        'basename': b'usage: basename [-d] string [suffix]\n',
+        'cleanname': b'usage: cleanname [-d pwd] name ...\n',
+    }
+    for name, operands, expected in cases:
+        for command, usage_status in ((f'/dis/{name}.dis', 'usage'),
+                                      (f'zxrun -c /dis/{name}.zx', '1')):
+            result = run(f'{command} {operands} > /build/zx-smoke/util.out '
+                         '>[2] /build/zx-smoke/util.err; echo $status; echo UTILITY_OK')
+            status = usage_status if expected is None else ''
+            assert result.stdout == status + '\nUTILITY_OK\n' and not result.stderr
+            actual = (files / 'util.out').read_bytes(), (files / 'util.err').read_bytes()
+            wanted = (b'', usage[name]) if expected is None else (expected.encode(), b'')
+            assert actual == wanted, (command, operands, actual, wanted)
+
+
 def graphics():
     import io
     import os

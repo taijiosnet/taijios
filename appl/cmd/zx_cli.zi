@@ -1,0 +1,56 @@
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+
+WriteAll :: (handle: s32, text: string) -> bool {
+    offset: s64;
+    while offset < text.count {
+        count := Io.WriteBytes(handle, text[offset:]);
+        if count <= 0 { return false }
+        offset += count;
+    }
+    return true;
+}
+
+PrintLine :: (text: string) {
+    if WriteAll(1, text) { unused WriteAll(1, "\n") }
+}
+
+Usage :: (text: string) -> s32 {
+    unused WriteAll(2, text);
+    return 1;
+}
+
+// Basename takes a flag. Cleanname takes a value after the same option letter.
+NameOptions :: struct {
+    next: s32;
+    directory: bool;
+    base: string;
+    valid: bool;
+}
+
+ParseNameOptions :: (count: s32, takes_base: bool) -> NameOptions {
+    options: NameOptions;
+    while options.next < count {
+        arg := Args.Operand(options.next);
+        if arg.count < 2 || arg[0] != #char "-" { break }
+        options.next += 1;
+        if arg == "--" { break }
+        if takes_base {
+            if arg[1] != #char "d" { return options }
+            if arg.count > 2 {
+                options.base = arg[2:];
+            } else {
+                if options.next == count { return options }
+                options.base = Args.Operand(options.next);
+                options.next += 1;
+            }
+        } else {
+            for i: 1..arg.count-1 {
+                if arg[i] != #char "d" { return options }
+            }
+            options.directory = true;
+        }
+    }
+    options.valid = true;
+    return options;
+}

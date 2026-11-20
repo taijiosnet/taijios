@@ -144,6 +144,18 @@ ZX commands use two typed capabilities declared in `appl/cmd`.
 Test the command against its Dis counterpart with
 `python3 -u build/zx-smoke/run.py Linux/386/bin/emu --cat`.
 
+### Build and run ZX `echo`, `basename`, and `cleanname`
+
+`mk install-zx` in `appl/cmd` installs all three bundles. To install just
+these bundles and the launcher, run `(cd appl/cmd && mk zxrun.install install-utilities-zx)`.
+They use `taijios_args` for operands and `taijios_io` for output and diagnostics.
+`basename` and `cleanname` share the Ziran path functions in `appl/lib/taijios_names.zi`.
+
+```sh
+Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'zxrun -c /dis/echo.zx hello; zxrun -c /dis/basename.zx /a/file.txt .txt; zxrun -c /dis/cleanname.zx -d /a b/../c'
+python3 -u build/zx-smoke/run.py Linux/386/bin/emu --utilities
+```
+
 ### Dis command migration order
 
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
@@ -153,7 +165,7 @@ signature without invoking each program.
 
 | Order | Existing commands | Capabilities to exercise or add |
 | --- | --- | --- |
-| 1 | `echo`, `basename`, `cleanname` | Argument handling, text output, path-string operations |
+| 1 | `echo`, `basename`, `cleanname` (ported) | Argument handling, text output, path-string operations |
 | 2 | `wc`, `uniq`, `tr` | Guest stdin, stdout, and sequential file access |
 | 3 | `test`, `ls`, `tee`, `cp` | File metadata, directory reads, and file creation |
 | 4 | `wm/about`, `wm/clock`, `wm/colors` | Guest surfaces and input, wall-clock time, and display sampling as needed |

@@ -1,0 +1,75 @@
+// Path operations follow the Inferno Names module in appl/lib/names.b.
+#import "std/vec";
+
+LastSlash :: (path: string) -> s64 {
+    i := path.count;
+    while i > 0 {
+        i -= 1;
+        if path[i] == #char "/" { return i }
+    }
+    return -1;
+}
+
+Basename :: (path: string, suffix: string) -> string {
+    name := path[LastSlash(path) + 1:];
+    if suffix.count <= name.count {
+        offset := name.count - suffix.count;
+        if name[offset:] == suffix { return name[:offset] }
+    }
+    return name;
+}
+
+Dirname :: (path: string) -> string {
+    slash := LastSlash(path);
+    if slash < 0 { return "." }
+    if slash == 0 { return "/" }
+    return path[:slash];
+}
+
+RootLength :: (path: string) -> s64 {
+    if path.count == 0 { return 0 }
+    if path[0] == #char "/" { return 1 }
+    if path[0] != #char "#" { return 0 }
+    if path.count == 1 { return 1 }
+    // The first rune after # is the device name, even when it is a slash.
+    i: s64 = 2;
+    while i < path.count && (path[i] & 0xc0) == 0x80 { i += 1 }
+    while i < path.count && path[i] != #char "/" { i += 1 }
+    return i;
+}
+
+LastComponentStart :: (path: string, limit: s64) -> s64 {
+    end := path.count - 1;
+    while end > limit && path[end] != #char "/" { end -= 1 }
+    return end;
+}
+
+Clean :: (path: string, out: *Text) -> bool {
+    root := RootLength(path);
+    unused VecResize(out.bytes, 0);
+    if !BuilderAppend(out.bytes, path[:root]) { return false }
+    limit := root;
+    i := root;
+    while i < path.count {
+        start := i;
+        while i < path.count && path[i] != #char "/" { i += 1 }
+        part := path[start:i];
+        i += 1;
+        if part.count == 0 || part == "." { continue }
+        end := out.bytes.count;
+        if part == ".." {
+            if end > limit {
+                start := LastComponentStart(TextView(out), limit);
+                unused VecResize(out.bytes, start);
+            } else if root == 0 {
+                if end != 0 && !BuilderAppend(out.bytes, "/") { return false }
+                if !BuilderAppend(out.bytes, "..") { return false }
+                limit = out.bytes.count;
+            }
+        } else {
+            if (root > 1 || end > root) && !BuilderAppend(out.bytes, "/") { return false }
+            if !BuilderAppend(out.bytes, part) { return false }
+        }
+    }
+    return out.bytes.count != 0 || BuilderAppend(out.bytes, ".");
+}

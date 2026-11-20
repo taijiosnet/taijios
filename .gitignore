@@ -28,9 +28,15 @@ y.debug
 /appl/wm/ziran.local.toml
 /appl/wm/build/
 /appl/cmd/cat.zx
+/appl/cmd/echo.zx
+/appl/cmd/basename.zx
+/appl/cmd/cleanname.zx
 /appl/cmd/coffee.zx
 /appl/cmd/tclsh.zx
 /dis/cat.zx
+/dis/echo.zx
+/dis/basename.zx
+/dis/cleanname.zx
 /dis/coffee.zx
 /dis/tclsh.zx
 /dis/wm/stopwatch.zx
