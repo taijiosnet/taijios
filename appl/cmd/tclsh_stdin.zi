@@ -1,6 +1,7 @@
 // Hosted shell script reader using the guest's redirected standard input.
 #import "std/vec"
 using Tcl :: #import "tcl"
+using Packages :: #import "tcl_packages"
 using Stdin :: #import "taijios_stdin"
 using Clock :: #import "taijios_clock"
 using Files :: #import "taijios_files"
@@ -35,6 +36,7 @@ main :: () -> s32 {
     error := Stdin.ReadScript(*source);
     if error != "" { print("tclsh: %\n", error); return 1 }
     tcl: Tcl.Interpreter;
+    Packages.Attach(*tcl);
     Tcl.SetClock(*tcl, GuestMillis);
     Tcl.SetSourceLoader(*tcl, LoadScript);
     backend := Io.Backend.{open = GuestOpen, create = GuestCreate, read = GuestRead, write = GuestWrite, seek = GuestSeek, stat = GuestStat, close = GuestClose, error = GuestError, stdin = true};

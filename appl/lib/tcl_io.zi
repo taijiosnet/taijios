@@ -334,9 +334,33 @@ ParseFileOffset :: (text: string) -> (offset: s64, valid: bool) {
     return (ifx negative then value else -value), true;
 }
 
+AppendPath :: (path: *Text, part: string) -> bool {
+    if part.count == 0 { return true }
+    if part[0] == 47 || part[0] == 126 { unused VecResize(path.bytes, 0) }
+    if part[0] == 47 && !VecPush(path.bytes, cast(u8)47) { return false }
+    at: s64;
+    while at < part.count {
+        if part[at] == 47 { at += 1; continue }
+        start := at;
+        while at < part.count && part[at] != 47 { at += 1 }
+        if path.bytes.count > 0 && path.bytes[path.bytes.count-1] != 47 && !VecPush(path.bytes, cast(u8)47) { return false }
+        if !BuilderAppend(path.bytes, part[start:at]) { return false }
+    }
+    return true;
+}
+
 RunFile :: (table: *ChannelTable, args: []Text) -> Result {
-    if args.count != 2 { return WrongArgs("file exists|size|isfile|isdirectory name") }
+    if args.count == 0 { return WrongArgs("file option ?arg ...?") }
     option := TextView(args[0]);
+    if option == "join" {
+        if args.count == 1 { return WrongArgs("file join name ?name ...?") }
+        path: Text;
+        for * part: args[1:] {
+            if !AppendPath(*path, TextView(part)) { return Failure("cannot allocate file path") }
+        }
+        return .{value = path};
+    }
+    if args.count != 2 { return WrongArgs("file exists|size|isfile|isdirectory name") }
     if !WordIn("exists size isfile isdirectory", option) { return Failure("unsupported file option") }
     stat := table.backend.stat;
     if stat == null { return Failure("file requires a stat capability") }

@@ -25,6 +25,18 @@ CommandPrefix :: struct { name: Text; context: s64; handler: PrefixHandler; }
 
 SourceLoader :: #type (context: s64, path: string, result: *Result) -> void;
 
+PackageScript :: struct { version: Text; script: Text; }
+Package :: struct { name: Text; provided: Text; scripts: Vec(PackageScript); }
+PackageTable :: struct {
+    entries: Vec(Package);
+    loading: Vec(Text);
+    unknown: Text;
+    custom_unknown: bool;
+    discovering: bool;
+    prefer_latest: bool;
+}
+PackageRunner :: #type (interpreter: *Interpreter, args: []Text, depth: s32, result: *Result) -> void;
+
 Interpreter :: struct {
     globals: Frame;
     procedures: Vec(Procedure);
@@ -38,6 +50,8 @@ Interpreter :: struct {
     output: Text;
     channels: Io.ChannelTable;
     steps: s64;
+    packages: PackageTable;
+    package_runner: PackageRunner;
 }
 
 // A zero-initialized Interpreter is ready to use. Eval keeps globals and
@@ -139,7 +153,7 @@ CopyResult :: (result: *Result) -> Result {
 
 CORE_COMMANDS :: "append array break calc catch continue dumpstack error eval exit expr for foreach format global if incr info lappend level load proc return set source string switch time unset uplevel upvar while";
 
-IsBuiltin :: (name: string) -> bool { return IsListCommand(name) || WordIn(CORE_COMMANDS, name) || WordIn(Io.COMMANDS, name) }
+IsBuiltin :: (name: string) -> bool { return name == "package" || IsListCommand(name) || WordIn(CORE_COMMANDS, name) || WordIn(Io.COMMANDS, name) }
 
 VariableSubstitution :: (interpreter: *Interpreter, frame: *Frame, cursor: *Cursor, depth: s32) -> Result {
     if depth > 48 { return Failure("script nesting limit exceeded") }
@@ -549,6 +563,7 @@ RunInfo :: (interpreter: *Interpreter, frame: *Frame, args: []Text) -> Result {
             unused BuilderAppend(names.bytes, LIST_COMMANDS);
             unused BuilderAppend(names.bytes, " ");
             unused BuilderAppend(names.bytes, Io.COMMANDS);
+            if interpreter.package_runner != null { AppendElement(*names.bytes, "package") }
             for * interpreter.extensions { AppendElement(*names.bytes, TextView(it.name)) }
             for * interpreter.libraries {
                 if !it.loaded { continue }
@@ -605,7 +620,11 @@ RunFrameCommand :: (interpreter: *Interpreter, frame: *Frame, name: string, args
 }
 
 RunSource :: (interpreter: *Interpreter, frame: *Frame, args: []Text, depth: s32) -> Result {
-    if args.count != 1 { return WrongArgs("source fileName") }
+    if args.count == 3 && TextView(args[0]) == "-encoding" {
+        if TextView(args[1]) != "utf-8" { return Failure("source supports only utf-8 encoding") }
+        args = args[2:];
+    }
+    if args.count != 1 { return WrongArgs("source ?-encoding utf-8? fileName") }
     loader := interpreter.source_loader;
     if loader == null { return Failure("source requires a script loader") }
     loaded: Result;
@@ -676,6 +695,12 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
     if name == "array" { return RunArray(frame, args) }
     if name == "source" { return RunSource(interpreter, frame, args, depth) }
     if name == "load" { return RunLoad(interpreter, args) }
+    if name == "package" && interpreter.package_runner != null {
+        result: Result;
+        runner := interpreter.package_runner;
+        runner(interpreter, args, depth, *result);
+        return result;
+    }
     if name == "time" { return RunTime(interpreter, frame, args, depth) }
     if name == "dumpstack" {
         if args.count != 0 { return WrongArgs("dumpstack") }

@@ -1,5 +1,6 @@
 #import "std/vec"
 using Tcl :: #import "tcl"
+using Packages :: #import "tcl_packages"
 using T :: #import "tcl_types"
 using Fixture :: #import "tcl_headless_input"
 
@@ -49,6 +50,18 @@ main :: () -> s32 {
     if !Expect(*tcl, "load conflicts", .Error, "command \"fixture_word\" already exists") { return 12 }
     if !Expect(*tcl, "unpublished test", .Error, "invalid command name \"unpublished\"") { return 13 }
     if !Expect(*other, "load probe", .Error, "Cannot load /dis/lib/tcl_probe.dis") { return 14 }
+
+    if !Expect(*tcl, "package names", .Error, "invalid command name \"package\"") { return 16 }
+    Packages.Attach(*tcl);
+    provided := Packages.Provide(*tcl, "Fixture", "1.2");
+    if provided.code != .OK { return 17 }
+    Packages.Attach(*tcl);
+    if !Expect(*tcl, "package require Fixture 1", .OK, "1.2") { return 18 }
+    if !Tcl.RegisterLibrary(*other, "probe", commands[:], 42) { return 19 }
+    Packages.Attach(*other);
+    if !Expect(*other, "package provide Fixture", .OK, "") { return 20 }
+    if !Expect(*other, "package ifneeded Fixture 2 {load probe; package provide Fixture 2}; package require Fixture; fixture_word test", .OK, "loaded test") { return 21 }
+    if !Expect(*tcl, "package provide Fixture", .OK, "1.2") { return 22 }
 
     Tcl.SetClock(*other, Millis, 9);
     if !Expect(*other, Fixture.Script, .OK, "") { return 15 }

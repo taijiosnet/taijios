@@ -2,10 +2,12 @@
 // A small tcl_input module supplies Script for the console ZX entry.
 #import "std/vec"
 using Tcl :: #import "tcl"
+using Packages :: #import "tcl_packages"
 using Input :: #import "tcl_input"
 
 main :: () -> s32 {
     interpreter: Tcl.Interpreter;
+    Packages.Attach(*interpreter);
     result := Tcl.Eval(*interpreter, Input.Script);
     output: Text = Tcl.TakeOutput(*interpreter);
     print("%", TextView(output));

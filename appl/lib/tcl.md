@@ -88,7 +88,7 @@ that also charges loop iterations, and permits 48 nested script levels.
   file or `catch` body. `Eval` returns `.Exit` to the embedding application.
   The shell entry points finish successfully. As in Limbo, arguments to
   `exit` are ignored.
-- `source fileName` evaluates the loaded script in the current frame and
+- `source ?-encoding utf-8? fileName` evaluates the loaded script in the current frame and
   shares the command and nesting budgets. Library callers can supply the
   reader with `SetSourceLoader`. The callback receives its context ID,
   the path and a pointer to a `Result`. It sets the result's owned value
@@ -97,9 +97,47 @@ that also charges loop iterations, and permits 48 nested script levels.
   The Taiji loader resolves paths in the invoking guest namespace.
 
 Namespaces, `{*}` word expansion, numeric and Unicode backslash escapes, wide
-expression integers, expression string operands, lazy expression operators,
-and Tcl packages are unsupported. The headless library can be imported by itself or
-used with the optional Tk module below.
+expression integers, expression string operands and lazy expression operators
+are unsupported. The headless library can be imported by itself or used with
+the optional Tk module below.
+
+### Tcl script libraries
+
+All Tcl shell entry points enable the optional `tcl_packages` module. A Ziran
+embedder can import it and call `Packages.Attach(*interpreter)` to enable the
+same `package` command. A package is registered in one interpreter. `provide`,
+`require`, `present`, `ifneeded`, `names`, `versions`, `forget`, `vcompare`,
+`vsatisfies`, `prefer` and `unknown` are available. `require` executes the chosen
+initialization script in the global frame, uses the same command budget as the
+caller, and detects circular loads. Version checks include `-exact`, multiple
+requirements, ranges and alpha and beta versions.
+
+Use `auto_path` to list directories containing `pkgIndex.tcl` files. The native
+and Taiji stdin shells read those files through their normal script loaders.
+An index sees its own directory in the local variable `dir`. For example:
+
+```tcl
+# /path/to/sample/pkgIndex.tcl
+package ifneeded sample 1.0 [list source [file join $dir sample.tcl]]
+```
+
+Put `package provide sample 1.0` in `sample.tcl`, then load it with:
+
+```tcl
+lappend auto_path /path/to/sample
+package require sample 1.0
+```
+
+Discovery checks the directories listed in `auto_path` directly. Scripts use
+the interpreter's supported Tcl commands. Tcl's standard library and Tcllib
+are separate dependencies, and C extension loading and `.tm` discovery are
+unsupported. `package unknown` can supply a custom discovery command. The
+in-memory shell can use script registrations but has no file loader.
+
+An embedder can call `Packages.Provide(*interpreter, name, version)` after
+initializing a Ziran extension and check the returned `Result`. An `ifneeded`
+script can also call `load name` for a bundle supplied by `RegisterLibrary`.
+The headless shells only advertise packages explicitly provided to them.
 
 ### Channels and files
 
@@ -118,7 +156,8 @@ used with the optional Tk module below.
   character and accepts the legacy optional variable name without setting
   it. EOF becomes sticky after an empty read. Reads and lines are bounded
   to 1 MiB per command.
-- `file exists`, `file size`, `file isfile` and `file isdirectory` query
+- `file join name ?name ...?` joins POSIX paths without a file backend.
+  `file exists`, `file size`, `file isfile` and `file isdirectory` query
   the guest path. Writes take effect immediately, so `flush` validates
   the channel and returns success without sending another write.
 

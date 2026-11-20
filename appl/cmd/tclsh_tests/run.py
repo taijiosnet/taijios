@@ -201,6 +201,37 @@ def source_script(path):
     return f"proc loadScript {{value}} {{source {{{path}}}; return $value}}\nputs sourced=[loadScript 5]\n"
 
 
+def package_suite(shell, image):
+    # Look up both versions from within a procedure with its own dir and
+    # counter. The index should see its package directory and the initializer
+    # should run once in the global frame.
+    def script(path):
+        return f"""set auto_path [list {{{path}/missing}} {{{path}/arithmetic library}}]
+set initializations 0
+set dir caller
+proc usePackage {{value}} {{
+    set dir local
+    set initializations -1
+    puts [list [package require demo::offset 2] [offset $value] $dir $initializations]
+}}
+usePackage 18
+puts [list [package require demo::twice 1] [twice 21] $dir $initializations]
+puts [list [catch {{package require demo::missing}}] [package provide Tk]]
+package forget demo::twice
+puts [list [package require demo::twice] $initializations]
+"""
+
+    expected = "2.0 37 local -1\n1.0 42 caller 1\n1 {}\n1.0 2\n"
+    expect(capture([shell, "-"], script(FIXTURES / "packages")), expected)
+    if image:
+        (BUILD / "package-discovery.tcl").write_text(script("/appl/cmd/tclsh_tests/packages"))
+        expect(guest(f"zxrun {image} < /build/tcl/package-discovery.tcl"), expected + "0\n", codes=(0, -9))
+        expected_registry = (FIXTURES / "packages.out").read_text()
+        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/packages.tcl"),
+               expected_registry + "0\n", codes=(0, -9))
+    print("Tcl package discovery loaded indexed scripts, resolved dependencies and initialized once")
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--stdin", metavar="GUEST_IMAGE", help="test hosted Tcl stdin and guest I/O")
@@ -212,7 +243,7 @@ def main():
                     "-o", native, "appl/cmd/tclsh_native.zi"], cwd=ROOT, env=ENV, check=True)
     shell = native / "tclsh_native"
 
-    for name in ("core", "reference", "compatibility", "expression", "format"):
+    for name in ("core", "reference", "compatibility", "expression", "format", "packages"):
         fixture = FIXTURES / f"{name}.tcl"
         script = fixture.read_text()
         expected = fixture.with_suffix(".out").read_text()
@@ -301,6 +332,7 @@ def main():
         print("Hosted Tcl stdin matched the Limbo numeric script")
     headless_suite(shell, args.stdin)
     channel_suite(args.stdin)
+    package_suite(shell, args.stdin)
 
 
 if __name__ == "__main__":

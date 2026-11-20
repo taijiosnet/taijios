@@ -1,0 +1,15 @@
+versions {1.10 1.11b2 1.2 2.0}
+stable 1.10 1.10
+conflict 1 {version conflict for package "sample": have 1.10, need 2.0}
+vcompare -1 0 -1
+ranges 1 0 1 0 1
+forgotten {} {} 1
+latest latest 1.9b1
+rollback 1 broken {}
+retry 1.0
+wrong-version 1 {}
+cycle 1 {} {}
+recovered 1.0 1.0
+unknown {spaced package} 2.5-2.5
+resolved 2.5
+quoted-path {/tmp/library dir/package.tcl}

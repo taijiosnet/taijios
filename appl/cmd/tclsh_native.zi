@@ -5,6 +5,7 @@
 #import "std/file"
 using Timer :: #import "std/timer_linux"
 using Tcl :: #import "tcl"
+using Packages :: #import "tcl_packages"
 using Types :: #import "tcl_types"
 
 LoadScript :: (context: s64, path: string, result: *Types.Result) {
@@ -21,6 +22,7 @@ NativeMillis :: (context: s64) -> s64 { return Timer.MonotonicMilliseconds() }
 
 Run :: (script: string) -> s32 {
     interpreter: Tcl.Interpreter;
+    Packages.Attach(*interpreter);
     Tcl.SetSourceLoader(*interpreter, LoadScript);
     Tcl.SetClock(*interpreter, NativeMillis);
     result := Tcl.Eval(*interpreter, script);

@@ -270,7 +270,7 @@ ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
 
-tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi ../wm/taijios_clock.zi $TCLZX
+tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi ../wm/taijios_clock.zi $TCLZX $ZXLIB/tcl_packages.zi
 	zi2zx --root . --module-path $ZXLIB --module-path ../wm --bind-host taijios_stdin --bind-host taijios_files --bind-host taijios_io --bind-host taijios_clock --entry tclsh_stdin:main -o $target tclsh_stdin.zi
 
 coffee.zx: tcltk/coffee_app.zi tcltk/coffee_art.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi taijios_stdin.zi $TCLZX $TKZX
