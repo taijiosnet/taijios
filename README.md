@@ -23,10 +23,10 @@ zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
 For the Linux/386 emulator, build the hosted runtime from the Ziran revision
-`ca459aecd9bd070b66ff489cf480d4dec64efa86`. It includes the binary64 fixes for Tcl's fixed-point
-formatter, compact execution plans and compact decoded instructions for the
-default 32 MiB main pool. The loader releases the guest image buffer after
-decoding and before execution planning. The GUI package dependencies are
+`8e8e53bacd207ad8ed9d9a92a96483893e6788d8`. It includes binary64 fixes for Tcl's fixed-point
+formatter and compact execution plans, decoded instructions, and value locations
+for the default 32 MiB main pool. The loader releases the guest image buffer
+after decoding and before execution planning. The GUI package dependencies are
 pinned separately in `appl/wm/ziran.lock`.
 Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
 Use a host-built `zi2c` for code generation and keep the target objects in
