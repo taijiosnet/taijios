@@ -321,6 +321,7 @@ def file_and_manual_probe(env):
     (BUILD / "man-mount").mkdir(exist_ok=True)
     script = "bind /man/1 /build/tcltk/man-mount; zxrun /build/tcltk/man_probe.zx"
     result = command(EMU, "-r", ROOT, "/dis/sh.dis", "-c", script, env=env, stdin=subprocess.DEVNULL,
+                     start_new_session=True,
                      capture_output=True, text=True)
     expected = "Guest namespace offsets, mount, errors, real manual lookup and formatting verified\n0\n"
     assert result.returncode in (0, -9) and result.stdout == expected and not result.stderr, result
@@ -442,7 +443,8 @@ def main():
             compile_image("tcltk", image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin")
         manual = BUILD / "man.zx"
         if not args.coffee_only:
-            compile_image("man_app", manual, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
+            compile_image("man_app", manual, "--define", "TAIJI_TK_NO_CANVAS",
+                          "--bind-host", "zx_surface", "--bind-host", "taijios_files")
         compile_image("coffee_app", coffee, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
 
     env = os.environ.copy()

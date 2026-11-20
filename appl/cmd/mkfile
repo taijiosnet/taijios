@@ -261,17 +261,21 @@ tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi $TCLZX
 coffee.zx: tcltk/coffee_app.zi tcltk/coffee_art.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi taijios_stdin.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --bind-host zx_surface --bind-host taijios_files --entry coffee_app:main -o $target tcltk/coffee_app.zi
 
+man.zx: tcltk/man_app.zi tcltk/man_pages.zi tcltk/man_roff.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi $TCLZX $TKZX
+	zi2zx --root tcltk --module-path $ZXLIB --module-path . --define TAIJI_TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --entry man_app:main -o $target tcltk/man_app.zi
+
 logwindow.zx: tcltk/logwindow_app.zi tcltk/logwindow_input.zi tcltk/logwindow_stream.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_args.zi taijios_files.zi taijios_stdin.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --bind-host zx_surface --bind-host taijios_args --bind-host taijios_files --bind-host taijios_stdin --entry logwindow_app:main -o $target tcltk/logwindow_app.zi
 
 memory.zx: tcltk/memory_app.zi tcltk/memory_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi ../wm/taijios_clock.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --module-path ../wm --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry memory_app:main -o $target tcltk/memory_app.zi
 
-install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-logwindow-zx install-memory-zx install-utilities-zx install-streams-zx
+install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-utilities-zx install-streams-zx
 	(cd sh && mk sh.install)
 install-cat-zx:V: $DISBIN/cat.zx
 install-tclsh-zx:V: $DISBIN/tclsh.zx
 install-coffee-zx:V: $DISBIN/coffee.zx tcltk/coffee.tcl $COFFEEART
+install-man-zx:V: $DISBIN/man.zx tcltk/man_query.tcl
 install-logwindow-zx:V: $DISBIN/wm/logwindow.zx tcltk/logwindow.tcl
 install-memory-zx:V: $DISBIN/wm/memory.zx tcltk/memory.tcl
 install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
@@ -280,6 +284,7 @@ install-streams-zx:V: $DISBIN/wc.zx $DISBIN/uniq.zx $DISBIN/tr.zx
 $DISBIN/cat.zx: cat.zx mkfile
 $DISBIN/tclsh.zx: tclsh.zx
 $DISBIN/coffee.zx: coffee.zx
+$DISBIN/man.zx: man.zx mkfile
 $DISBIN/wm/logwindow.zx: logwindow.zx
 $DISBIN/wm/memory.zx: memory.zx mkfile
 $DISBIN/echo.zx: echo.zx mkfile

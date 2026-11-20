@@ -57,7 +57,9 @@ Widget :: struct {
     panel: Panel;
     check: Check.State;
     scroll: Scroll.State;
-    canvas: Canvas.State;
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        canvas: Canvas.State;
+    }
     text_height: s32;
     last_scroll: Scroll.State;
     sent_scroll: bool;
@@ -90,8 +92,11 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
                Tcl.RegisterCommand(interpreter, "scale", Create, SCALE) &&
                Tcl.RegisterCommand(interpreter, "panel", Create, PANEL) &&
                Tcl.RegisterCommand(interpreter, "checkbutton", Create, CHECKBUTTON) &&
-               Tcl.RegisterCommand(interpreter, "scrollbar", Create, SCROLLBAR) &&
-               Tcl.RegisterCommand(interpreter, "canvas", Create, CANVAS) &&
+               Tcl.RegisterCommand(interpreter, "scrollbar", Create, SCROLLBAR);
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        attached = attached && Tcl.RegisterCommand(interpreter, "canvas", Create, CANVAS);
+    }
+    attached = attached &&
                Tcl.RegisterCommand(interpreter, "variable", VariableCommand) &&
                Tcl.RegisterPrefix(interpreter, "update", Update) &&
                Tcl.RegisterCommand(interpreter, "pack", Pack) &&
@@ -132,7 +137,9 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     if args.count % 2 != 0 { SetError(result, "expected option and value pairs"); return false }
     if widget.kind == SCALE { return ConfigureScale(widget, args, result) }
     if widget.kind == PANEL { return ConfigurePanel(widget, args, result) }
-    if widget.kind == CANVAS { return Canvas.Configure(*widget.canvas, args, result) }
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        if widget.kind == CANVAS { return Canvas.Configure(*widget.canvas, args, result) }
+    }
     if widget.kind == TEXT || widget.kind == SCROLLBAR { return ConfigureScroll(widget, args, result) }
     button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
     for i: 0..args.count/2-1 {
@@ -172,7 +179,9 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     }
     widget := Widget.{name = TextCopy(path), kind = kind, parent = parent};
     if kind == SCALE { widget.scale = Scale.Default() }
-    if kind == CANVAS { widget.canvas = Canvas.Default() }
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        if kind == CANVAS { widget.canvas = Canvas.Default() }
+    }
     if kind == CHECKBUTTON {
         on: Text = TextCopy("1");
         off: Text = TextCopy("0");
@@ -196,8 +205,10 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     saved.disabled = widget.disabled;
     saved.scale = widget.scale;
     saved.scroll = widget.scroll;
-    saved.canvas.width = widget.canvas.width;
-    saved.canvas.height = widget.canvas.height;
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        saved.canvas.width = widget.canvas.width;
+        saved.canvas.height = widget.canvas.height;
+    }
     saved.text_height = widget.text_height;
     saved.sent_scroll = false;
     saved.check.selected = widget.check.selected;
@@ -291,7 +302,9 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             unused VecResize(it.check.off.bytes, 0);
             unused VecResize(it.view.tags, 0);
             unused VecResize(it.panel.pixels, 0);
-            Canvas.Clear(*it.canvas);
+            #if !#defined(TAIJI_TK_NO_CANVAS) {
+                Canvas.Clear(*it.canvas);
+            }
             View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
@@ -335,7 +348,9 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     if widget.kind == PANEL { PanelCommand(widget, args, result); return }
     if widget.kind == CHECKBUTTON { CheckCommand(widget, args, result, script); return }
     if widget.kind == SCROLLBAR { ScrollCommand(widget, args, result); return }
-    if widget.kind == CANVAS { Canvas.Command(*widget.canvas, args, result); return }
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        if widget.kind == CANVAS { Canvas.Command(*widget.canvas, args, result); return }
+    }
     if widget.kind == ENTRY { EntryCommand(widget, args, result); return }
     if widget.kind == TEXT {
         TextCommand(widget, args, result);
@@ -688,7 +703,6 @@ Measure :: (parent: s64) -> Box {
             requested = ifx widget.scale.horizontal then Box.{w = length, h = minor} else Box.{w = minor, h = length};
         }
         else if widget.kind == PANEL { requested = .{w = widget.panel.width + 2*widget.panel.border, h = widget.panel.height + 2*widget.panel.border} }
-        else if widget.kind == CANVAS { requested = .{w = widget.canvas.width, h = widget.canvas.height} }
         else if widget.kind == ENTRY { requested = .{w = 168, h = 30} }
         else if widget.kind == TEXT { requested = .{w = 280, h = ifx widget.text_height > 0 then widget.text_height else 150} }
         else if widget.kind == SCROLLBAR {
@@ -699,6 +713,9 @@ Measure :: (parent: s64) -> Box {
             length := UTF.Count(TextView(widget.text), 512);
             requested = .{w = length * CHAR_WIDTH + 30, h = ifx widget.kind == BUTTON then 36 else 28};
             if widget.kind == CHECKBUTTON { requested.w += 10 }
+        }
+        #if !#defined(TAIJI_TK_NO_CANVAS) {
+            if widget.kind == CANVAS { requested = .{w = widget.canvas.width, h = widget.canvas.height} }
         }
         widget.requested = requested;
         w := requested.w + widget.pack.padx * 2;

@@ -8,7 +8,15 @@ using Scroll :: #import "tcl_tk_scrollbar"
 using Items :: #import "tcl_tk_canvas"
 #import "std/vec"
 
-Canvas :: struct { pixels: []u8; width: s32; height: s32; clipped: bool; clip: Tk.Box; }
+Canvas :: struct {
+    pixels: []u8;
+    width: s32;
+    height: s32;
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        clipped: bool;
+        clip: Tk.Box;
+    }
+}
 Ink :: struct { r: u8; g: u8; b: u8; }
 PAPER :: Ink.{r = 244, g = 246, b = 247};
 BUTTON :: Ink.{r = 224, g = 234, b = 242};
@@ -25,12 +33,14 @@ Fill :: (canvas: *Canvas, box: Tk.Box, ink: Ink) {
     top := Tk.NonNegative(box.y);
     right := Tk.Minimum(box.x + box.w, canvas.width);
     bottom := Tk.Minimum(box.y + box.h, canvas.height);
-    if canvas.clipped {
-        clip := canvas.clip;
-        left = Tk.Maximum(left, clip.x);
-        top = Tk.Maximum(top, clip.y);
-        right = Tk.Minimum(right, clip.x+clip.w);
-        bottom = Tk.Minimum(bottom, clip.y+clip.h);
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        if canvas.clipped {
+            clip := canvas.clip;
+            left = Tk.Maximum(left, clip.x);
+            top = Tk.Maximum(top, clip.y);
+            right = Tk.Minimum(right, clip.x+clip.w);
+            bottom = Tk.Minimum(bottom, clip.y+clip.h);
+        }
     }
     for y: top..bottom-1 {
         offset := cast(s64)y * cast(s64)canvas.width * 4;
@@ -177,7 +187,9 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         if it.kind == Tk.CHECKBUTTON { DrawCheck(*canvas, it); continue }
         if it.kind == Tk.SCROLLBAR { DrawScroll(*canvas, it, it_index); continue }
         if it.kind == Tk.PANEL { DrawPanel(*canvas, it); continue }
-        if it.kind == Tk.CANVAS { DrawCanvas(*canvas, it); continue }
+        #if !#defined(TAIJI_TK_NO_CANVAS) {
+            if it.kind == Tk.CANVAS { DrawCanvas(*canvas, it); continue }
+        }
         if it.kind == Tk.TEXT {
             Fill(*canvas, box, ifx it_index == Tk.focused then LETTER else BORDER);
             Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
@@ -217,33 +229,35 @@ Render :: (pixels: []u8, width: s32, height: s32) {
     }
 }
 
-Color :: (rgb: s32) -> Ink {
-    return .{r = cast(u8)(rgb >> 16), g = cast(u8)(rgb >> 8), b = cast(u8)rgb};
-}
+#if !#defined(TAIJI_TK_NO_CANVAS) {
+    Color :: (rgb: s32) -> Ink {
+        return .{r = cast(u8)(rgb >> 16), g = cast(u8)(rgb >> 8), b = cast(u8)rgb};
+    }
 
-DrawCanvas :: (canvas: *Canvas, widget: *Tk.Widget) {
-    box := widget.box;
-    clipped := Canvas.{pixels = canvas.pixels, width = canvas.width, height = canvas.height, clipped = true, clip = box};
-    for * widget.canvas.items {
-        if it.kind == .Label {
-            if it.fill == Items.NONE { continue }
-            bounds := Items.Bounds(it);
-            DrawText(*clipped, .{x = box.x+bounds.x0, y = box.y+bounds.y0,
-                                w = bounds.x1-bounds.x0, h = bounds.y1-bounds.y0}, TextView(it.text), false, Color(it.fill));
-            continue;
+    DrawCanvas :: (canvas: *Canvas, widget: *Tk.Widget) {
+        box := widget.box;
+        clipped := Canvas.{pixels = canvas.pixels, width = canvas.width, height = canvas.height, clipped = true, clip = box};
+        for * widget.canvas.items {
+            if it.kind == .Label {
+                if it.fill == Items.NONE { continue }
+                bounds := Items.Bounds(it);
+                DrawText(*clipped, .{x = box.x+bounds.x0, y = box.y+bounds.y0,
+                                    w = bounds.x1-bounds.x0, h = bounds.y1-bounds.y0}, TextView(it.text), false, Color(it.fill));
+                continue;
+            }
+            rect := Items.Rectangle(it.coordinates);
+            x := box.x + rect.x0;
+            y := box.y + rect.y0;
+            w := rect.x1 - rect.x0;
+            h := rect.y1 - rect.y0;
+            if it.fill != Items.NONE { Fill(*clipped, .{x, y, w, h}, Color(it.fill)) }
+            if it.outline == Items.NONE { continue }
+            edge := Color(it.outline);
+            Fill(*clipped, .{x, y, w+1, 1}, edge);
+            Fill(*clipped, .{x, y+h, w+1, 1}, edge);
+            Fill(*clipped, .{x, y, 1, h}, edge);
+            Fill(*clipped, .{x+w, y, 1, h}, edge);
         }
-        rect := Items.Rectangle(it.coordinates);
-        x := box.x + rect.x0;
-        y := box.y + rect.y0;
-        w := rect.x1 - rect.x0;
-        h := rect.y1 - rect.y0;
-        if it.fill != Items.NONE { Fill(*clipped, .{x, y, w, h}, Color(it.fill)) }
-        if it.outline == Items.NONE { continue }
-        edge := Color(it.outline);
-        Fill(*clipped, .{x, y, w+1, 1}, edge);
-        Fill(*clipped, .{x, y+h, w+1, 1}, edge);
-        Fill(*clipped, .{x, y, 1, h}, edge);
-        Fill(*clipped, .{x+w, y, 1, h}, edge);
     }
 }
 

@@ -14,6 +14,10 @@ display, and history from Inferno's [manual browser](../../wm/man.b) and
 [lookup library](../../lib/man.b). This port uses the Inferno
 [MIT notice](../../../NOTICE).
 
+Man's build defines `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
+renderer. This lets it browse large manual pages in the default Linux/386
+guest memory pool. The general Tk launcher and Memory build include Canvas.
+
 Infernal Coffee keeps all six masked cups, the original background, Stop/Go,
 and Rate, Jitter, and Skip sliders. It reads the shipped
 `/icons/bigdelight.bit` and `/icons/coffee*` artwork through the same guest file
@@ -41,8 +45,7 @@ Python Pillow, and a ZX-enabled Linux/386 emulator built from this checkout:
 ```sh
 python3 appl/cmd/tcltk/test_tcltk.py
 install -m 0644 build/tcltk/tcltk.zx dis/tcltk.zx
-install -m 0644 build/tcltk/man.zx dis/man.zx
-(cd appl/cmd && mk install-coffee-zx)
+(cd appl/cmd && mk install-coffee-zx install-man-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
 python3 appl/cmd/tcltk/test_logwindow.py
 (cd appl/cmd && mk install-logwindow-zx)
