@@ -123,8 +123,7 @@ zxopen(const char *path, char *err)
 
 	if(zxread(err, path, &image) != ZX_MODULE_IMAGE_FOUND)
 		return nil;
-	bundle = BundleOpenBytes(image.data, image.size);
-	image.release(err, image.data, image.size);
+	bundle = BundleOpenOwnedBytes(image.data, image.size, image.release, err);
 	if(bundle == nil)
 		strecpy(err, err+ERRMAX, "invalid ZX image");
 	return bundle;
@@ -944,8 +943,15 @@ zxrun(String *s, List *args, ZX_Window *win)
 #endif
 			if(ready){
 				program = ZxModuleProgramOpen(loader, bundle, bindings, count);
-				if(program != nil)
+				if(program != nil){
+					/* Present consumes the framebuffer within the host call. */
+					for(size_t i = 0; i < count; i++){
+						if(bindings[i].call == zxsurface && strcmp(bindings[i].function, "Present") == 0)
+							ZxModuleProgramBorrowHostString(program, bindings[i].module,
+								    bindings[i].function, 2);
+					}
 					ran = ZxModuleProgramRun(program, &result.value, &result.status);
+				}
 #if defined(__linux__) && defined(__i386__)
 				fesetenv(&saved);
 #endif

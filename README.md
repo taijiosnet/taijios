@@ -23,10 +23,11 @@ zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
 For the Linux/386 emulator, build the hosted runtime from the Ziran revision
-`be5b40432ee3f31ddf85e367177321f27e977c12`. It includes the binary64 fixes
+`25a11628d4963e829890cad4bb01698c68cb6bdc`. It includes the binary64 fixes
 for Tcl's fixed-point formatter and the compact execution plan used by
-Stopwatch at the default 32 MiB main pool. The GUI package dependencies are
-pinned separately in `appl/wm/ziran.lock`.
+Stopwatch at the default 32 MiB main pool. The loader releases the guest image
+buffer after decoding and before execution planning. The GUI package
+dependencies are pinned separately in `appl/wm/ziran.lock`.
 Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
 Use a host-built `zi2c` for code generation and keep the target objects in
 their own build directory.
@@ -97,9 +98,11 @@ app. To launch any compatible bundle in a TaijiOS window manager context, use
 
 The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
 `Close` to the guest window manager and Draw. `Present` uploads a packed RGBA8
-frame to a guest Draw image. `Event` supplies pointer buttons and movement,
-keyboard input and UTF-8 text, redraw and resize, and close. The X11 emulator
-exposes physical key presses, releases, and Shift, Control, and Alt through
+frame to a guest Draw image. The runtime borrows the RGBA bytes during the
+synchronous upload, so it can pass the frame without a temporary copy.
+`Event` supplies pointer buttons and movement, keyboard input, UTF-8 text,
+and redraw, resize, and close events. The X11 emulator exposes physical key
+presses, releases, and Shift, Control, and Alt through
 `/dev/keyevent`. The guest window manager forwards these events to the focused
 client that requests them. `/dev/keyboard` still carries Dis runes and supplies
 ZX text input. Window managers without the key event path use the rune channel
