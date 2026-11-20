@@ -1,0 +1,28 @@
+count=3
+duration=<milliseconds>
+time-error=1 count=5
+zero=-NaN milliseconds per iteration count=5
+negative=-0 milliseconds per iteration count=5
+bad-count=1
+load=<> words=2
+missing-library=1
+simple table at 0
+	name [shared], value [global]
+assoc table at 0
+	assoc array at 0, name rows
+		name [first], value [root]
+Symbol table at 0
+simple table at 1
+	name [marker], value [left]
+	name [message], value [two words]
+assoc table at 1
+Symbol table at 1
+simple table at 2
+	name [marker], value [right]
+	name [message], value [two words]
+assoc table at 2
+	assoc array at 0, name rows
+		name [second], value [leaf]
+Symbol table at 2
+	name [shared], alias [shared], value [0]
+done

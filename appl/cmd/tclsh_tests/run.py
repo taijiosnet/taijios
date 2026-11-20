@@ -1,6 +1,7 @@
 """Exercise the Tcl scripts and API on the native, portable and Taiji runners."""
 
 import argparse
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -55,6 +56,56 @@ def stdin_suite(image):
     expect(guest(f"echo 'source {path}.missing' | zxrun {image}"),
            f'tclsh: could not read Tcl script "{path}.missing"\n1\n', codes=(0, -9))
     print("Hosted Tcl stdin passed file redirection, multiple reads, pipes, EOF, source and error status")
+    precision = "puts [expr {1.0000000009313225746 > 1.0}]\nputs [expr {sqrt(2)}]\n"
+    (BUILD / "expression-installed-precision.tcl").write_text(precision)
+    expect(guest(f"zxrun {image} < /build/tcl/expression-installed-precision.tcl"),
+           "1\n1.4142135623730951\n0\n", codes=(0, -9))
+    print("Hosted Tcl preserves binary64 precision")
+
+
+def headless_output(output):
+    normalized = []
+    variables = []
+    for line in output.splitlines():
+        content = line.lstrip()
+        if content.startswith("H_link at "):
+            continue
+        if content.startswith("name ["):
+            variables.append(line)
+            continue
+        normalized.extend(sorted(variables))
+        variables.clear()
+        if line.startswith("duration="):
+            duration, _, unit = line.removeprefix("duration=").partition(" ")
+            value = float(duration)
+            assert math.isfinite(value) and value >= 0 and unit == "milliseconds per iteration", line
+            line = "duration=<milliseconds>"
+        normalized.append(line)
+    normalized.extend(sorted(variables))
+    return "\n".join(normalized) + "\n"
+
+
+def headless_suite(shell, image):
+    fixture = FIXTURES / "headless.tcl"
+    script = fixture.read_text()
+    expected = fixture.with_suffix(".out").read_text()
+    (BUILD / "legacy-headless.tcl").write_text(script + "exit\n")
+    (BUILD / "tcl_headless_input.zi").write_text("Script :: #string TCL_HEADLESS\n" + script + "TCL_HEADLESS;\n")
+    model = BUILD / "tcl_headless_api.zx"
+    compile_zx(FIXTURES / "tcl_headless_api.zi", "tcl_headless_api:main", model, BUILD)
+    workloads = [
+        (capture([shell, fixture]), expected, (0,)),
+        (guest("tclsh /build/tcl/legacy-headless.tcl"), expected, (0, -9)),
+        (capture(["zi2zx", "run", "--backend", "engine", model]), expected + "0\n", (0,)),
+        (guest("zxrun /build/tcl/tcl_headless_api.zx"), expected + "0\n", (0, -9)),
+    ]
+    if image:
+        workloads.append((guest(f"zxrun {image} < /appl/cmd/tclsh_tests/headless.tcl"), expected + "0\n", (0, -9)))
+    for result, output, codes in workloads:
+        result.stdout = headless_output(result.stdout)
+        expect(result, output, codes=codes)
+    print("Timing, stack frames and library load matched Limbo and the native, ZX and Taiji runners")
+    print("Injected clocks, command libraries and atomic activation verified on ZX and Taiji")
 
 
 def prepare_channel_files():
@@ -194,6 +245,9 @@ def main():
         ('puts before; set operand {1+2}; expr {$operand}', "expected numeric or boolean expression operand"),
         ('puts before; expr {1.5 % 2}', "expected integer operands"),
         ('puts before; expr {abs(1,2)}', "wrong number of function arguments or missing close-parenthesis"),
+        ('puts before; dumpstack extra', 'wrong # args: should be "dumpstack"'),
+        ('puts before; time {} wrong', 'expected integer but got "wrong"'),
+        ('puts before; load notRegistered', "Cannot load /dis/lib/tcl_notRegistered.dis"),
     ):
         expect(capture([shell, "-"], script), "before\n", codes=(1,), error=diagnostic + "\n")
     print("Malformed and unsupported scripts returned the expected errors")
@@ -208,6 +262,7 @@ def main():
         expect(guest(f"zxrun {args.stdin} < /appl/cmd/tclsh_tests/expression.tcl"),
                expression + "0\n", codes=(0, -9))
         print("Hosted Tcl stdin matched the Limbo numeric script")
+    headless_suite(shell, args.stdin)
     channel_suite(args.stdin)
 
 

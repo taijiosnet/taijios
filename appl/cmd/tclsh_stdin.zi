@@ -2,10 +2,13 @@
 #import "std/vec"
 using Tcl :: #import "tcl"
 using Stdin :: #import "taijios_stdin"
+using Clock :: #import "taijios_clock"
 using Files :: #import "taijios_files"
 using Guest :: #import "taijios_io"
 using Io :: #import "tcl_io"
 using Types :: #import "tcl_types"
+
+GuestMillis :: (context: s64) -> s64 { return Clock.Millis() }
 
 GuestOpen :: (context: s64, path: string, mode: s32) -> s32 { return Guest.OpenFile(path, mode) }
 GuestCreate :: (context: s64, path: string, mode: s32, permissions: s32) -> s32 { return Guest.CreateFile(path, mode, permissions) }
@@ -32,6 +35,7 @@ main :: () -> s32 {
     error := Stdin.ReadScript(*source);
     if error != "" { print("tclsh: %\n", error); return 1 }
     tcl: Tcl.Interpreter;
+    Tcl.SetClock(*tcl, GuestMillis);
     Tcl.SetSourceLoader(*tcl, LoadScript);
     backend := Io.Backend.{open = GuestOpen, create = GuestCreate, read = GuestRead, write = GuestWrite, seek = GuestSeek, stat = GuestStat, close = GuestClose, error = GuestError, stdin = true};
     unused Tcl.SetChannelBackend(*tcl, backend);

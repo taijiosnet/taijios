@@ -185,3 +185,36 @@ LinkVariable :: (frame: *Frame, name: string, target: *Frame, target_name: strin
     }
     return Success();
 }
+
+AppendDumpHeader :: (out: *Text, label: string, level: s64) -> bool {
+    number := Integer(level);
+    return BuilderAppend(out.bytes, label) && BuilderAppend(out.bytes, TextView(number.value)) && BuilderAppend(out.bytes, "\n");
+}
+
+AppendDumpValues :: (out: *Text, table: *VariableTable, indent: string) -> bool {
+    for * table.entries {
+        if !BuilderAppend(out.bytes, indent) || !BuilderAppend(out.bytes, "name [") || !BuilderAppend(out.bytes, TextView(it.name)) ||
+            !BuilderAppend(out.bytes, "], value [") || !BuilderAppend(out.bytes, TextView(it.value)) || !BuilderAppend(out.bytes, "]\n") { return false }
+    }
+    return true;
+}
+
+AppendStackDump :: (out: *Text, frame: *Frame) -> bool {
+    if frame == null { return true }
+    if !AppendStackDump(out, frame.parent) || !AppendDumpHeader(out, "simple table at ", frame.level) ||
+        !AppendDumpValues(out, *frame.variables, "\t") || !AppendDumpHeader(out, "assoc table at ", frame.level) { return false }
+    for * frame.arrays {
+        index := Integer(it_index);
+        if !BuilderAppend(out.bytes, "\tassoc array at ") || !BuilderAppend(out.bytes, TextView(index.value)) ||
+            !BuilderAppend(out.bytes, ", name ") || !BuilderAppend(out.bytes, TextView(it.name)) || !BuilderAppend(out.bytes, "\n") ||
+            !AppendDumpValues(out, *it.elements, "\t\t") { return false }
+    }
+    if !AppendDumpHeader(out, "Symbol table at ", frame.level) { return false }
+    for * frame.aliases {
+        level := Integer(it.frame.level);
+        if !BuilderAppend(out.bytes, "\tname [") || !BuilderAppend(out.bytes, TextView(it.name)) ||
+            !BuilderAppend(out.bytes, "], alias [") || !BuilderAppend(out.bytes, TextView(it.target)) ||
+            !BuilderAppend(out.bytes, "], value [") || !BuilderAppend(out.bytes, TextView(level.value)) || !BuilderAppend(out.bytes, "]\n") { return false }
+    }
+    return true;
+}

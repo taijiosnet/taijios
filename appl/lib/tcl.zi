@@ -14,6 +14,9 @@ Procedure :: struct { name: Text; parameters: Vec(Parameter); body: Text; variad
 // The client can use the context ID as a lookup key for its own widget state.
 CommandHandler :: #type (context: s64, args: []Text, result: *Result) -> void;
 Extension :: struct { name: Text; context: s64; handler: CommandHandler; }
+LibraryCommand :: struct { name: string; handler: CommandHandler; }
+Library :: struct { name: Text; commands: Vec(Extension); loaded: bool; }
+MonotonicClock :: #type (context: s64) -> s64;
 
 // A prefix can supply dynamically named commands. A nonempty script is
 // evaluated in the current frame and its result becomes the command result.
@@ -26,9 +29,12 @@ Interpreter :: struct {
     globals: Frame;
     procedures: Vec(Procedure);
     extensions: Vec(Extension);
+    libraries: Vec(Library);
     prefixes: Vec(CommandPrefix);
     source_loader: SourceLoader;
     source_context: s64;
+    clock: MonotonicClock;
+    clock_context: s64;
     output: Text;
     channels: Io.ChannelTable;
     steps: s64;
@@ -54,6 +60,12 @@ SetSourceLoader :: (interpreter: *Interpreter, loader: SourceLoader, context: s6
     interpreter.source_context = context;
 }
 
+// The callback returns monotonic milliseconds, or a negative value on failure.
+SetClock :: (interpreter: *Interpreter, clock: MonotonicClock, context: s64 = 0) {
+    interpreter.clock = clock;
+    interpreter.clock_context = context;
+}
+
 // Reconfiguration closes any channels previously opened by the interpreter.
 SetChannelBackend :: (interpreter: *Interpreter, backend: Io.Backend) -> Result {
     table := *interpreter.channels;
@@ -74,10 +86,37 @@ CloseChannels :: (interpreter: *Interpreter) -> Result {
 RegisterCommand :: (interpreter: *Interpreter, name: string, handler: CommandHandler, context: s64 = 0) -> bool {
     if name == "" || handler == null || IsBuiltin(name) { return false }
     if FindProcedure(interpreter, name) >= 0 { return false }
-    for * interpreter.extensions {
-        if TextView(it.name) == name { return false }
-    }
+    if FindExtension(interpreter, name) != null { return false }
     return VecPush(interpreter.extensions, Extension.{name = TextCopy(name), context = context, handler = handler});
+}
+
+FindLibrary :: (interpreter: *Interpreter, name: string) -> *Library {
+    for * interpreter.libraries { if TextView(it.name) == name { return it } }
+    return null;
+}
+
+FindExtension :: (interpreter: *Interpreter, name: string) -> *Extension {
+    for * interpreter.extensions { if TextView(it.name) == name { return it } }
+    for * interpreter.libraries {
+        if !it.loaded { continue }
+        for * it.commands { if TextView(it.name) == name { return it } }
+    }
+    return null;
+}
+
+BUILTIN_LIBRARIES :: "calc io list string";
+
+// A named bundle supplies commands when the script loads it. Copy each name so
+// callers can pass short-lived descriptors. Activation is local to an interpreter.
+RegisterLibrary :: (interpreter: *Interpreter, name: string, commands: []LibraryCommand, context: s64 = 0) -> bool {
+    if name == "" || commands.count == 0 || WordIn(BUILTIN_LIBRARIES, name) || FindLibrary(interpreter, name) != null { return false }
+    library := Library.{name = TextCopy(name)};
+    for command: commands {
+        if command.name == "" || command.handler == null || IsBuiltin(command.name) { return false }
+        for * library.commands { if TextView(it.name) == command.name { return false } }
+        if !VecPush(library.commands, Extension.{name = TextCopy(command.name), context = context, handler = command.handler}) { return false }
+    }
+    return VecPush(interpreter.libraries, library);
 }
 
 RegisterPrefix :: (interpreter: *Interpreter, prefix: string, handler: PrefixHandler, context: s64 = 0) -> bool {
@@ -98,7 +137,7 @@ CopyResult :: (result: *Result) -> Result {
     return .{code = result.code, value = TextCopy(TextView(result.value))};
 }
 
-CORE_COMMANDS :: "append array break calc catch continue error eval exit expr for foreach format global if incr info lappend level proc return set source string switch unset uplevel upvar while";
+CORE_COMMANDS :: "append array break calc catch continue dumpstack error eval exit expr for foreach format global if incr info lappend level load proc return set source string switch time unset uplevel upvar while";
 
 IsBuiltin :: (name: string) -> bool { return IsListCommand(name) || WordIn(CORE_COMMANDS, name) || WordIn(Io.COMMANDS, name) }
 
@@ -511,6 +550,10 @@ RunInfo :: (interpreter: *Interpreter, frame: *Frame, args: []Text) -> Result {
             unused BuilderAppend(names.bytes, " ");
             unused BuilderAppend(names.bytes, Io.COMMANDS);
             for * interpreter.extensions { AppendElement(*names.bytes, TextView(it.name)) }
+            for * interpreter.libraries {
+                if !it.loaded { continue }
+                for * it.commands { AppendElement(*names.bytes, TextView(it.name)) }
+            }
         }
         for * interpreter.procedures { AppendElement(*names.bytes, TextView(it.name), names.bytes.count > 0) }
         return .{value = names};
@@ -571,6 +614,57 @@ RunSource :: (interpreter: *Interpreter, frame: *Frame, args: []Text, depth: s32
     return EvalScript(interpreter, frame, TextView(loaded.value), depth+1);
 }
 
+RunLoad :: (interpreter: *Interpreter, args: []Text) -> Result {
+    if args.count != 1 { return WrongArgs("load libname") }
+    name := TextView(args[0]);
+    if WordIn(BUILTIN_LIBRARIES, name) { return Success() }
+    library := FindLibrary(interpreter, name);
+    if library == null { return QuotedError("Cannot load /dis/lib/tcl_", name, ".dis") }
+    if library.loaded { return Success() }
+    for * library.commands {
+        command := TextView(it.name);
+        if FindProcedure(interpreter, command) >= 0 || FindExtension(interpreter, command) != null {
+            return QuotedError("command \"", command, "\" already exists");
+        }
+    }
+    library.loaded = true;
+    return Success();
+}
+
+RunTime :: (interpreter: *Interpreter, frame: *Frame, args: []Text, depth: s32) -> Result {
+    if args.count < 1 || args.count > 2 { return WrongArgs("time command ?count?") }
+    count: s64 = 1;
+    if args.count == 2 {
+        word := TextView(args[1]);
+        value, valid := ParseInteger(word);
+        if !valid { return QuotedError("expected integer but got \"", word, "\"") }
+        count = value;
+    }
+    if count == 0 { return Success("-NaN milliseconds per iteration") }
+    if count < 0 { return Success("-0 milliseconds per iteration") }
+    clock := interpreter.clock;
+    if clock == null { return Failure("time requires a monotonic clock") }
+    start := clock(interpreter.clock_context);
+    if start < 0 { return Failure("monotonic clock unavailable") }
+    script := TextView(args[0]);
+    failed: Result;
+    for 0..count-1 {
+        if interpreter.steps <= 0 { return Failure("script command limit exceeded") }
+        interpreter.steps -= 1;
+        result := EvalScript(interpreter, frame, script, depth + 1);
+        if result.code == .Error {
+            failed.code = .Error;
+            VecSwap(failed.value.bytes, result.value.bytes);
+        } else if result.code != .OK { return result }
+    }
+    if failed.code != .OK { return failed }
+    end := clock(interpreter.clock_context);
+    if end < start { return Failure("monotonic clock unavailable") }
+    result := C.Format(C.Real(cast(float64)(end - start) / cast(float64)count));
+    if !BuilderAppend(result.value.bytes, " milliseconds per iteration") { return Failure("cannot allocate timing result") }
+    return result;
+}
+
 Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32) -> Result {
     name := TextView(words[0]);
     args := words[1:];
@@ -581,6 +675,16 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
     if name == "info" { return RunInfo(interpreter, frame, args) }
     if name == "array" { return RunArray(frame, args) }
     if name == "source" { return RunSource(interpreter, frame, args, depth) }
+    if name == "load" { return RunLoad(interpreter, args) }
+    if name == "time" { return RunTime(interpreter, frame, args, depth) }
+    if name == "dumpstack" {
+        if args.count != 0 { return WrongArgs("dumpstack") }
+        dump: Text;
+        if !AppendStackDump(*dump, frame) || !BuilderAppend(interpreter.output.bytes, TextView(dump)) {
+            return Failure("cannot allocate stack dump");
+        }
+        return Success();
+    }
     if name == "switch" { return RunSwitch(interpreter, frame, args, depth) }
     if name == "global" || name == "upvar" || name == "uplevel" { return RunFrameCommand(interpreter, frame, name, args, depth) }
     if name == "level" {
@@ -656,11 +760,11 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
     }
     index := FindProcedure(interpreter, name);
     if index >= 0 { return CallProcedure(interpreter, frame, index, args, depth) }
-    for * interpreter.extensions {
-        if TextView(it.name) != name { continue }
+    extension := FindExtension(interpreter, name);
+    if extension != null {
         result: Result;
-        handler := it.handler;
-        handler(it.context, args, *result);
+        handler := extension.handler;
+        handler(extension.context, args, *result);
         return result;
     }
     longest: s64;

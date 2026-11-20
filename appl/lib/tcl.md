@@ -62,6 +62,22 @@ that also charges loop iterations, and permits 48 nested script levels.
 - The real functions are `abs`, `acos`, `asin`, `atan`, `atan2`, `ceil`, `cos`,
   `cosh`, `exp`, `floor`, `fmod`, `hypot`, `log`, `log10`, `pow`, `sin`, `sinh`,
   `sqrt`, `tan` and `tanh`.
+- `time script ?count?` runs the script repeatedly in the calling frame and
+  reports milliseconds per iteration. It shares the script command limit.
+  Script errors are reported after the requested repetitions and control flow
+  such as `return` or `exit` propagates immediately. Native and hosted shells
+  provide a monotonic clock. Embedders can inject one with `SetClock`. The
+  callback receives a context ID and returns milliseconds or a negative value
+  on failure.
+- `dumpstack` writes the scalar, array and alias tables for frames visible from
+  the current frame to the Tcl output buffer. The entries use variable insertion
+  order, with no Limbo hash slot numbers.
+- `load libname` activates a command bundle registered with `RegisterLibrary`.
+  The embedder passes a slice of `LibraryCommand` descriptors and one context ID.
+  Commands are visible to `info commands` and callable after activation. Loads
+  are idempotent and a command conflict rejects the entire bundle. `calc`,
+  `io`, `list` and `string` are available by default. Dis binary loading and
+  guest discovery of external Ziran Tcl modules require separate integration.
 - `puts string` and `puts -nonewline string` write to the output buffer.
 - `exit` stops the current evaluation, including from a procedure, source
   file or `catch` body. `Eval` returns `.Exit` to the embedding application.
@@ -112,18 +128,17 @@ releases them, including after `.Exit`. Explicit `stdout` and implicit
 
 ### Comparison with shipped Inferno Tcl
 
-The shipped Limbo interpreter additionally registers `dumpstack`, `load`
-and `time`. Limbo `load` requires a Dis module. Its `file`, `flush` and
-`tell` are empty stubs. `string match`, `wordstart` and `wordend` are empty stubs in
+Limbo `load` resolves `/dis/lib/tcl_<name>.dis` and calls the module’s `TclLib`
+interface. A leading `|` in an `open` filename is treated as an ordinary path
+by the shipped Limbo shell. Its `file`, `flush` and `tell` are empty stubs. `string match`, `wordstart` and `wordend` are empty stubs in
 the shipped interpreter and are unsupported here. The Ziran implementation
 also handles ASCII `string toupper`, string search and trim, and `format`
 literal text where the Limbo implementation has stubs or bugs.
 
-Real expressions preserve mixed terms and use Ziran's `float64` values. The
-installed Taiji ZX runtime currently rounds real values to single precision.
-Native Ziran and the standalone ZX engine retain binary64 precision. Decimal
-formatting and exceptional-value spelling can differ from Limbo. The shared
-script compares approximate function results with a tolerance.
+Real expressions preserve mixed terms and use Ziran's `float64` values on
+native, standalone ZX and the installed Taiji runtime. Decimal formatting and
+exceptional-value spelling can differ from Limbo. The shared script compares
+approximate function results with a tolerance.
 
 ## Build, test and run
 
@@ -136,14 +151,15 @@ build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
 ```
 
 The native shell also reads stdin with `-` or when given no filename. The
-test runner compares the reference, compatibility, expression and channel
-scripts with the existing Limbo `tclsh`, runs the scripts under ZX and hosted
-Taiji, and tests the library API with an injected channel backend. `zxrun` prints a
+test runner compares the reference, compatibility, expression, headless and
+channel scripts with the existing Limbo `tclsh` and runs the scripts under ZX
+and hosted Taiji. API tests exercise injected channels, clocks and command
+libraries. `zxrun` prints a
 final scalar `0` on success and `1` on a Tcl error. `zxrun -c` reports the
 result as a guest command status.
 
 With a Taiji emulator that provides `taijios_stdin`, `taijios_files` and
-`taijios_io` including `Create`, `Seek` and `Stat`, build the shell that
+`taijios_clock` and `taijios_io` including `Create`, `Seek` and `Stat`, build the shell that
 reads a script from the guest's standard input. It evaluates after EOF and
 accepts scripts up to 1 MiB.
 

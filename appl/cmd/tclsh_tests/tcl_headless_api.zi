@@ -1,0 +1,58 @@
+#import "std/vec"
+using Tcl :: #import "tcl"
+using T :: #import "tcl_types"
+using Fixture :: #import "tcl_headless_input"
+
+elapsed: s64;
+Millis :: (step: s64) -> s64 {
+    previous := elapsed;
+    elapsed += step;
+    return previous;
+}
+
+Callback :: (context: s64, args: []Text, result: *T.Result) {
+    if context != 42 || args.count != 1 {
+        result.code = .Error;
+        unused BuilderAppend(result.value.bytes, "library callback requires one argument");
+        return;
+    }
+    unused BuilderAppend(result.value.bytes, "loaded ");
+    unused BuilderAppend(result.value.bytes, TextView(args[0]));
+}
+
+Expect :: (interp: *Tcl.Interpreter, script: string, code: T.Code, expected: string) -> bool {
+    result := Tcl.Eval(interp, script);
+    if result.code == code && TextView(result.value) == expected { return true }
+    print("Tcl <%> returned <%>\n", script, TextView(result.value));
+    return false;
+}
+
+main :: () -> s32 {
+    tcl: Tcl.Interpreter;
+    other: Tcl.Interpreter;
+    if !Expect(*tcl, "time {}", .Error, "time requires a monotonic clock") { return 1 }
+    Tcl.SetClock(*tcl, Millis, 9);
+    if !Expect(*tcl, "time {} 3", .OK, "3 milliseconds per iteration") { return 2 }
+    if !Expect(*tcl, "time {} 2147483647", .Error, "script command limit exceeded") { return 3 }
+    if !Expect(*tcl, "time {exit} 2", .Exit, "") { return 4 }
+
+    commands: [1]Tcl.LibraryCommand = .{.{name = "fixture_word", handler = Callback}};
+    conflicts: [2]Tcl.LibraryCommand = .{.{name = "unpublished", handler = Callback}, .{name = "fixture_word", handler = Callback}};
+    invalid: [1]Tcl.LibraryCommand = .{.{name = "time", handler = Callback}};
+    if !Tcl.RegisterLibrary(*tcl, "probe", commands[:], 42) || !Tcl.RegisterLibrary(*tcl, "conflicts", conflicts[:], 42) { return 5 }
+    if Tcl.RegisterLibrary(*tcl, "probe", commands[:], 42) || Tcl.RegisterLibrary(*tcl, "invalid", invalid[:], 42) { return 6 }
+    if !Expect(*tcl, "lsearch [info commands] fixture_word", .OK, "-1") { return 7 }
+    if !Expect(*tcl, "fixture_word before", .Error, "invalid command name \"fixture_word\"") { return 8 }
+    if !Expect(*tcl, "load probe; load probe; fixture_word {two words}", .OK, "loaded two words") { return 9 }
+    if !Expect(*tcl, "expr {[lsearch [info commands] fixture_word] >= 0}", .OK, "1") { return 10 }
+    if !Expect(*tcl, "fixture_word", .Error, "library callback requires one argument") { return 11 }
+    if !Expect(*tcl, "load conflicts", .Error, "command \"fixture_word\" already exists") { return 12 }
+    if !Expect(*tcl, "unpublished test", .Error, "invalid command name \"unpublished\"") { return 13 }
+    if !Expect(*other, "load probe", .Error, "Cannot load /dis/lib/tcl_probe.dis") { return 14 }
+
+    Tcl.SetClock(*other, Millis, 9);
+    if !Expect(*other, Fixture.Script, .OK, "") { return 15 }
+    logged: Text = Tcl.TakeOutput(*other);
+    print("%", TextView(logged));
+    return 0;
+}
