@@ -39,6 +39,7 @@ y.debug
 /appl/cmd/test.zx
 /appl/cmd/ls.zx
 /appl/cmd/mkdir.zx
+/appl/wm/clock.zx
 /appl/cmd/coffee.zx
 /appl/cmd/logwindow.zx
 /appl/cmd/memory.zx
@@ -64,6 +65,7 @@ y.debug
 /dis/math/linbench.zx
 /dis/math/graph0.zx
 /dis/wm/stopwatch.zx
+/dis/wm/clock.zx
 /dis/wm/logwindow.zx
 /dis/wm/memory.zx
 /build/zx-smoke/*

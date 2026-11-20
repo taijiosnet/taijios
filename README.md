@@ -107,6 +107,23 @@ for both presses and text. Surfaces are limited to 4,194,304 pixels and 4,096
 pixels per axis.
 The `taijios_clock.MonotonicMillis` capability supplies elapsed time.
 
+### Build and run ZX Clock
+
+Use the Kryon revision pinned in `appl/wm/ziran.lock` when building Clock.
+If you use a local Kryon override, use that revision so the generated host
+binding matches the lockfile. Install and launch Clock with the emulator's
+default memory setting.
+
+```sh
+(cd appl/wm && mk install-clock-zx)
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /dis/wm/clock.zx
+python3 -u appl/wm/clock_zx_test.py
+```
+
+Clock draws through Kryon's hosted surface and reads `/dev/time`,
+`/env/timezone`, and `/locale/timezone` through `taijios_files.ReadAt`.
+The original Clock remains available as `/dis/wm/clock.dis`.
+
 ### Read guest standard input
 
 Both `zxrun` and `zxrun -w` can bind the typed standard input capability.

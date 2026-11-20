@@ -1,0 +1,106 @@
+// Port of the shipped Clock. Subject to the Lucent Public License 1.02.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Shape :: #import "kryon/shape";
+Files :: #import "taijios_files";
+Math :: #import "std/math";
+#import "kryon/geometry"
+#import "kryon/session"
+#import "kryon/tree"
+#import "std/number_text"
+
+zone: [2048]u8;
+zone_length: s32;
+
+ZoneSpace :: (byte: u8) -> bool {
+    return byte == 32 || byte == 9 || byte == 10 || byte == 13
+}
+
+ZoneWord :: (text: string, at: *s64) -> string {
+    while at.* < text.count && ZoneSpace(cast(u8)text[at.*]) { at.* += 1 }
+    start := at.*
+    while at.* < text.count && !ZoneSpace(cast(u8)text[at.*]) { at.* += 1 }
+    return text[start:at.*]
+}
+
+ZoneOffset :: (text: string, utc: s64) -> s64 {
+    at: s64
+    unused ZoneWord(text, *at)
+    standard := ZoneWord(text, *at)
+    unused ZoneWord(text, *at)
+    daylight := ZoneWord(text, *at)
+    base, base_count := IntegerPrefix(standard)
+    summer, summer_count := IntegerPrefix(daylight)
+    if base_count == 0 || base_count != standard.count || base < -86400 || base > 86400 ||
+        summer_count == 0 || summer_count != daylight.count || summer < -86400 || summer > 86400 { return 0 }
+    wall := utc + base
+    while at < text.count {
+        start := ZoneWord(text, *at)
+        end := ZoneWord(text, *at)
+        lower, lower_count := IntegerPrefix(start)
+        upper, upper_count := IntegerPrefix(end)
+        if lower_count == 0 || lower_count != start.count || upper_count == 0 || upper_count != end.count { break }
+        if wall >= lower && wall < upper { return summer }
+    }
+    return base
+}
+
+LoadZone :: () {
+    zone_length = Files.ReadBytesAt("/env/timezone", 0, zone[:])
+    if zone_length <= 0 { zone_length = Files.ReadBytesAt("/locale/timezone", 0, zone[:]) }
+    if zone_length <= 0 { return }
+    if zone[0] == 47 || zone[0] == 35 {
+        path: [2048]u8
+        count := zone_length
+        if zone[count - 1] == 10 { count -= 1 }
+        for i: 0..count - 1 { path[i] = zone[i] }
+        zone_length = Files.ReadBytesAt(TextView(path[:count]), 0, zone[:])
+    }
+}
+
+LocalMinute :: () -> s64 {
+    time: [32]u8
+    size := Files.ReadBytesAt("/dev/time", 0, time[:])
+    if size <= 0 { return 0 }
+    micros, count := IntegerPrefix(TextView(time[:size]))
+    if count != size { return 0 }
+    seconds := micros / 1000000
+    if zone_length > 0 { seconds += ZoneOffset(TextView(zone[:zone_length]), seconds) }
+    day := seconds % 86400
+    if day < 0 { day += 86400 }
+    return day / 60
+}
+
+RadialPoint :: (center: Vector2, radius: float32, steps: s64) -> Vector2 {
+    radians := cast(float64)steps * 0.10471975511965977
+    return .{center.x + radius * cast(float32)Math.Sin(radians),
+             center.y - radius * cast(float32)Math.Cos(radians)}
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    center: Vector2 = .{bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0}
+    diameter := ifx bounds.width < bounds.height then bounds.width else bounds.height
+    radius := diameter / 2.0 - 8.0
+    Box.Draw(session, .{.key = 1, .bounds = bounds, .fill = .{213, 255, 255, 255}})
+    if radius <= 0.0 { return }
+
+    for tick: 0..11 {
+        Shape.Circle(session, .{.key = cast(u64)tick + 2, .center = RadialPoint(center, radius, tick * 5),
+            .radius = 2.0, .fill = .{0, 0, 255, 255}})
+    }
+    local := LocalMinute()
+    minute := local % 60
+    hour := ((local / 60) % 12) * 5 + minute / 10
+    Shape.Draw(session, .{.key = 14, .start = center, .end = RadialPoint(center, radius * 0.75, minute),
+        .thickness = 2.0, .color = .{0, 0, 187, 255}})
+    Shape.Draw(session, .{.key = 15, .start = center, .end = RadialPoint(center, radius / 2.0, hour),
+        .thickness = 2.0, .color = .{0, 0, 85, 255}})
+}
+
+#program_export
+main :: () -> s32 {
+    LoadZone()
+    return Surface.Run(.{.title = "clock", .width = 100, .height = 100}, Draw, 1000)
+}

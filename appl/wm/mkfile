@@ -100,3 +100,14 @@ DISBIN=$ROOT/dis/wm
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
+
+clock.zx: clock.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
+	kryon_id=$(python3 -c 'import json; print(json.load(open("ziran.lock"))["root"]["dependencies"]["kryon"])') &&
+	ziran bundle --project --module-path ../cmd --bind-host "${kryon_id}_pixmap" --bind-host taijios_files --entry clock:main -o $target clock.zi
+
+install-clock-zx:V: $DISBIN/clock.zx
+
+$DISBIN/clock.zx: clock.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 clock.zx "$staged" && mv "$staged" "$target"
