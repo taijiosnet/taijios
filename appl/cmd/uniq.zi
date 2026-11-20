@@ -1,0 +1,137 @@
+#import "std/vec";
+#import "std/number_text";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Runes :: #import "zx_runes";
+using UTF :: #import "std/utf8";
+
+Usage :: () -> s32 { return Cli.Usage("usage: uniq [-udc] [file]\n") }
+
+Line :: struct { bytes: Vec(u8); }
+
+// Bufio.gets converts each buffered fragment to a string separately.
+AppendFragment :: (line: *Line, fragment: string) -> bool {
+    at: s32;
+    start: s32;
+    while at < fragment.count {
+        lead := fragment[at];
+        if lead < 0x80 { at += 1; continue }
+        if fragment.count - at < Runes.Width(lead) { break }
+        decoded := UTF.Decode(fragment, at);
+        if !decoded.valid {
+            if !BuilderAppend(line.bytes, fragment[start:at]) || !BuilderAppend(line.bytes, "�") {
+                return false;
+            }
+            start = decoded.after;
+        }
+        at = decoded.after;
+    }
+    return BuilderAppend(line.bytes, fragment[start:at]);
+}
+
+ReadLine :: (input: *Runes.Reader, line: *Line) -> s32 {
+    unused VecResize(line.bytes, 0);
+    while true {
+        start := input.next;
+        newline: bool;
+        while input.next < input.end {
+            lead := input.data[input.next];
+            if lead < 0x80 {
+                input.next += 1;
+                if lead == 10 { newline = true; break }
+            } else {
+                width := Runes.Width(lead);
+                if input.end - input.next < width { break }
+                decoded := UTF.Decode(TextView(input.data[input.next:input.next+width]), 0);
+                input.next += decoded.after;
+            }
+        }
+        if !AppendFragment(line, TextView(input.data[start:input.next])) { return -1 }
+        if newline || !Runes.Refill(input) { return ifx line.bytes.count > 0 then 1 else 0 }
+    }
+}
+
+LineText :: (line: *Line) -> string {
+    return TextView(VecSlice(line.bytes, 0, line.bytes.count));
+}
+
+Emit :: (line: *Line, count: s64, number: bool, unique: bool, duplicates: bool) {
+    if (count != 1 || !unique) && (count <= 1 || !duplicates) { return }
+    if number {
+        digits: [24]u8;
+        unused Cli.WriteAll(1, FormatInteger(count, digits[:]));
+        unused Cli.WriteAll(1, "\t");
+    }
+    unused Cli.WriteAll(1, LineText(line));
+}
+
+Filter :: (handle: s32, number: bool, unique: bool, duplicates: bool) -> s32 {
+    input: Runes.Reader = .{handle = handle};
+    first: Line;
+    second: Line;
+    previous := *first;
+    current := *second;
+    count: s64;
+    while true {
+        result := ReadLine(*input, current);
+        if result < 0 {
+            unused Cli.WriteAll(2, "uniq: could not allocate input line\n");
+            unused Args.SetFailure("error");
+            return 1;
+        }
+        if result == 0 { break }
+        if count > 0 && LineText(previous) == LineText(current) {
+            count += 1;
+        } else {
+            Emit(previous, count, number, unique, duplicates);
+            old := previous;
+            previous = current;
+            current = old;
+            count = 1;
+        }
+    }
+    Emit(previous, count, number, unique, duplicates);
+    return 0;
+}
+
+main :: () -> s32 {
+    unique: bool;
+    duplicates: bool;
+    number: bool;
+    first: s32;
+    argc := Args.OperandCount();
+    while first < argc {
+        option := Args.Operand(first);
+        if option.count < 2 || option[0] != 45 { break }
+        first += 1;
+        if option == "--" { break }
+        for i: 1..option.count-1 {
+            byte := option[i];
+            if byte == 117 { unique = true }
+            else if byte == 100 { duplicates = true }
+            else if byte == 99 { number = true }
+            else { return Usage() }
+        }
+    }
+    if argc - first > 1 { return Usage() }
+    if !unique && !duplicates { unique = true; duplicates = true }
+    handle: s32;
+    if argc > first {
+        path := Args.Operand(first);
+        handle = Io.OpenFile(path, 0);
+        if handle < 0 {
+            problem := Io.LastError();
+            unused Cli.WriteAll(2, "uniq: cannot open ");
+            unused Cli.WriteAll(2, path);
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, problem);
+            unused Cli.WriteAll(2, "\n\n");
+            unused Args.SetFailure("open file");
+            return 1;
+        }
+    }
+    status := Filter(handle, number, unique, duplicates);
+    if handle != 0 { unused Io.CloseFile(handle) }
+    return status;
+}

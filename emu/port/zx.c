@@ -8,6 +8,9 @@
 #include "ziran_host.h"
 #include "ziran_zx_module.h"
 #include <time.h>
+#if defined(__linux__) && defined(__i386__)
+#include <fenv.h>
+#endif
 #include "draw.h"
 #include "zxrunt.h"
 #include "drawif.h"
@@ -691,6 +694,8 @@ zxio(void *context, const char *module, const char *function,
 		   (length != 0 && buffer->elements == nil))
 			return 0;
 		count = length == 0 ? 0 : kread(fd, bytes, length);
+		if(count > 0)
+			BundleHostRenewSteps();
 		for(i = 0; i < count; i++)
 			buffer->elements[i].bits = bytes[i];
 	}else{
@@ -775,6 +780,26 @@ struct ZxResult {
 	char problem[ERRMAX];
 };
 
+#if defined(__linux__) && defined(__i386__)
+static int
+zxfpbegin(fenv_t *saved)
+{
+	unsigned short control;
+
+	if(feholdexcept(saved) != 0)
+		return 0;
+	if(fesetround(FE_TONEAREST) != 0){
+		fesetenv(saved);
+		return 0;
+	}
+	/* The Dis worker can enter with a different x87 precision setting. */
+	__asm__ volatile("fnstcw %0" : "=m"(control));
+	control = (control & ~0x0300) | 0x0200;
+	__asm__ volatile("fldcw %0" : : "m"(control));
+	return 1;
+}
+#endif
+
 static ZxResult
 zxrun(String *s, List *args, ZX_Window *win)
 {
@@ -783,7 +808,7 @@ zxrun(String *s, List *args, ZX_Window *win)
 	ZxCommand command = {0};
 	HostBinding *bindings;
 	size_t count;
-	int i;
+	int i, ran;
 	ZxResult result = {0, -1, ""};
 	Bundle *bundle;
 	ZxModuleLoader *loader;
@@ -817,14 +842,31 @@ zxrun(String *s, List *args, ZX_Window *win)
 		count = BundleCapabilityCount(bundle);
 		bindings = nil;
 		program = nil;
+		ran = 0;
 		loader = ZxModuleLoaderOpenConfigured(&config);
 		if(count != 0 && count <= SIZE_MAX / sizeof(*bindings))
 			bindings = malloc(count * sizeof(*bindings));
 		if(loader != nil && (count == 0 || bindings != nil)){
+			int ready = 1;
+#if defined(__linux__) && defined(__i386__)
+			fenv_t saved;
+#endif
 			count = zxbindings(bundle, &surface, &command, bindings);
-			program = ZxModuleProgramOpen(loader, bundle, bindings, count);
+#if defined(__linux__) && defined(__i386__)
+			ready = zxfpbegin(&saved);
+#endif
+			if(ready){
+				program = ZxModuleProgramOpen(loader, bundle, bindings, count);
+				if(program != nil)
+					ran = ZxModuleProgramRun(program, &result.value, &result.status);
+#if defined(__linux__) && defined(__i386__)
+				fesetenv(&saved);
+#endif
+			}else
+				strecpy(result.problem, result.problem+sizeof(result.problem),
+					"cannot initialize ZX floating-point environment");
 		}
-		if(program == nil || !ZxModuleProgramRun(program, &result.value, &result.status)){
+		if(!ran){
 			problem = loader == nil ? nil : ZxModuleLoaderError(loader);
 			if(problem != nil && problem[0] != '\0')
 				snprint(result.problem, sizeof(result.problem), "%s", problem);

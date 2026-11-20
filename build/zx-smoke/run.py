@@ -26,6 +26,11 @@ missing = run('zxrun /build/zx-smoke/absent.zx >[2] /build/zx-smoke/missing.stde
 assert missing.stdout == 'zx\n' and missing.stderr == ''
 assert 'absent.zx' in (files / 'missing.stderr').read_text()
 
+if '--precision' in sys.argv[2:]:
+    precision = run('zxrun /build/zx-smoke/float64.zx; echo $status')
+    assert precision.stdout == 'literal true parsed true sum true sqrt(2) 1.4142135623730951\n0\n\n'
+    assert not precision.stderr
+
 if '--runtime' in sys.argv[2:]:
     unbound = run('zxrun /build/zx-smoke/linked.zx >[2] /build/zx-smoke/module.stderr; echo $status')
     assert unbound.stdout == 'zx\n' and unbound.stderr == ''
@@ -81,9 +86,9 @@ if '--stock-zx' in sys.argv[2:]:
     from shutil import copyfile
     from tempfile import TemporaryDirectory
 
-    lookup = run('whatis cat echo basename cleanname wc /dis/cat.dis /dis/cat.zx')
+    lookup = run('whatis cat echo basename cleanname ls /dis/cat.dis /dis/cat.zx')
     assert lookup.stdout.splitlines() == ['/dis/cat.zx', '/dis/echo.zx', '/dis/basename.zx',
-                                          '/dis/cleanname.zx', '/dis/wc.dis', '/dis/cat.dis',
+                                          '/dis/cleanname.zx', '/dis/ls.dis', '/dis/cat.dis',
                                           '/dis/cat.zx']
     assert not lookup.stderr
 
@@ -122,6 +127,55 @@ if '--stock-zx' in sys.argv[2:]:
     builtin = run('load /dis/sh/echo.dis; whatis echo; echo builtin')
     assert builtin.stdout == 'load /dis/sh/echo.dis; echo\nbuiltin\n' and not builtin.stderr
     print('Stock ZX: lookup, UTF-8 argv, pipeline, named errors, path precedence and Dis fallback')
+
+if '--streams' in sys.argv[2:]:
+    lookup = run('whatis wc uniq tr')
+    assert lookup.stdout == '/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n' and not lookup.stderr
+    plain = 'a\na\n\nκ\nκ\nend'.encode()
+    malformed = b'a\x00b\na\x00b\n\xff\n\xff\n\xe2\x82'
+    boundary = b'x' * 8191 + '€κ☕🫖'.encode() + b'\n'
+    (files / 'stream-other').write_bytes(b'one\t two\n')
+    cases = [
+        ('wc', '', b''),
+        ('wc', '-lwc', boundary),
+        ('wc', '-lwcbe', bytes(range(256)) * 120),
+        ('wc', 'stream-other stream-input', boundary),
+        ('wc', '-q', plain),
+        ('wc', 'stream-missing stream-other', plain),
+        ('wc', '', b'word\n' * 3355444),
+        ('uniq', '-u', plain),
+        ('uniq', '-d', plain),
+        ('uniq', '-udc -- stream-input', plain),
+        ('uniq', '-c', malformed),
+        ('uniq', '-c', (boundary * 2 + b'y')),
+        ('uniq', '-q', b''),
+        ('uniq', 'stream-missing', b''),
+        ('tr', 'a-z A-Z', boundary),
+        ('tr', '-s a-c z', b'abczz\naabb\n'),
+        ('tr', '-ds xy z', b'zzxzyyyyxxzz\n'),
+        ('tr', '-c abc d', 'xyzabc☕🫖\n'.encode()),
+        ('tr', "'€κ☕🫖' 'é𐀀'", boundary),
+        ('tr', "'\\101-\\x43' '!?X'", b'ABCD'),
+        ('tr', 'aa xy', b'aa\n'),
+        ('tr', 'z-a y', b'd'),
+        ('tr', "-d '\\777'", b'd'),
+        ('tr', "-d ''", malformed),
+        ('tr', "-c '\\000' ''", b'a\x00b\n'),
+    ]
+    for name, args, payload in cases:
+        (files / 'stream-input').write_bytes(payload)
+        # The prebuilt uniq.dis can predate the -c option in uniq.b.
+        legacy = '/appl/cmd/uniq.dis' if name == 'uniq' else f'/dis/{name}.dis'
+        results = []
+        for command in (legacy, name):
+            result = run(f'cd /build/zx-smoke; {command} {args} < stream-input '
+                         '> stream-out >[2] stream-err; echo $status')
+            assert not result.stderr
+            results.append((result.stdout, (files / 'stream-out').read_bytes(),
+                            (files / 'stream-err').read_bytes()))
+        assert results[0] == results[1], (name, args, len(payload),
+                                         [(status, output[:100], error) for status, output, error in results])
+    print(f'Stream ZX: {len(cases)} Dis parity cases, including UTF-8, errors and 16 MiB stdin')
 
 if '--utilities' in sys.argv[2:]:
     cases = [

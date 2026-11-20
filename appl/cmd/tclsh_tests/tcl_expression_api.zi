@@ -1,0 +1,49 @@
+using Expression :: #import "tcl_calc"
+#import "std/vec"
+
+Expect :: (script: string, expected: string) -> bool {
+    value, problem := Expression.Evaluate(script);
+    result := Expression.Format(value);
+    actual := TextView(result.value);
+    if problem == "" && actual == expected { return true }
+    print("expression %: expected %, got % (%)\n", script, expected, actual, problem);
+    return false;
+}
+
+Near :: (script: string, expected: float64) -> bool {
+    value, problem := Expression.Evaluate(script);
+    delta := Expression.ToReal(value)-expected;
+    if problem == "" && delta > -0.000000000001 && delta < 0.000000000001 { return true }
+    result := Expression.Format(value);
+    print("inaccurate expression %: got % (%)\n", script, TextView(result.value), problem);
+    return false;
+}
+
+Error :: (script: string, expected: string) -> bool {
+    _, problem := Expression.Evaluate(script);
+    if problem == expected { return true }
+    print("expression %: expected error %, got %\n", script, expected, problem);
+    return false;
+}
+
+main :: () -> s32 {
+    if !Expect("2+1.0+1", "4") || !Expect("2.0+1+1", "4") || !Expect("1.5+2*3", "7.5") { return 1 }
+    if !Expect(".5*8", "4") || !Expect("1e3 + 2.5E-1", "1000.25") || !Expect("5/2.0", "2.5") { return 2 }
+    if !Expect("0x20|04", "36") || !Expect("~1&7", "6") || !Expect("4<<3+1", "64") || !Expect("-8>>2", "-2") { return 3 }
+    if !Expect("-2147483648", "-2147483648") || !Expect("-5 / 2", "-3") || !Expect("-5 % 2", "1") || !Expect("2147483647 != 2147483646", "1") { return 4 }
+    if !Expect("off ? 11 : on ? 12 : 13", "12") || !Expect("!false && 7>=6.5", "1") { return 5 }
+    if !Expect("abs(-2.5)+ceil(-2.5)+floor(2.5)", "2.5") || !Expect("pow(sqrt(9), 2)", "9") { return 6 }
+    if !Expect("hypot(3,4)", "5") || !Expect("fmod(-5.5,2)", "-1.5") || !Expect("abs(-2147483648)", "2147483648.0") { return 7 }
+    if !Near("cos(1)+sin(1)", 1.3817732906760363) || !Near("atan2(1,1)", 0.7853981633974483) || !Near("1.0/3", 0.3333333333333333) { return 8 }
+    if !Expect("sqrt(-1)", "NaN") || !Expect("log(0)", "-Infinity") || !Expect("1.5/0.0", "Infinity") { return 9 }
+    if !Expect("fmod(Infinity,1)", "NaN") || !Expect("fmod(1,Infinity)", "1") ||
+        !Expect("ceil(NaN)", "NaN") || !Expect("floor(Infinity)", "Infinity") { return 16 }
+    if !Error("0&&1/0", "divide by zero") || !Error("0?1/0:2", "divide by zero") || !Error("1.5 % 2", "expected integer operands") { return 10 }
+    if !Error("2147483647+1", "integer overflow") || !Error("1<<32", "shift count is out of range") { return 11 }
+    if !Error("1e-", "invalid floating-point expression operand") || !Error("08", "invalid digit in integer expression") || !Error("1 2", "unexpected token in expression") { return 12 }
+    if !Error("ignored(1)", "unknown expression function") || !Error("pow(2)", "expected two function arguments") || !Error("sin(1,2)", "wrong number of function arguments or missing close-parenthesis") { return 13 }
+    if !Expression.ScalarOperand(" -1.25e-3 ") || !Expression.ScalarOperand("off") || !Expression.ScalarOperand("-Infinity") || !Expression.ScalarOperand("0x20") { return 14 }
+    if Expression.ScalarOperand("1+2") || Expression.ScalarOperand("pow(2,3)") || Expression.ScalarOperand("1 2") { return 15 }
+    print("Tcl expression API OK\n");
+    return 0;
+}

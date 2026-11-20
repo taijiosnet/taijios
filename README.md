@@ -48,8 +48,14 @@ redirections. The shared loader validates module images and typed imports.
 
 Each ZX instance starts with a 16-million-step budget shared by initialization
 and execution. A graphical application renews its budget when `Event` delivers
-input or a window event, or completes a nonzero timed wait. Empty polls and
-closed-window events consume the remaining budget.
+input or a window event, or completes a nonzero timed wait. A positive
+`taijios_io.Read` also renews the budget so a filter can process a long stream
+in bounded chunks. Empty reads and polls, read errors, and closed-window events
+consume the remaining budget.
+
+On Linux/i386, the ZX engine uses nontrapping, round-to-nearest binary64
+arithmetic and restores the calling thread's floating-point environment after
+execution.
 
 ### Build and run ZX Stopwatch
 
@@ -192,6 +198,16 @@ python3 -u build/zx-smoke/run.py Linux/386/bin/emu --stock-zx --cat --utilities
 
 ### Dis command migration order
 
+`mk install-zx` also installs `wc`, `uniq`, and `tr` as shell commands.
+All three use `taijios_io` for guest I/O. `uniq` and `tr` share a buffered
+rune reader. The stream parity test uses a freshly built Dis `uniq` so it
+can compare the `-c` flag from the current Limbo source.
+
+```sh
+(cd appl/cmd && mk install-streams-zx uniq.dis)
+python3 build/zx-smoke/run.py Linux/386/bin/emu --streams
+```
+
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
 with the shell's `Command.init` signature. That includes 160 entries directly
 under `/dis` and 52 under `/dis/wm`. This inventory checks the entry
@@ -200,7 +216,7 @@ signature without invoking each program.
 | Order | Existing commands | Capabilities to exercise or add |
 | --- | --- | --- |
 | 1 | `echo`, `basename`, `cleanname` (ported) | Argument handling, text output, path-string operations |
-| 2 | `wc`, `uniq`, `tr` | Guest stdin, stdout, and sequential file access |
+| 2 | `wc`, `uniq`, `tr` (ported) | Guest stdin, stdout, and sequential file access |
 | 3 | `test`, `ls`, `tee`, `cp` | File metadata, directory reads, and file creation |
 | 4 | `wm/about`, `wm/clock`, `wm/colors` | Guest surfaces and input, wall-clock time, and display sampling as needed |
 | 5 | `sh`, `wm/wm`, compiler and service commands | Process control, namespaces, window management, and service-specific APIs |
@@ -247,6 +263,15 @@ zi2zx --root build/zx-smoke/modules --module-path "$ZIRAN_SRC/std" \
 zi2zx --root build/zx-smoke/keyevents --entry zx_surface:Budget \
     -o build/zx-smoke/budget.zx build/zx-smoke/keyevents/zx_surface.zi
 python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics --runtime
+```
+
+To verify binary64 precision in the hosted engine on Linux/i386, build the
+standard-library fixture and run it inside the installed emulator.
+
+```sh
+zi2zx --root build/zx-smoke --entry float64:main \
+    -o build/zx-smoke/float64.zx build/zx-smoke/float64.zi
+python3 build/zx-smoke/run.py Linux/386/bin/emu --precision
 ```
 
 To test guest stdin, build the fixture and add `--stdin` to the smoke command:

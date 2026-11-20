@@ -1,0 +1,121 @@
+#import "std/number_text";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+Options :: struct { lines: bool; words: bool; chars: bool; errors: bool; bytes: bool; }
+Counts :: struct { lines: s64; words: s64; chars: s64; errors: s64; bytes: s64; }
+
+Field :: (value: s64, spaced: bool) {
+    digits: [24]u8;
+    text := FormatInteger(value, digits[:]);
+    if spaced { unused Cli.WriteAll(1, " ") }
+    if text.count < 7 { unused Cli.WriteAll(1, "       "[:7-text.count]) }
+    unused Cli.WriteAll(1, text);
+}
+
+Report :: (counts: Counts, options: Options, name: string) {
+    if options.lines { Field(counts.lines, false) }
+    if options.words { Field(counts.words, options.lines) }
+    if options.chars { Field(counts.chars, options.lines || options.words) }
+    if options.errors { Field(counts.errors, options.lines || options.words || options.chars) }
+    if options.bytes { Field(counts.bytes, options.lines || options.words || options.chars || options.errors) }
+    if name.count > 0 {
+        unused Cli.WriteAll(1, " ");
+        unused Cli.WriteAll(1, name);
+    }
+    unused Cli.WriteAll(1, "\n");
+}
+
+Diagnostic :: (description: string, name: string) {
+    problem := Io.LastError();
+    unused Cli.WriteAll(2, description);
+    unused Cli.WriteAll(2, name);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, problem);
+    unused Cli.WriteAll(2, "\n");
+}
+
+Count :: (handle: s32, name: string, options: Options) -> Counts {
+    buffer: [8192]u8;
+    tally: Counts;
+    remaining: s32;
+    word := false;
+    bytes_only := !options.lines && !options.words && !options.chars && !options.errors;
+    while true {
+        size := Io.ReadBytes(handle, buffer[:]);
+        if size <= 0 {
+            if size < 0 { Diagnostic("wc: error reading ", name) }
+            break;
+        }
+        tally.bytes += size;
+        if bytes_only { continue }
+        tally.chars += size;
+        for i: 0..size-1 {
+            value := buffer[i];
+            continuation := value >= 0x80 && value < 0xC0;
+            if remaining > 0 && continuation {
+                remaining -= 1;
+                tally.chars -= 1;
+                continue;
+            }
+            // The Dis counter accepts only two- and three-byte sequences.
+            if remaining > 0 || continuation || value >= 0xF0 { tally.errors += 1 }
+            remaining = 0;
+            if value == 9 || value == 10 || value == 32 {
+                if value == 10 { tally.lines += 1 }
+                word = false;
+                continue;
+            }
+            if !word { tally.words += 1; word = true }
+            if value >= 0xC0 && value < 0xF0 {
+                remaining = ifx value < 0xE0 then 1 else 2;
+            }
+        }
+    }
+    if remaining > 0 { tally.errors += 1 }
+    Report(tally, options, name);
+    return tally;
+}
+
+main :: () -> s32 {
+    options: Options;
+    first: s32;
+    argc := Args.OperandCount();
+    while first < argc {
+        option := Args.Operand(first);
+        if option.count < 2 || option[0] != 45 || option[1] == 45 { break }
+        for i: 1..option.count-1 {
+            byte := option[i];
+            if byte == 108 { options.lines = true }
+            else if byte == 119 { options.words = true }
+            else if byte == 99 { options.chars = true }
+            else if byte == 101 { options.errors = true }
+            else if byte == 98 { options.bytes = true }
+            else { return Cli.Usage("usage: wc [-lwcbe] [file ...]\n") }
+        }
+        first += 1;
+    }
+    if !options.lines && !options.words && !options.chars && !options.errors && !options.bytes {
+        options = .{lines = true, words = true, chars = true};
+    }
+    if first == argc {
+        unused Count(0, "", options);
+        return 0;
+    }
+    total: Counts;
+    for index: first..argc-1 {
+        name := Args.Operand(cast(s32)index);
+        file := Io.OpenFile(name, 0);
+        if file < 0 { Diagnostic("wc: can't open ", name); continue }
+        tally := Count(file, name, options);
+        unused Io.CloseFile(file);
+        total.lines += tally.lines;
+        total.words += tally.words;
+        total.chars += tally.chars;
+        total.errors += tally.errors;
+        total.bytes += tally.bytes;
+    }
+    if argc - first > 1 { Report(total, options, "total") }
+    return 0;
+}

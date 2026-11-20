@@ -1,0 +1,68 @@
+using Io :: #import "taijios_io";
+using UTF :: #import "std/utf8";
+
+RuneMax :: 0x10FFFF;
+Replacement :: 0xFFFD;
+
+Reader :: struct {
+    handle: s32;
+    data: [8192]u8;
+    next: s32;
+    end: s32;
+}
+
+// Match the guest Bufio reader's lookahead, including on invalid leading bytes.
+Width :: (lead: u8) -> s32 {
+    if lead < 0x80 { return 1 }
+    if lead < 0xE0 { return 2 }
+    if lead < 0xF0 { return 3 }
+    return 4;
+}
+
+Refill :: (reader: *Reader) -> bool {
+    remaining := reader.end - reader.next;
+    for i: 0..remaining-1 { reader.data[i] = reader.data[reader.next+i] }
+    count := Io.ReadBytes(reader.handle, reader.data[remaining:]);
+    if count <= 0 { return false }
+    reader.next = 0;
+    reader.end = remaining + count;
+    return true;
+}
+
+Next :: (reader: *Reader) -> s32 {
+    while true {
+        if reader.next < reader.end {
+            lead := reader.data[reader.next];
+            if lead < 0x80 {
+                reader.next += 1;
+                return cast(s32)lead;
+            }
+            width := Width(lead);
+            if reader.end - reader.next >= width {
+                decoded := UTF.Decode(TextView(reader.data[reader.next:reader.next+width]), 0);
+                reader.next += decoded.after;
+                return cast(s32)decoded.value;
+            }
+        }
+        if !Refill(reader) { return -1 }
+    }
+}
+
+Encode :: (value: s32, output: []u8) -> s32 {
+    rune := value;
+    if rune < 0 || rune > RuneMax || (rune >= 0xD800 && rune <= 0xDFFF) {
+        rune = Replacement;
+    }
+    if rune < 0x80 {
+        output[0] = cast(u8)rune;
+        return 1;
+    }
+    width: s32 = ifx rune < 0x800 then 2 else (ifx rune < 0x10000 then 3 else 4);
+    first := ifx width == 2 then 0xC0 else (ifx width == 3 then 0xE0 else 0xF0);
+    for i: 1..width-1 {
+        output[width-i] = cast(u8)(0x80 | (rune & 63));
+        rune >>= 6;
+    }
+    output[0] = cast(u8)(first | rune);
+    return width;
+}

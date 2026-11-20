@@ -1,0 +1,12 @@
+#import "std/vec";
+using F :: #import "std/float_text";
+using M :: #import "std/math";
+
+main :: () -> s32 {
+    literal: float64 = 1.0000000009313225746;
+    parsed, valid := F.ParseFloat64("1.0000000009313225746");
+    sum: float64 = 1.0 + 0.0000000009313225746;
+    root: Text = F.Float64Repr(M.Sqrt(2.0));
+    print("literal % parsed % sum % sqrt(2) %\n", literal > 1.0, valid && parsed > 1.0, sum > 1.0, TextView(root));
+    return 0;
+}

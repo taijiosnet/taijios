@@ -248,25 +248,19 @@ ExpressionValue :: (interpreter: *Interpreter, frame: *Frame, text: string, dept
             part := SubstitutionValue(interpreter, frame, *cursor, depth);
             if part.code != .OK { return CopyResult(*part) }
             literal := TextView(part.value);
-            number, valid := ParseInteger(literal);
-            if !valid && literal != "true" && literal != "false" && literal != "yes" &&
-                literal != "no" && literal != "on" && literal != "off" {
-                return Failure("expected integer or boolean expression operand");
+            if !C.ScalarOperand(literal) { return Failure("expected numeric or boolean expression operand") }
+            if !VecPush(expanded.bytes, cast(u8)40) || !BuilderAppend(expanded.bytes, literal) {
+                return Failure("cannot allocate expression");
             }
-            if !VecPush(expanded.bytes, cast(u8)40) { return Failure("cannot allocate expression") }
-            if valid {
-                integer := Integer(number);
-                if !BuilderAppend(expanded.bytes, TextView(integer.value)) { return Failure("cannot allocate expression") }
-            } else if !BuilderAppend(expanded.bytes, literal) { return Failure("cannot allocate expression") }
             if !VecPush(expanded.bytes, cast(u8)41) { return Failure("cannot allocate expression") }
         } else {
             part := Substitute(interpreter, frame, *cursor, depth, *expanded.bytes);
             if part.code != .OK { return part }
         }
     }
-    value, problem := EvaluateInteger(TextView(expanded));
+    value, problem := C.Evaluate(TextView(expanded));
     if problem != "" { return Failure(problem) }
-    return Integer(value);
+    return C.Format(value);
 }
 
 FindProcedure :: (interpreter: *Interpreter, name: string) -> s64 {

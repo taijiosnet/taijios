@@ -50,11 +50,18 @@ that also charges loop iterations, and permits 48 nested script levels.
   `end` and `end-N` are inclusive.
 - `format` supports `%%`, `%s`, `%d` and `%x`, with width, left alignment,
   zero padding and precision. Literal text is preserved between fields.
-- `expr` and the Inferno `calc` alias accept signed 32-bit decimal integers,
-  `true`/`false`, `yes`/`no`, `on`/`off`, parentheses, unary `+ - !`, binary
-  `+ - * / %`, and numeric comparisons `== != < <= > >=`. Substitutions
-  inside an expression must yield a single integer or boolean. Overflow and
-  division by zero return errors.
+- `expr` and `calc` accept signed 32-bit decimal, leading-zero octal and `0x`
+  hexadecimal integers, decimal and scientific real literals, and the boolean
+  words `true`/`false`, `yes`/`no` and `on`/`off`. They support parentheses,
+  unary `+ - ! ~`, binary `+ - * / %`, the numeric comparisons `== != < <= > >=`,
+  and `<< >> & ^ | && || ?:`. Remainder, bitwise and logical operators take
+  integers. Logical and conditional operands are evaluated eagerly. A
+  substitution inside braces must yield one numeric or boolean literal.
+  Integer overflow and division by zero return errors. Real arithmetic can
+  return `NaN` or `Infinity`.
+- The real functions are `abs`, `acos`, `asin`, `atan`, `atan2`, `ceil`, `cos`,
+  `cosh`, `exp`, `floor`, `fmod`, `hypot`, `log`, `log10`, `pow`, `sin`, `sinh`,
+  `sqrt`, `tan` and `tanh`.
 - `puts string` and `puts -nonewline string` write to the output buffer.
 - `exit` stops the current evaluation, including from a procedure, source
   file or `catch` body. `Eval` returns `.Exit` to the embedding application.
@@ -69,8 +76,8 @@ that also charges loop iterations, and permits 48 nested script levels.
   The Taiji loader resolves paths in the invoking guest namespace.
 
 Namespaces, `{*}` word expansion, numeric and Unicode backslash escapes, wide
-expression integers, floating-point and lazy expression operators, and Tcl
-packages are unsupported. The headless library can be imported by itself or
+expression integers, expression string operands, lazy expression operators,
+and Tcl packages are unsupported. The headless library can be imported by itself or
 used with the optional Tk module below.
 
 ### Channels and files
@@ -106,12 +113,17 @@ releases them, including after `.Exit`. Explicit `stdout` and implicit
 ### Comparison with shipped Inferno Tcl
 
 The shipped Limbo interpreter additionally registers `dumpstack`, `load`
-and `time`. Limbo `load` requires a Dis module. The shipped calculator
-supports floating-point math and named functions. Its `file`, `flush` and
+and `time`. Limbo `load` requires a Dis module. Its `file`, `flush` and
 `tell` are empty stubs. `string match`, `wordstart` and `wordend` are empty stubs in
 the shipped interpreter and are unsupported here. The Ziran implementation
 also handles ASCII `string toupper`, string search and trim, and `format`
 literal text where the Limbo implementation has stubs or bugs.
+
+Real expressions preserve mixed terms and use Ziran's `float64` values. The
+installed Taiji ZX runtime currently rounds real values to single precision.
+Native Ziran and the standalone ZX engine retain binary64 precision. Decimal
+formatting and exceptional-value spelling can differ from Limbo. The shared
+script compares approximate function results with a tolerance.
 
 ## Build, test and run
 
@@ -124,9 +136,9 @@ build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
 ```
 
 The native shell also reads stdin with `-` or when given no filename. The
-test runner compares the reference, compatibility and channel scripts with
-the existing Limbo `tclsh`, runs the scripts under ZX and hosted Taiji, and
-tests the library API with an injected channel backend. `zxrun` prints a
+test runner compares the reference, compatibility, expression and channel
+scripts with the existing Limbo `tclsh`, runs the scripts under ZX and hosted
+Taiji, and tests the library API with an injected channel backend. `zxrun` prints a
 final scalar `0` on success and `1` on a Tcl error. `zxrun -c` reports the
 result as a guest command status.
 

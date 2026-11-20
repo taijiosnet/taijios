@@ -1,0 +1,225 @@
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Cli :: #import "zx_cli";
+using Io :: #import "taijios_io";
+using Runes :: #import "zx_runes";
+using UTF :: #import "std/utf8";
+
+Pattern :: struct {
+    text: string;
+    at: s32;
+    last: s32;
+    final: s32;
+    error: string;
+}
+
+PatternOf :: (text: string) -> Pattern { return .{text = text, last = -1, final = -1} }
+
+Digit :: (value: u8, base: s32) -> s32 {
+    if value >= 48 && value <= 57 && cast(s32)value - 48 < base { return cast(s32)value - 48 }
+    if base == 16 {
+        if value >= 97 && value <= 102 { return cast(s32)value - 87 }
+        if value >= 65 && value <= 70 { return cast(s32)value - 55 }
+    }
+    return -1;
+}
+
+Symbol :: (pattern: *Pattern) -> s32 {
+    if pattern.at >= pattern.text.count { return -1 }
+    decoded := UTF.Decode(pattern.text, pattern.at);
+    pattern.at = decoded.after;
+    if decoded.value != 92 || pattern.at == pattern.text.count { return cast(s32)decoded.value }
+
+    base: s32 = 8;
+    limit: s32 = 3;
+    if pattern.text[pattern.at] == 120 { base = 16; limit = 6; pattern.at += 1 }
+    value: s32;
+    for i: 0..limit-1 {
+        if pattern.at == pattern.text.count { break }
+        digit := Digit(pattern.text[pattern.at], base);
+        if digit < 0 {
+            if i != 0 { break }
+            if base == 16 { return 120 }
+            quoted := UTF.Decode(pattern.text, pattern.at);
+            return cast(s32)quoted.value;
+        }
+        value = value * base + digit;
+        pattern.at += 1;
+    }
+    if base == 8 && value > 255 { pattern.error = "char>0377"; return -1 }
+    if value > Runes.RuneMax { pattern.error = "rune out of range"; return -1 }
+    return value;
+}
+
+Next :: (pattern: *Pattern) -> s32 {
+    if pattern.last < pattern.final {
+        pattern.last += 1;
+        return pattern.last;
+    }
+    if pattern.at + 1 < pattern.text.count && pattern.text[pattern.at] == 45 && pattern.last >= 0 {
+        pattern.at += 1;
+        end := Symbol(pattern);
+        if pattern.error.count > 0 { return -1 }
+        if end < pattern.last { pattern.error = "Invalid range specification"; return -1 }
+        if end > pattern.last {
+            pattern.final = end;
+            pattern.last += 1;
+            return pattern.last;
+        }
+    }
+    pattern.final = -1;
+    pattern.last = Symbol(pattern);
+    return pattern.last;
+}
+
+Insert :: (set: []u8, rune: s32) { set[rune >> 3] |= cast(u8)(1 << (rune & 7)) }
+
+Contains :: (set: []u8, rune: s32) -> bool {
+    return rune >= 0 && (set[rune >> 3] & cast(u8)(1 << (rune & 7))) != 0;
+}
+
+Collect :: (pattern: *Pattern, set: []u8) -> s32 {
+    high: s32;
+    while true {
+        rune := Next(pattern);
+        if rune < 0 { return high }
+        Insert(set, rune);
+        if rune > high { high = rune }
+    }
+}
+
+Fail :: (message: string) -> s32 {
+    unused Cli.WriteAll(2, "tr: ");
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+WriteError :: () -> s32 {
+    problem := Io.LastError();
+    unused Cli.WriteAll(2, "tr: write error: ");
+    unused Cli.WriteAll(2, problem);
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Options :: struct { delete: bool; squeeze: bool; complement: bool; }
+
+Filter :: (options: Options, selected: []u8, squeeze: []u8, mapped: []s32,
+           high: s32, repeat: s32, excess: s32) -> s32 {
+    input: Runes.Reader;
+    output: [8192]u8;
+    used: s32;
+    last: s32 = Runes.RuneMax + 1;
+    while true {
+        rune := Runes.Next(*input);
+        if rune < 0 { break }
+        if options.delete {
+            if Contains(selected, rune) != options.complement { continue }
+        } else if options.complement {
+            if rune > high { rune = excess }
+            else if !Contains(selected, rune) {
+                if rune < mapped.count { rune = mapped[rune] - 1 }
+                else { rune = repeat }
+            }
+        } else if rune < mapped.count && mapped[rune] != 0 {
+            rune = mapped[rune] - 1;
+        }
+        if options.squeeze && rune == last && Contains(squeeze, rune) { continue }
+        last = rune;
+        if used > output.count - 4 {
+            if !Cli.WriteAll(1, TextView(output[:used])) { return WriteError() }
+            used = 0;
+        }
+        if rune < 0 {
+            // The Dis buffer writes the exhausted complement sentinel as a byte.
+            output[used] = 255;
+            used += 1;
+        } else {
+            used += Runes.Encode(rune, output[used:]);
+        }
+    }
+    if !Cli.WriteAll(1, TextView(output[:used])) { return WriteError() }
+    return 0;
+}
+
+Translate :: (options: Options, from: string, to: string) -> s32 {
+    selected_buf: Vec(u8);
+    squeeze_buf: Vec(u8);
+    set_size := (Runes.RuneMax + 1) / 8;
+    if !VecResize(selected_buf, set_size) || !VecResize(squeeze_buf, set_size) {
+        return Fail("cannot allocate character set");
+    }
+    selected := VecSlice(selected_buf, 0, set_size);
+    squeeze := VecSlice(squeeze_buf, 0, set_size);
+    source := PatternOf(from);
+    target := PatternOf(to);
+    high := Collect(*source, selected);
+    if source.error.count > 0 { return Fail(source.error) }
+    if options.delete || options.complement {
+        other := Collect(*target, squeeze);
+        if target.error.count > 0 { return Fail(target.error) }
+        if options.delete {
+            empty: []s32;
+            return Filter(options, selected, squeeze, empty, high, 0, 0);
+        }
+        if other > high { high = other }
+        target = PatternOf(to);
+    }
+    table: Vec(s32);
+    repeat: s32;
+    excess: s32 = -1;
+    if options.complement {
+        for rune: 0..high {
+            if Contains(selected, rune) { continue }
+            replacement := Next(*target);
+            if replacement < 0 { excess = repeat; break }
+            if !VecResize(table, cast(s64)rune+1) { return Fail("cannot allocate translation") }
+            mapped := VecSlice(table, 0, table.count);
+            mapped[rune] = replacement + 1;
+            repeat = replacement;
+            excess = repeat;
+        }
+    } else {
+        if !VecResize(table, cast(s64)high+1) { return Fail("cannot allocate translation") }
+        mapped := VecSlice(table, 0, table.count);
+        source = PatternOf(from);
+        while true {
+            rune := Next(*source);
+            if rune < 0 { break }
+            replacement := Next(*target);
+            if target.error.count > 0 { return Fail(target.error) }
+            if replacement >= 0 { repeat = replacement }
+            if mapped[rune] != 0 && mapped[rune] != repeat + 1 { return Fail("ambiguous translation") }
+            mapped[rune] = repeat + 1;
+            Insert(squeeze, repeat);
+        }
+        unused Collect(*target, squeeze);
+        if target.error.count > 0 { return Fail(target.error) }
+    }
+    return Filter(options, selected, squeeze, VecSlice(table, 0, table.count), high, repeat, excess);
+}
+
+main :: () -> s32 {
+    options: Options;
+    first: s32;
+    argc := Args.OperandCount();
+    while first < argc {
+        arg := Args.Operand(first);
+        if arg.count < 2 || arg[0] != 45 { break }
+        first += 1;
+        if arg == "--" { break }
+        for i: 1..arg.count-1 {
+            if arg[i] == 100 { options.delete = true }
+            else if arg[i] == 115 { options.squeeze = true }
+            else if arg[i] == 99 { options.complement = true }
+            else { return Cli.Usage("Usage: tr [-sdc] [from-set [to-set]]\n") }
+        }
+    }
+    required := ifx options.delete && !options.squeeze then 1 else 2;
+    if argc - first != required { return Cli.Usage("Usage: tr [-sdc] [from-set [to-set]]\n") }
+    to := ifx required == 2 then Args.Operand(first+1) else "";
+    return Translate(options, Args.Operand(first), to);
+}

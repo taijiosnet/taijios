@@ -133,7 +133,7 @@ def main():
                     "-o", native, "appl/cmd/tclsh_native.zi"], cwd=ROOT, env=ENV, check=True)
     shell = native / "tclsh_native"
 
-    for name in ("core", "reference", "compatibility"):
+    for name in ("core", "reference", "compatibility", "expression"):
         fixture = FIXTURES / f"{name}.tcl"
         script = fixture.read_text()
         expected = fixture.with_suffix(".out").read_text()
@@ -161,6 +161,22 @@ def main():
            (FIXTURES / "compatibility.out").read_text(), codes=(0, -9))
     print("compatibility.tcl matched Limbo Dis for arrays, global, info, switch, lists and strings")
 
+    expression = (FIXTURES / "expression.out").read_text()
+    script = (FIXTURES / "expression.tcl").read_text()
+    (BUILD / "legacy-expression.tcl").write_text(script + "exit\n")
+    expect(guest("tclsh /build/tcl/legacy-expression.tcl"), expression, codes=(0, -9))
+    print("expression.tcl matched Limbo Dis for numeric operations and all 20 math functions")
+    expect(capture([shell, "-"], "puts [calc {sqrt(81)}]; puts [expr {2+1.0+1}]"), "9\n4\n")
+    expect(capture([shell, "-"], "set wide [expr {abs(-2147483648)}]; puts [expr {$wide/2.0}]"),
+           "1073741824\n")
+
+    expression_api = BUILD / "tcl_expression_api.zx"
+    compile_zx(FIXTURES / "tcl_expression_api.zi", "tcl_expression_api:main", expression_api)
+    expected_api = "Tcl expression API OK\n0\n"
+    expect(capture(["zi2zx", "run", "--backend", "engine", expression_api]), expected_api)
+    expect(guest("zxrun /build/tcl/tcl_expression_api.zx"), expected_api, codes=(0, -9))
+    print("Expression results and deterministic errors verified on ZX and Taiji")
+
     expect(capture([shell, "-"], source_script(FIXTURES / "sourced.tcl")), "sourced=8\n")
     (BUILD / "source-script.tcl").write_text(source_script("/appl/cmd/tclsh_tests/sourced.tcl") + "exit\n")
     expect(guest("tclsh /build/tcl/source-script.tcl"), "sourced=8\n", codes=(0, -9))
@@ -175,6 +191,9 @@ def main():
         ('puts before; set x $' + 'a($' * 50 + 'leaf' + ')' * 50, "script nesting limit exceeded"),
         ('puts before; switch a {a -}', "switch fallthrough has no body"),
         ('puts before; uplevel 1 {set x}', "bad stack level"),
+        ('puts before; set operand {1+2}; expr {$operand}', "expected numeric or boolean expression operand"),
+        ('puts before; expr {1.5 % 2}', "expected integer operands"),
+        ('puts before; expr {abs(1,2)}', "wrong number of function arguments or missing close-parenthesis"),
     ):
         expect(capture([shell, "-"], script), "before\n", codes=(1,), error=diagnostic + "\n")
     print("Malformed and unsupported scripts returned the expected errors")
@@ -186,6 +205,9 @@ def main():
     print("Extension dispatch, interpreter isolation and recovery verified on ZX and Taiji")
     if args.stdin:
         stdin_suite(args.stdin)
+        expect(guest(f"zxrun {args.stdin} < /appl/cmd/tclsh_tests/expression.tcl"),
+               expression + "0\n", codes=(0, -9))
+        print("Hosted Tcl stdin matched the Limbo numeric script")
     channel_suite(args.stdin)
 
 

@@ -1,59 +1,151 @@
-// Integer expression module ported from Inferno tcl_calc.b. See ../../NOTICE (MIT).
-using T :: #import "tcl_types"
+// Numeric expression parser adapted from Inferno tcl_calc.b. See ../../NOTICE (MIT).
+#import "std/vec"
+#import "tcl_types"
+using Float :: #import "std/float_text"
+using Math :: #import "std/math"
+using Functions :: #import "tcl_math"
 
-Expression :: struct {
-    cursor: Cursor;
-    problem: string;
-}
+Value :: struct { integer: s64; real: float64; floating: bool; }
+Parser :: struct { cursor: Cursor; problem: string; }
+
+Int :: (value: s64) -> Value { return .{integer = value} }
+Real :: (value: float64) -> Value { return .{real = value, floating = true} }
+Boolean :: (value: bool) -> Value { return Int(ifx value then 1 else 0) }
+ToReal :: (value: Value) -> float64 { return ifx value.floating then value.real else cast(float64)value.integer }
+Truth :: (value: Value) -> bool { return ifx value.floating then value.real != 0.0 else value.integer != 0 }
 
 SkipSpaces :: (cursor: *Cursor) {
     while Has(cursor) && Space(Peek(cursor)) { cursor.at += 1 }
 }
 
-Operand :: (expr: *Expression, depth: s32) -> s64 {
-    if depth > 64 { expr.problem = "expression nesting limit exceeded"; return 0 }
-    cursor := *expr.cursor;
+Fail :: (parser: *Parser, message: string) -> Value {
+    parser.problem = message;
+    return .{};
+}
+
+Checked :: (parser: *Parser, value: s64) -> Value {
+    if InRange(value) { return Int(value) }
+    return Fail(parser, "integer overflow");
+}
+
+RadixDigit :: (byte: u8) -> s64 {
+    if Digit(byte) { return cast(s64)(byte-48) }
+    if byte >= 65 && byte <= 70 { return cast(s64)(byte-55) }
+    if byte >= 97 && byte <= 102 { return cast(s64)(byte-87) }
+    return -1;
+}
+
+IntegerLiteral :: (parser: *Parser, word: string, base: s64, negative: bool) -> Value {
+    if word.count == 0 { return Fail(parser, "missing digits in integer expression") }
+    magnitude: s64;
+    for word {
+        digit := RadixDigit(it);
+        if digit < 0 || digit >= base { return Fail(parser, "invalid digit in integer expression") }
+        magnitude = magnitude*base+digit;
+        if magnitude > 2147483648 { return Fail(parser, "integer overflow") }
+    }
+    return Checked(parser, ifx negative then -magnitude else magnitude);
+}
+
+Number :: (parser: *Parser, negative: bool) -> Value {
+    cursor := *parser.cursor;
+    start := cursor.at;
+    if Peek(cursor) == 48 && start+1 < cursor.text.count {
+        next := cursor.text[start+1];
+        if next == 120 || next == 88 {
+            cursor.at += 2;
+            digits := cursor.at;
+            while Has(cursor) && NameByte(Peek(cursor)) { cursor.at += 1 }
+            return IntegerLiteral(parser, cursor.text[digits:cursor.at], 16, negative);
+        }
+    }
+    while Has(cursor) && Digit(Peek(cursor)) { cursor.at += 1 }
+    floating := Has(cursor) && Peek(cursor) == 46;
+    if floating {
+        cursor.at += 1;
+        while Has(cursor) && Digit(Peek(cursor)) { cursor.at += 1 }
+    }
+    if Has(cursor) && (Peek(cursor) == 101 || Peek(cursor) == 69) {
+        floating = true;
+        cursor.at += 1;
+        if Has(cursor) && (Peek(cursor) == 43 || Peek(cursor) == 45) { cursor.at += 1 }
+        while Has(cursor) && Digit(Peek(cursor)) { cursor.at += 1 }
+    }
+    word := cursor.text[start:cursor.at];
+    if floating {
+        value, valid := Float.ParseFloat64(word);
+        if !valid { return Fail(parser, "invalid floating-point expression operand") }
+        return Real(ifx negative then -value else value);
+    }
+    base: s64 = ifx word.count > 1 && word[0] == 48 then 8 else 10;
+    return IntegerLiteral(parser, word, base, negative);
+}
+
+NamedValue :: (word: string) -> (value: Value, valid: bool) {
+    if word == "true" || word == "yes" || word == "on" { return Int(1), true }
+    if word == "false" || word == "no" || word == "off" { return Int(0), true }
+    if word == "Inf" || word == "inf" || word == "Infinity" { return Real(Math.Infinity()), true }
+    if word == "NaN" || word == "nan" { return Real(Math.NotANumber()), true }
+    return .{}, false;
+}
+
+Function :: (parser: *Parser, name: string, arity: s32, depth: s32) -> Value {
+    cursor := *parser.cursor;
+    cursor.at += 1;
+    if arity == 0 { return Fail(parser, "unknown expression function") }
+    first := Conditional(parser, depth+1);
+    if parser.problem != "" { return .{} }
     SkipSpaces(cursor);
-    if !Has(cursor) { expr.problem = "expected expression operand"; return 0 }
+    second: Value;
+    if arity == 2 {
+        if !Has(cursor) || Take(cursor) != 44 { return Fail(parser, "expected two function arguments") }
+        second = Conditional(parser, depth+1);
+        if parser.problem != "" { return .{} }
+        SkipSpaces(cursor);
+    }
+    if !Has(cursor) || Take(cursor) != 41 { return Fail(parser, "wrong number of function arguments or missing close-parenthesis") }
+    return Real(Functions.Call(name, ToReal(first), ToReal(second)));
+}
+
+Operand :: (parser: *Parser, depth: s32) -> Value {
+    if depth > 64 { return Fail(parser, "expression nesting limit exceeded") }
+    cursor := *parser.cursor;
+    SkipSpaces(cursor);
+    if !Has(cursor) { return Fail(parser, "expected expression operand") }
     byte := Peek(cursor);
     if byte == 40 {
         cursor.at += 1;
-        value := Binary(expr, 1, depth + 1);
-        if expr.problem != "" { return 0 }
+        value := Conditional(parser, depth+1);
+        if parser.problem != "" { return .{} }
         SkipSpaces(cursor);
-        if !Has(cursor) || Take(cursor) != 41 { expr.problem = "missing close-parenthesis in expression" }
+        if !Has(cursor) || Take(cursor) != 41 { return Fail(parser, "missing close-parenthesis in expression") }
         return value;
     }
-    if byte == 43 || byte == 45 || byte == 33 {
+    if byte == 43 || byte == 45 || byte == 33 || byte == 126 {
         cursor.at += 1;
         SkipSpaces(cursor);
-        if byte == 45 && Has(cursor) && Digit(Peek(cursor)) {
-            return Numeral(expr, true);
+        if byte == 45 && Has(cursor) && (Digit(Peek(cursor)) || Peek(cursor) == 46) { return Number(parser, true) }
+        value := Operand(parser, depth+1);
+        if parser.problem != "" { return .{} }
+        if byte == 43 { return value }
+        if byte == 45 {
+            if value.floating { return Real(-value.real) }
+            return Checked(parser, -value.integer);
         }
-        value := Operand(expr, depth + 1);
-        if expr.problem != "" { return 0 }
-        if byte == 33 { return ifx value == 0 then 1 else 0 }
-        if byte == 45 { return Checked(expr, -value) }
-        return value;
+        if value.floating { return Fail(parser, "expected integer operand") }
+        if byte == 33 { return Boolean(!Truth(value)) }
+        return Int(~value.integer);
     }
-    if Digit(byte) { return Numeral(expr, false) }
+    if Digit(byte) || byte == 46 { return Number(parser, false) }
     start := cursor.at;
     while Has(cursor) && NameByte(Peek(cursor)) { cursor.at += 1 }
     word := cursor.text[start:cursor.at];
-    if word == "true" || word == "yes" || word == "on" { return 1 }
-    if word == "false" || word == "no" || word == "off" { return 0 }
-    expr.problem = "expected integer expression operand";
-    return 0;
-}
-
-Numeral :: (expr: *Expression, negative: bool) -> s64 {
-    cursor := *expr.cursor;
-    value: s64;
-    while Has(cursor) && Digit(Peek(cursor)) {
-        value = value * 10 + cast(s64)(Take(cursor) - 48);
-        if value > 2147483648 { expr.problem = "integer overflow"; return 0 }
-    }
-    return Checked(expr, ifx negative then -value else value);
+    if word == "" { return Fail(parser, "expected expression operand") }
+    SkipSpaces(cursor);
+    if Has(cursor) && Peek(cursor) == 40 { return Function(parser, word, Functions.Arity(word), depth) }
+    value, valid := NamedValue(word);
+    if valid { return value }
+    return Fail(parser, "expected integer expression operand");
 }
 
 Operator :: (cursor: *Cursor) -> (symbol: string, precedence: s32) {
@@ -61,60 +153,144 @@ Operator :: (cursor: *Cursor) -> (symbol: string, precedence: s32) {
     if !Has(cursor) { return "", 0 }
     start := cursor.at;
     byte := Peek(cursor);
-    if start + 1 < cursor.text.count && cursor.text[start+1] == 61 {
-        if byte == 61 || byte == 33 { return cursor.text[start:start+2], 1 }
-        if byte == 60 || byte == 62 { return cursor.text[start:start+2], 2 }
+    if start+1 < cursor.text.count {
+        pair := cursor.text[start:start+2];
+        if pair == "||" { return pair, 1 }
+        if pair == "&&" { return pair, 2 }
+        if pair == "==" || pair == "!=" { return pair, 6 }
+        if pair == "<=" || pair == ">=" { return pair, 7 }
+        if pair == "<<" || pair == ">>" { return pair, 8 }
     }
     op := cursor.text[start:start+1];
-    if byte == 60 || byte == 62 { return op, 2 }
-    if byte == 43 || byte == 45 { return op, 3 }
-    if byte == 42 || byte == 47 || byte == 37 { return op, 4 }
+    if byte == 124 { return op, 3 }
+    if byte == 94 { return op, 4 }
+    if byte == 38 { return op, 5 }
+    if byte == 60 || byte == 62 { return op, 7 }
+    if byte == 43 || byte == 45 { return op, 9 }
+    if byte == 42 || byte == 47 || byte == 37 { return op, 10 }
     return "", 0;
 }
 
-Checked :: (expr: *Expression, value: s64) -> s64 {
-    if InRange(value) { return value }
-    expr.problem = "integer overflow";
-    return 0;
+ApplyReal :: (parser: *Parser, op: string, a: float64, b: float64) -> Value {
+    if op == "==" { return Boolean(a == b) }
+    if op == "!=" { return Boolean(a != b) }
+    if op == "<" { return Boolean(a < b) }
+    if op == "<=" { return Boolean(a <= b) }
+    if op == ">" { return Boolean(a > b) }
+    if op == ">=" { return Boolean(a >= b) }
+    if op == "+" { return Real(a+b) }
+    if op == "-" { return Real(a-b) }
+    if op == "*" { return Real(a*b) }
+    if op == "/" { return Real(a/b) }
+    return Fail(parser, "expected integer operands");
 }
 
-Apply :: (expr: *Expression, op: string, a: s64, b: s64) -> s64 {
-    if op == "+" { return Checked(expr, a + b) }
-    if op == "-" { return Checked(expr, a - b) }
-    if op == "*" { return Checked(expr, a * b) }
-    if op == "==" { return ifx a == b then 1 else 0 }
-    if op == "!=" { return ifx a != b then 1 else 0 }
-    if op == "<" { return ifx a < b then 1 else 0 }
-    if op == "<=" { return ifx a <= b then 1 else 0 }
-    if op == ">" { return ifx a > b then 1 else 0 }
-    if op == ">=" { return ifx a >= b then 1 else 0 }
-    if b == 0 { expr.problem = "divide by zero"; return 0 }
-    quotient := a / b;
-    remainder := a % b;
+ApplyInteger :: (parser: *Parser, op: string, a: s64, b: s64) -> Value {
+    if op == "==" { return Boolean(a == b) }
+    if op == "!=" { return Boolean(a != b) }
+    if op == "<" { return Boolean(a < b) }
+    if op == "<=" { return Boolean(a <= b) }
+    if op == ">" { return Boolean(a > b) }
+    if op == ">=" { return Boolean(a >= b) }
+    if op == "+" { return Checked(parser, a+b) }
+    if op == "-" { return Checked(parser, a-b) }
+    if op == "*" { return Checked(parser, a*b) }
+    if op == "||" { return Boolean(a != 0 || b != 0) }
+    if op == "&&" { return Boolean(a != 0 && b != 0) }
+    if op == "|" { return Int(a|b) }
+    if op == "^" { return Int(a^b) }
+    if op == "&" { return Int(a&b) }
+    if op == "<<" || op == ">>" {
+        if b < 0 || b >= 32 { return Fail(parser, "shift count is out of range") }
+        if op == "<<" { return Int(cast(s64)cast(s32)(cast(u32)a << cast(u32)b)) }
+        return Int(a >> b);
+    }
+    if b == 0 { return Fail(parser, "divide by zero") }
+    quotient := a/b;
+    remainder := a%b;
     if remainder != 0 && (remainder < 0) != (b < 0) {
         quotient -= 1;
         remainder += b;
     }
-    if op == "%" { return remainder }
-    return Checked(expr, quotient);
+    if op == "%" { return Int(remainder) }
+    return Checked(parser, quotient);
 }
 
-Binary :: (expr: *Expression, minimum: s32, depth: s32) -> s64 {
-    value := Operand(expr, depth);
-    while expr.problem == "" {
-        op, precedence := Operator(*expr.cursor);
+Apply :: (parser: *Parser, op: string, left: Value, right: Value) -> Value {
+    if left.floating || right.floating { return ApplyReal(parser, op, ToReal(left), ToReal(right)) }
+    return ApplyInteger(parser, op, left.integer, right.integer);
+}
+
+Binary :: (parser: *Parser, minimum: s32, depth: s32) -> Value {
+    value := Operand(parser, depth);
+    while parser.problem == "" {
+        op, precedence := Operator(*parser.cursor);
         if precedence < minimum { break }
-        expr.cursor.at += op.count;
-        right := Binary(expr, precedence + 1, depth);
-        if expr.problem != "" { break }
-        value = Apply(expr, op, value, right);
+        parser.cursor.at += op.count;
+        right := Binary(parser, precedence+1, depth);
+        if parser.problem != "" { break }
+        value = Apply(parser, op, value, right);
     }
     return value;
 }
 
-EvaluateInteger :: (source: string) -> (number: s64, problem: string) {
-    expr := Expression.{cursor = .{text = source}};
-    value := Binary(*expr, 1, 0);
-    if expr.problem == "" && Has(*expr.cursor) { expr.problem = "unexpected token in integer expression" }
-    return value, expr.problem;
+Conditional :: (parser: *Parser, depth: s32) -> Value {
+    value := Binary(parser, 1, depth);
+    cursor := *parser.cursor;
+    if parser.problem != "" || !Has(cursor) || Peek(cursor) != 63 { return value }
+    cursor.at += 1;
+    yes := Conditional(parser, depth+1);
+    if parser.problem != "" { return .{} }
+    if !Has(cursor) || Take(cursor) != 58 { return Fail(parser, "missing colon in conditional expression") }
+    no := Conditional(parser, depth+1);
+    return ifx Truth(value) then yes else no;
+}
+
+Evaluate :: (text: string) -> (value: Value, problem: string) {
+    parser := Parser.{cursor = .{text = text}};
+    value := Conditional(*parser, 0);
+    if parser.problem == "" && Has(*parser.cursor) { return value, "unexpected token in expression" }
+    return value, parser.problem;
+}
+
+// Substitution accepts one literal, preventing text values from becoming operators.
+ScalarOperand :: (text: string) -> bool {
+    parser := Parser.{cursor = .{text = text}};
+    cursor := *parser.cursor;
+    SkipSpaces(cursor);
+    if !Has(cursor) { return false }
+    sign := Peek(cursor);
+    if sign == 43 || sign == 45 {
+        cursor.at += 1;
+        if !Has(cursor) { return false }
+    }
+    if Digit(Peek(cursor)) || Peek(cursor) == 46 {
+        unused Number(*parser, sign == 45);
+        SkipSpaces(cursor);
+        return parser.problem == "" && !Has(cursor);
+    }
+    start := cursor.at;
+    while Has(cursor) && NameByte(Peek(cursor)) { cursor.at += 1 }
+    _, valid := NamedValue(cursor.text[start:cursor.at]);
+    SkipSpaces(cursor);
+    return valid && !Has(cursor);
+}
+
+Format :: (value: Value) -> Result {
+    if !value.floating { return Integer(value.integer) }
+    if value.real != value.real { return Success("NaN") }
+    if value.real == Math.Infinity() { return Success("Infinity") }
+    if value.real == -Math.Infinity() { return Success("-Infinity") }
+    if value.real > -1000000.0 && value.real < 1000000.0 {
+        integral := cast(s64)value.real;
+        if cast(float64)integral == value.real { return Integer(integral) }
+    }
+    repr: Text = Float.Float64Repr(value.real);
+    text := TextView(repr);
+    end := text.count;
+    // Keep values outside the integer range usable as real expression operands.
+    if value.real >= -2147483648.0 && value.real < 2147483648.0 && end >= 2 && text[end-2:] == ".0" {
+        end -= 2;
+    }
+    return Success(text[:end]);
 }
