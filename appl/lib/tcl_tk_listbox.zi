@@ -1,0 +1,267 @@
+// Listbox commands and vertical viewport, following Inferno libtk/listb.c.
+#import "std/vec"
+#import "std/number_text"
+using T :: #import "tcl_types"
+using Scale :: #import "tcl_tk_scale"
+using Scroll :: #import "tcl_tk_scrollbar"
+using View :: #import "tcl_tk_view"
+
+ROW_HEIGHT :: View.ROW_HEIGHT;
+INSET :: 2;
+
+Row :: struct { text: Text; selected: bool; }
+State :: struct {
+    rows: Vec(Row);
+    width: s32;
+    height: s32;
+    visible: s64;
+    top: s64;
+    active: s64;
+    anchor: s64;
+    browse: bool;
+}
+
+Error :: (result: *T.Result, message: string) {
+    result.code = .Error;
+    unused BuilderAppend(result.value.bytes, message);
+}
+
+Integer :: (result: *T.Result, value: s64) {
+    digits: [24]u8;
+    unused BuilderAppend(result.value.bytes, FormatInteger(value, digits[:]));
+}
+
+Default :: () -> State {
+    return .{width = 170, height = 10*ROW_HEIGHT + 2*INSET, visible = 10, active = -1, anchor = -1};
+}
+
+Clamp :: (value: s64, upper: s64) -> s64 {
+    if value <= 0 || upper <= 0 { return 0 }
+    return ifx value < upper then value else upper;
+}
+
+Move :: (list: *State, top: s64) { list.top = Clamp(top, list.rows.count - list.visible); }
+
+Layout :: (list: *State, height: s32) {
+    list.visible = Clamp((height - 2*INSET) / ROW_HEIGHT, 4096);
+    Move(list, list.top);
+}
+
+Fractions :: (list: *State) -> Scroll.State {
+    count := list.rows.count;
+    if count <= list.visible { return .{last = Scroll.UNIT} }
+    return .{first = list.top*Scroll.UNIT/count, last = (list.top+list.visible)*Scroll.UNIT/count};
+}
+
+See :: (list: *State, row: s64) {
+    if list.rows.count == 0 { return }
+    at := Clamp(row, list.rows.count-1);
+    if at < list.top { Move(list, at) }
+    else if at >= list.top + list.visible { Move(list, at-list.visible+1) }
+}
+
+Activate :: (list: *State, row: s64) {
+    list.active = ifx row < list.rows.count then row else -1;
+    if list.browse {
+        for * list.rows { it.selected = it_index == list.active }
+    }
+}
+
+Choose :: (list: *State, row: s64) {
+    if row < 0 || row >= list.rows.count { return }
+    for * list.rows { it.selected = it_index == row }
+    list.anchor = row;
+}
+
+Press :: (list: *State, y: s32) {
+    row := y / ROW_HEIGHT;
+    if y < 0 || row >= list.visible || list.top+row >= list.rows.count { return }
+    Choose(list, list.top+row);
+    Activate(list, list.top+row);
+}
+
+Drag :: (list: *State, y: s32) {
+    row := y / ROW_HEIGHT;
+    if y < 0 || row >= list.visible || list.top+row >= list.rows.count { return }
+    Activate(list, list.top+row);
+    if list.browse { list.anchor = list.active }
+}
+
+Step :: (list: *State, step: s64) {
+    start := ifx list.active < 0 then list.rows.count else list.active;
+    row := Clamp(start + step, list.rows.count-1);
+    Activate(list, row);
+    See(list, row);
+}
+
+Index :: (list: *State, word: string) -> (row: s64, valid: bool) {
+    if word == "end" { return Clamp(list.rows.count-1, list.rows.count), true }
+    if word == "active" { return list.active, list.active >= 0 }
+    if word == "anchor" { return list.anchor, list.anchor >= 0 }
+    if word.count > 0 && word[0] == 64 {
+        for i: 1..word.count-1 {
+            if word[i] != 44 { continue }
+            y, valid := T.ParseInteger(word[i+1:]);
+            return Clamp(list.top + y/ROW_HEIGHT, list.rows.count), valid;
+        }
+        return 0, false;
+    }
+    index, valid := T.ParseInteger(word);
+    return index, valid && index >= 0 && word.count > 0 && T.Digit(word[0]);
+}
+
+Range :: (list: *State, args: []Text) -> (first: s64, last: s64, valid: bool) {
+    first, valid := Index(list, TextView(args[0]));
+    if !valid || args.count == 1 { return first, first, valid }
+    last, valid_last := Index(list, TextView(args[1]));
+    return first, last, valid_last;
+}
+
+Reverse :: (list: *State, first: s64, end: s64) {
+    for i: 0..(end-first)/2-1 {
+        left := *list.rows[first+i];
+        right := *list.rows[end-1-i];
+        VecSwap(left.text.bytes, right.text.bytes);
+        selected := left.selected;
+        left.selected = right.selected;
+        right.selected = selected;
+    }
+}
+
+Insert :: (list: *State, index: s64, values: []Text) -> bool {
+    count := list.rows.count;
+    end := count+values.count;
+    if !VecResize(list.rows, end) { return false }
+    for i: 0..values.count-1 {
+        value := TextView(values[i]);
+        copy: Text = TextCopy(value);
+        if copy.bytes.count != value.count {
+            unused VecResize(list.rows, count);
+            return false;
+        }
+        row := *list.rows[count+i];
+        VecSwap(row.text.bytes, copy.bytes);
+    }
+    // Rotate the appended rows ahead of the existing suffix after all copies succeed.
+    if index < count {
+        Reverse(list, index, count);
+        Reverse(list, count, end);
+        Reverse(list, index, end);
+    }
+    if list.active >= index { list.active += values.count }
+    if list.anchor >= index { list.anchor += values.count }
+    return true;
+}
+
+AfterDelete :: (index: s64, first: s64, last: s64) -> s64 {
+    if index < first { return index }
+    if index <= last { return -1 }
+    return index - (last-first+1);
+}
+
+Delete :: (list: *State, first: s64, last: s64) {
+    end := Clamp(last+1, list.rows.count);
+    if first >= end { return }
+    for i: end..list.rows.count-1 {
+        dest := i - (end-first);
+        VecSwap(list.rows[dest].text.bytes, list.rows[i].text.bytes);
+        list.rows[dest].selected = list.rows[i].selected;
+    }
+    unused VecResize(list.rows, list.rows.count-(end-first));
+    list.active = AfterDelete(list.active, first, end-1);
+    list.anchor = AfterDelete(list.anchor, first, end-1);
+    Move(list, list.top);
+}
+
+Yview :: (list: *State, args: []Text, result: *T.Result) {
+    if args.count == 0 {
+        fractions := Fractions(list);
+        Scale.Append(*result.value, fractions.first, Scroll.UNIT);
+        unused BuilderAppend(result.value.bytes, " ");
+        Scale.Append(*result.value, fractions.last, Scroll.UNIT);
+        return;
+    }
+    operation := TextView(args[0]);
+    if operation == "moveto" && args.count == 2 {
+        amount, valid := Scale.Parse(TextView(args[1]), Scroll.UNIT);
+        if valid {
+            fraction := Scroll.Clamp(amount);
+            Move(list, ((fraction+1)*list.rows.count + Scroll.UNIT/2) / Scroll.UNIT);
+            return;
+        }
+    }
+    if operation == "scroll" && args.count == 3 {
+        amount, valid := T.ParseInteger(TextView(args[1]));
+        units := TextView(args[2]);
+        page := units == "page" || units == "pages";
+        if valid && (page || units == "unit" || units == "units") {
+            if page { amount *= list.visible }
+            Move(list, list.top+amount);
+            return;
+        }
+    }
+    if args.count == 1 {
+        index, valid := Index(list, operation);
+        if valid { Move(list, index); return }
+    }
+    Error(result, "expected yview ?index | moveto fraction | scroll count units/pages?");
+}
+
+Selection :: (list: *State, args: []Text, result: *T.Result) {
+    operation := TextView(args[0]);
+    first, last, valid := Range(list, args[1:]);
+    if !valid { Error(result, "bad listbox index"); return }
+    if operation == "includes" && args.count == 2 {
+        Integer(result, ifx first < list.rows.count && list.rows[first].selected then 1 else 0);
+        return;
+    }
+    if operation == "anchor" && args.count == 2 {
+        if first < list.rows.count { list.anchor = first }
+        return;
+    }
+    if operation == "set" || operation == "clear" {
+        for i: first..Clamp(last+1, list.rows.count)-1 { list.rows[i].selected = operation == "set" }
+        return;
+    }
+    Error(result, "expected selection anchor, includes, set or clear");
+}
+
+Command :: (list: *State, args: []Text, result: *T.Result) {
+    command := TextView(args[0]);
+    if command == "yview" { Yview(list, args[1:], result); return }
+    if command == "size" && args.count == 1 { Integer(result, list.rows.count); return }
+    if command == "curselection" && args.count == 1 {
+        digits: [24]u8;
+        for * list.rows {
+            if !it.selected { continue }
+            if result.value.bytes.count > 0 { unused BuilderAppend(result.value.bytes, " ") }
+            unused BuilderAppend(result.value.bytes, FormatInteger(it_index, digits[:]));
+        }
+        return;
+    }
+    if command == "selection" && args.count >= 3 && args.count <= 4 { Selection(list, args[1:], result); return }
+    if args.count >= 2 {
+        index, valid := Index(list, TextView(args[1]));
+        if !valid { Error(result, "bad listbox index"); return }
+        if command == "insert" {
+            if args.count == 2 { return }
+            at := ifx TextView(args[1]) == "end" then list.rows.count else Clamp(index, list.rows.count);
+            if !Insert(list, at, args[2:]) { Error(result, "could not allocate listbox rows") }
+            return;
+        }
+        if command == "index" && args.count == 2 { Integer(result, index); return }
+        if command == "activate" && args.count == 2 { Activate(list, index); return }
+        if command == "see" && args.count == 2 { See(list, index); return }
+        if (command == "get" || command == "delete") && args.count <= 3 {
+            first, last, range_ok := Range(list, args[1:]);
+            if !range_ok { Error(result, "bad listbox index"); return }
+            if command == "delete" { Delete(list, first, last); return }
+            for row: first..Clamp(last+1, list.rows.count)-1 {
+                if row != first { unused BuilderAppend(result.value.bytes, " ") }
+                unused BuilderAppend(result.value.bytes, TextView(list.rows[row].text));
+            }
+            return;
+        }
+    }
+    Error(result, "unsupported listbox subcommand or arguments");
+}

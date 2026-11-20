@@ -1,0 +1,110 @@
+// The stock graphical LINPACK benchmark, adapted from appl/math/linbench.b. See NOTICE.
+#import "std/vec"
+#import "std/number_text"
+using Tcl :: #import "tcl"
+using T :: #import "tcl_types"
+using Model :: #import "linbench_model"
+using Clock :: #import "taijios_clock"
+using Files :: #import "taijios_files"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+
+Phase :: enum { Idle; Generate; Factor; Forward; Backward; Validate; }
+state: Model.State;
+phase: Phase;
+column: s64;
+elapsed: s64;
+requested: bool;
+
+Request :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count != 0 {
+        result.code = .Error;
+        unused BuilderAppend(result.value.bytes, "expected linbench_run");
+        return;
+    }
+    if phase == .Idle { requested = true }
+}
+
+AppendFixed :: (output: *Text, value: s64, decimals: s64) {
+    base := ifx decimals == 2 then 100 else 10;
+    digits: [24]u8;
+    unused BuilderAppend(output.bytes, FormatInteger(value/base, digits[:]));
+    unused BuilderAppend(output.bytes, ".");
+    if decimals == 2 { unused VecPush(output.bytes, cast(u8)(48 + value/10%10)) }
+    unused VecPush(output.bytes, cast(u8)(48 + value%10));
+}
+
+Finish :: (tcl: *Tcl.Interpreter, message: string) -> Window.PollResult {
+    phase = .Idle;
+    script: Text;
+    unused BuilderAppend(script.bytes, ".b.Run configure -state normal -text Run; .d.f insert end {");
+    unused BuilderAppend(script.bytes, message);
+    unused BuilderAppend(script.bytes, "}; .d.f yview moveto 1");
+    return ifx Window.Execute(tcl, TextView(script)) then .Changed else .Failed;
+}
+
+Report :: (tcl: *Tcl.Interpreter) -> Window.PollResult {
+    residual := Model.NormalizedResidual(*state);
+    if residual*residual > cast(float64)state.order { print("LINPACK residual exceeds sqrt(N)\n") }
+    rate: s64;
+    if elapsed > 0 { rate = (Model.Operations(state.order) + 5*elapsed)/(10*elapsed) }
+    else { print("can't measure time\n") }
+    line: Text;
+    AppendFixed(*line, rate, 2);
+    unused BuilderAppend(line.bytes, " Mflops    ");
+    AppendFixed(*line, (elapsed+50)/100, 1);
+    unused BuilderAppend(line.bytes, " secs");
+    return Finish(tcl, TextView(line));
+}
+
+Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResult {
+    if phase == .Idle {
+        if !requested { return .Idle }
+        requested = false;
+        entry := Tcl.Eval(tcl, ".b.N get");
+        order, valid := T.ParseInteger(TextView(entry.value));
+        if entry.code != .OK { return .Failed }
+        if !valid || order < 1 || order > Model.MAX_ORDER { return Finish(tcl, "Enter an order from 1 to 320") }
+        if !Model.Start(*state, order) { return Finish(tcl, "Could not allocate the LINPACK matrix") }
+        phase = .Generate;
+        column = 0;
+        elapsed = 0;
+        return ifx Window.Execute(tcl, ".b.Run configure -state disabled -text Running") then .Changed else .Failed;
+    }
+    if event.kind != Surface.Idle { return .Idle }
+
+    // Yield through the window event loop between batches so the hosted app can close
+    // during a long run. Time spent waiting for events isn't benchmark work.
+    begin := Clock.Millis();
+    batch := ifx phase == .Factor then 3 else 32;
+    current := phase;
+    for 0..batch-1 {
+        if current == .Generate { Model.Generate(*state, column) }
+        if current == .Factor && !Model.Factor(*state, column) { return Finish(tcl, "Singular LINPACK matrix") }
+        if current == .Forward { Model.Forward(*state, column) }
+        if current == .Backward { Model.Backward(*state, state.order-1-column) }
+        if current == .Validate { Model.Validate(*state, column) }
+        column += 1;
+        if column == state.order { break }
+    }
+    if current == .Factor || current == .Forward || current == .Backward { elapsed += Clock.Millis() - begin }
+    if column < state.order { return .Idle }
+    column = 0;
+    if current == .Generate { Model.SaveRightHandSide(*state); phase = .Factor }
+    if current == .Factor { phase = .Forward }
+    if current == .Forward { phase = .Backward }
+    if current == .Backward { state.seed = 1325; phase = .Validate }
+    if current == .Validate { return Report(tcl) }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    script: Text;
+    if Files.ReadFile("/appl/cmd/tcltk/linbench.tcl", *script, 16384) != 0 {
+        print("linbench: could not read controls\n");
+        return 1;
+    }
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "linbench_run", Request) { return 1 }
+    return Window.RunPolled(*tcl, TextView(script), "Linpack in Ziran", 478, 250, Window.NoPrepare, Tick, 5);
+}

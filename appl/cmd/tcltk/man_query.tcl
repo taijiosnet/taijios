@@ -15,11 +15,18 @@ button .controls.down -text {Page Down} -command {.view.t yview scroll 1 pages}
 button .controls.close -text Close -command {destroy .}
 label .controls.status -text {}
 
+# Keep the interface usable by installed Man images that predate native page transfer.
+if {[lsearch [info commands] manual_display] < 0} {
+    proc manual_display {widget} {
+        $widget delete 1.0 end
+        $widget insert end [manual body]
+        manual decorate $widget
+    }
+}
+
 proc show {} {
     .heading configure -text [manual title]
-    .view.t delete 1.0 end
-    .view.t insert end [manual body]
-    manual decorate .view.t
+    manual_display .view.t
     set match [manual matchfirst]
     if {![string equal $match {}]} { .view.t tag add sel $match [manual matchlast] }
     .view.t yview moveto [manual top]

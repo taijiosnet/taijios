@@ -16,6 +16,7 @@ Visit :: struct { query: Text; top: Text; first: Text; last: Text; }
 history: Vec(Visit);
 current: s64 = -1;
 page: Man.Page;
+pending_page: bool;
 
 Replace :: (text: *Text, value: string) {
     copy: Text = TextCopy(value);
@@ -56,7 +57,37 @@ Navigate :: (action: string, query: string, position: string) -> bool {
     VecSwap(page.title.bytes, found.title.bytes);
     VecSwap(page.body.bytes, found.body.bytes);
     VecSwap(page.references, found.references);
+    pending_page = true;
     return true;
+}
+
+Display :: (_: s64, args: []Text, result: *Result) {
+    if args.count == 1 {
+        id := Tk.Find(TextView(args[0]));
+        if id >= 0 && Tk.widgets[id].kind == Tk.TEXT {
+            if !pending_page { return }
+            widget := *Tk.widgets[id];
+            tag := View.EnsureTag(*widget.view, "reference");
+            if tag >= 0 {
+                // Transfer the rendered page so Tcl does not copy it during substitution.
+                previous: Text;
+                VecSwap(widget.text.bytes, previous.bytes);
+                VecSwap(widget.text.bytes, page.body.bytes);
+                pending_page = false;
+                View.Reset(*widget.view);
+                for * page.references {
+                    if !View.AddRange(*widget.view, tag, it.first, it.last) {
+                        result.code = .Error;
+                        unused BuilderAppend(result.value.bytes, "could not mark manual references");
+                        return;
+                    }
+                }
+                return;
+            }
+        }
+    }
+    result.code = .Error;
+    unused BuilderAppend(result.value.bytes, "could not display manual page");
 }
 
 Command :: (_: s64, args: []Text, result: *Result) {
@@ -74,34 +105,20 @@ Command :: (_: s64, args: []Text, result: *Result) {
             count := T.Integer(UTF.Count(TextView(args[1])));
             VecSwap(result.value.bytes, count.value.bytes);
             return;
-        } else if (action == "decorate" || action == "reference") && args.count >= 2 && args.count <= 3 {
+        } else if action == "reference" && args.count == 3 {
             id := Tk.Find(TextView(args[1]));
             if id >= 0 && Tk.widgets[id].kind == Tk.TEXT {
                 widget := *Tk.widgets[id];
-                body := TextView(page.body);
-                if action == "decorate" && args.count == 2 && TextView(widget.text) == body {
-                    tag := View.EnsureTag(*widget.view, "reference");
-                    if tag >= 0 {
-                        for * page.references {
-                            if !View.AddRange(*widget.view, tag, it.first, it.last) {
-                                result.code = .Error;
-                                unused BuilderAppend(result.value.bytes, "could not mark manual references");
-                                return;
-                            }
+                body := TextView(widget.text);
+                at, ok := Tk.TextOffset(widget, TextView(args[2]));
+                if ok {
+                    for * page.references {
+                        if at >= it.first && at < it.last && it.last <= body.count {
+                            unused BuilderAppend(result.value.bytes, body[it.first:it.last]);
+                            break;
                         }
-                        return;
                     }
-                } else if action == "reference" && args.count == 3 {
-                    at, ok := Tk.TextOffset(widget, TextView(args[2]));
-                    if ok {
-                        for * page.references {
-                            if at >= it.first && at < it.last {
-                                unused BuilderAppend(result.value.bytes, body[it.first:it.last]);
-                                break;
-                            }
-                        }
-                        return;
-                    }
+                    return;
                 }
             }
         } else if args.count == 1 && current >= 0 {
@@ -111,7 +128,6 @@ Command :: (_: s64, args: []Text, result: *Result) {
             else if action == "matchfirst" { value = TextView(history[current].first) }
             else if action == "matchlast" { value = TextView(history[current].last) }
             else if action == "title" { value = TextView(page.title) }
-            else if action == "body" { value = TextView(page.body) }
             else if action == "backstate" { value = ifx current > 0 then "normal" else "disabled" }
             else if action == "forwardstate" { value = ifx current + 1 < history.count then "normal" else "disabled" }
             else { result.code = .Error; unused BuilderAppend(result.value.bytes, "unknown manual action"); return }
@@ -132,5 +148,6 @@ main :: () -> s32 {
     }
     interpreter: Tcl.Interpreter;
     if !Tcl.RegisterCommand(*interpreter, "manual", Command) { return 1 }
+    if !Tcl.RegisterCommand(*interpreter, "manual_display", Display) { return 1 }
     return Window.Run(*interpreter, TextView(script), "Manual", 500, 420);
 }

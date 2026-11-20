@@ -187,6 +187,9 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         if it.kind == Tk.CHECKBUTTON { DrawCheck(*canvas, it); continue }
         if it.kind == Tk.SCROLLBAR { DrawScroll(*canvas, it, it_index); continue }
         if it.kind == Tk.PANEL { DrawPanel(*canvas, it); continue }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if it.kind == Tk.LISTBOX { DrawListbox(*canvas, it, it_index == Tk.focused); continue }
+        }
         #if !#defined(TAIJI_TK_NO_CANVAS) {
             if it.kind == Tk.CANVAS { DrawCanvas(*canvas, it); continue }
         }
@@ -226,6 +229,30 @@ Render :: (pixels: []u8, width: s32, height: s32) {
                  ifx it_index == Tk.pressed then PRESSED else BUTTON);
         }
         DrawText(*canvas, box, TextView(it.text), true, ifx it.disabled then MUTED else LETTER);
+    }
+}
+
+#if #defined(TAIJI_TK_LISTBOX) {
+    using Listbox :: #import "tcl_tk_listbox"
+
+    DrawListbox :: (canvas: *Canvas, widget: *Tk.Widget, focused: bool) {
+        box := widget.box;
+        list := *widget.listbox;
+        Fill(canvas, box, ifx focused then LETTER else BORDER);
+        Fill(canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ENTRY);
+        for row: 0..list.visible-1 {
+            index := list.top+row;
+            if index >= list.rows.count { break }
+            y := box.y + Listbox.INSET + cast(s32)row * Listbox.ROW_HEIGHT;
+            entry := *list.rows[index];
+            if entry.selected {
+                Fill(canvas, .{x = box.x+Listbox.INSET, y = y, w = box.w-2*Listbox.INSET, h = Listbox.ROW_HEIGHT}, SELECTION);
+            }
+            DrawText(canvas, .{x = box.x+5, y = y, w = box.w-10, h = Listbox.ROW_HEIGHT}, TextView(entry.text), false);
+            if focused && index == list.active {
+                Fill(canvas, .{x = box.x+Listbox.INSET, y = y+Listbox.ROW_HEIGHT-1, w = box.w-2*Listbox.INSET, h = 1}, BORDER);
+            }
+        }
     }
 }
 

@@ -27,7 +27,7 @@ Draw :: (tcl: *Tcl.Interpreter, frame: *Frame, width: s32, height: s32) -> bool 
     if !VecResizeBounded(frame.pixels, count, 16777216) { return false }
     Tk.Layout(width, height);
     callbacks: Text;
-    Tk.CollectTextScroll(*callbacks);
+    Tk.CollectScroll(*callbacks);
     if !ExecuteCallback(tcl, callbacks) { return false }
     if Tk.Closed() { return true }
     Paint.Render(VecSlice(frame.pixels, 0, count), width, height);

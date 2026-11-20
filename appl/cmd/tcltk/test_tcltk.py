@@ -30,8 +30,8 @@ def compile_image(module, image, *flags):
             *flags, "--entry", f"{module}:main", "-o", image, SOURCES / f"{module}.zi", check=True)
 
 
-def until(probe, description):
-    deadline = time.monotonic() + 12
+def until(probe, description, *, timeout=12):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = probe()
         if value:
@@ -440,7 +440,7 @@ def main():
     else:
         image = BUILD / "tcltk.zx"
         if not args.coffee_only:
-            compile_image("tcltk", image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin")
+            compile_image("tcltk", image, "--define", "TAIJI_TK_LISTBOX", "--bind-host", "zx_surface", "--bind-host", "taijios_stdin")
         manual = BUILD / "man.zx"
         if not args.coffee_only:
             compile_image("man_app", manual, "--define", "TAIJI_TK_NO_CANVAS",

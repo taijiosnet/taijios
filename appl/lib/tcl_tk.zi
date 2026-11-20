@@ -9,6 +9,9 @@ using Scale :: #import "tcl_tk_scale"
 using Check :: #import "tcl_tk_check"
 using Scroll :: #import "tcl_tk_scrollbar"
 using Canvas :: #import "tcl_tk_canvas"
+#if #defined(TAIJI_TK_LISTBOX) {
+    using Listbox :: #import "tcl_tk_listbox"
+}
 
 MAX_WIDGETS :: 32;
 MAX_ENTRY_BYTES :: 16384;
@@ -22,6 +25,7 @@ PANEL :: 6;
 CHECKBUTTON :: 7;
 SCROLLBAR :: 8;
 CANVAS :: 9;
+LISTBOX :: 10;
 MAX_PANEL_BYTES :: 16777216;
 CHAR_WIDTH :: Canvas.CELL_WIDTH;
 ENTRY_INSET :: 8;
@@ -60,6 +64,10 @@ Widget :: struct {
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         canvas: Canvas.State;
     }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        listbox: Listbox.State;
+        entry_width: s32;
+    }
     text_height: s32;
     last_scroll: Scroll.State;
     sent_scroll: bool;
@@ -95,6 +103,9 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
                Tcl.RegisterCommand(interpreter, "scrollbar", Create, SCROLLBAR);
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         attached = attached && Tcl.RegisterCommand(interpreter, "canvas", Create, CANVAS);
+    }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        attached = attached && Tcl.RegisterCommand(interpreter, "listbox", Create, LISTBOX);
     }
     attached = attached &&
                Tcl.RegisterCommand(interpreter, "variable", VariableCommand) &&
@@ -140,6 +151,9 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         if widget.kind == CANVAS { return Canvas.Configure(*widget.canvas, args, result) }
     }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if widget.kind == LISTBOX { return ConfigureListbox(widget, args, result) }
+    }
     if widget.kind == TEXT || widget.kind == SCROLLBAR { return ConfigureScroll(widget, args, result) }
     button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
     for i: 0..args.count/2-1 {
@@ -152,6 +166,12 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
         }
         if widget.kind == CHECKBUTTON && CheckOption(option) { continue }
         if option == "-bg" && widget.kind == ENTRY && TextView(args[2*i+1]) == "white" { continue }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if option == "-width" && widget.kind == ENTRY {
+                _, valid := Distance(TextView(args[2*i+1]));
+                if valid { continue }
+            }
+        }
         SetError(result, "unsupported widget option or value");
         return false;
     }
@@ -160,6 +180,13 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
         option := TextView(args[2*i]);
         if option == "-state" { widget.disabled = TextView(args[2*i+1]) == "disabled"; continue }
         if option == "-bg" || CheckOption(option) { continue }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if option == "-width" {
+                pixels, _ := Distance(TextView(args[2*i+1]));
+                widget.entry_width = pixels;
+                continue;
+            }
+        }
         value: Text = TextCopy(TextView(args[2*i+1]));
         if option == "-text" { VecSwap(widget.text.bytes, value.bytes) }
         else { VecSwap(widget.command.bytes, value.bytes) }
@@ -181,6 +208,9 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     if kind == SCALE { widget.scale = Scale.Default() }
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         if kind == CANVAS { widget.canvas = Canvas.Default() }
+    }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if kind == LISTBOX { widget.listbox = Listbox.Default() }
     }
     if kind == CHECKBUTTON {
         on: Text = TextCopy("1");
@@ -208,6 +238,16 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         saved.canvas.width = widget.canvas.width;
         saved.canvas.height = widget.canvas.height;
+    }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        saved.listbox.width = widget.listbox.width;
+        saved.listbox.height = widget.listbox.height;
+        saved.listbox.visible = widget.listbox.visible;
+        saved.listbox.browse = widget.listbox.browse;
+        saved.listbox.top = 0;
+        saved.listbox.active = -1;
+        saved.listbox.anchor = -1;
+        saved.entry_width = widget.entry_width;
     }
     saved.text_height = widget.text_height;
     saved.sent_scroll = false;
@@ -305,6 +345,9 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             #if !#defined(TAIJI_TK_NO_CANVAS) {
                 Canvas.Clear(*it.canvas);
             }
+            #if #defined(TAIJI_TK_LISTBOX) {
+                unused VecResize(it.listbox.rows, 0);
+            }
             View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
@@ -333,6 +376,11 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
         if option == "-bg" && widget.kind == ENTRY {
             unused BuilderAppend(result.value.bytes, "white"); return;
         }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if option == "-width" && widget.kind == ENTRY {
+                Listbox.Integer(result, EntryWidth(widget)); return;
+            }
+        }
         if option == "-command" && button {
             unused BuilderAppend(result.value.bytes, TextView(widget.command)); return;
         }
@@ -351,6 +399,16 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         if widget.kind == CANVAS { Canvas.Command(*widget.canvas, args, result); return }
     }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if widget.kind == LISTBOX {
+            if subcommand == "cget" && args.count == 2 { ListboxOption(widget, TextView(args[1]), result); return }
+            Listbox.Command(*widget.listbox, args, result);
+            if result.code == .OK && result.value.bytes.count == 0 {
+                AppendScroll(widget, script, Listbox.Fractions(*widget.listbox));
+            }
+            return;
+        }
+    }
     if widget.kind == ENTRY { EntryCommand(widget, args, result); return }
     if widget.kind == TEXT {
         TextCommand(widget, args, result);
@@ -367,7 +425,8 @@ Focus :: (_: s64, args: []Text, result: *Result) {
     }
     if args.count != 1 { SetError(result, "expected focus ?widget?"); return }
     index := Find(TextView(args[0]));
-    if closed || index < 0 || (widgets[index].kind != ENTRY && widgets[index].kind != TEXT && widgets[index].kind != SCALE) {
+    if closed || index < 0 || (widgets[index].kind != ENTRY && widgets[index].kind != TEXT &&
+       widgets[index].kind != SCALE && widgets[index].kind != LISTBOX) {
         SetError(result, "expected a focusable widget path"); return;
     }
     focused = index;
@@ -652,6 +711,14 @@ KeyDown :: (key: EntryKey) -> Text {
         if key == .End { View.Move(*entry.view, entry.view.rows.count) }
         return TextCopy("");
     }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if entry.kind == LISTBOX {
+            if key == .Up { Listbox.Step(*entry.listbox, -1) }
+            if key == .Down { Listbox.Step(*entry.listbox, 1) }
+            if key == .Return { Listbox.Choose(*entry.listbox, entry.listbox.active) }
+            return .{};
+        }
+    }
     if key == .Return { return TextCopy(TextView(entry.command)) }
     if key == .Left { entry.cursor = UTF.Previous(TextView(entry.text), entry.cursor) }
     if key == .Right { entry.cursor = UTF.Next(TextView(entry.text), entry.cursor) }
@@ -672,6 +739,12 @@ TextInput :: (value: string) {
     if focused >= 0 && widgets[focused].kind == ENTRY {
         unused Insert(*widgets[focused], widgets[focused].cursor, value);
     }
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if focused >= 0 && widgets[focused].kind == LISTBOX && value == " " {
+            listbox := *widgets[focused].listbox;
+            Listbox.Choose(listbox, listbox.active);
+        }
+    }
 }
 
 Minimum :: (a: s32, b: s32) -> s32 { return ifx a < b then a else b }
@@ -688,6 +761,13 @@ NextChild :: (parent: s64, after: s32) -> s64 {
 
 Horizontal :: (pack: Packing) -> bool { return pack.side == 1 || pack.side == 3 }
 
+EntryWidth :: (widget: *Widget) -> s32 {
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if widget.entry_width > 0 { return widget.entry_width }
+    }
+    return 168;
+}
+
 Measure :: (parent: s64) -> Box {
     used: Box;
     required: Box;
@@ -703,7 +783,7 @@ Measure :: (parent: s64) -> Box {
             requested = ifx widget.scale.horizontal then Box.{w = length, h = minor} else Box.{w = minor, h = length};
         }
         else if widget.kind == PANEL { requested = .{w = widget.panel.width + 2*widget.panel.border, h = widget.panel.height + 2*widget.panel.border} }
-        else if widget.kind == ENTRY { requested = .{w = 168, h = 30} }
+        else if widget.kind == ENTRY { requested = .{w = EntryWidth(widget), h = 30} }
         else if widget.kind == TEXT { requested = .{w = 280, h = ifx widget.text_height > 0 then widget.text_height else 150} }
         else if widget.kind == SCROLLBAR {
             requested = ifx widget.scroll.horizontal then Box.{w = Scroll.LENGTH, h = Scroll.WIDTH}
@@ -716,6 +796,9 @@ Measure :: (parent: s64) -> Box {
         }
         #if !#defined(TAIJI_TK_NO_CANVAS) {
             if widget.kind == CANVAS { requested = .{w = widget.canvas.width, h = widget.canvas.height} }
+        }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if widget.kind == LISTBOX { requested = .{w = widget.listbox.width, h = widget.listbox.height} }
         }
         widget.requested = requested;
         w := requested.w + widget.pack.padx * 2;
@@ -783,6 +866,9 @@ Place :: (parent: s64, cavity: Box) {
         widget.box = .{x = x, y = y, w = w, h = h};
         if widget.kind == FRAME { Place(index, widget.box) }
         else if widget.kind == TEXT { TextLayout(widget) }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if widget.kind == LISTBOX { Listbox.Layout(*widget.listbox, h) }
+        }
         index = NextChild(parent, widget.order);
     }
 }
@@ -980,6 +1066,16 @@ ScaleTrack :: (widget: *Widget) -> Box {
 
 PointerPress :: (x: s32, y: s32) -> Text {
     PointerDown(x, y);
+    #if #defined(TAIJI_TK_LISTBOX) {
+        listbox := Over(x, y, LISTBOX);
+        if listbox >= 0 {
+            widget := *widgets[listbox];
+            focused = listbox;
+            pressed = listbox;
+            Listbox.Press(*widget.listbox, y-widget.box.y-Listbox.INSET);
+            return .{};
+        }
+    }
     check := Over(x, y, CHECKBUTTON);
     if check >= 0 {
         widget := *widgets[check];
@@ -1006,12 +1102,20 @@ PointerPress :: (x: s32, y: s32) -> Text {
 }
 
 Dragging :: () -> bool {
-    return pressed >= 0 && (widgets[pressed].kind == SCALE || widgets[pressed].kind == SCROLLBAR);
+    if pressed < 0 { return false }
+    kind := widgets[pressed].kind;
+    return kind == SCALE || kind == SCROLLBAR || kind == LISTBOX;
 }
 
 PointerMove :: (x: s32, y: s32) -> Text {
     if !Dragging() { return .{} }
     widget := *widgets[pressed];
+    #if #defined(TAIJI_TK_LISTBOX) {
+        if widget.kind == LISTBOX {
+            Listbox.Drag(*widget.listbox, y-widget.box.y-Listbox.INSET);
+            return .{};
+        }
+    }
     if widget.kind == SCROLLBAR { return ScrollDrag(widget, x, y) }
     return ScaleDrag(widget, x, y);
 }
@@ -1187,6 +1291,53 @@ ConfigureScroll :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     return true;
 }
 
+#if #defined(TAIJI_TK_LISTBOX) {
+    ConfigureListbox :: (widget: *Widget, args: []Text, result: *Result) -> bool {
+        width := widget.listbox.width;
+        height := widget.listbox.height;
+        browse := widget.listbox.browse;
+        callback: string;
+        replace_callback := false;
+        for i: 0..args.count/2-1 {
+            option := TextView(args[2*i]);
+            value := TextView(args[2*i+1]);
+            if option == "-width" || option == "-height" {
+                pixels, valid := Distance(value);
+                if !valid { SetError(result, "invalid listbox dimension"); return false }
+                if option == "-width" { width = pixels }
+                else { height = pixels }
+            } else if option == "-selectmode" && (value == "single" || value == "browse") {
+                browse = value == "browse";
+            } else if option == "-yscrollcommand" {
+                callback = value;
+                replace_callback = true;
+            } else {
+                SetError(result, "unsupported listbox option or value");
+                return false;
+            }
+        }
+        if replace_callback && callback != TextView(widget.command) {
+            copy: Text = TextCopy(callback);
+            if copy.bytes.count != callback.count { SetError(result, "could not allocate scroll callback"); return false }
+            VecSwap(widget.command.bytes, copy.bytes);
+            widget.sent_scroll = false;
+        }
+        widget.listbox.width = width;
+        widget.listbox.height = height;
+        widget.listbox.browse = browse;
+        if widget.order == 0 { Listbox.Layout(*widget.listbox, height) }
+        return true;
+    }
+
+    ListboxOption :: (widget: *Widget, option: string, result: *Result) {
+        if option == "-width" { Listbox.Integer(result, widget.listbox.width); return }
+        if option == "-height" { Listbox.Integer(result, widget.listbox.height); return }
+        if option == "-selectmode" { unused BuilderAppend(result.value.bytes, ifx widget.listbox.browse then "browse" else "single"); return }
+        if option == "-yscrollcommand" { unused BuilderAppend(result.value.bytes, TextView(widget.command)); return }
+        SetError(result, "unsupported listbox option");
+    }
+}
+
 ScrollCommand :: (widget: *Widget, args: []Text, result: *Result) {
     operation := TextView(args[0]);
     if operation == "set" && args.count == 3 {
@@ -1268,8 +1419,7 @@ ScrollDrag :: (widget: *Widget, x: s32, y: s32) -> Text {
 }
 
 TextScroll :: (widget: *Widget, script: *Text) {
-    command := TextView(widget.command);
-    if command == "" { return }
+    if widget.command.bytes.count == 0 { return }
     TextLayout(widget);
     rows := widget.view.rows.count;
     first: s64;
@@ -1278,24 +1428,33 @@ TextScroll :: (widget: *Widget, script: *Text) {
         first = cast(s64)widget.view.top * Scroll.UNIT / rows;
         last = Scroll.Clamp(cast(s64)(widget.view.top + widget.view.visible) * Scroll.UNIT / rows);
     }
-    if widget.sent_scroll && widget.last_scroll.first == first && widget.last_scroll.last == last { return }
-    widget.last_scroll = .{first = first, last = last};
+    AppendScroll(widget, script, .{first = first, last = last});
+}
+
+AppendScroll :: (widget: *Widget, script: *Text, fractions: Scroll.State) {
+    command := TextView(widget.command);
+    if command == "" { return }
+    if widget.sent_scroll && widget.last_scroll.first == fractions.first && widget.last_scroll.last == fractions.last { return }
+    widget.last_scroll = fractions;
     widget.sent_scroll = true;
     unused BuilderAppend(script.bytes, command);
     unused BuilderAppend(script.bytes, " ");
-    Scale.Append(script, first, Scroll.UNIT);
+    Scale.Append(script, fractions.first, Scroll.UNIT);
     unused BuilderAppend(script.bytes, " ");
-    Scale.Append(script, last, Scroll.UNIT);
+    Scale.Append(script, fractions.last, Scroll.UNIT);
     unused BuilderAppend(script.bytes, "\nlist\n");
 }
 
-CollectTextScroll :: (script: *Text) {
+CollectScroll :: (script: *Text) {
     for * widgets {
         if it.name.bytes.count > 0 && it.kind == TEXT { TextScroll(it, script) }
+        #if #defined(TAIJI_TK_LISTBOX) {
+            if it.name.bytes.count > 0 && it.kind == LISTBOX { AppendScroll(it, script, Listbox.Fractions(*it.listbox)) }
+        }
     }
 }
 
 Update :: (_: s64, name: string, args: []Text, result: *Result, script: *Text) {
     if name != "update" || args.count != 0 { SetError(result, "expected update"); return }
-    CollectTextScroll(script);
+    CollectScroll(script);
 }

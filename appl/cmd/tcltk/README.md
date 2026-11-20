@@ -17,6 +17,8 @@ display, and history from Inferno's [manual browser](../../wm/man.b) and
 Man's build defines `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
 renderer. This lets it browse large manual pages in the default Linux/386
 guest memory pool. The general Tk launcher and Memory build include Canvas.
+The general Tk launcher and LINPACK builds define `TAIJI_TK_LISTBOX` to add
+listboxes and entry `-width` support. LINPACK omits Canvas.
 
 Infernal Coffee keeps all six masked cups, the original background, Stop/Go,
 and Rate, Jitter, and Skip sliders. It reads the shipped
@@ -37,6 +39,15 @@ the arena limit, the allocation count in the original display units, a red usage
 bar, and the high-water mark. The graph uses the shared Ziran Canvas
 widget. [ZX source](memory_app.zi) · [Inferno source](../../wm/memory.b)
 
+LINPACK opens with matrix order 200. Edit the order and press Run to generate
+the original deterministic matrix, factor it with partial pivoting, solve it,
+and check the normalized residual. The benchmark times factorization and the
+solve, then adds Mflops and elapsed seconds to the selectable results list.
+The scrollbar gives access to earlier results. The button shows Running while
+the app works in batches and accepts orders from 1 to 320. Timing depends on
+the execution engine and clock resolution.
+[ZX source](linbench_app.zi) · [Inferno source](../../math/linbench.b)
+
 ## Run in Taiji
 
 From the TaijiOS root, with `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
@@ -53,6 +64,9 @@ python3 appl/cmd/tcltk/test_logwindow.py --installed
 python3 appl/cmd/tcltk/test_memory.py
 install -m 0644 build/tcltk/memory.zx dis/wm/memory.zx
 python3 appl/cmd/tcltk/test_memory.py --installed
+python3 appl/cmd/tcltk/test_linbench.py
+install -m 0644 build/tcltk/linbench.zx dis/math/linbench.zx
+python3 appl/cmd/tcltk/test_linbench.py --installed
 ```
 
 The general Tk launcher reads guest stdin until EOF and accepts scripts up to
@@ -65,6 +79,7 @@ zxrun -w /dis/man.zx
 zxrun -w /dis/coffee.zx
 zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log
 zxrun -p -w /dis/wm/memory.zx
+zxrun -p -w /dis/math/linbench.zx
 ```
 
 Log Window accepts `-e` to close when input ends. By default it prints `Got EOF`
@@ -136,6 +151,14 @@ arena snapshot through the guest namespace, and checks usage bar and
 high-water mark positions, refreshed size labels, and window close. It also
 launches the ZX app against the guest's real `/dev/memory`.
 
+`test_linbench.py` compares the listbox command transcript with `tkcmd`
+including UTF-8 rows, selection ranges, and scrollbar callbacks. It checks
+the solution and residual for several matrix orders directly in the Ziran
+engine. Under private Xvfb it drives the original Dis benchmark and the ZX
+benchmark through runs, new results, scrollbar arrows and dragging, row
+selection, and close. The hosted test also covers invalid order recovery
+and reruns at the upper supported order.
+
 ## Supported commands
 
 | Command | Options and behavior |
@@ -145,8 +168,12 @@ launches the ZX app against the guest's real `/dev/memory`.
 | `checkbutton .path` | Button options plus `-variable`, `-onvalue`, and `-offvalue`. A left press toggles the value and runs the callback |
 | `variable name ?value?` | Read or write the Tk variable associated with one or more checkbuttons |
 | `frame .path` | Container for nested widgets |
-| `entry .path` | Single-line UTF-8 text, with `-bg white` |
+| `entry .path` | Single-line UTF-8 text with `-bg white` and `-width` |
 | `text .path` | Wrapped, scrollable text. `-height` sets the requested height. `-yscrollcommand` receives the first and last visible fractions |
+| `listbox .path` | Configurable `-width`, `-height`, `-selectmode single` or `browse`, and `-yscrollcommand`. A click selects a row. Up and Down move the active row. Enter or Space selects it |
+| `.listbox insert index element ?element ...?`, `delete first ?last?`, `get first ?last?`, `size`, `index index` | Edit or read rows by numeric index, `end`, `active`, `anchor`, or `@x,y` |
+| `.listbox activate index`, `curselection`, `selection anchor index`, `selection includes index`, `selection set first ?last?`, `selection clear first ?last?` | Move the active row or read and change selection and its anchor |
+| `.listbox see index`, `yview ?index\|moveto fraction\|scroll count units/pages?` | Reveal a row or read and set the vertical viewport |
 | `canvas .path` | Integer-pixel `-width` and `-height` |
 | `.canvas create rectangle x0 y0 x1 y1 ?options?` | Add a rectangle with `-fill` and `-outline`. Return its numeric item ID |
 | `.canvas create text x y ?options?` | Add a single-line stroke-font label with `-anchor`, `-text`, and `-fill`. Return its numeric item ID |
@@ -160,7 +187,7 @@ launches the ZX app against the guest's real `/dev/memory`.
 | `.panel dirty ?x0 y0 x1 y1?` | Accept a redraw request for the panel. The surface presents the current pixels on refresh |
 | `update` | Request the regular surface refresh after the Tcl evaluation |
 | `pack .path ?path ...?` | `-side top`, `bottom`, `left` or `right`, `-padx pixels`, `-pady pixels`, `-fill none`, `x`, `y` or `both`, `-expand 0` or `1`, and `-anchor center`, `n`, `ne`, `e`, `se`, `s`, `sw`, `w` or `nw` |
-| `focus ?path?` | Read or set the focused entry, text view, or scale |
+| `focus ?path?` | Read or set the focused entry, text view, scale, or listbox |
 | `bind .entry <Return> script` | Set an entry's Enter callback. Inferno's `<Key-\n>` spelling also works |
 | `.path configure option value` | Set one or more of that widget's supported options |
 | `.path cget option` | Read a supported option from the widget |
@@ -189,9 +216,9 @@ empty string for transparency.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements a subset of 15 of the 25 commands advertised by the
-[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining 10 are `bitmap`,
-`grab`, `image`, `listbox`, `lower`, `menu`, `menubutton`,
+The port implements a subset of 16 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining nine are `bitmap`,
+`grab`, `image`, `lower`, `menu`, `menubutton`,
 `radiobutton`, `raise`, and `toplevel`.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
@@ -210,7 +237,9 @@ stacking, scrolling, fractional coordinates, line and polygon items, ovals,
 arcs, images, embedded windows, and more font, color, and stroke options.
 The text widget still needs horizontal scrolling and `-xscrollcommand`.
 The Tk variable command still needs Inferno's `lasterror` query.
-`listbox` with `curselection`, `get`, `yview`, and its scroll callback is used
-by [Unicode Browser](../../wm/unibrowse.b).
+The remaining listbox API includes `nearest`, `xview`, `-xscrollcommand`,
+`-selectborderwidth`, multiple and extended selection, and drag autoscroll.
+Unicode Browser uses the supported listbox commands and also needs separate
+windows, clipboard access, and bitmap font rendering. [Inferno source](../../wm/unibrowse.b)
 See the [Tcl command comparison](../../lib/tcl.md#comparison-with-shipped-inferno-tcl)
 for the headless interpreter.

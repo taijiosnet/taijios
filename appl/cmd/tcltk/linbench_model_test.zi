@@ -1,0 +1,61 @@
+#import "std/vec"
+using Model :: #import "linbench_model"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using Input :: #import "linbench_listbox_input"
+
+CheckSolve :: (state: *Model.State, order: s64) -> bool {
+    if !Model.Start(state, order) { return false }
+    for col: 0..order-1 { Model.Generate(state, col) }
+    if state.matrix[0] != -1.27630615234375 { return false }
+    Model.SaveRightHandSide(state);
+    for col: 0..order-1 { if !Model.Factor(state, col) { return false } }
+    for col: 0..order-1 { Model.Forward(state, col) }
+    for col: 0..order-1 { Model.Backward(state, order-col-1) }
+    for row: 0..order-1 {
+        if Model.Absolute(state.solution[row]-1.0) > 1e-10 { return false }
+    }
+    state.seed = 1325;
+    for col: 0..order-1 { Model.Validate(state, col) }
+    residual := Model.NormalizedResidual(state);
+    return residual >= 0 && residual*residual <= cast(float64)order;
+}
+
+CheckWidgets :: () -> bool {
+    tcl: Tcl.Interpreter;
+    if !Tk.Attach(*tcl) { return false }
+    start: s64;
+    for i: 0..Input.Script.count-1 {
+        if Input.Script[i] != 10 { continue }
+        result := Tcl.Eval(*tcl, Input.Script[start:i]);
+        if result.code != .OK { print("line %: %\n", start, TextView(result.value)); return false }
+        if result.value.bytes.count > 0 { print("#%\n", TextView(result.value)) }
+        Tk.Layout(300, 220);
+        start = i+1;
+    }
+    checked := Tcl.Eval(*tcl, ".rows insert end A B C D E; .rows yview moveto 0; focus .rows");
+    if checked.code != .OK { return false }
+    id := Tk.Find(".rows");
+    box := Tk.widgets[id].box;
+    unused Tk.PointerPress(box.x+10, box.y+10);
+    unused Tk.PointerUp(box.x+10, box.y+10);
+    unused Tk.KeyDown(.Down);
+    before := Tcl.Eval(*tcl, ".rows curselection");
+    active := Tcl.Eval(*tcl, ".rows index active");
+    unused Tk.KeyDown(.Return);
+    after := Tcl.Eval(*tcl, ".rows curselection");
+    if TextView(before.value) != "0" || TextView(active.value) != "1" || TextView(after.value) != "1" { return false }
+    replaced := Tcl.Eval(*tcl, "destroy .rows; listbox .rows; .rows size");
+    return replaced.code == .OK && TextView(replaced.value) == "0";
+}
+
+main :: () -> s32 {
+    state: Model.State;
+    if Model.Operations(200) != 5413333 || Model.Start(*state, 0) || Model.Start(*state, Model.MAX_ORDER+1) { return 1 }
+    for order: s64.[1, 9, 37, 5] {
+        if !CheckSolve(*state, order) { print("LINPACK solve failed on order %\n", order); return 2 }
+    }
+    if !CheckWidgets() { return 3 }
+    print("LINPACK solver and listbox input verified\n");
+    return 0;
+}

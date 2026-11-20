@@ -1,0 +1,116 @@
+// LINPACK benchmark from Inferno appl/math/linbench.b and linalg.b. See NOTICE.
+#import "std/vec"
+
+MAX_ORDER :: 320;
+MATRIX_CAPACITY :: MAX_ORDER * MAX_ORDER;
+EPSILON :: 2.220446049250313e-16;
+
+State :: struct {
+    order: s64;
+    matrix: Vec(float64);
+    solution: Vec(float64);
+    residual: Vec(float64);
+    pivots: Vec(s64);
+    seed: s64;
+    norm: float64;
+}
+
+Start :: (state: *State, order: s64) -> bool {
+    if order < 1 || order > MAX_ORDER { return false }
+    if !VecResizeBounded(state.matrix, MATRIX_CAPACITY, MATRIX_CAPACITY) ||
+       !VecResizeBounded(state.solution, MAX_ORDER, MAX_ORDER) ||
+       !VecResizeBounded(state.residual, MAX_ORDER, MAX_ORDER) ||
+       !VecResizeBounded(state.pivots, MAX_ORDER, MAX_ORDER) { return false }
+    state.order = order;
+    state.seed = 1325;
+    state.norm = 0;
+    for row: 0..order-1 { state.solution[row] = 0 }
+    return true;
+}
+
+Sample :: (state: *State) -> float64 {
+    state.seed = (3125 * state.seed) % 65536;
+    return cast(float64)(state.seed - 32768) / 16384.0;
+}
+
+Generate :: (state: *State, column: s64) {
+    n := state.order;
+    matrix := VecSlice(state.matrix, column*n, (column+1)*n);
+    for row: 0..n-1 {
+        value := Sample(state);
+        matrix[row] = value;
+        state.solution[row] += value;
+        if value > state.norm { state.norm = value }
+    }
+}
+
+Absolute :: (value: float64) -> float64 { return ifx value < 0 then -value else value; }
+
+Factor :: (state: *State, k: s64) -> bool {
+    n := state.order;
+    matrix := VecSlice(state.matrix, 0, n*n);
+    base := k*n;
+    pivot := k;
+    for row: k+1..n-1 {
+        if Absolute(matrix[base+row]) > Absolute(matrix[base+pivot]) { pivot = row }
+    }
+    state.pivots[k] = pivot;
+    value := matrix[base+pivot];
+    if value == 0 { return false }
+    matrix[base+pivot] = matrix[base+k];
+    matrix[base+k] = value;
+    multiplier := -1.0 / value;
+    for row: k+1..n-1 { matrix[base+row] *= multiplier }
+    for column: k+1..n-1 {
+        target := column*n;
+        value = matrix[target+pivot];
+        matrix[target+pivot] = matrix[target+k];
+        matrix[target+k] = value;
+        for row: k+1..n-1 { matrix[target+row] += value * matrix[base+row] }
+    }
+    return true;
+}
+
+Forward :: (state: *State, k: s64) {
+    n := state.order;
+    column := VecSlice(state.matrix, k*n, (k+1)*n);
+    b := VecSlice(state.solution, 0, n);
+    pivot := state.pivots[k];
+    value := b[pivot];
+    b[pivot] = b[k];
+    b[k] = value;
+    for row: k+1..n-1 { b[row] += value * column[row] }
+}
+
+Backward :: (state: *State, k: s64) {
+    column := VecSlice(state.matrix, k*state.order, (k+1)*state.order);
+    b := VecSlice(state.solution, 0, state.order);
+    b[k] /= column[k];
+    value := -b[k];
+    for row: 0..k-1 { b[row] += value * column[row] }
+}
+
+SaveRightHandSide :: (state: *State) {
+    for row: 0..state.order-1 { state.residual[row] = -state.solution[row] }
+}
+
+Validate :: (state: *State, column: s64) {
+    x := state.solution[column];
+    for row: 0..state.order-1 { state.residual[row] += Sample(state) * x }
+}
+
+NormalizedResidual :: (state: *State) -> float64 {
+    norm_x: float64;
+    residual: float64;
+    for row: 0..state.order-1 {
+        x := Absolute(state.solution[row]);
+        error := Absolute(state.residual[row]);
+        if x > norm_x { norm_x = x }
+        if error > residual { residual = error }
+    }
+    denominator := cast(float64)state.order * state.norm * norm_x * EPSILON;
+    if denominator == 0 { return ifx residual == 0 then 0.0 else 1e30 }
+    return residual / denominator;
+}
+
+Operations :: (order: s64) -> s64 { return (2*order*order*order)/3 + 2*order*order; }
