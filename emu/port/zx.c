@@ -447,6 +447,7 @@ struct ZxCommand {
 	int argc;
 	int *fd;
 	int nfd;
+	char *fdpath;
 	char err[ERRMAX];
 	char failure[ERRMAX];
 };
@@ -624,7 +625,34 @@ zxioopen(ZxCommand *command, const HostValue *args, int n, int create, HostValue
 }
 
 static int
-zxiostat(ZxCommand *command, const HostValue *args, int n, HostValue *result)
+zxioslice(const HostValue *buffer)
+{
+	return buffer->kind == HOST_SLICE && buffer->type != nil &&
+		strcmp(buffer->type, "[]u8") == 0 && (buffer->length == 0 || buffer->elements != nil);
+}
+
+static int
+zxstatrecord(ZxCommand *command, Dir *dir, const HostValue *buffer, uchar *bytes, HostValue *result)
+{
+	int count, i;
+
+	if(dir == nil)
+		return zxioerror(command, result, nil);
+	count = sizeD2M(dir);
+	if(count <= ZxIoBytes && count <= buffer->length)
+		count = convD2M(dir, bytes, count);
+	else
+		count = 0;
+	free(dir);
+	if(count <= BIT16SZ)
+		return zxioerror(command, result, "stat record does not fit");
+	for(i = 0; i < count; i++)
+		buffer->elements[i].bits = bytes[i];
+	return zxs32(result, count);
+}
+
+static int
+zxiostat(ZxCommand *command, const HostValue *args, int n, uchar *packed, HostValue *result)
 {
 	char path[ZxGuestPathBytes + 1];
 	const HostValue *buffer;
@@ -634,13 +662,14 @@ zxiostat(ZxCommand *command, const HostValue *args, int n, HostValue *result)
 	if(n != 2 || args[0].kind != HOST_STRING)
 		return 0;
 	buffer = args + 1;
-	if(buffer->kind != HOST_SLICE || buffer->type == nil || strcmp(buffer->type, "[]u8") != 0 ||
-	   (buffer->length != 0 && buffer->elements == nil))
+	if(!zxioslice(buffer))
 		return 0;
-	if(buffer->length < 12)
+	if(packed == nil && buffer->length < 12)
 		return zxioerror(command, result, "stat needs a 12-byte buffer");
 	if(!zxiopath(args, path))
 		return zxioerror(command, result, "invalid file name");
+	if(packed != nil)
+		return zxstatrecord(command, kdirstat(path), buffer, packed, result);
 	dir = kdirstat(path);
 	if(dir == nil)
 		return zxioerror(command, result, nil);
@@ -699,10 +728,22 @@ zxio(void *context, const char *module, const char *function,
 	if(strcmp(function, "Create") == 0)
 		return zxioopen(command, args, n, 1, result);
 	if(strcmp(function, "Stat") == 0)
-		return zxiostat(command, args, n, result);
+		return zxiostat(command, args, n, nil, result);
+	if(strcmp(function, "StatPacked") == 0)
+		return zxiostat(command, args, n, bytes, result);
 	if(n < 1 || !zxisindex(args))
 		return 0;
 	handle = args[0].integer;
+	if(strcmp(function, "FdPath") == 0){
+		if(n != 1)
+			return 0;
+		free(command->fdpath);
+		command->fdpath = kfd2path(handle);
+		*result = (HostValue){.kind = HOST_STRING, .type = "string",
+			.data = (uchar *)command->fdpath,
+			.length = command->fdpath == nil ? 0 : strlen(command->fdpath)};
+		return 1;
+	}
 	if(handle >= 0 && handle < 3)
 		fd = handle;
 	else if(handle >= 3 && handle - 3 < command->nfd)
@@ -725,10 +766,20 @@ zxio(void *context, const char *module, const char *function,
 		return 0;
 	buffer = args + 1;
 	length = buffer->length > sizeof(bytes) ? sizeof(bytes) : buffer->length;
-	if(strcmp(function, "Read") == 0){
-		if(buffer->kind != HOST_SLICE || buffer->type == nil ||
-		   strcmp(buffer->type, "[]u8") != 0 ||
-		   (length != 0 && buffer->elements == nil))
+	if(strcmp(function, "FstatPacked") == 0){
+		if(!zxioslice(buffer))
+			return 0;
+		return zxstatrecord(command, kdirfstat(fd), buffer, bytes, result);
+	}
+	if(strcmp(function, "WstatPacked") == 0){
+		if(buffer->kind != HOST_STRING || (length != 0 && buffer->data == nil))
+			return 0;
+		if(length != buffer->length || length < STATFIXLEN)
+			return zxioerror(command, result, "invalid stat record size");
+		memmove(bytes, buffer->data, length);
+		count = kfwstat(fd, bytes, length);
+	}else if(strcmp(function, "Read") == 0){
+		if(!zxioslice(buffer))
 			return 0;
 		count = length == 0 ? 0 : kread(fd, bytes, length);
 		if(count > 0)
@@ -763,7 +814,8 @@ static size_t
 zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *bindings)
 {
 	static const char *names[] = {"Open", "Event", "Present", "Close", "SetTasked"};
-	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error"};
+	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error",
+		"StatPacked", "FstatPacked", "WstatPacked", "FdPath"};
 	BundleCapabilityAbi abi;
 	size_t i, count = 0;
 	int j;
@@ -924,6 +976,7 @@ zxrun(String *s, List *args, ZX_Window *win)
 		if(command.fd[i] >= 0)
 			kclose(command.fd[i]);
 	free(command.fd);
+	free(command.fdpath);
 	zxfreeargs(&command);
 	acquire();
 	return result;

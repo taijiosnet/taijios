@@ -1,0 +1,213 @@
+// Guest file and directory copy, following the Limbo cp command.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Fs :: #import "taijios_stat";
+using Names :: #import "taijios_names";
+
+Usage :: "usage: \tcp [-gux] src target\n\tcp [-r] [-gux] src ... directory\n";
+Options :: struct { recursive: bool; group: bool; owner: bool; exact: bool; }
+State :: struct { options: Options; failed: bool; seen: Vec(Fs.Identity); }
+
+Warn :: (state: *State, first: string, second: string = "", third: string = "", fourth: string = "") {
+    state.failed = true;
+    unused Cli.WriteAll(2, "cp: ");
+    unused Cli.WriteAll(2, first);
+    unused Cli.WriteAll(2, second);
+    unused Cli.WriteAll(2, third);
+    unused Cli.WriteAll(2, fourth);
+    unused Cli.WriteAll(2, "\n");
+}
+
+FileError :: (state: *State, message: string, path: string) {
+    error := Io.LastError();
+    Warn(state, message, path, ": ", error);
+}
+
+Basename :: (path: string) -> string {
+    end := path.count;
+    while end > 0 && path[end-1] == 47 { end -= 1 }
+    if end == 0 { return path }
+    return Names.Basename(path[:end], "");
+}
+
+Join :: (path: string, name: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    return BuilderAppend(out.bytes, path) && BuilderAppend(out.bytes, "/") && BuilderAppend(out.bytes, name);
+}
+
+Transfer :: (state: *State, src: string, dst: string, input: s32, output: s32) -> bool {
+    bytes: [8192]u8;
+    while true {
+        count := Io.ReadBytes(input, bytes[:]);
+        if count < 0 { FileError(state, "error reading ", src); return false }
+        if count == 0 { return true }
+        if Io.WriteBytes(output, TextView(bytes[:count])) != count {
+            FileError(state, "error writing ", dst);
+            return false;
+        }
+    }
+}
+
+CopyFile :: (state: *State, src: string, dst: string) {
+    metadata: [Fs.BufferSize]u8;
+    source := Fs.PathInfo(src, metadata[:]);
+    if source.size == 0 { FileError(state, "", src); return }
+    if (source.mode & Fs.Directory) != 0 { Warn(state, src, " is a directory"); return }
+    other: [Fs.BufferSize]u8;
+    target := Fs.PathInfo(dst, other[:]);
+    if target.size != 0 && Fs.SameFile(source.identity, target.identity) {
+        Warn(state, src, " and ", dst, " are the same file");
+        return;
+    }
+    input := Io.OpenFile(src, 0);
+    if input < 0 { FileError(state, "cannot open ", src); return }
+    output := Io.CreateFile(dst, 1, cast(s32)(source.mode & 0x1ff));
+    if output < 0 {
+        FileError(state, "cannot create ", dst);
+    } else {
+        if Transfer(state, src, dst, input, output) {
+            opt := state.options;
+            if !Fs.Change(output, source, opt.exact, opt.exact, opt.owner, opt.group) {
+                FileError(state, "can't wstat ", src);
+            }
+        }
+        unused Io.CloseFile(output);
+    }
+    unused Io.CloseFile(input);
+}
+
+DirectorySeen :: (state: *State, identity: Fs.Identity) -> bool {
+    for state.seen { if Fs.SameFile(it, identity) { return true } }
+    if !VecPush(state.seen, identity) {
+        Warn(state, "cannot allocate directory identities");
+        return true;
+    }
+    return false;
+}
+
+Contains :: (parent: Fs.Identity, path: string) -> bool {
+    clean: Text;
+    if !Names.Clean(path, *clean) { return false }
+    name := TextView(clean);
+    metadata: [Fs.BufferSize]u8;
+    while true {
+        slash := Names.LastSlash(name);
+        name = Names.Dirname(name);
+        entry := Fs.PathInfo(name, metadata[:]);
+        if entry.size != 0 && Fs.SameFile(entry.identity, parent) { return true }
+        if slash <= 0 { return false }
+    }
+}
+
+CopyEntries :: (state: *State, src: string, dst: string, input: s32) {
+    bytes: [Fs.BufferSize]u8;
+    names: Vec(Text);
+    source_path: Text;
+    target_path: Text;
+    while true {
+        count := Io.ReadBytes(input, bytes[:]);
+        if count < 0 { FileError(state, "error reading ", src); return }
+        if count == 0 { return }
+        offset: s64;
+        while offset < count {
+            entry := Fs.Decode(bytes[offset:count]);
+            if entry.size == 0 { Warn(state, src, ": invalid directory entry"); return }
+            offset += entry.size;
+            // Union directories can return the same name from multiple branches.
+            duplicate := false;
+            for * names { if TextView(it) == entry.name { duplicate = true; break } }
+            if duplicate { continue }
+            if !VecPush(names, TextCopy(entry.name)) ||
+               !Join(src, entry.name, *source_path) || !Join(dst, entry.name, *target_path) {
+                Warn(state, "cannot allocate directory paths");
+                return;
+            }
+            source := TextView(source_path);
+            target := TextView(target_path);
+            if (entry.mode & Fs.Directory) == 0 { CopyFile(state, source, target) }
+            else if DirectorySeen(state, entry.identity) { Warn(state, source, ": directory loop found") }
+            else { CopyDirectory(state, source, target, entry) }
+        }
+    }
+}
+
+CopyDirectory :: (state: *State, src: string, dst: string, source: Fs.Info) {
+    metadata: [Fs.BufferSize]u8;
+    if Fs.PathInfo(dst, metadata[:]).size != 0 {
+        Warn(state, "cannot copy ", src, " onto another directory");
+        return;
+    }
+    if Contains(source.identity, dst) {
+        Warn(state, "cannot copy ", src, " into itself");
+        return;
+    }
+    output := Io.CreateFile(dst, 0, cast(s32)(source.mode | Fs.Directory | 0x1ff));
+    if output < 0 { FileError(state, "cannot make directory ", dst); return }
+    input := Io.OpenFile(src, 0);
+    if input >= 0 {
+        CopyEntries(state, src, dst, input);
+        unused Io.CloseFile(input);
+    }
+    opt := state.options;
+    if !Fs.Change(output, source, true, opt.exact, opt.owner, opt.group) { FileError(state, "can't wstat ", dst) }
+    unused Io.CloseFile(output);
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    first: s32;
+    state: State;
+    while first < argc {
+        option := Args.Operand(first);
+        if option.count < 2 || option[0] != 45 { break }
+        first += 1;
+        if option == "--" { break }
+        for index: 1..option.count-1 {
+            byte := option[index];
+            if byte == 114 { state.options.recursive = true }
+            else if byte == 103 { state.options.group = true }
+            else if byte == 117 { state.options.owner = true; state.options.group = true }
+            else if byte == 120 { state.options.exact = true }
+            else { return Cli.Usage(Usage) }
+        }
+    }
+    if argc - first < 2 { return Cli.Usage(Usage) }
+    dst := Args.Operand(argc - 1);
+    metadata: [Fs.BufferSize]u8;
+    target := Fs.PathInfo(dst, metadata[:]);
+    to_dir := target.size != 0 && (target.mode & Fs.Directory) != 0;
+    if argc - first > 2 && !to_dir { Warn(*state, dst, "  not a directory") }
+    else if state.options.recursive && target.size != 0 && !to_dir {
+        Warn(*state, dst, ": destination not a directory");
+    } else {
+        info: [Fs.BufferSize]u8;
+        path: Text;
+        for index: first..argc-2 {
+            src := Args.Operand(cast(s32)index);
+            source: Fs.Info;
+            if state.options.recursive {
+                source = Fs.PathInfo(src, info[:]);
+                if source.size == 0 { FileError(*state, "can't stat ", src); continue }
+                if to_dir && Fs.SameFile(source.identity, target.identity) {
+                    Warn(*state, "cannot copy ", src, " into itself");
+                    continue;
+                }
+            }
+            inside := to_dir || (state.options.recursive && (source.mode & Fs.Directory) == 0);
+            if inside {
+                if !Join(dst, Basename(src), *path) {
+                    Warn(*state, "cannot allocate destination path");
+                    continue;
+                }
+            }
+            dest := ifx inside then TextView(path) else dst;
+            if state.options.recursive && (source.mode & Fs.Directory) != 0 { CopyDirectory(*state, src, dest, source) }
+            else { CopyFile(*state, src, dest) }
+        }
+    }
+    if !state.failed { return 0 }
+    unused Args.SetFailure("error");
+    return 1;
+}

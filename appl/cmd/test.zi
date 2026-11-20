@@ -1,0 +1,215 @@
+// Predicates and evaluation order follow the guest's Limbo test command.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Fs :: #import "taijios_stat";
+
+Expression :: struct { next: s32; count: s32; bad: bool; }
+
+Error :: (expression: *Expression, message: string, argument: string = "") {
+    if expression.bad { return }
+    expression.bad = true;
+    unused Cli.WriteAll(2, "test: bad syntax: ");
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, argument);
+    unused Cli.WriteAll(2, "\n");
+}
+
+Take :: (expression: *Expression, word: string) -> bool {
+    if expression.next >= expression.count || Args.Operand(expression.next) != word { return false }
+    expression.next += 1;
+    return true;
+}
+
+Operand :: (expression: *Expression, required: bool = true) -> string {
+    if expression.bad { return "" }
+    if expression.next < expression.count {
+        word := Args.Operand(expression.next);
+        expression.next += 1;
+        return word;
+    }
+    if required { Error(expression, "argument expected") }
+    return "";
+}
+
+Digits :: (word: string) -> bool {
+    if word.count == 0 { return false }
+    for i: 0..word.count-1 { if word[i] < 48 || word[i] > 57 { return false } }
+    return true;
+}
+
+// Dis's int conversion parses decimal and saturates at signed 32-bit bounds.
+Integer :: (word: string) -> s32 {
+    value: s64;
+    for i: 0..word.count-1 {
+        value = 10*value + cast(s64)(word[i] - 48);
+        if value > 2147483647 { return 2147483647 }
+    }
+    return cast(s32)value;
+}
+
+IsConsole :: (fd: s32) -> bool {
+    path := Io.FdPath(fd);
+    suffix := "/dev/cons";
+    return path == "#c/cons" || (path.count >= suffix.count && path[path.count-suffix.count:] == suffix);
+}
+
+Now :: () -> s32 {
+    fd := Io.OpenFile("/dev/time", 0);
+    if fd < 0 { return 0 }
+    bytes: [128]u8;
+    count := Io.ReadBytes(fd, bytes[:]);
+    unused Io.CloseFile(fd);
+    if count <= 0 { return 0 }
+    start: s64;
+    while start < count && bytes[start] <= 32 { start += 1 }
+    negative := start < count && bytes[start] == 45;
+    if start < count && (negative || bytes[start] == 43) { start += 1 }
+    value: s64;
+    while start < count && bytes[start] >= 48 && bytes[start] <= 57 {
+        digit := cast(s64)(bytes[start] - 48);
+        if value > (9223372036854775807 - digit)/10 { return 0 }
+        value = 10*value + digit;
+        start += 1;
+    }
+    seconds := cast(s32)(value / 1000000);
+    return ifx negative then -seconds else seconds;
+}
+
+Age :: (expression: *Expression, timestamp: s32, word: string) -> bool {
+    duration: s32;
+    next: s64;
+    while next < word.count {
+        start := next;
+        while next < word.count && word[next] >= 48 && word[next] <= 57 { next += 1 }
+        if next == start { Error(expression, "bad time syntax, ", word); return false }
+        amount := Integer(word[start:next]);
+        if next == word.count { duration = amount; break }
+        unit := word[next];
+        next += 1;
+        if unit == 121 { duration += amount*31104000 }
+        else if unit == 77 { duration += amount*2592000 }
+        else if unit == 100 { duration += amount*86400 }
+        else if unit == 104 { duration += amount*3600 }
+        else if unit == 109 { duration += amount*60 }
+        else if unit == 115 { duration += amount }
+        else { Error(expression, "bad time syntax, ", word); return false }
+    }
+    return timestamp + duration < Now();
+}
+
+FileMode :: (operator: string, path: string) -> bool {
+    if operator == "-r" || operator == "-w" || operator == "-x" {
+        fd := Io.OpenFile(path, ifx operator == "-w" then 1 else 0);
+        if fd < 0 { return false }
+        allowed := true;
+        if operator == "-x" {
+            bytes: [Fs.BufferSize]u8;
+            info := Fs.DescriptorInfo(fd, bytes[:]);
+            allowed = info.size != 0 && (info.mode & 0x49) != 0;
+        }
+        unused Io.CloseFile(fd);
+        return allowed;
+    }
+    bytes: [Fs.BufferSize]u8;
+    info := Fs.PathInfo(path, bytes[:]);
+    if info.size == 0 { return false }
+    if operator == "-e" { return true }
+    if operator == "-s" { return info.length > 0 }
+    if operator == "-f" { return (info.mode & Fs.Directory) == 0 }
+    if operator == "-d" { return (info.mode & Fs.Directory) != 0 }
+    if operator == "-A" { return (info.mode & Fs.AppendOnly) != 0 }
+    if operator == "-L" { return (info.mode & Fs.Exclusive) != 0 }
+    return (info.mode & Fs.Temporary) != 0;
+}
+
+Compare :: (expression: *Expression, left: string) -> bool {
+    op := Operand(expression, false);
+    if op.count == 0 { return left.count != 0 }
+    if op == "=" { return Operand(expression) == left }
+    if op == "!=" { return Operand(expression) != left }
+    if op == "-older" || op == "-ot" || op == "-nt" {
+        right := Operand(expression);
+        if expression.bad { return false }
+        bytes: [Fs.BufferSize]u8;
+        a := Fs.PathInfo(left, bytes[:]);
+        if a.size == 0 { return false }
+        if op == "-older" { return Age(expression, a.modified, right) }
+        b := Fs.PathInfo(right, bytes[:]);
+        if b.size == 0 { return false }
+        return ifx op == "-ot" then a.modified < b.modified else a.modified > b.modified;
+    }
+    if !Digits(left) { return left.count != 0 }
+    if expression.next < expression.count {
+        right := Args.Operand(expression.next);
+        if Digits(right) {
+            expression.next += 1;
+            a := Integer(left);
+            b := Integer(right);
+            if op == "-eq" { return a == b }
+            if op == "-ne" { return a != b }
+            if op == "-gt" { return a > b }
+            if op == "-lt" { return a < b }
+            if op == "-ge" { return a >= b }
+            if op == "-le" { return a <= b }
+        }
+    }
+    Error(expression, "unknown operator ", op);
+    return false;
+}
+
+Primary :: (expression: *Expression) -> bool {
+    word := Operand(expression);
+    if expression.bad { return false }
+    if word == "(" {
+        value := Either(expression);
+        if Operand(expression) != ")" { Error(expression, ") expected") }
+        return value;
+    }
+    if word == "-n" { return Operand(expression).count != 0 }
+    if word == "-z" { return Operand(expression).count == 0 }
+    if word == "-t" {
+        if expression.next < expression.count {
+            number := Args.Operand(expression.next);
+            if Digits(number) {
+                expression.next += 1;
+                return IsConsole(Integer(number));
+            }
+        }
+        return IsConsole(1);
+    }
+    if word == "-A" || word == "-L" || word == "-T" || word == "-f" || word == "-d" ||
+       word == "-r" || word == "-w" || word == "-x" || word == "-e" || word == "-s" {
+        path := Operand(expression);
+        return !expression.bad && FileMode(word, path);
+    }
+    return Compare(expression, word);
+}
+
+Negate :: (expression: *Expression) -> bool {
+    invert := false;
+    while Take(expression, "!") { invert = !invert }
+    return Primary(expression) != invert;
+}
+
+Both :: (expression: *Expression) -> bool {
+    left := Negate(expression);
+    if !expression.bad && Take(expression, "-a") { return left && Both(expression) }
+    return left;
+}
+
+Either :: (expression: *Expression) -> bool {
+    left := Both(expression);
+    if !expression.bad && Take(expression, "-o") { return left || Either(expression) }
+    return left;
+}
+
+main :: () -> s32 {
+    expression := Expression.{count = Args.OperandCount()};
+    if expression.count == 0 { unused Args.SetFailure("usage"); return 1 }
+    value := Either(*expression);
+    if expression.bad { unused Args.SetFailure("bad syntax"); return 1 }
+    if value { return 0 }
+    unused Args.SetFailure("false");
+    return 1;
+}

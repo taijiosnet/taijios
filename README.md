@@ -83,10 +83,11 @@ From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
     ziran bundle --project --bind-host "${kryon_id}_pixmap" \
         --entry stopwatch:main -o ../../dis/wm/stopwatch.zx stopwatch.zi
 )
-Linux/386/bin/emu -p main=256M -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
+Linux/386/bin/emu -p main=64M -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
 ```
 
-`wm/stopwatch` without `-zx` runs the original Dis app. To launch any compatible
+The hosted ZX Stopwatch uses `-p main=64M` to give the engine room to
+load and run the bundle. `wm/stopwatch` without `-zx` runs the original Dis app. To launch any compatible
 bundle in a TaijiOS window manager context, use `zxrun -w /path/to/app.zx`.
 
 The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
@@ -182,6 +183,10 @@ ZX commands use two typed capabilities declared in `appl/cmd`.
   are start, current, and end. `Stat(path, metadata)` writes twelve bytes
   on success and returns `0`. The first eight bytes are the signed file
   length and the next four are the unsigned Inferno mode, both little endian.
+- `StatPacked(path, buffer)` and `FstatPacked(handle, buffer)` return the
+  standard packed Inferno directory record and its byte count. `WstatPacked`
+  applies a packed update using guest permissions. `FdPath(fd)` resolves a
+  descriptor number from the calling guest process, as used by `test -t`.
 
 Test the command against its Dis counterpart with
 `python3 -u build/zx-smoke/run.py Linux/386/bin/emu --cat`.
@@ -214,13 +219,15 @@ can compare the `-c` flag from the current Limbo source.
 python3 build/zx-smoke/run.py Linux/386/bin/emu --streams
 ```
 
-`tee` copies guest stdin to its output files and stdout. `-a` appends and
-`--` ends option parsing. It uses the guest file bindings for create, seek,
-read, and write. Install it and check byte-for-byte parity with Dis using:
+`tee`, `cp`, and `test` are installed as executable ZX commands. `tee`
+fans out guest stdin and supports `-a` and `--`. `cp` supports recursive
+copies and guest owner, group, mode, and timestamp flags. `test` uses guest
+file metadata, descriptor paths, and named shell statuses. The Dis versions
+are available as `/dis/tee.dis`, `/dis/cp.dis`, and `/dis/test.dis`.
 
 ```sh
 (cd appl/cmd && mk install-file-commands-zx)
-python3 -u build/zx-smoke/run.py Linux/386/bin/emu --tee
+python3 -u build/zx-smoke/run.py Linux/386/bin/emu --tee --file-commands
 ```
 
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
@@ -232,7 +239,7 @@ signature without invoking each program.
 | --- | --- | --- |
 | 1 | `echo`, `basename`, `cleanname` (ported) | Argument handling, text output, path-string operations |
 | 2 | `wc`, `uniq`, `tr` (ported) | Guest stdin, stdout, and sequential file access |
-| 3 | `test`, `ls`, `tee`, `cp` | File metadata, directory reads, and file creation |
+| 3 | `test`, `tee`, `cp` (ported), `ls` | File metadata, directory reads, and file creation |
 | 4 | `wm/about`, `wm/clock`, `wm/colors` | Guest surfaces and input, wall-clock time, and display sampling as needed |
 | 5 | `sh`, `wm/wm`, compiler and service commands | Process control, namespaces, window management, and service-specific APIs |
 

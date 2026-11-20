@@ -189,6 +189,111 @@ if '--stock-zx' in sys.argv[2:]:
     assert builtin.stdout == 'load /dis/sh/echo.dis; echo\nbuiltin\n' and not builtin.stderr
     print('Stock ZX: lookup, UTF-8 argv, pipeline, named errors, path precedence and Dis fallback')
 
+if '--file-commands' in sys.argv[2:]:
+    from hashlib import file_digest
+    import os
+    from stat import S_IMODE
+    from tempfile import TemporaryDirectory
+
+    def digest(path):
+        with path.open('rb') as stream:
+            return file_digest(stream, 'sha256').digest()
+
+    resolved = run('whatis cp; whatis test')
+    assert resolved.stdout == '/dis/cp.zx\n/dis/test.zx\n' and not resolved.stderr
+    with TemporaryDirectory(dir=files, prefix='file-commands-') as directory:
+        directory = Path(directory)
+        src = directory / 'src'
+        (src / 'sub').mkdir(parents=True)
+        data = src / 'sub' / 'data'
+        with data.open('wb') as stream:
+            block = bytes(range(256)) * 4096
+            for _ in range(17):
+                stream.write(block)
+            stream.write(b'\0\xff!')
+        data.chmod(0o640)
+        old = 1000000000
+        os.utime(data, (old, old))
+        (src / 'empty').touch()
+        (src / 'executable').write_bytes(b'x')
+        (src / 'executable').chmod(0o755)
+        (src / 'sub').chmod(0o750)
+        (directory / '-café').write_bytes(b'name')
+        os.link(data, directory / 'alias')
+
+        guest = '/' + str(directory.relative_to(root))
+        prefix = f'bind -c {guest} /chan; cd /chan; '
+        copy_cases = (
+            ('src/empty result/empty', ''),
+            ("-- '-café' result/name", ''),
+            ('src/empty src/executable result', ''),
+            ('-rx src result', ''),
+            ('-ux src/sub/data result/data', ''),
+            ('-g src/empty result/group', ''),
+            ('-r src result', 'error'),
+            ('src/empty src/empty', 'error'),
+            ('src/sub/data alias', 'error'),
+            ('src result/no', 'error'),
+            ('missing result/no', 'error'),
+            ('src/empty src/executable nowhere', 'error'),
+            ('-q', 'usage'),
+        )
+        test_cases = (
+            ('', 'usage'), ("-z ''", ''), ("-n ''", 'false'),
+            ("'café' '=' 'café'", ''), ("'café' '!=' 'café'", 'false'),
+            ('010 -eq 10', ''), ('9 -ge 10', 'false'),
+            ('2147483648 -eq 2147483647', ''), ('1 -lt -1', 'bad syntax'),
+            ("'(' -f src/empty -a ! -d src/empty ')'", ''),
+            ('-e missing -a -f', 'false'), ('-d src -o -f', ''),
+            ("'(' -d src", 'bad syntax'), ('-f', 'bad syntax'),
+            ('-f src/sub/data', ''), ('-d src', ''), ('-e missing', 'false'),
+            ('-s src/empty', 'false'), ('-s src/sub/data', ''),
+            ('-r src/sub/data', ''), ('-w src/empty', ''),
+            ('-x src/executable', ''), ('-x src/sub/data', 'false'),
+            ('-A src/empty', 'false'), ('-L src/empty', 'false'), ('-T src/empty', 'false'),
+            ('src/sub/data -ot src/empty', ''), ('src/empty -nt src/sub/data', ''),
+            ('src/sub/data -older 1d', ''), ('src/sub/data -older 1q', 'bad syntax'),
+            ('-t', ''), ('-t 999', 'false'), ('-t 7 >[7=1]', ''),
+        )
+        outputs = {}
+        for suffix in ('dis', 'zx'):
+            (directory / 'result').mkdir()
+            for name, cases in (('cp', copy_cases), ('test', test_cases)):
+                tool = f'/dis/{name}.dis' if suffix == 'dis' else name
+                for arguments, status in cases:
+                    result = run(prefix + f'{tool} {arguments} > output >[2] diagnostic; echo $status')
+                    output = (directory / 'output').read_bytes()
+                    diagnostic = (directory / 'diagnostic').read_bytes()
+                    if name == 'test' and arguments == '-t':
+                        # Standard output is redirected by the test harness.
+                        status = 'false'
+                    assert result.stdout == status + '\n' and not result.stderr, (tool, arguments)
+                    key = name, arguments
+                    if suffix == 'dis':
+                        outputs[key] = output, diagnostic
+                    else:
+                        assert outputs[key] == (output, diagnostic), (tool, arguments, diagnostic)
+            (directory / 'result').rename(directory / suffix)
+
+        def tree(path):
+            entries = {}
+            for entry in path.rglob('*'):
+                info = entry.stat()
+                entries[entry.relative_to(path)] = (
+                    S_IMODE(info.st_mode), info.st_uid, info.st_gid,
+                    None if entry.is_dir() else (info.st_size, digest(entry)))
+            return entries
+
+        legacy, zx = directory / 'dis', directory / 'zx'
+        assert tree(legacy) == tree(zx)
+        assert digest(zx / 'data') == digest(zx / 'src/sub/data') == digest(data)
+        assert (zx / 'empty').stat().st_size == 0 and (zx / 'name').read_bytes() == b'name'
+        for name in ('data', 'src/sub/data'):
+            assert (legacy / name).stat().st_mtime == (zx / name).stat().st_mtime == old
+        assert S_IMODE((zx / 'src/sub').stat().st_mode) == 0o750
+        assert S_IMODE((zx / 'data').stat().st_mode) == 0o640
+    print(f'ZX cp and test matched Dis on {len(copy_cases) + len(test_cases)} file and expression cases')
+
 if '--streams' in sys.argv[2:]:
     lookup = run('whatis wc uniq tr')
     assert lookup.stdout == '/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n' and not lookup.stderr
@@ -325,8 +430,8 @@ def graphics():
             time.sleep(0.05)
         raise AssertionError(description)
 
-    def launch(app, *args):
-        return subprocess.Popen([emu, '-p', 'main=256M', '-r', root, '-g', '800x600',
+    def launch(app, *args, arena='256M'):
+        return subprocess.Popen([emu, '-p', f'main={arena}', '-r', root, '-g', '800x600',
                                  'wm/wm', app, *args], env=env,
                                 start_new_session=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
@@ -567,7 +672,7 @@ def graphics():
             stop(proc)
 
     def stopwatch():
-        proc = launch('wm/stopwatch', '-zx')
+        proc = launch('wm/stopwatch', '-zx', arena='64M')
         status = bytearray()
 
         def returned():

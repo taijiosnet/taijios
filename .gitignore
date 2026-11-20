@@ -34,6 +34,9 @@ y.debug
 /appl/cmd/wc.zx
 /appl/cmd/uniq.zx
 /appl/cmd/tr.zx
+/appl/cmd/tee.zx
+/appl/cmd/cp.zx
+/appl/cmd/test.zx
 /appl/cmd/coffee.zx
 /appl/cmd/logwindow.zx
 /appl/cmd/memory.zx
@@ -45,6 +48,9 @@ y.debug
 /dis/wc.zx
 /dis/uniq.zx
 /dis/tr.zx
+/dis/tee.zx
+/dis/cp.zx
+/dis/test.zx
 /dis/coffee.zx
 /dis/tclsh.zx
 /dis/wm/stopwatch.zx

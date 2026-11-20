@@ -7,6 +7,11 @@ Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 Write :: (handle: s32, data: string) -> s32 #foreign host_api;
 Seek :: (handle: s32, offset: s64, origin: s32) -> s64 #foreign host_api;
 Stat :: (path: string, metadata: []u8) -> s32 #foreign host_api;
+StatPacked :: (path: string, buffer: []u8) -> s32 #foreign host_api;
+FstatPacked :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
+WstatPacked :: (handle: s32, record: string) -> s32 #foreign host_api;
+// Inspect an inherited guest descriptor number without opening or closing it.
+FdPath :: (descriptor: s32) -> string #foreign host_api;
 Close :: (handle: s32) -> s32 #foreign host_api;
 Error :: () -> string #foreign host_api;
 
