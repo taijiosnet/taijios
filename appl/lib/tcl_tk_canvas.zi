@@ -1,4 +1,4 @@
-// Integer-pixel text and rectangle items, following Inferno libtk/canvs.c.
+// Canvas item geometry and commands, following Inferno libtk/canvs.c.
 #import "std/vec"
 #import "std/number_text"
 using T :: #import "tcl_types"
@@ -11,10 +11,13 @@ RED :: 0xff0000;
 CELL_WIDTH :: 12;
 TEXT_HEIGHT :: 14;
 MAX_CELLS :: 512;
+FRACTION :: 10000;
 
 Anchor :: enum { Center; North; Northeast; East; Southeast; South; Southwest; West; Northwest; }
-Kind :: enum { Rectangle; Label; }
+Kind :: enum { Rectangle; Label; Line; Oval; }
 Coordinates :: struct { x0: s32; y0: s32; x1: s32; y1: s32; }
+PathPoint :: struct { x: s64; y: s64; }
+FixedCoordinates :: struct { x0: s64; y0: s64; x1: s64; y1: s64; }
 Item :: struct {
     kind: Kind;
     coordinates: Coordinates;
@@ -22,10 +25,14 @@ Item :: struct {
     fill: s32;
     outline: s32;
     text: Text;
+    precise: FixedCoordinates;
+    path: Vec(PathPoint);
+    stroke: s64;
+    marker_radius: s64;
 }
-State :: struct { width: s32; height: s32; items: Vec(Item); }
+State :: struct { width: s32; height: s32; background: s32; border: s32; sunken: bool; items: Vec(Item); }
 
-Default :: () -> State { return .{width = 360, height = 270} }
+Default :: () -> State { return .{width = 360, height = 270, background = NONE} }
 
 Minimum :: (a: s32, b: s32) -> s32 { return ifx a < b then a else b }
 Maximum :: (a: s32, b: s32) -> s32 { return ifx a > b then a else b }
@@ -37,9 +44,12 @@ Rectangle :: (coordinates: Coordinates) -> Coordinates {
 
 Bounds :: (item: *Item) -> Coordinates {
     coordinates := item.coordinates;
-    if item.kind == .Rectangle {
+    if item.kind != .Label {
         rect := Rectangle(coordinates);
-        return .{rect.x0-2, rect.y0-2, rect.x1+2, rect.y1+2};
+        margin: s32 = 2;
+        if item.kind == .Line { margin = Pixel(item.stroke) }
+        if item.kind == .Oval { margin = 2*Pixel(item.stroke) }
+        return .{rect.x0-margin, rect.y0-margin, rect.x1+margin, rect.y1+margin};
     }
     width := UTF.Count(TextView(item.text), MAX_CELLS) * CELL_WIDTH;
     x := coordinates.x0;
@@ -57,15 +67,37 @@ Add :: (state: *State, kind: Kind, coordinates: Coordinates, fill: s32, outline:
     if !VecResize(state.items, index+1) { return 0 }
     item := *state.items[index];
     item.kind = kind;
-    item.coordinates = coordinates;
+    SetInteger(item, coordinates);
     item.fill = fill;
     item.outline = outline;
     item.anchor = anchor;
+    item.stroke = FRACTION;
     return index+1;
 }
 
 AddRectangle :: (state: *State, coordinates: Coordinates, fill: s32, outline: s32) -> s64 {
     return Add(state, .Rectangle, coordinates, fill, outline, .Center);
+}
+
+AddPolyline :: (state: *State, count: s64, bounds: Coordinates, fill: s32, stroke: s64, marker_radius: s64 = 0) -> *Item {
+    if count < 1 || count > 4096 { return null }
+    id := Add(state, .Line, bounds, fill, NONE, .Center);
+    item := Find(state, id);
+    if item == null { return null }
+    if !VecResizeBounded(item.path, count, count) {
+        unused VecResize(state.items, id-1);
+        return null;
+    }
+    item.stroke = stroke;
+    item.marker_radius = marker_radius;
+    return item;
+}
+
+IncludePoint :: (bounds: Coordinates, x: s64, y: s64, first: bool) -> Coordinates {
+    px := Pixel(x);
+    py := Pixel(y);
+    if first { return .{px, py, px, py} }
+    return .{Minimum(bounds.x0, px), Minimum(bounds.y0, py), Maximum(bounds.x1, px), Maximum(bounds.y1, py)};
 }
 
 Find :: (state: *State, id: s64) -> *Item {
@@ -76,7 +108,7 @@ Find :: (state: *State, id: s64) -> *Item {
 SetCoordinates :: (state: *State, id: s64, coordinates: Coordinates) -> bool {
     item := Find(state, id);
     if item == null { return false }
-    item.coordinates = coordinates;
+    SetInteger(item, coordinates);
     return true;
 }
 
@@ -106,32 +138,107 @@ Error :: (result: *T.Result, message: string) {
 Configure :: (state: *State, args: []Text, result: *T.Result) -> bool {
     width := state.width;
     height := state.height;
+    background := state.background;
+    border := state.border;
+    sunken := state.sunken;
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
-        value, ok := T.ParseInteger(TextView(args[2*i+1]));
-        if !ok || value < 0 || value > 32767 { Error(result, "bad canvas size"); return false }
-        if option == "-width" { width = cast(s32)value }
-        else if option == "-height" { height = cast(s32)value }
-        else { Error(result, "unsupported canvas option"); return false }
+        word := TextView(args[2*i+1]);
+        if option == "-background" || option == "-bg" {
+            color, ok := ParseColor(word);
+            if !ok { Error(result, "bad canvas background"); return false }
+            background = color;
+        } else if option == "-relief" && (word == "flat" || word == "sunken") {
+            sunken = word == "sunken";
+        } else {
+            value, ok := T.ParseInteger(word);
+            if !ok || value < 0 || value > 32767 { Error(result, "bad canvas size or relief"); return false }
+            if option == "-width" { width = cast(s32)value }
+            else if option == "-height" { height = cast(s32)value }
+            else if option == "-borderwidth" || option == "-bd" { border = cast(s32)value }
+            else { Error(result, "unsupported canvas option"); return false }
+        }
     }
     state.width = width;
     state.height = height;
+    state.background = background;
+    state.border = border;
+    state.sunken = sunken;
     return true;
 }
 
-ReadCoordinate :: (word: string) -> (pixel: s32, valid: bool) {
-    value, ok := T.ParseInteger(word);
-    return cast(s32)value, ok && value >= -1000000 && value <= 1000000;
+Pixel :: (number: s64) -> s32 {
+    offset := ifx number >= 0 then FRACTION/2 else -FRACTION/2;
+    return cast(s32)((number+offset)/FRACTION);
 }
 
-ReadCoordinates :: (args: []Text, count: s64) -> (coordinates: Coordinates, valid: bool) {
-    if args.count < count { return Coordinates.{}, false }
-    x0, x0ok := ReadCoordinate(TextView(args[0]));
-    y0, y0ok := ReadCoordinate(TextView(args[1]));
-    if count == 2 { return Coordinates.{x0, y0, 0, 0}, x0ok && y0ok }
-    x1, x1ok := ReadCoordinate(TextView(args[2]));
-    y1, y1ok := ReadCoordinate(TextView(args[3]));
-    return Coordinates.{x0, y0, x1, y1}, x0ok && y0ok && x1ok && y1ok;
+SetInteger :: (item: *Item, coordinates: Coordinates) {
+    item.coordinates = coordinates;
+    item.precise = .{cast(s64)coordinates.x0*FRACTION, cast(s64)coordinates.y0*FRACTION,
+                     cast(s64)coordinates.x1*FRACTION, cast(s64)coordinates.y1*FRACTION};
+}
+
+ReadCoordinate :: (word: string) -> (value: s64, valid: bool) {
+    if word.count == 0 { return 0, false }
+    negative := word[0] == 45;
+    at: s64 = ifx negative || word[0] == 43 then 1 else 0;
+    whole: s64;
+    digits: s64;
+    while at < word.count && word[at] >= 48 && word[at] <= 57 {
+        whole = whole*10 + cast(s64)(word[at]-48);
+        if whole > 1000000 { return 0, false }
+        at += 1;
+        digits += 1;
+    }
+    fraction: s64;
+    if at < word.count && word[at] == 46 {
+        at += 1;
+        place: s64 = FRACTION/10;
+        while at < word.count && word[at] >= 48 && word[at] <= 57 {
+            fraction += place*cast(s64)(word[at]-48);
+            place /= 10;
+            at += 1;
+            digits += 1;
+        }
+    }
+    value := whole*FRACTION+fraction;
+    if negative { value = -value }
+    return value, digits > 0 && at == word.count;
+}
+
+SetFixed :: (item: *Item, args: []Text, count: s64) -> bool {
+    if args.count < count { return false }
+    x0, x_ok := ReadCoordinate(TextView(args[0]));
+    y0, y_ok := ReadCoordinate(TextView(args[1]));
+    if !x_ok || !y_ok { return false }
+    x1: s64;
+    y1: s64;
+    if count == 4 {
+        x1, x_ok = ReadCoordinate(TextView(args[2]));
+        y1, y_ok = ReadCoordinate(TextView(args[3]));
+        if !x_ok || !y_ok { return false }
+    }
+    item.precise = .{x0, y0, x1, y1};
+    item.coordinates = .{Pixel(x0), Pixel(y0), Pixel(x1), Pixel(y1)};
+    return true;
+}
+
+SetLine :: (item: *Item, args: []Text, allow_options: bool) -> (consumed: s64, ok: bool) {
+    points: Vec(PathPoint);
+    bounds: Coordinates;
+    at: s64;
+    while at+1 < args.count {
+        x, x_ok := ReadCoordinate(TextView(args[at]));
+        if !x_ok && allow_options { break }
+        y, y_ok := ReadCoordinate(TextView(args[at+1]));
+        if !x_ok || !y_ok || points.count >= 4096 || !VecPush(points, PathPoint.{x, y}) { return 0, false }
+        bounds = IncludePoint(bounds, x, y, at == 0);
+        at += 2;
+    }
+    if points.count < 2 || (!allow_options && at != args.count) { return 0, false }
+    VecSwap(item.path, points);
+    item.coordinates = bounds;
+    return at, true;
 }
 
 ParseAnchor :: (word: string) -> (anchor: Anchor, valid: bool) {
@@ -173,11 +280,12 @@ UpdateItem :: (state: *State, id: s64, args: []Text) -> bool {
     fill := item.fill;
     outline := item.outline;
     anchor := item.anchor;
+    stroke := item.stroke;
     text_index: s64 = -1;
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
         value := TextView(args[2*i+1]);
-        if option == "-fill" || (option == "-outline" && item.kind == .Rectangle) {
+        if option == "-fill" || (option == "-outline" && (item.kind == .Rectangle || item.kind == .Oval)) {
             color, ok := ParseColor(value);
             if !ok { return false }
             if option == "-fill" { fill = color } else { outline = color }
@@ -186,25 +294,42 @@ UpdateItem :: (state: *State, id: s64, args: []Text) -> bool {
             if !ok { return false }
             anchor = parsed;
         } else if option == "-text" && item.kind == .Label { text_index = 2*i+1 }
+        else if option == "-width" && (item.kind == .Line || item.kind == .Oval) {
+            number, ok := ReadCoordinate(value);
+            if !ok || number < 0 || number > 32767*FRACTION { return false }
+            stroke = number;
+        }
         else { return false }
     }
     if text_index >= 0 && !SetText(state, id, TextView(args[text_index])) { return false }
     item.fill = fill;
     item.outline = outline;
     item.anchor = anchor;
+    item.stroke = stroke;
     return true;
 }
 
 Create :: (state: *State, args: []Text, result: *T.Result) {
-    kind := TextView(args[0]);
-    if kind != "rectangle" && kind != "text" { Error(result, "unsupported canvas item type"); return }
-    count: s64 = ifx kind == "rectangle" then 4 else 2;
-    coordinates, ok := ReadCoordinates(args[1:], count);
-    if !ok { Error(result, "bad canvas coordinates"); return }
-    id: s64;
-    if kind == "rectangle" { id = AddRectangle(state, coordinates, NONE, BLACK) }
-    else { id = AddText(state, coordinates.x0, coordinates.y0, .Center, "", BLACK) }
+    name := TextView(args[0]);
+    kind: Kind;
+    if name == "rectangle" { kind = .Rectangle }
+    else if name == "text" { kind = .Label }
+    else if name == "line" { kind = .Line }
+    else if name == "oval" { kind = .Oval }
+    else { Error(result, "unsupported canvas item type"); return }
+    foreground := kind == .Label || kind == .Line;
+    id := Add(state, kind, .{}, ifx foreground then BLACK else NONE, ifx foreground then NONE else BLACK, .Center);
     if id < 1 { Error(result, "could not allocate canvas item"); return }
+    item := Find(state, id);
+    count: s64 = ifx kind == .Label then 2 else 4;
+    valid: bool;
+    if kind == .Line { count, valid = SetLine(item, args[1:], true) }
+    else { valid = SetFixed(item, args[1:], count) }
+    if !valid {
+        unused VecResize(state.items, id-1);
+        Error(result, "bad canvas coordinates");
+        return;
+    }
     if !UpdateItem(state, id, args[count+1:]) {
         unused VecResize(state.items, id-1);
         Error(result, "unsupported canvas item option or value");
@@ -228,6 +353,23 @@ AppendCoordinates :: (result: *T.Result, coordinates: Coordinates, count: s64) {
     }
 }
 
+AppendFixed :: (result: *T.Result, value: s64) {
+    if value < 0 && value > -FRACTION {
+        if result.value.bytes.count != 0 { unused BuilderAppend(result.value.bytes, " ") }
+        unused BuilderAppend(result.value.bytes, "-0");
+    } else { Append(result, value/FRACTION) }
+    fraction := value%FRACTION;
+    if fraction < 0 { fraction = -fraction }
+    if fraction == 0 { return }
+    unused BuilderAppend(result.value.bytes, ".");
+    place: s64 = FRACTION/10;
+    while fraction > 0 {
+        unused VecPush(result.value.bytes, cast(u8)(48+fraction/place));
+        fraction %= place;
+        place /= 10;
+    }
+}
+
 Command :: (state: *State, args: []Text, result: *T.Result) {
     subcommand := TextView(args[0]);
     if subcommand == "create" && args.count >= 2 { Create(state, args[1:], result); return }
@@ -235,6 +377,8 @@ Command :: (state: *State, args: []Text, result: *T.Result) {
         option := TextView(args[1]);
         if option == "-width" { Append(result, state.width); return }
         if option == "-height" { Append(result, state.height); return }
+        if option == "-bd" || option == "-borderwidth" { Append(result, state.border); return }
+        if option == "-relief" { unused BuilderAppend(result.value.bytes, ifx state.sunken then "sunken" else "flat"); return }
     }
     if args.count >= 2 && (subcommand == "bbox" || subcommand == "coords" ||
                           subcommand == "itemconfigure" || subcommand == "itemcget") {
@@ -243,15 +387,33 @@ Command :: (state: *State, args: []Text, result: *T.Result) {
         if !ok || item == null { Error(result, "bad canvas item"); return }
         if subcommand == "bbox" && args.count == 2 { AppendCoordinates(result, Bounds(item), 4); return }
         if subcommand == "coords" {
-            count: s64 = ifx item.kind == .Rectangle then 4 else 2;
-            if args.count == 2 { AppendCoordinates(result, item.coordinates, count); return }
-            coordinates, valid := ReadCoordinates(args[2:], count);
-            if !valid || args.count != count+2 { Error(result, "bad canvas coordinates"); return }
-            unused SetCoordinates(state, id, coordinates);
+            count: s64 = ifx item.kind == .Label then 2 else 4;
+            if args.count == 2 {
+                if item.kind == .Line {
+                    for * item.path { AppendFixed(result, it.x); AppendFixed(result, it.y) }
+                } else {
+                    AppendFixed(result, item.precise.x0);
+                    AppendFixed(result, item.precise.y0);
+                    if count == 4 {
+                        AppendFixed(result, item.precise.x1);
+                        AppendFixed(result, item.precise.y1);
+                    }
+                }
+                return;
+            }
+            valid: bool;
+            if item.kind == .Line { _, valid = SetLine(item, args[2:], false) }
+            else { valid = args.count == count+2 && SetFixed(item, args[2:], count) }
+            if !valid { Error(result, "bad canvas coordinates") }
             return;
         }
         if subcommand == "itemconfigure" && args.count >= 4 {
             if !UpdateItem(state, id, args[2:]) { Error(result, "unsupported canvas item option or value") }
+            return;
+        }
+        if subcommand == "itemcget" && args.count == 3 && TextView(args[2]) == "-width" &&
+           (item.kind == .Line || item.kind == .Oval) {
+            AppendFixed(result, item.stroke);
             return;
         }
         if subcommand == "itemcget" && args.count == 3 && item.kind == .Label && TextView(args[2]) == "-text" {

@@ -45,6 +45,7 @@ y.debug
 /appl/cmd/tclsh.zx
 /appl/cmd/tcltk.zx
 /appl/cmd/linbench.zx
+/appl/cmd/graph0.zx
 /dis/cat.zx
 /dis/echo.zx
 /dis/basename.zx
@@ -61,6 +62,7 @@ y.debug
 /dis/tclsh.zx
 /dis/tcltk.zx
 /dis/math/linbench.zx
+/dis/math/graph0.zx
 /dis/wm/stopwatch.zx
 /dis/wm/logwindow.zx
 /dis/wm/memory.zx

@@ -389,7 +389,8 @@ def coffee_window(env, run, *, native):
                 _, top, right, bottom = slider
                 middle = (top+bottom)//2
                 before = capture().crop(slider)
-                pointer(thumb, middle, "mousedown", "1")
+                # Let the guest process the press at the thumb before sending motion.
+                pointer(thumb, middle, "mousedown", "1", "sleep", "0.30")
                 pointer(right-5, middle)
                 until(lambda: capture().getpixel((right-12, middle)) == (188, 213, 231),
                       "slider thumb did not follow the pointer before release")

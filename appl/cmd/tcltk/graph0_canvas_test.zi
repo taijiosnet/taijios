@@ -1,0 +1,45 @@
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using Graph :: #import "graph0_model"
+using Fixture :: #import "graph0_canvas_input"
+
+main :: () -> s32 {
+    decimal, decimal_ok := Graph.ParseValue("-.125");
+    if !decimal_ok || decimal != -0.125 { return 1 }
+    scientific, scientific_ok := Graph.ParseValue("+1.25e1");
+    if !scientific_ok || scientific != 12.5 { return 1 }
+    _, malformed_ok := Graph.ParseValue("1.2.3");
+    if malformed_ok { return 1 }
+    points: Graph.Points;
+    if Graph.Read("0 0\n+1.0 2e0\n2 -1\n3 3\n4 1\n", *points) != .Ok { return 1 }
+    if Graph.Count(*points) != 5 { return 1 }
+    x, y := Graph.Axes(*points);
+    if Graph.Abs(Graph.Pixel(x, 0.0)-160.8495) > 0.001 { return 1 }
+    if Graph.Abs(Graph.Value(y, Graph.Pixel(y, 2.0))-2.0) > 0.000001 { return 1 }
+    tick := Graph.TickRange(x);
+    if tick.first != 0 || tick.last != 4 || tick.step != 1 { return 1 }
+    output: Text;
+    Graph.AppendNumber(*output, Graph.Value(x, 161.0), 3);
+    unused BuilderAppend(output.bytes, " ");
+    Graph.AppendNumber(*output, -1.234, 3);
+    if TextView(output) != "0.00188 -1.23" { return 1 }
+
+    interpreter: Tcl.Interpreter;
+    if !Tk.Attach(*interpreter) { return 1 }
+    start: s64;
+    for at: 0..Fixture.Commands.count-1 {
+        if Fixture.Commands[at] != 10 { continue }
+        result := Tcl.Eval(*interpreter, Fixture.Commands[start:at]);
+        if result.code != .OK { print("%\n", TextView(result.value)); return 1 }
+        if result.value.bytes.count > 0 { print("%\n", TextView(result.value)) }
+        start = at+1;
+    }
+    binding := Tcl.Eval(*interpreter, "pack .c -padx 0 -pady 0; bind .c <Button-1> {list %x %y %%}");
+    if binding.code != .OK { return 1 }
+    Tk.Layout(160, 140);
+    box := Tk.widgets[Tk.Find(".c")].box;
+    press: Text = Tk.PointerPress(box.x+9, box.y+14);
+    if TextView(press) != "list 7 12 %" { return 1 }
+    return 0;
+}

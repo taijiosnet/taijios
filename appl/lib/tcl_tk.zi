@@ -238,6 +238,9 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         saved.canvas.width = widget.canvas.width;
         saved.canvas.height = widget.canvas.height;
+        saved.canvas.background = widget.canvas.background;
+        saved.canvas.border = widget.canvas.border;
+        saved.canvas.sunken = widget.canvas.sunken;
     }
     #if #defined(TAIJI_TK_LISTBOX) {
         saved.listbox.width = widget.listbox.width;
@@ -433,11 +436,15 @@ Focus :: (_: s64, args: []Text, result: *Result) {
 }
 
 Bind :: (_: s64, args: []Text, result: *Result) {
-    if args.count != 3 { SetError(result, "expected bind entry <Return> script"); return }
+    if args.count != 3 { SetError(result, "expected bind widget event script"); return }
     index := Find(TextView(args[0]));
     event := TextView(args[1]);
-    if closed || index < 0 || widgets[index].kind != ENTRY || (event != "<Return>" && event != "<Key-\n>") {
-        SetError(result, "only the entry Return binding is supported"); return;
+    if closed || index < 0 { SetError(result, "bad binding widget"); return }
+    kind := widgets[index].kind;
+    entry := kind == ENTRY && (event == "<Return>" || event == "<Key-\n>");
+    canvas := kind == CANVAS && (event == "<ButtonPress-1>" || event == "<Button-1>");
+    if !entry && !canvas {
+        SetError(result, "unsupported widget binding"); return;
     }
     command: Text = TextCopy(TextView(args[2]));
     VecSwap(widgets[index].command.bytes, command.bytes);
@@ -795,7 +802,10 @@ Measure :: (parent: s64) -> Box {
             if widget.kind == CHECKBUTTON { requested.w += 10 }
         }
         #if !#defined(TAIJI_TK_NO_CANVAS) {
-            if widget.kind == CANVAS { requested = .{w = widget.canvas.width, h = widget.canvas.height} }
+            if widget.kind == CANVAS {
+                border := 2*widget.canvas.border;
+                requested = .{w = widget.canvas.width+border, h = widget.canvas.height+border};
+            }
         }
         #if #defined(TAIJI_TK_LISTBOX) {
             if widget.kind == LISTBOX { requested = .{w = widget.listbox.width, h = widget.listbox.height} }
@@ -955,8 +965,11 @@ PointerUp :: (x: s32, y: s32) -> Text {
     local_y := y-widget.box.y;
     if BoundRange(widget, local_x-View.INSET, local_y-View.INSET) != range { return .{} }
     tag := widget.view.ranges[range].tag;
+    return PointerScript(TextView(widget.view.tags[tag].release), local_x, local_y);
+}
+
+PointerScript :: (script: string, local_x: s32, local_y: s32) -> Text {
     output: Text;
-    script := TextView(widget.view.tags[tag].release);
     digits: [24]u8;
     i: s64;
     while i < script.count {
@@ -1066,6 +1079,14 @@ ScaleTrack :: (widget: *Widget) -> Box {
 
 PointerPress :: (x: s32, y: s32) -> Text {
     PointerDown(x, y);
+    #if !#defined(TAIJI_TK_NO_CANVAS) {
+        canvas := Over(x, y, CANVAS);
+        if canvas >= 0 {
+            widget := *widgets[canvas];
+            border := widget.canvas.border;
+            return PointerScript(TextView(widget.command), x-widget.box.x-border, y-widget.box.y-border);
+        }
+    }
     #if #defined(TAIJI_TK_LISTBOX) {
         listbox := Over(x, y, LISTBOX);
         if listbox >= 0 {

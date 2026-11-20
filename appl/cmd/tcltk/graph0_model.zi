@@ -1,0 +1,199 @@
+// Plot ranges and tick selection adapted from Inferno appl/math/gr.b. See NOTICE.
+#import "std/vec"
+#import "std/number_text"
+using Float :: #import "std/float_text"
+using Math :: #import "std/math"
+
+// Bound the amount of plot work the stock 32 MiB guest can complete.
+MAX_POINTS :: 3072;
+Point :: struct { x: float64; y: float64; }
+Points :: struct { data: Vec(Point); low: Point; high: Point; }
+Axis :: struct { low: float64; high: float64; scale: float64; edge: float64; }
+Ticks :: struct { first: s64; last: s64; step: s64; unit: float64; factor: float64; exponent: s64; }
+ReadResult :: enum { Ok; Empty; Unpaired; Invalid; Full; }
+
+Space :: (byte: u8) -> bool { return byte == 32 || (byte >= 9 && byte <= 13) }
+
+Word :: (input: string, at: *s64) -> string {
+    while at.* < input.count && Space(input[at.*]) { at.* += 1 }
+    first := at.*;
+    while at.* < input.count && !Space(input[at.*]) { at.* += 1 }
+    return input[first:at.*];
+}
+
+ParseDecimal :: (word: string) -> (value: float64, valid: bool) {
+    if word.count == 0 || word.count > 17 { return 0.0, false }
+    negative := word[0] == 45;
+    start: s64 = ifx negative || word[0] == 43 then 1 else 0;
+    numerator: s64;
+    divisor: s64 = 1;
+    digits: s64;
+    decimal := false;
+    for i: start..word.count-1 {
+        byte: u8 = word[i];
+        if byte == 46 && !decimal { decimal = true; continue }
+        if byte < 48 || byte > 57 || digits == 15 { return 0.0, false }
+        numerator = 10*numerator+cast(s64)(byte-48);
+        digits += 1;
+        if decimal { divisor *= 10 }
+    }
+    if digits == 0 { return 0.0, false }
+    // Both integers fit exactly in a double, so the division rounds the decimal once.
+    value := cast(float64)numerator/cast(float64)divisor;
+    if negative { value = -value }
+    return value, true;
+}
+
+ParseValue :: (word: string) -> (value: float64, valid: bool) {
+    value, valid := ParseDecimal(word);
+    if !valid { value, valid = Float.ParseFloat64(word) }
+    return value, valid;
+}
+
+AddPoint :: (points: *Points, x: float64, y: float64) -> bool {
+    if points.data.count == MAX_POINTS { return false }
+    empty := points.data.count == 0;
+    if !VecPush(points.data, Point.{x, y}) { return false }
+    if empty {
+        points.low = .{x, y};
+        points.high = .{x, y};
+    } else {
+        if x < points.low.x { points.low.x = x }
+        if y < points.low.y { points.low.y = y }
+        if x > points.high.x { points.high.x = x }
+        if y > points.high.y { points.high.y = y }
+    }
+    return true;
+}
+
+Read :: (input: string, points: *Points) -> ReadResult {
+    at: s64;
+    while at < input.count {
+        first := Word(input, *at);
+        if first.count == 0 { break }
+        second := Word(input, *at);
+        if second.count == 0 { return .Unpaired }
+        if first.count > 64 || second.count > 64 { return .Invalid }
+        x, x_ok := ParseValue(first);
+        y, y_ok := ParseValue(second);
+        // Keep subtraction, scaling and decade calculations in the finite range.
+        if !x_ok || !y_ok || !(Abs(x) <= 1.0e150) || !(Abs(y) <= 1.0e150) { return .Invalid }
+        if !AddPoint(points, x, y) { return .Full }
+    }
+    return ifx points.data.count == 0 then ReadResult.Empty else ReadResult.Ok;
+}
+
+Count :: (points: *Points) -> s64 { return points.data.count }
+
+At :: (points: *Points, index: s64) -> (x: float64, y: float64) {
+    return points.data[index].x, points.data[index].y;
+}
+
+Abs :: (x: float64) -> float64 { return ifx x < 0.0 then -x else x }
+Max :: (a: float64, b: float64) -> float64 { return ifx a > b then a else b }
+Range :: (low: float64, high: float64, edge: float64, direction: float64) -> Axis {
+    span := 1.15 * Max(1.0e-30, Max(0.001*Max(Abs(low), Abs(high)), high-low));
+    center := (low+high) * 0.5;
+    return .{center-span*0.5, center+span*0.5, direction*384.0/(1.04*span), edge};
+}
+
+Axes :: (points: *Points) -> (horizontal: Axis, vertical: Axis) {
+    return Range(points.low.x, points.high.x, 506.0, 1.0), Range(points.low.y, points.high.y, 34.0, -1.0);
+}
+
+Pixel :: (axis: Axis, value: float64) -> float64 {
+    return axis.edge + (value-axis.high)*axis.scale;
+}
+
+Value :: (axis: Axis, pixel: float64) -> float64 {
+    return axis.high + (pixel-axis.edge)/axis.scale;
+}
+
+Floor :: (value: float64) -> s64 {
+    integer := cast(s64)value;
+    return ifx cast(float64)integer > value then integer-1 else integer;
+}
+
+Modulo :: (value: s64, divisor: s64) -> s64 {
+    remainder := value % divisor;
+    return ifx remainder < 0 then remainder+divisor else remainder;
+}
+
+TickRange :: (axis: Axis) -> Ticks {
+    epsilon := 0.0001;
+    decade := Floor(Math.Log10((axis.high-axis.low)/(3.0+epsilon)));
+    unit := Math.Pow(10.0, cast(float64)decade);
+    first := -Floor(-axis.low/unit+epsilon);
+    last := Floor(axis.high/unit+epsilon);
+    step: s64 = 1;
+    if last-first+1 > 5 {
+        step = 2;
+        if (last-Modulo(last, step)-first-Modulo(-first, step))/step+1 > 5 {
+            step = 5;
+            count := (last-Modulo(last, step)-first-Modulo(-first, step))/step+1;
+            if count > 5 {
+                step = 1;
+                unit *= 10.0;
+                decade += 1;
+                first = -Floor(-axis.low/unit+epsilon);
+                last = Floor(axis.high/unit+epsilon);
+            } else if count < 3 { step = 4 }
+        }
+    }
+    first += Modulo(-first, step);
+    last -= Modulo(last, step);
+    digits := 1+Floor(Math.Log10(Max(Abs(cast(float64)first), Max(Abs(cast(float64)last), 1.0e-30))));
+    exponent: s64;
+    if !((decade <= 0 && decade >= -digits) || (decade < 0 && decade >= -3) ||
+         (decade > 0 && digits+decade <= 4)) {
+        exponent = 3*Floor(cast(float64)decade / 3.0);
+        if decade > 0 && digits+decade-exponent > 3 { exponent += 3 }
+        if decade < 0 && decade != exponent && digits >= exponent+3-decade { exponent += 3 }
+    }
+    return .{first, last, step, unit, Math.Pow(10.0, cast(float64)(decade-exponent)), exponent};
+}
+
+AppendInteger :: (output: *Text, value: s64) {
+    digits: [24]u8;
+    unused BuilderAppend(output.bytes, FormatInteger(value, digits[:]));
+}
+
+// As in Inferno's %g readout, retain significant digits and discard ending zeroes.
+AppendNumber :: (output: *Text, value: float64, precision: s64, trim_leading_zero: bool = false) {
+    if value == 0.0 { unused BuilderAppend(output.bytes, "0"); return }
+    if value < 0.0 { unused BuilderAppend(output.bytes, "-") }
+    magnitude := Abs(value);
+    order := Floor(Math.Log10(magnitude));
+    mantissa := cast(s64)(magnitude / Math.Pow(10.0, cast(float64)(order-precision+1)) + 0.5);
+    storage: [24]u8;
+    digits := FormatInteger(mantissa, storage[:]);
+    if digits.count > precision { order += 1 }
+    count := digits.count;
+    while count > 1 && digits[count-1] == 48 { count -= 1 }
+    digits = digits[:count];
+    if order < -4 || order >= precision {
+        unused BuilderAppend(output.bytes, digits[:1]);
+        if count > 1 {
+            unused BuilderAppend(output.bytes, ".");
+            unused BuilderAppend(output.bytes, digits[1:]);
+        }
+        unused BuilderAppend(output.bytes, ifx order < 0 then "e-" else "e+");
+        exponent := ifx order < 0 then -order else order;
+        if exponent < 10 { unused BuilderAppend(output.bytes, "0") }
+        AppendInteger(output, exponent);
+    } else if order < 0 {
+        unused BuilderAppend(output.bytes, ifx trim_leading_zero then "." else "0.");
+        for 1..-order-1 { unused BuilderAppend(output.bytes, "0") }
+        unused BuilderAppend(output.bytes, digits);
+    } else {
+        whole := order+1;
+        if count <= whole {
+            unused BuilderAppend(output.bytes, digits);
+            for count..whole-1 { unused BuilderAppend(output.bytes, "0") }
+        } else {
+            unused BuilderAppend(output.bytes, digits[:whole]);
+            unused BuilderAppend(output.bytes, ".");
+            unused BuilderAppend(output.bytes, digits[whole:]);
+        }
+    }
+}

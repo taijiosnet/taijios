@@ -14,9 +14,10 @@ display, and history from Inferno's [manual browser](../../wm/man.b) and
 [lookup library](../../lib/man.b). This port uses the Inferno
 [MIT notice](../../../NOTICE).
 
-Man's build defines `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
-renderer. This lets it browse large manual pages in the default Linux/386
-guest memory pool. The general Tk launcher and Memory build include Canvas.
+Man and Coffee define `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
+renderer, leaving more of the default Linux/386 guest memory pool available
+for manual pages and Coffee artwork. The general Tk launcher, Memory, and
+Graph0 builds include Canvas.
 The general Tk launcher and LINPACK builds define `TAIJI_TK_LISTBOX` to add
 listboxes and entry `-width` support. LINPACK omits Canvas.
 
@@ -48,6 +49,16 @@ the app works in batches and accepts orders from 1 to 320. Timing depends on
 the execution engine and clock resolution.
 [ZX source](linbench_app.zi) · [Inferno source](../../math/linbench.b)
 
+Graph0 reads whitespace-separated X and Y coordinates from a guest file. It
+scales the axes to the data, draws ticks and circular markers, and connects
+the points in file order. Click inside the plot to read the data coordinates
+at the pointer. The port accepts up to 3,072 pairs in a 32 KiB file and uses
+the shared stroke font and plain-text scientific tick labels. It scales the
+plot area to 480×384 to fit full-frame uploads in the default 32 MiB guest.
+Its connected stroke and markers share one Canvas path. The app computes
+data bounds while reading the file and fills the allocated path directly.
+[ZX source](graph0_app.zi) · [Inferno source](../../math/graph0.b)
+
 ## Run in Taiji
 
 From the TaijiOS root, with `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
@@ -67,6 +78,9 @@ python3 appl/cmd/tcltk/test_memory.py --installed
 python3 appl/cmd/tcltk/test_linbench.py
 install -m 0644 build/tcltk/linbench.zx dis/math/linbench.zx
 python3 appl/cmd/tcltk/test_linbench.py --installed
+python3 appl/cmd/tcltk/test_graph0.py
+(cd appl/cmd && mk install-graph0-zx)
+python3 appl/cmd/tcltk/test_graph0.py --installed
 ```
 
 The general Tk launcher reads guest stdin until EOF and accepts scripts up to
@@ -80,6 +94,7 @@ zxrun -w /dis/coffee.zx
 zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log
 zxrun -p -w /dis/wm/memory.zx
 zxrun -p -w /dis/math/linbench.zx
+zxrun -w /dis/math/graph0.zx /path/to/coordinates.xy
 ```
 
 Log Window accepts `-e` to close when input ends. By default it prints `Got EOF`
@@ -159,6 +174,12 @@ benchmark through runs, new results, scrollbar arrows and dragging, row
 selection, and close. The hosted test also covers invalid order recovery
 and reruns at the upper supported order.
 
+`test_graph0.py` compares decimal Canvas commands with `tkcmd` and runs the
+original Dis plotter and the ZX port in private Xvfb. It checks axis positions,
+tick labels, connected data points, circular markers, click readouts and close.
+It also runs the hosted plot at its supported point limit and checks that an
+oversized dataset exits with an error.
+
 ## Supported commands
 
 | Command | Options and behavior |
@@ -174,11 +195,14 @@ and reruns at the upper supported order.
 | `.listbox insert index element ?element ...?`, `delete first ?last?`, `get first ?last?`, `size`, `index index` | Edit or read rows by numeric index, `end`, `active`, `anchor`, or `@x,y` |
 | `.listbox activate index`, `curselection`, `selection anchor index`, `selection includes index`, `selection set first ?last?`, `selection clear first ?last?` | Move the active row or read and change selection and its anchor |
 | `.listbox see index`, `yview ?index\|moveto fraction\|scroll count units/pages?` | Reveal a row or read and set the vertical viewport |
-| `canvas .path` | Integer-pixel `-width` and `-height` |
+| `canvas .path` | Integer-pixel `-width`, `-height`, `-borderwidth` or `-bd`, `-background` or `-bg`, and `-relief flat` or `sunken` |
 | `.canvas create rectangle x0 y0 x1 y1 ?options?` | Add a rectangle with `-fill` and `-outline`. Return its numeric item ID |
 | `.canvas create text x y ?options?` | Add a single-line stroke-font label with `-anchor`, `-text`, and `-fill`. Return its numeric item ID |
-| `.canvas coords id ?coordinates?`, `.canvas bbox id` | Read or set an item's coordinates, or read its painted bounds using Ziran font metrics for text |
-| `.canvas itemconfigure id option value`, `.canvas itemcget id -text` | Set supported item options or read a text item's label |
+| `.canvas create line x0 y0 x1 y1 ?x y ...? ?options?` | Add a polyline with `-fill` and `-width`. Return its numeric item ID |
+| `.canvas create oval x0 y0 x1 y1 ?options?` | Add an oval with `-fill`, `-outline`, and `-width`. Return its numeric item ID |
+| `.canvas coords id ?coordinates?`, `.canvas bbox id` | Read or set an item's coordinates with up to four decimal places, or read its pixel bounds using Ziran font metrics for text |
+| `.canvas itemconfigure id option value`, `.canvas itemcget id -text`, `.canvas itemcget id -width` | Set supported item options or read a text item's label or a line or oval's stroke width |
+| `bind .canvas <ButtonPress-1> script` | Run a left-press callback. `<Button-1>` is an alias. `%x` and `%y` give coordinates inside the Canvas border |
 | `scrollbar .path` | `-orient vertical` or `horizontal`, and `-command`. Arrows and troughs call `scroll` by units and pages. A held thumb drag calls `moveto` |
 | `.scrollbar set first last`, `.scrollbar get`, `.scrollbar identify x y` | Update or read clamped viewport fractions and identify the part under local coordinates |
 | `scale .path` | `-from`, `-to`, `-resolution`, `-bigincrement`, pixel `-length`, `-orient horizontal` or `vertical`, `-showvalue 0` or `1`, and `-command script` |
@@ -233,8 +257,10 @@ embedded windows, editable selections, and the wider tag API remain open.
 Checkbutton indicator customization and keyboard activation, scrollbar
 `activate`, `delta`, `fraction`, `-jump`, and hold autorepeat remain open.
 Canvas still needs tags, item bindings and hit testing, item deletion and
-stacking, scrolling, fractional coordinates, line and polygon items, ovals,
-arcs, images, embedded windows, and more font, color, and stroke options.
+stacking, scrolling, polygon and arc items, images, embedded windows,
+physical-unit coordinates, more font, color, join and cap options, and
+additional pointer bindings. Canvas background can be configured, and
+`cget -background` remains open.
 The text widget still needs horizontal scrolling and `-xscrollcommand`.
 The Tk variable command still needs Inferno's `lasterror` query.
 The remaining listbox API includes `nearest`, `xview`, `-xscrollcommand`,

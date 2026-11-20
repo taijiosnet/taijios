@@ -6,6 +6,9 @@ using Scale :: #import "tcl_tk_scale"
 using Check :: #import "tcl_tk_check"
 using Scroll :: #import "tcl_tk_scrollbar"
 using Items :: #import "tcl_tk_canvas"
+#if !#defined(TAIJI_TK_NO_CANVAS) {
+    using Math :: #import "std/math"
+}
 #import "std/vec"
 
 Canvas :: struct {
@@ -105,6 +108,7 @@ Strokes :: (rune: s32) -> string {
     if byte == 92 { return "0046" }
     if byte == 44 { return "2516" }
     if byte == 58 { return "22222525" }
+    if byte == 94 { return "02202042" }
     if byte == 59 { return "22222516" }
     if byte == 39 { return "2021" }
     if byte == 34 { return "10113031" }
@@ -263,6 +267,17 @@ Render :: (pixels: []u8, width: s32, height: s32) {
 
     DrawCanvas :: (canvas: *Canvas, widget: *Tk.Widget) {
         box := widget.box;
+        border := widget.canvas.border;
+        if widget.canvas.sunken && border > 0 {
+            light := Ink.{207, 207, 207};
+            dark := Ink.{159, 159, 159};
+            Fill(canvas, box, light);
+            Fill(canvas, .{x = box.x, y = box.y, w = box.w, h = border}, dark);
+            Fill(canvas, .{x = box.x, y = box.y, w = border, h = box.h}, dark);
+        }
+        box = .{x = box.x+border, y = box.y+border, w = box.w-2*border, h = box.h-2*border};
+        if box.w <= 0 || box.h <= 0 { return }
+        if widget.canvas.background != Items.NONE { Fill(canvas, box, Color(widget.canvas.background)) }
         clipped := Canvas.{pixels = canvas.pixels, width = canvas.width, height = canvas.height, clipped = true, clip = box};
         for * widget.canvas.items {
             if it.kind == .Label {
@@ -272,11 +287,40 @@ Render :: (pixels: []u8, width: s32, height: s32) {
                                     w = bounds.x1-bounds.x0, h = bounds.y1-bounds.y0}, TextView(it.text), false, Color(it.fill));
                 continue;
             }
+            if it.kind == .Line {
+                if it.fill == Items.NONE { continue }
+                ink := Color(it.fill);
+                half := Items.Pixel(it.stroke)/2;
+                for i: 1..it.path.count-1 {
+                    first := it.path[i-1];
+                    next := it.path[i];
+                    DrawLine(*clipped, box.x+Items.Pixel(first.x), box.y+Items.Pixel(first.y),
+                             box.x+Items.Pixel(next.x), box.y+Items.Pixel(next.y), half, ink);
+                }
+                radius := it.marker_radius;
+                if radius > 0 {
+                    outline := it.fill;
+                    for * it.path {
+                        left := Items.Pixel(it.x-radius);
+                        right := Items.Pixel(it.x+radius);
+                        top := Items.Pixel(it.y-radius);
+                        bottom := Items.Pixel(it.y+radius);
+                        rx := (right-left)/2;
+                        ry := (bottom-top)/2;
+                        DrawOval(*clipped, box.x+left+rx, box.y+top+ry, rx, ry, half, Items.NONE, outline);
+                    }
+                }
+                continue;
+            }
             rect := Items.Rectangle(it.coordinates);
             x := box.x + rect.x0;
             y := box.y + rect.y0;
             w := rect.x1 - rect.x0;
             h := rect.y1 - rect.y0;
+            if it.kind == .Oval {
+                DrawOval(*clipped, x+w/2, y+h/2, w/2, h/2, Items.Pixel(it.stroke)/2, it.fill, it.outline);
+                continue;
+            }
             if it.fill != Items.NONE { Fill(*clipped, .{x, y, w, h}, Color(it.fill)) }
             if it.outline == Items.NONE { continue }
             edge := Color(it.outline);
@@ -284,6 +328,84 @@ Render :: (pixels: []u8, width: s32, height: s32) {
             Fill(*clipped, .{x, y+h, w+1, 1}, edge);
             Fill(*clipped, .{x, y, 1, h}, edge);
             Fill(*clipped, .{x+w, y, 1, h}, edge);
+        }
+    }
+
+    Vertex :: struct { x: float64; y: float64; }
+
+    CeilPixel :: (value: float64) -> s32 {
+        pixel := cast(s32)value;
+        return ifx cast(float64)pixel < value then pixel+1 else pixel;
+    }
+
+    DrawLine :: (canvas: *Canvas, x0: s32, y0: s32, x1: s32, y1: s32, half: s32, ink: Ink) {
+        dx := cast(float64)(x1-x0);
+        dy := cast(float64)(y1-y0);
+        length := Math.Sqrt(dx*dx+dy*dy);
+        if length == 0.0 {
+            Fill(canvas, .{x = x0-half, y = y0-half, w = 2*half+1, h = 2*half+1}, ink);
+            return;
+        }
+        radius := cast(float64)half+0.5;
+        ux := dx/length*radius;
+        uy := dy/length*radius;
+        start_x := cast(float64)x0+0.5-ux;
+        start_y := cast(float64)y0+0.5-uy;
+        end_x := cast(float64)x1+0.5+ux;
+        end_y := cast(float64)y1+0.5+uy;
+        corners: [4]Vertex;
+        corners[0] = .{start_x-uy, start_y+ux};
+        corners[1] = .{end_x-uy, end_y+ux};
+        corners[2] = .{end_x+uy, end_y-ux};
+        corners[3] = .{start_x+uy, start_y-ux};
+        clip := canvas.clip;
+        top := Tk.Maximum(clip.y, Tk.Minimum(y0, y1)-2*half-1);
+        bottom := Tk.Minimum(clip.y+clip.h-1, Tk.Maximum(y0, y1)+2*half+1);
+        for y: top..bottom {
+            row := cast(float64)y+0.5;
+            left := 2000000.0;
+            right := -2000000.0;
+            for i: 0..3 {
+                p := corners[i];
+                q := corners[(i+1)%4];
+                if (p.y <= row && row < q.y) || (q.y <= row && row < p.y) {
+                    at := p.x + (q.x-p.x)*(row-p.y)/(q.y-p.y);
+                    if at < left { left = at }
+                    if at > right { right = at }
+                }
+            }
+            if left <= right {
+                x := CeilPixel(left-0.5);
+                Fill(canvas, .{x, y, CeilPixel(right-0.5)-x, 1}, ink);
+            }
+        }
+    }
+
+    EllipseSpan :: (rx: s32, ry: s32, offset: s32) -> s32 {
+        if rx < 0 || ry < 0 || offset < -ry || offset > ry { return -1 }
+        if ry == 0 { return rx }
+        fraction := cast(float64)offset/cast(float64)ry;
+        return cast(s32)(cast(float64)rx*Math.Sqrt(1.0-fraction*fraction)+0.5);
+    }
+
+    DrawOval :: (canvas: *Canvas, x: s32, y: s32, rx: s32, ry: s32, half: s32, fill: s32, outline: s32) {
+        clip := canvas.clip;
+        top := Tk.Maximum(clip.y, y-ry-half);
+        bottom := Tk.Minimum(clip.y+clip.h-1, y+ry+half);
+        for row: top..bottom {
+            if fill != Items.NONE {
+                inside := EllipseSpan(rx, ry, row-y);
+                if inside >= 0 { Fill(canvas, .{x-inside, row, 2*inside+1, 1}, Color(fill)) }
+            }
+            if outline == Items.NONE { continue }
+            outer := EllipseSpan(rx+half, ry+half, row-y);
+            inner := EllipseSpan(rx-half-1, ry-half-1, row-y);
+            if outer < 0 { continue }
+            if inner < 0 { Fill(canvas, .{x-outer, row, 2*outer+1, 1}, Color(outline)) }
+            else {
+                Fill(canvas, .{x-outer, row, outer-inner, 1}, Color(outline));
+                Fill(canvas, .{x+inner+1, row, outer-inner, 1}, Color(outline));
+            }
         }
     }
 }

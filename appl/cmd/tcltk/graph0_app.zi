@@ -1,0 +1,172 @@
+// File plotting adapted from Inferno appl/math/graph0.b and appl/math/gr.b. See NOTICE.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using Files :: #import "taijios_files"
+using Graph :: #import "graph0_model"
+using Tcl :: #import "tcl"
+using T :: #import "tcl_types"
+using Window :: #import "tcltk"
+using Tk :: #import "tcl_tk"
+using Canvas :: #import "tcl_tk_canvas"
+
+horizontal: Graph.Axis;
+vertical: Graph.Axis;
+points: Graph.Points;
+
+// Keep the complete frame upload within the default guest main pool.
+VIEW_SCALE :: 0.8;
+
+Readout :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 2 {
+        x, x_ok := T.ParseInteger(TextView(args[0]));
+        y, y_ok := T.ParseInteger(TextView(args[1]));
+        if x_ok && y_ok && x >= -4096 && y >= -4096 && x <= 4096 && y <= 4096 {
+            Graph.AppendNumber(*result.value, Graph.Value(horizontal, cast(float64)x/VIEW_SCALE), 3);
+            unused BuilderAppend(result.value.bytes, " ");
+            Graph.AppendNumber(*result.value, Graph.Value(vertical, cast(float64)y/VIEW_SCALE), 3);
+            return;
+        }
+    }
+    result.code = .Error;
+    unused BuilderAppend(result.value.bytes, "expected graph0_at x y");
+}
+
+// The original plot rounds coordinates to one decimal before sending them to Tk.
+Coordinate :: (script: *Text, value: float64) {
+    unused BuilderAppend(script.bytes, " ");
+    tenths := cast(s64)(Graph.Abs(value)*10.0+0.5);
+    if value < 0.0 && tenths > 0 { unused BuilderAppend(script.bytes, "-") }
+    Graph.AppendInteger(script, tenths/10);
+    unused BuilderAppend(script.bytes, ".");
+    unused VecPush(script.bytes, cast(u8)(48+tenths%10));
+}
+
+Point :: (script: *Text, x: float64, y: float64) {
+    Coordinate(script, x*VIEW_SCALE);
+    Coordinate(script, y*VIEW_SCALE);
+}
+
+Segment :: (script: *Text, x0: float64, y0: float64, x1: float64, y1: float64) {
+    unused BuilderAppend(script.bytes, ".fc.c create line");
+    Point(script, x0, y0);
+    Point(script, x1, y1);
+    unused BuilderAppend(script.bytes, " -width 3\n");
+}
+
+Label :: (script: *Text, x: float64, y: float64, anchor: string, number: float64) {
+    unused BuilderAppend(script.bytes, ".fc.c create text");
+    Point(script, x, y);
+    unused BuilderAppend(script.bytes, " -anchor ");
+    unused BuilderAppend(script.bytes, anchor);
+    unused BuilderAppend(script.bytes, " -text {");
+    Graph.AppendNumber(script, number, 6, true);
+    unused BuilderAppend(script.bytes, "}\n");
+}
+
+ExponentLabel :: (script: *Text, x: float64, y: float64, anchor: string, exponent: s64) {
+    if exponent == 0 { return }
+    unused BuilderAppend(script.bytes, ".fc.c create text");
+    Point(script, x, y);
+    unused BuilderAppend(script.bytes, " -anchor ");
+    unused BuilderAppend(script.bytes, anchor);
+    unused BuilderAppend(script.bytes, " -text {/ 10^");
+    Graph.AppendInteger(script, exponent);
+    unused BuilderAppend(script.bytes, "}\n");
+}
+
+PlotCoordinate :: (axis: Graph.Axis, number: float64) -> s64 {
+    pixel := Graph.Pixel(axis, number)*VIEW_SCALE;
+    tenths := cast(s64)(Graph.Abs(pixel)*10.0+0.5);
+    fixed := tenths*(Canvas.FRACTION/10);
+    return ifx pixel < 0.0 then -fixed else fixed;
+}
+
+DrawData :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count != 0 { Canvas.Error(result, "expected graph0_draw"); return }
+    index := Tk.Find(".fc.c");
+    if index < 0 { Canvas.Error(result, "missing graph canvas"); return }
+    count := Graph.Count(*points);
+    bounds := Canvas.Coordinates.{Canvas.Pixel(PlotCoordinate(horizontal, points.low.x)),
+                                  Canvas.Pixel(PlotCoordinate(vertical, points.high.y)),
+                                  Canvas.Pixel(PlotCoordinate(horizontal, points.high.x)),
+                                  Canvas.Pixel(PlotCoordinate(vertical, points.low.y))};
+    radius := cast(s64)(3.2*VIEW_SCALE*cast(float64)Canvas.FRACTION);
+    item := Canvas.AddPolyline(*Tk.widgets[index].canvas, count, bounds, Canvas.BLACK, 3*Canvas.FRACTION, radius);
+    if item == null { Canvas.Error(result, "could not allocate graph path"); return }
+    for i: 0..count-1 {
+        x, y := Graph.At(*points, i);
+        point := *item.path[i];
+        point.x = PlotCoordinate(horizontal, x);
+        point.y = PlotCoordinate(vertical, y);
+    }
+}
+
+DrawAxes :: (script: *Text) {
+    left := Graph.Pixel(horizontal, horizontal.low);
+    right := horizontal.edge;
+    top := vertical.edge;
+    bottom := Graph.Pixel(vertical, vertical.low);
+    tick := 0.02*(right-left);
+    unused BuilderAppend(script.bytes, ".fc.c create line");
+    Point(script, left, bottom);
+    Point(script, right, bottom);
+    Point(script, right, top);
+    Point(script, left, top);
+    Point(script, left, bottom);
+    unused BuilderAppend(script.bytes, " -width 3\n");
+    ticks := Graph.TickRange(horizontal);
+    i := ticks.first;
+    while i <= ticks.last {
+        x := Graph.Pixel(horizontal, cast(float64)i*ticks.unit);
+        Segment(script, x, bottom, x, bottom-tick);
+        Segment(script, x, top, x, top+tick);
+        Label(script, x, bottom+tick, "n", cast(float64)i*ticks.factor);
+        i += ticks.step;
+    }
+    ExponentLabel(script, (left+right)*0.5, bottom+2.0*tick+8.0, "n", ticks.exponent);
+    ticks = Graph.TickRange(vertical);
+    i = ticks.first;
+    while i <= ticks.last {
+        y := Graph.Pixel(vertical, cast(float64)i*ticks.unit);
+        Segment(script, left, y, left+tick, y);
+        Segment(script, right, y, right-tick, y);
+        Label(script, left-tick, y, "e", cast(float64)i*ticks.factor);
+        i += ticks.step;
+    }
+    ExponentLabel(script, left-4.0*tick-8.0, (top+bottom)*0.5, "e", ticks.exponent);
+}
+
+Load :: (path: string, script: *Text) -> bool {
+    source: Text;
+    if Files.ReadFile(path, *source, 32768) != 0 {
+        print("graph0: cannot read % within 32 KiB\n", path);
+        return false;
+    }
+    parsed := Graph.Read(TextView(source), *points);
+    if parsed != .Ok {
+        if parsed == .Empty { print("empty input\n") }
+        else if parsed == .Unpaired { print("after reading % pairs, saw singleton\n", Graph.Count(*points)) }
+        else if parsed == .Full { print("graph0: maximum % pairs or insufficient memory\n", Graph.MAX_POINTS) }
+        else { print("graph0: expected finite numeric pairs\n") }
+        return false;
+    }
+    unused BuilderAppend(script.bytes, "\ngraph0_draw\n");
+    horizontal, vertical = Graph.Axes(*points);
+    DrawAxes(script);
+    return true;
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() == 0 { return 0 }
+    path := Args.Operand(0);
+    script: Text;
+    if Files.ReadFile("/appl/cmd/tcltk/graph0.tcl", *script, 4096) != 0 {
+        print("graph0: could not load the plot window\n");
+        return 1;
+    }
+    if !Load(path, *script) { return 1 }
+    interpreter: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*interpreter, "graph0_at", Readout) { return 1 }
+    if !Tcl.RegisterCommand(*interpreter, "graph0_draw", DrawData) { return 1 }
+    return Window.Run(*interpreter, TextView(script), path, 508, 440);
+}
