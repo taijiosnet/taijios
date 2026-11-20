@@ -48,8 +48,13 @@ that also charges loop iterations, and permits 48 nested script levels.
   List and string indexes accept decimal integers, `end` and `end-N`.
   A numeric last index in `string range` is exclusive, following Limbo.
   `end` and `end-N` are inclusive.
-- `format` supports `%%`, `%s`, `%d` and `%x`, with width, left alignment,
-  zero padding and precision. Literal text is preserved between fields.
+- `format` supports `%%`, `%s`, `%d`, `%x` and `%f`, with width, left
+  alignment, zero padding and precision. Literal text is preserved between
+  fields. Following Limbo, `%f` defaults to one decimal place and `%Nf`
+  specifies precision. Use `%W.Nf` to set both width and precision. Fixed
+  formatting rounds binary64 values to nearest with ties to even. Precision
+  and width are limited to 4096. Invalid real arguments return Tcl errors.
+  Nonfinite real arguments format as `Inf`, `-Inf` and `NaN`.
 - `expr` and `calc` accept signed 32-bit decimal, leading-zero octal and `0x`
   hexadecimal integers, decimal and scientific real literals, and the boolean
   words `true`/`false`, `yes`/`no` and `on`/`off`. They support parentheses,
@@ -129,7 +134,13 @@ releases them, including after `.Exit`. Explicit `stdout` and implicit
 ### Comparison with shipped Inferno Tcl
 
 Limbo `load` resolves `/dis/lib/tcl_<name>.dis` and calls the module’s `TclLib`
-interface. A leading `|` in an `open` filename is treated as an ordinary path
+interface. The five libraries shipped here are `calc`, `io`, `list`, `string`
+and `tk`. The first four are built into the port, and the optional Tcl/Tk
+app imports its Tk bridge at startup. Hosted ZX resolves imports at startup.
+Loading separately compiled extensions after startup would require a guest API
+for named lookup and invocation.
+
+A leading `|` in an `open` filename is treated as an ordinary path
 by the shipped Limbo shell. Its `file`, `flush` and `tell` are empty stubs. `string match`, `wordstart` and `wordend` are empty stubs in
 the shipped interpreter and are unsupported here. The Ziran implementation
 also handles ASCII `string toupper`, string search and trim, and `format`
@@ -151,8 +162,8 @@ build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
 ```
 
 The native shell also reads stdin with `-` or when given no filename. The
-test runner compares the reference, compatibility, expression, headless and
-channel scripts with the existing Limbo `tclsh` and runs the scripts under ZX
+test runner compares the reference, compatibility, expression, format,
+headless and channel scripts with the existing Limbo `tclsh` and runs the scripts under ZX
 and hosted Taiji. API tests exercise injected channels, clocks and command
 libraries. `zxrun` prints a
 final scalar `0` on success and `1` on a Tcl error. `zxrun -c` reports the

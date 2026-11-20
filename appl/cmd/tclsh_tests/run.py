@@ -63,6 +63,34 @@ def stdin_suite(image):
     print("Hosted Tcl preserves binary64 precision")
 
 
+def fixed_format_edges(shell, image):
+    cases = [("0.1", 60), ("1.7976931348623157e308", 0), ("5e-324", 1074),
+             ("2.225073858507201e-308", 1074), ("-1e-999", 3)]
+    lines = [f"puts [format %.{precision}f {value}]" for value, precision in cases]
+    outputs = [f"{float(value):.{precision}f}" for value, precision in cases]
+    lines += ["puts [string length [format %.4096f 1.0]]",
+              "puts [format {left=[%08.2f] %% %s} -1.25 value]",
+              "puts [format {%f %f %f} Infinity -Infinity NaN]",
+              "puts [format {[%4.1s]|[%07.2f]|[%-4d]|[%4.1s]} éz -1.25 21 βγ]"]
+    outputs += ["4098", "left=[-0001.25] % value", "Inf -Inf NaN",
+                "[   é]|[-001.25]|[21  ]|[   β]"]
+    script = "\n".join(lines) + "\n"
+    expected = "\n".join(outputs) + "\n"
+    expect(capture([shell, "-"], script), expected)
+    (BUILD / "tcl_input.zi").write_text("Script :: #string TCL_SCRIPT_END\n" +
+                                      script + "TCL_SCRIPT_END;\n")
+    bundled = BUILD / "format-edges.zx"
+    compile_zx(ROOT / "appl/cmd/tclsh.zi", "tclsh:main", bundled, BUILD)
+    expect(capture(["zi2zx", "run", "--backend", "engine", bundled]), expected + "0\n")
+    if image:
+        (BUILD / "format-edges.tcl").write_text(script)
+        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/format.tcl"),
+               (FIXTURES / "format.out").read_text() + "0\n", codes=(0, -9))
+        expect(guest(f"zxrun {image} < /build/tcl/format-edges.tcl"),
+               expected + "0\n", codes=(0, -9))
+    print("Fixed-point formatting covered maximum and subnormal binary64 values, signed zero and limits")
+
+
 def headless_output(output):
     normalized = []
     variables = []
@@ -184,7 +212,7 @@ def main():
                     "-o", native, "appl/cmd/tclsh_native.zi"], cwd=ROOT, env=ENV, check=True)
     shell = native / "tclsh_native"
 
-    for name in ("core", "reference", "compatibility", "expression"):
+    for name in ("core", "reference", "compatibility", "expression", "format"):
         fixture = FIXTURES / f"{name}.tcl"
         script = fixture.read_text()
         expected = fixture.with_suffix(".out").read_text()
@@ -217,6 +245,13 @@ def main():
     (BUILD / "legacy-expression.tcl").write_text(script + "exit\n")
     expect(guest("tclsh /build/tcl/legacy-expression.tcl"), expression, codes=(0, -9))
     print("expression.tcl matched Limbo Dis for numeric operations and all 20 math functions")
+    fixture = FIXTURES / "format.tcl"
+    (BUILD / "legacy-format.tcl").write_text(fixture.read_text() + "exit\n")
+    expect(guest("tclsh /build/tcl/legacy-format.tcl"),
+           fixture.with_suffix(".out").read_text(), codes=(0, -9))
+    print("format.tcl matched Limbo Dis for fixed-point precision, rounding and alignment")
+    fixed_format_edges(shell, args.stdin)
+
     expect(capture([shell, "-"], "puts [calc {sqrt(81)}]; puts [expr {2+1.0+1}]"), "9\n4\n")
     expect(capture([shell, "-"], "set wide [expr {abs(-2147483648)}]; puts [expr {$wide/2.0}]"),
            "1073741824\n")
@@ -245,6 +280,8 @@ def main():
         ('puts before; set operand {1+2}; expr {$operand}', "expected numeric or boolean expression operand"),
         ('puts before; expr {1.5 % 2}', "expected integer operands"),
         ('puts before; expr {abs(1,2)}', "wrong number of function arguments or missing close-parenthesis"),
+        ('puts before; format %f {1+2}', 'expected real format argument'),
+        ('puts before; format %.4097f 1.0', 'format precision exceeds limit'),
         ('puts before; dumpstack extra', 'wrong # args: should be "dumpstack"'),
         ('puts before; time {} wrong', 'expected integer but got "wrong"'),
         ('puts before; load notRegistered', "Cannot load /dis/lib/tcl_notRegistered.dis"),

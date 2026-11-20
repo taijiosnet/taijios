@@ -2,6 +2,7 @@
 #import "std/vec"
 using T :: #import "tcl_types"
 using L :: #import "tcl_lists"
+using D :: #import "tcl_decimal"
 
 RunString :: (args: []Text) -> Result {
     if args.count < 1 { return WrongArgs("string option arg ?arg ...?") }
@@ -92,6 +93,16 @@ FormatNumber :: (cursor: *Cursor) -> s64 {
     return number;
 }
 
+AppendField :: (output: *Text, value: string, width: s64, zeros: s64, negative: bool, left: bool, numeric: bool) {
+    padding := width-zeros-cast(s64)negative;
+    if padding > 0 { padding -= ifx numeric then value.count else CharacterCount(value) }
+    if !left { for 0..padding-1 { unused VecPush(output.bytes, cast(u8)32) } }
+    if negative { unused VecPush(output.bytes, cast(u8)45) }
+    for 0..zeros-1 { unused VecPush(output.bytes, cast(u8)48) }
+    unused BuilderAppend(output.bytes, value);
+    if left { for 0..padding-1 { unused VecPush(output.bytes, cast(u8)32) } }
+}
+
 RunFormat :: (args: []Text) -> Result {
     if args.count == 0 { return WrongArgs("format formatString ?arg ...?") }
     cursor := Cursor.{text = TextView(args[0])};
@@ -108,6 +119,7 @@ RunFormat :: (args: []Text) -> Result {
         left := Has(*cursor) && Peek(*cursor) == 45;
         if left { cursor.at += 1 }
         zero := Has(*cursor) && Peek(*cursor) == 48;
+        has_width := Has(*cursor) && Digit(Peek(*cursor));
         width := FormatNumber(*cursor);
         precision: s64 = -1;
         if Has(*cursor) && Peek(*cursor) == 46 {
@@ -144,13 +156,25 @@ RunFormat :: (args: []Text) -> Result {
             zeros = precision-value.count;
             if zero && !left && precision < 0 { zeros = width-value.count-cast(s64)negative }
             if zeros < 0 { zeros = 0 }
+        } else if kind == 102 {
+            if precision < 0 {
+                // The Limbo form %Nf specifies precision. %f uses one place.
+                precision = ifx has_width then width else 1;
+                width = 0;
+            }
+            magnitude, minus, valid := D.Fixed(value, precision);
+            if !valid { return Failure("expected real format argument") }
+            {
+                field := TextView(magnitude);
+                if zero && !left && width > field.count+cast(s64)minus {
+                    zeros = width-field.count-cast(s64)minus;
+                }
+                AppendField(*output, field, width, zeros, minus, left, true);
+            }
+            VecFree(magnitude.bytes);
+            continue;
         } else { return Failure("unsupported format conversion") }
-        padding := width-CharacterCount(value)-zeros-cast(s64)negative;
-        if !left { for 0..padding-1 { unused VecPush(output.bytes, cast(u8)32) } }
-        if negative { unused VecPush(output.bytes, cast(u8)45) }
-        for 0..zeros-1 { unused VecPush(output.bytes, cast(u8)48) }
-        unused BuilderAppend(output.bytes, value);
-        if left { for 0..padding-1 { unused VecPush(output.bytes, cast(u8)32) } }
+        AppendField(*output, value, width, zeros, negative, left, kind != 115);
     }
     return .{value = output};
 }

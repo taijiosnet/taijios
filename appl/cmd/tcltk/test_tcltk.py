@@ -445,7 +445,8 @@ def main():
         if not args.coffee_only:
             compile_image("man_app", manual, "--define", "TAIJI_TK_NO_CANVAS",
                           "--bind-host", "zx_surface", "--bind-host", "taijios_files")
-        compile_image("coffee_app", coffee, "--bind-host", "zx_surface", "--bind-host", "taijios_files")
+        compile_image("coffee_app", coffee, "--define", "TAIJI_TK_NO_CANVAS",
+                      "--bind-host", "zx_surface", "--bind-host", "taijios_files")
 
     env = os.environ.copy()
     for key in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"):

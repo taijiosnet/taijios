@@ -22,7 +22,10 @@ shell using its guest pathname.
 zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
-For the Linux/386 emulator, use the Ziran revision in `appl/wm/ziran.lock`.
+For the Linux/386 emulator, build the hosted runtime from the Ziran revision
+`81a0bca977988d1e5470bbf277916873d197c6b4`, which fixes binary64 edge values
+needed by Tcl's fixed-point formatter. The GUI package dependencies are
+pinned separately in `appl/wm/ziran.lock`.
 Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
 Use a host-built `zi2c` for code generation and keep the target objects in
 their own build directory.
