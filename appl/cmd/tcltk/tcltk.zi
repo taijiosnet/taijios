@@ -2,6 +2,11 @@
 #import "std/vec"
 using Tcl :: #import "tcl"
 using Tk :: #import "tcl_tk"
+#if #defined(TAIJI_TK_PACKAGES) {
+    using Packages :: #import "tcl_packages"
+    using Files :: #import "taijios_files"
+    using Types :: #import "tcl_types"
+}
 using Paint :: #import "tcl_tk_paint"
 using Surface :: #import "zx_surface"
 using Stdin :: #import "taijios_stdin"
@@ -17,6 +22,19 @@ Execute :: (tcl: *Tcl.Interpreter, script: string) -> bool {
 
 ExecuteCallback :: (tcl: *Tcl.Interpreter, script: Text) -> bool {
     return script.bytes.count == 0 || Execute(tcl, TextView(script));
+}
+
+#if #defined(TAIJI_TK_PACKAGES) {
+    LoadScript :: (_: s64, path: string, result: *Types.Result) {
+        script: Text;
+        if Files.ReadFile(path, *script, 1048576) == 0 {
+            VecSwap(result.value.bytes, script.bytes);
+            return;
+        }
+        failure := Types.QuotedError("could not read Tcl script \"", path, "\"");
+        result.code = failure.code;
+        VecSwap(result.value.bytes, failure.value.bytes);
+    }
 }
 
 Frame :: struct { pixels: Vec(u8); }
@@ -68,6 +86,15 @@ RunPolled :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, 
 RunWindow :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, height: s32, interval: s32,
               prepare: Prepare, animate: Animate, started: Prepare, poll: Poll) -> s32 {
     if !Tk.Attach(tcl) { return 1 }
+    #if #defined(TAIJI_TK_PACKAGES) {
+        Packages.Attach(tcl);
+        Tcl.SetSourceLoader(tcl, LoadScript);
+        provided := Packages.Provide(tcl, "Tk", "0.1");
+        if provided.code != .OK {
+            print("tcltk: %\n", TextView(provided.value));
+            return 1;
+        }
+    }
     if !Execute(tcl, script) { return 1 }
     if Tk.Closed() { return 0 }
     if !Surface.OpenWindow(title, width, height) { return 1 }
@@ -116,7 +143,7 @@ RunWindow :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, 
         if polled == .Failed { return 1 }
         if Tk.Closed() { break }
         // Editing an entry changes its contents and caret, leaving its packed size fixed.
-        if entry_only && polled == .Idle && Tk.focused >= 0 && Tk.widgets[Tk.focused].kind == Tk.ENTRY {
+        if entry_only && !Tk.MenuPosted() && polled == .Idle && Tk.focused >= 0 && Tk.widgets[Tk.focused].kind == Tk.ENTRY {
             pixels := VecSlice(frame.pixels, 0, frame.pixels.count);
             Paint.RenderFocusedEntry(pixels, width, height);
             if !Surface.PresentRGBA(width, height, TextView(pixels)) { return 1 }

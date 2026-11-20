@@ -19,7 +19,13 @@ renderer, leaving more of the default Linux/386 guest memory pool available
 for manual pages and Coffee artwork. The general Tk launcher, Memory, and
 Graph0 builds include Canvas.
 The general Tk launcher and LINPACK builds define `TAIJI_TK_LISTBOX` to add
-listboxes and entry `-width` support. LINPACK omits Canvas.
+listboxes and entry `-width` support. LINPACK omits Canvas. The general launcher
+also defines `TAIJI_TK_MENU` for menus and menubuttons and `TAIJI_TK_PACKAGES`
+for the optional Tcl package registry. The launcher registers this Tk subset as
+`Tk 0.1`, so a script can use `package require Tk`. Other Tcl script packages
+can register via `package ifneeded` or use `pkgIndex.tcl` in a guest directory
+added to `auto_path`. The launcher reads these scripts through the guest file
+service.
 
 Infernal Coffee keeps all six masked cups, the original background, Stop/Go,
 and Rate, Jitter, and Skip sliders. It reads the shipped
@@ -66,9 +72,11 @@ Python Pillow, and a ZX-enabled Linux/386 emulator built from this checkout:
 
 ```sh
 python3 appl/cmd/tcltk/test_tcltk.py
-install -m 0644 build/tcltk/tcltk.zx dis/tcltk.zx
+target="$PWD/dis/tcltk.zx"
+(cd appl/cmd && mk "$target")
 (cd appl/cmd && mk install-coffee-zx install-man-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
+python3 appl/cmd/tcltk/test_menu.py --installed
 python3 appl/cmd/tcltk/test_logwindow.py
 (cd appl/cmd && mk install-logwindow-zx)
 python3 appl/cmd/tcltk/test_logwindow.py --installed
@@ -180,12 +188,25 @@ tick labels, connected data points, circular markers, click readouts and close.
 It also runs the hosted plot at its supported point limit and checks that an
 oversized dataset exits with an error.
 
+`test_menu.py` compares menu and menubutton results with `tkcmd`. It marks the
+first cell in the shipped Sweeper and resets it through Options → restart. The
+hosted test exercises the same press, drag, and release sequence, including the
+callback redraw, disabled items, separators, outside dismissal, and direct
+posting. It also loads `Tk 0.1` and discovers a separate Tcl script package from
+the guest namespace through `auto_path`. Run without `--installed` to build the launcher first.
+
 ## Supported commands
 
 | Command | Options and behavior |
 | --- | --- |
 | `label .path` | `-text text` |
 | `button .path` | `-text text`, `-command script`, and `-state normal` or `disabled` |
+| `menubutton .path` | `-text`, `-menu`, and `-state normal` or `disabled`. Press to post, drag to a row, and release to invoke it |
+| `menu .path` | `-bd` or `-borderwidth`. A popup may be a child of its menubutton |
+| `.menu add type ?options?`, `insert index type ?options?`, `delete first ?last?` | Edit command and separator rows. Command options include `-label` or `-text`, `-command`, and `-state` |
+| `.menu entryconfigure index option value`, `entrycget index option` | Change or query a command row |
+| `.menu index index`, `type index`, `yposition index`, `activate index`, `invoke index` | Query or act on rows by number, `end`, `last`, `active`, `none`, or `@y` |
+| `.menu post x y`, `unpost` | Show a popup at application-surface coordinates or dismiss it. An outside press dismisses a posted popup |
 | `checkbutton .path` | Button options plus `-variable`, `-onvalue`, and `-offvalue`. A left press toggles the value and runs the callback |
 | `variable name ?value?` | Read or write the Tk variable associated with one or more checkbuttons |
 | `frame .path` | Container for nested widgets |
@@ -240,14 +261,17 @@ empty string for transparency.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements a subset of 16 of the 25 commands advertised by the
-[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining nine are `bitmap`,
-`grab`, `image`, `lower`, `menu`, `menubutton`,
-`radiobutton`, `raise`, and `toplevel`.
+The port implements a subset of 18 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining seven are `bitmap`,
+`grab`, `image`, `lower`, `radiobutton`, `raise`, and `toplevel`.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
 commands include `choicebutton`, `cursor`, `grid`, `send`, and `winfo`.
 
+Menus still need cascade, checkbutton and radiobutton entries, `-postcommand`,
+keyboard navigation, autoscroll, and the wider visual options. Graphical
+menus currently share the root's pixel buffer when posted. Separate windows
+and screen-relative posting depend on addressable guest surfaces.
 The remaining scale API includes coordinate-based `get`, `coords`,
 `identify`, `-jump`, `-label`, tick marks, slider size and relief, and trough
 autorepeat. The remaining panel API includes `-anchor`, `origin`,

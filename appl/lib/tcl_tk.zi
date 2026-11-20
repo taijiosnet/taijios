@@ -13,6 +13,10 @@ using Canvas :: #import "tcl_tk_canvas"
     using Listbox :: #import "tcl_tk_listbox"
 }
 
+#if #defined(TAIJI_TK_MENU) {
+    using Menu :: #import "tcl_tk_menu"
+}
+
 MAX_WIDGETS :: 32;
 MAX_ENTRY_BYTES :: 16384;
 LABEL :: 0;
@@ -26,6 +30,8 @@ CHECKBUTTON :: 7;
 SCROLLBAR :: 8;
 CANVAS :: 9;
 LISTBOX :: 10;
+MENU :: 11;
+MENUBUTTON :: 12;
 MAX_PANEL_BYTES :: 16777216;
 CHAR_WIDTH :: Canvas.CELL_WIDTH;
 ENTRY_INSET :: 8;
@@ -68,6 +74,9 @@ Widget :: struct {
         listbox: Listbox.State;
         entry_width: s32;
     }
+    #if #defined(TAIJI_TK_MENU) {
+        menu: Menu.State;
+    }
     text_height: s32;
     last_scroll: Scroll.State;
     sent_scroll: bool;
@@ -88,6 +97,14 @@ sequence: s32;
 drag_start: s32;
 drag_value: s64;
 
+#if #defined(TAIJI_TK_MENU) {
+    popup: s64 = -1;
+    popup_owner: s64 = -1;
+    popup_x: s32;
+    popup_y: s32;
+    viewport: Box;
+}
+
 Attach :: (interpreter: *Tcl.Interpreter) -> bool {
     if attached { return false }
     commands := interpreter.extensions.count;
@@ -106,6 +123,10 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
     }
     #if #defined(TAIJI_TK_LISTBOX) {
         attached = attached && Tcl.RegisterCommand(interpreter, "listbox", Create, LISTBOX);
+    }
+    #if #defined(TAIJI_TK_MENU) {
+        attached = attached && Tcl.RegisterCommand(interpreter, "menu", Create, MENU) &&
+                   Tcl.RegisterCommand(interpreter, "menubutton", Create, MENUBUTTON);
     }
     attached = attached &&
                Tcl.RegisterCommand(interpreter, "variable", VariableCommand) &&
@@ -154,13 +175,16 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     #if #defined(TAIJI_TK_LISTBOX) {
         if widget.kind == LISTBOX { return ConfigureListbox(widget, args, result) }
     }
+    #if #defined(TAIJI_TK_MENU) {
+        if widget.kind == MENU { return Menu.Configure(*widget.menu, args, result) }
+    }
     if widget.kind == TEXT || widget.kind == SCROLLBAR { return ConfigureScroll(widget, args, result) }
     button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
-        if option == "-text" && (widget.kind == LABEL || button) { continue }
-        if option == "-command" && button { continue }
-        if option == "-state" && button {
+        if option == "-text" && (widget.kind == LABEL || widget.kind == MENUBUTTON || button) { continue }
+        if option == "-command" && button || option == "-menu" && widget.kind == MENUBUTTON { continue }
+        if option == "-state" && (button || widget.kind == MENUBUTTON) {
             value := TextView(args[2*i+1]);
             if value == "normal" || value == "disabled" { continue }
         }
@@ -202,10 +226,13 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     parent: s64 = -1;
     if parent_end > 0 {
         parent = Find(path[:parent_end]);
-        if parent < 0 || widgets[parent].kind != FRAME { SetError(result, "expected a frame parent"); return }
+        if parent < 0 || (kind != MENU && widgets[parent].kind != FRAME) { SetError(result, "expected a frame parent"); return }
     }
     widget := Widget.{name = TextCopy(path), kind = kind, parent = parent};
     if kind == SCALE { widget.scale = Scale.Default() }
+    #if #defined(TAIJI_TK_MENU) {
+        if kind == MENU { Menu.Initialize(*widget.menu) }
+    }
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         if kind == CANVAS { widget.canvas = Canvas.Default() }
     }
@@ -252,6 +279,10 @@ Create :: (kind: s64, args: []Text, result: *Result) {
         saved.listbox.anchor = -1;
         saved.entry_width = widget.entry_width;
     }
+    #if #defined(TAIJI_TK_MENU) {
+        saved.menu.active = widget.menu.active;
+        saved.menu.border = widget.menu.border;
+    }
     saved.text_height = widget.text_height;
     saved.sent_scroll = false;
     saved.check.selected = widget.check.selected;
@@ -276,7 +307,9 @@ Pack :: (_: s64, args: []Text, result: *Result) {
     count: s64;
     options := Packing.{side = -1, padx = -1, pady = -1, fill = -1, expand = -1, anchor_x = -2, anchor_y = -2};
     while count < args.count && ParentEnd(TextView(args[count])) >= 0 {
-        if Find(TextView(args[count])) < 0 { SetError(result, "cannot pack unknown widget"); return }
+        index := Find(TextView(args[count]));
+        if index < 0 { SetError(result, "cannot pack unknown widget"); return }
+        if widgets[index].kind == MENU { SetError(result, "cannot pack a menu"); return }
         count += 1;
     }
     if count == 0 || (args.count - count) % 2 != 0 { SetError(result, "invalid pack arguments"); return }
@@ -351,6 +384,10 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             #if #defined(TAIJI_TK_LISTBOX) {
                 unused VecResize(it.listbox.rows, 0);
             }
+            #if #defined(TAIJI_TK_MENU) {
+                if popup == it_index || popup_owner == it_index { UnpostMenu() }
+                if it.kind == MENU { Menu.Clear(*it.menu) }
+            }
             View.Reset(*it.view);
             it.order = 0;
             it.box = .{};
@@ -365,6 +402,9 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     if index < 0 || closed { SetError(result, "unknown widget path"); return }
     if args.count == 0 { SetError(result, "expected widget subcommand"); return }
     widget := *widgets[index];
+    #if #defined(TAIJI_TK_MENU) {
+        if widget.kind == MENU { MenuCommand(index, args, result, script); return }
+    }
     subcommand := TextView(args[0]);
     if subcommand == "configure" && args.count >= 3 {
         if Configure(widget, args[1:], result) && widget.kind == TEXT { TextScroll(widget, script) }
@@ -373,7 +413,7 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     if subcommand == "cget" && args.count == 2 {
         option := TextView(args[1]);
         button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
-        if option == "-text" && (widget.kind == LABEL || button) {
+        if option == "-text" && (widget.kind == LABEL || widget.kind == MENUBUTTON || button) {
             unused BuilderAppend(result.value.bytes, TextView(widget.text)); return;
         }
         if option == "-bg" && widget.kind == ENTRY {
@@ -384,10 +424,10 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
                 Listbox.Integer(result, EntryWidth(widget)); return;
             }
         }
-        if option == "-command" && button {
+        if option == "-command" && button || option == "-menu" && widget.kind == MENUBUTTON {
             unused BuilderAppend(result.value.bytes, TextView(widget.command)); return;
         }
-        if option == "-state" && button {
+        if option == "-state" && (button || widget.kind == MENUBUTTON) {
             unused BuilderAppend(result.value.bytes, ifx widget.disabled then "disabled" else "normal"); return;
         }
     }
@@ -800,6 +840,7 @@ Measure :: (parent: s64) -> Box {
             length := UTF.Count(TextView(widget.text), 512);
             requested = .{w = length * CHAR_WIDTH + 30, h = ifx widget.kind == BUTTON then 36 else 28};
             if widget.kind == CHECKBUTTON { requested.w += 10 }
+            if widget.kind == MENUBUTTON { requested.w += 12 }
         }
         #if !#defined(TAIJI_TK_NO_CANVAS) {
             if widget.kind == CANVAS {
@@ -884,6 +925,9 @@ Place :: (parent: s64, cavity: Box) {
 }
 
 Layout :: (width: s32, height: s32) {
+    #if #defined(TAIJI_TK_MENU) {
+        viewport = .{w = width, h = height};
+    }
     for * widgets { it.box = .{} }
     unused Measure(-1);
     Place(-1, .{x = ROOT_INSET, y = ROOT_INSET,
@@ -945,6 +989,19 @@ PointerDown :: (x: s32, y: s32) {
 }
 
 PointerUp :: (x: s32, y: s32) -> Text {
+    #if #defined(TAIJI_TK_MENU) {
+        if popup >= 0 {
+            row, inside := MenuHit(x, y);
+            script: Text;
+            if inside && row >= 0 {
+                menu := *widgets[popup].menu;
+                if !menu.rows[row].separator { Menu.Invoke(menu, row, *script); UnpostMenu() }
+            } else {
+                UnpostMenu();
+            }
+            return script;
+        }
+    }
     index := pressed;
     range := pressed_range;
     pressed = -1;
@@ -990,6 +1047,77 @@ PointerScript :: (script: string, local_x: s32, local_y: s32) -> Text {
 }
 
 Closed :: () -> bool { return closed }
+
+MenuPosted :: () -> bool {
+    #if #defined(TAIJI_TK_MENU) {
+        return popup >= 0;
+    }
+    else {
+        return false;
+    }
+}
+
+#if #defined(TAIJI_TK_MENU) {
+    MenuBounds :: () -> Box {
+        menu := *widgets[popup].menu;
+        border := menu.border;
+        width: s32 = 28;
+        for * menu.rows {
+            width = Maximum(width, UTF.Count(TextView(it.label), 512)*CHAR_WIDTH+20);
+        }
+        width = Minimum(viewport.w, width+2*border);
+        height := Minimum(viewport.h, Menu.RowTop(menu, menu.rows.count)+2*border);
+        y := popup_y;
+        if popup_owner >= 0 && y > viewport.h-height && widgets[popup_owner].box.y >= height {
+            y = widgets[popup_owner].box.y-height;
+        }
+        return .{x = Maximum(0, Minimum(popup_x, viewport.w-width)),
+                 y = Maximum(0, Minimum(y, viewport.h-height)), w = width, h = height};
+    }
+
+    MenuHit :: (x: s32, y: s32) -> (row: s64, inside: bool) {
+        box := MenuBounds();
+        if x < box.x || x >= box.x+box.w || y < box.y || y >= box.y+box.h { return -1, false }
+        border := widgets[popup].menu.border;
+        if x < box.x+border || x >= box.x+box.w-border || y >= box.y+box.h-border { return -1, true }
+        return Menu.AtY(*widgets[popup].menu, y-box.y-border), true;
+    }
+
+    PostMenu :: (index: s64, owner: s64, x: s32, y: s32) {
+        if popup >= 0 && popup != index { UnpostMenu() }
+        popup = index;
+        popup_owner = owner;
+        popup_x = x;
+        popup_y = y;
+        pressed = -1;
+        pressed_range = -1;
+    }
+
+    UnpostMenu :: () {
+        widgets[popup].menu.active = -1;
+        popup = -1;
+        popup_owner = -1;
+    }
+
+    MenuCommand :: (index: s64, args: []Text, result: *Result, script: *Text) {
+        op := TextView(args[0]);
+        if op == "unpost" && args.count == 1 {
+            if popup == index { UnpostMenu() }
+            return;
+        }
+        if op == "post" && args.count == 3 {
+            x, x_ok := ParseInteger(TextView(args[1]));
+            y, y_ok := ParseInteger(TextView(args[2]));
+            if !x_ok || !y_ok || x < -2147483648 || x > 2147483647 || y < -2147483648 || y > 2147483647 {
+                SetError(result, "invalid menu coordinates");
+                return;
+            }
+            PostMenu(index, -1, cast(s32)x, cast(s32)y);
+            return;
+        }
+        Menu.Command(*widgets[index].menu, args, result, script);
+    }
+}
 
 ConfigureScale :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     scale := widget.scale;
@@ -1078,6 +1206,24 @@ ScaleTrack :: (widget: *Widget) -> Box {
 }
 
 PointerPress :: (x: s32, y: s32) -> Text {
+    #if #defined(TAIJI_TK_MENU) {
+        opener := Over(x, y, MENUBUTTON);
+        if popup >= 0 {
+            row, inside := MenuHit(x, y);
+            if inside { Menu.Activate(*widgets[popup].menu, row); return .{} }
+            UnpostMenu();
+            if opener < 0 { return .{} }
+        }
+        if opener >= 0 {
+            name := TextView(widgets[opener].command);
+            index := Find(name);
+            if index >= 0 && widgets[index].kind == MENU {
+                box := widgets[opener].box;
+                PostMenu(index, opener, box.x, box.y+box.h);
+            }
+            return .{};
+        }
+    }
     PointerDown(x, y);
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         canvas := Over(x, y, CANVAS);
@@ -1123,12 +1269,20 @@ PointerPress :: (x: s32, y: s32) -> Text {
 }
 
 Dragging :: () -> bool {
+    if MenuPosted() { return true }
     if pressed < 0 { return false }
     kind := widgets[pressed].kind;
     return kind == SCALE || kind == SCROLLBAR || kind == LISTBOX;
 }
 
 PointerMove :: (x: s32, y: s32) -> Text {
+    #if #defined(TAIJI_TK_MENU) {
+        if popup >= 0 {
+            row, _ := MenuHit(x, y);
+            Menu.Activate(*widgets[popup].menu, row);
+            return .{};
+        }
+    }
     if !Dragging() { return .{} }
     widget := *widgets[pressed];
     #if #defined(TAIJI_TK_LISTBOX) {

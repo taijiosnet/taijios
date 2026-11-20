@@ -285,8 +285,8 @@ logwindow.zx: tcltk/logwindow_app.zi tcltk/logwindow_input.zi tcltk/logwindow_st
 memory.zx: tcltk/memory_app.zi tcltk/memory_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi ../wm/taijios_clock.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --module-path ../wm --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry memory_app:main -o $target tcltk/memory_app.zi
 
-tcltk.zx: tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi $TCLZX $TKZX
-	zi2zx --root tcltk --module-path $ZXLIB --module-path . --define TAIJI_TK_LISTBOX --bind-host zx_surface --bind-host taijios_stdin --entry tcltk:main -o $target tcltk/tcltk.zi
+tcltk.zx: tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi $TCLZX $TKZX $ZXLIB/tcl_tk_menu.zi $ZXLIB/tcl_packages.zi mkfile
+	zi2zx --root tcltk --module-path $ZXLIB --module-path . --define TAIJI_TK_LISTBOX --define TAIJI_TK_MENU --define TAIJI_TK_PACKAGES --bind-host zx_surface --bind-host taijios_stdin --bind-host taijios_files --entry tcltk:main -o $target tcltk/tcltk.zi
 
 linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi ../wm/taijios_clock.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --module-path ../wm --define TAIJI_TK_LISTBOX --define TAIJI_TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry linbench_app:main -o $target tcltk/linbench_app.zi

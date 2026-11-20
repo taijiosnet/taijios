@@ -9,6 +9,9 @@ using Items :: #import "tcl_tk_canvas"
 #if !#defined(TAIJI_TK_NO_CANVAS) {
     using Math :: #import "std/math"
 }
+#if #defined(TAIJI_TK_MENU) {
+    using Menu :: #import "tcl_tk_menu"
+}
 #import "std/vec"
 
 Canvas :: struct {
@@ -237,12 +240,59 @@ Render :: (pixels: []u8, width: s32, height: s32) {
             DrawEntry(*canvas, it, it_index == Tk.focused);
             continue;
         }
+        #if #defined(TAIJI_TK_MENU) {
+            if it.kind == Tk.MENUBUTTON { DrawMenuButton(*canvas, it, it_index); continue }
+        }
         if it.kind == Tk.BUTTON {
             Fill(*canvas, box, BORDER);
             Fill(*canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2},
                  ifx it_index == Tk.pressed then PRESSED else BUTTON);
         }
         DrawText(*canvas, box, TextView(it.text), true, ifx it.disabled then MUTED else LETTER);
+    }
+    #if #defined(TAIJI_TK_MENU) {
+        if Tk.MenuPosted() { DrawMenu(*canvas) }
+    }
+}
+
+#if #defined(TAIJI_TK_MENU) {
+    DrawMenuButton :: (canvas: *Canvas, widget: *Tk.Widget, index: s64) {
+        box := widget.box;
+        Fill(canvas, box, BORDER);
+        Fill(canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2},
+             ifx Tk.popup_owner == index then PRESSED else BUTTON);
+        ink := ifx widget.disabled then MUTED else LETTER;
+        DrawText(canvas, .{x = box.x+2, y = box.y, w = box.w-14, h = box.h}, TextView(widget.text), true, ink);
+        x := box.x+box.w-10;
+        y := box.y+box.h/2-1;
+        for i: 0..2 {
+            offset := cast(s32)i;
+            Fill(canvas, .{x = x+offset, y = y+offset, w = 5-2*offset, h = 1}, ink);
+        }
+    }
+
+    DrawMenu :: (canvas: *Canvas) {
+        box := Tk.MenuBounds();
+        menu := *Tk.widgets[Tk.popup].menu;
+        border := menu.border;
+        Fill(canvas, box, BORDER);
+        x := box.x+border;
+        y := box.y+border;
+        width := box.w-2*border;
+        bottom := box.y+box.h-border;
+        Fill(canvas, .{x = x, y = y, w = width, h = bottom-y}, PAPER);
+        for * menu.rows {
+            height := Tk.Minimum(Menu.Height(it), bottom-y);
+            if height <= 0 { break }
+            if it.separator {
+                Fill(canvas, .{x = x+4, y = y+height/2, w = width-8, h = 1}, BORDER);
+            } else {
+                if menu.active == it_index { Fill(canvas, .{x = x, y = y, w = width, h = height}, PRESSED) }
+                DrawText(canvas, .{x = x+8, y = y, w = width-16, h = height}, TextView(it.label), false,
+                         ifx it.disabled then MUTED else LETTER);
+            }
+            y += height;
+        }
     }
 }
 

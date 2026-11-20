@@ -1,0 +1,242 @@
+// Menu entries and indices follow Inferno libtk/menus.c. See ../../NOTICE.
+#import "std/vec"
+#import "std/number_text"
+using T :: #import "tcl_types"
+using Lists :: #import "tcl_lists"
+
+// The stock font's 14-pixel row and one-pixel borders determine default y positions.
+COMMAND_HEIGHT :: 16;
+SEPARATOR_HEIGHT :: 6;
+MAX_ROWS :: 128;
+
+MenuRow :: struct { label: Text; command: Text; separator: bool; disabled: bool; }
+State :: struct { rows: Vec(MenuRow); active: s64; border: s32; }
+
+Initialize :: (menu: *State) {
+    menu.active = -1;
+    menu.border = 1;
+}
+
+Clear :: (menu: *State) {
+    unused VecResize(menu.rows, 0);
+    Initialize(menu);
+}
+
+Error :: (result: *T.Result, message: string) {
+    result.code = .Error;
+    unused BuilderAppend(result.value.bytes, message);
+}
+
+WriteInteger :: (result: *T.Result, value: s64) {
+    digits: [24]u8;
+    unused BuilderAppend(result.value.bytes, FormatInteger(value, digits[:]));
+}
+
+Height :: (row: *MenuRow) -> s32 {
+    return ifx row.separator then SEPARATOR_HEIGHT else COMMAND_HEIGHT;
+}
+
+RowTop :: (menu: *State, index: s64) -> s32 {
+    top: s32;
+    for i: 0..index-1 { top += Height(*menu.rows[i]) }
+    return top;
+}
+
+AtY :: (menu: *State, y: s32) -> s64 {
+    top: s32;
+    for * menu.rows {
+        bottom := top+Height(it);
+        if y >= top && y < bottom { return it_index }
+        top = bottom;
+    }
+    return -1;
+}
+
+Index :: (menu: *State, word: string) -> (index: s64, valid: bool) {
+    if word == "none" { return -1, true }
+    if word == "active" { return menu.active, true }
+    if word == "end" || word == "last" {
+        return ifx menu.rows.count == 0 then 0 else menu.rows.count-1, true;
+    }
+    if word.count > 0 && word[0] == 64 {
+        y, valid := T.ParseInteger(word[1:]);
+        if !valid { return -1, false }
+        top: s64;
+        for * menu.rows {
+            height := cast(s64)Height(it);
+            inset: s64 = ifx it.separator then 0 else 1;
+            if y >= top+inset && y < top+inset+height { return it_index, true }
+            top += height;
+        }
+        return -1, false;
+    }
+    index, valid := T.ParseInteger(word);
+    return index, valid && index >= 0;
+}
+
+Selectable :: (menu: *State, index: s64) -> bool {
+    return index >= 0 && index < menu.rows.count && !menu.rows[index].separator && !menu.rows[index].disabled;
+}
+
+Activate :: (menu: *State, index: s64) {
+    menu.active = ifx Selectable(menu, index) then index else -1;
+}
+
+Invoke :: (menu: *State, index: s64, script: *Text) {
+    if !Selectable(menu, index) { return }
+    body := TextView(menu.rows[index].command);
+    if body.count == 0 { return }
+    // Inferno invokes an entry for its effects and discards the callback result.
+    unused BuilderAppend(script.bytes, "catch");
+    Lists.AppendElement(*script.bytes, body, true);
+    unused BuilderAppend(script.bytes, "; format {} ");
+}
+
+Configure :: (menu: *State, args: []Text, result: *T.Result) -> bool {
+    if args.count % 2 != 0 { Error(result, "expected menu option and value pairs"); return false }
+    border := menu.border;
+    for i: 0..args.count/2-1 {
+        option := TextView(args[2*i]);
+        value := TextView(args[2*i+1]);
+        if option == "-bd" || option == "-borderwidth" {
+            width, valid := T.ParseInteger(value);
+            if valid && width >= 0 && width <= 512 { border = cast(s32)width; continue }
+        }
+        Error(result, "unsupported menu option or value");
+        return false;
+    }
+    menu.border = border;
+    return true;
+}
+
+ConfigureRow :: (row: *MenuRow, args: []Text, result: *T.Result) -> bool {
+    if args.count % 2 != 0 { Error(result, "expected entry option and value pairs"); return false }
+    label_arg: s64 = -1;
+    command_arg: s64 = -1;
+    disabled := row.disabled;
+    for i: 0..args.count/2-1 {
+        option := TextView(args[2*i]);
+        value := TextView(args[2*i+1]);
+        if !row.separator {
+            if option == "-label" || option == "-text" { label_arg = 2*i+1; continue }
+            if option == "-command" { command_arg = 2*i+1; continue }
+            if option == "-state" && (value == "normal" || value == "disabled") {
+                disabled = value == "disabled";
+                continue;
+            }
+        }
+        Error(result, "unsupported menu entry option or value");
+        return false;
+    }
+    label_copy: Text;
+    command_copy: Text;
+    if label_arg >= 0 {
+        unused BuilderAppend(label_copy.bytes, TextView(args[label_arg]));
+        if label_copy.bytes.count != args[label_arg].bytes.count { Error(result, "could not allocate menu label"); return false }
+    }
+    if command_arg >= 0 {
+        unused BuilderAppend(command_copy.bytes, TextView(args[command_arg]));
+        if command_copy.bytes.count != args[command_arg].bytes.count { Error(result, "could not allocate menu callback"); return false }
+    }
+    if label_arg >= 0 { VecSwap(row.label.bytes, label_copy.bytes) }
+    if command_arg >= 0 { VecSwap(row.command.bytes, command_copy.bytes) }
+    row.disabled = disabled;
+    return true;
+}
+
+SwapRows :: (a: *MenuRow, b: *MenuRow) {
+    VecSwap(a.label.bytes, b.label.bytes);
+    VecSwap(a.command.bytes, b.command.bytes);
+    separator := a.separator;
+    disabled := a.disabled;
+    a.separator = b.separator;
+    a.disabled = b.disabled;
+    b.separator = separator;
+    b.disabled = disabled;
+}
+
+Insert :: (menu: *State, index: s64, args: []Text, result: *T.Result) {
+    kind := TextView(args[0]);
+    if kind != "command" && kind != "separator" { Error(result, "unsupported menu entry type"); return }
+    row: MenuRow = .{separator = kind == "separator"};
+    // Inferno ignores the supplied options for a plain separator on creation.
+    if !row.separator && !ConfigureRow(*row, args[1:], result) { return }
+    count := menu.rows.count;
+    if count >= MAX_ROWS || !VecResize(menu.rows, count+1) { Error(result, "could not allocate menu entry"); return }
+    SwapRows(*menu.rows[count], *row);
+    at := count;
+    while at > index {
+        SwapRows(*menu.rows[at-1], *menu.rows[at]);
+        at -= 1;
+    }
+    if menu.active >= at { menu.active += 1 }
+}
+
+Delete :: (menu: *State, first: s64, last: s64) {
+    count := menu.rows.count;
+    end := ifx last >= count then count else last+1;
+    if first >= end { return }
+    removed := end-first;
+    for i: end..count-1 { SwapRows(*menu.rows[i-removed], *menu.rows[i]) }
+    unused VecResize(menu.rows, count-removed);
+    if menu.active >= end { menu.active -= removed }
+    else if menu.active >= first { menu.active = -1 }
+}
+
+EntryOption :: (row: *MenuRow, option: string, result: *T.Result) {
+    if !row.separator {
+        if option == "-label" || option == "-text" { unused BuilderAppend(result.value.bytes, TextView(row.label)); return }
+        if option == "-command" { unused BuilderAppend(result.value.bytes, TextView(row.command)); return }
+        if option == "-state" {
+            unused BuilderAppend(result.value.bytes, ifx row.disabled then "disabled" else "normal");
+            return;
+        }
+    }
+    Error(result, "unsupported menu entry option");
+}
+
+// The root dispatch handles posting, since it owns the popup bounds and pointer grab.
+Command :: (menu: *State, args: []Text, result: *T.Result, script: *Text) {
+    op := TextView(args[0]);
+    if op == "add" && args.count >= 2 { Insert(menu, menu.rows.count, args[1:], result); return }
+    if op == "configure" && args.count > 1 { unused Configure(menu, args[1:], result); return }
+    if op == "cget" && args.count == 2 {
+        option := TextView(args[1]);
+        if option == "-bd" || option == "-borderwidth" { WriteInteger(result, menu.border); return }
+    }
+    if args.count < 2 { Error(result, "expected menu subcommand and arguments"); return }
+    index, valid := Index(menu, TextView(args[1]));
+    if op == "invoke" && args.count == 2 { if valid { Invoke(menu, index, script) }; return }
+    if !valid { Error(result, "bad index"); return }
+    if op == "index" && args.count == 2 {
+        if index < 0 { unused BuilderAppend(result.value.bytes, "none") }
+        else { WriteInteger(result, index) }
+        return;
+    }
+    if op == "activate" && args.count == 2 { Activate(menu, index); return }
+    if op == "insert" && args.count >= 3 && index >= 0 { Insert(menu, index, args[2:], result); return }
+    if op == "delete" && (args.count == 2 || args.count == 3) {
+        last := index;
+        if args.count == 3 { last, valid = Index(menu, TextView(args[2])) }
+        if !valid || index < 0 || last < 0 { Error(result, "bad index"); return }
+        Delete(menu, index, last);
+        return;
+    }
+    if index < 0 || index >= menu.rows.count { Error(result, "bad index"); return }
+    row := *menu.rows[index];
+    if op == "type" && args.count == 2 {
+        unused BuilderAppend(result.value.bytes, ifx row.separator then "separator" else "command");
+        return;
+    }
+    if op == "yposition" && args.count == 2 {
+        inset: s32 = ifx row.separator then 0 else 1;
+        WriteInteger(result, RowTop(menu, index)+inset);
+        return;
+    }
+    if op == "entrycget" && args.count == 3 { EntryOption(row, TextView(args[2]), result); return }
+    if op == "entryconfigure" && args.count > 2 {
+        if ConfigureRow(row, args[2:], result) && index == menu.active && row.disabled { menu.active = -1 }
+        return;
+    }
+    Error(result, "unsupported menu subcommand or arguments");
+}
