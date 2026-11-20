@@ -37,6 +37,11 @@ CANVAS :: 9;
 LISTBOX :: 10;
 MENU :: 11;
 MENUBUTTON :: 12;
+RADIOBUTTON :: 13;
+
+SelectionButton :: (kind: s64) -> bool {
+    return kind == CHECKBUTTON || kind == RADIOBUTTON;
+}
 MAX_PANEL_BYTES :: 16777216;
 CHAR_WIDTH :: Canvas.CELL_WIDTH;
 ENTRY_INSET :: 8;
@@ -248,6 +253,7 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
                Tcl.RegisterCommand(interpreter, "scale", Create, SCALE) &&
                Tcl.RegisterCommand(interpreter, "panel", Create, PANEL) &&
                Tcl.RegisterCommand(interpreter, "checkbutton", Create, CHECKBUTTON) &&
+               Tcl.RegisterCommand(interpreter, "radiobutton", Create, RADIOBUTTON) &&
                Tcl.RegisterCommand(interpreter, "scrollbar", Create, SCROLLBAR);
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         attached = attached && Tcl.RegisterCommand(interpreter, "canvas", Create, CANVAS);
@@ -299,7 +305,7 @@ SetError :: (result: *Result, message: string) {
     unused BuilderAppend(result.value.bytes, message);
 }
 
-Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
+Configure :: (widget: *Widget, args: []Text, result: *Result, path: string = "") -> bool {
     if args.count % 2 != 0 { SetError(result, "expected option and value pairs"); return false }
     if widget.kind == SCALE { return ConfigureScale(widget, args, result) }
     if widget.kind == PANEL { return ConfigurePanel(widget, args, result) }
@@ -316,16 +322,20 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
     #if #defined(TAIJI_TK_BITMAP) {
         if widget.kind == LABEL || widget.kind == FRAME { return ConfigureAppearance(widget, args, result) }
     }
-    button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
+    button := widget.kind == BUTTON || SelectionButton(widget.kind);
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
-        if option == "-text" && (widget.kind == LABEL || widget.kind == MENUBUTTON || button) { continue }
+        if (option == "-text" || option == "-label" && SelectionButton(widget.kind)) &&
+           (widget.kind == LABEL || widget.kind == MENUBUTTON || button) { continue }
         if option == "-command" && button || option == "-menu" && widget.kind == MENUBUTTON { continue }
         if option == "-state" && (button || widget.kind == MENUBUTTON) {
             value := TextView(args[2*i+1]);
             if value == "normal" || value == "disabled" { continue }
         }
-        if widget.kind == CHECKBUTTON && CheckOption(option) { continue }
+        if SelectionButton(widget.kind) {
+            supported := Check.Option(*widget.check, option);
+            if supported && (option != "-indicatoron" || Check.Indicator(TextView(args[2*i+1])) != 0) { continue }
+        }
         if option == "-bg" && widget.kind == ENTRY && TextView(args[2*i+1]) == "white" { continue }
         #if #defined(TAIJI_TK_LISTBOX) {
             if option == "-width" && widget.kind == ENTRY {
@@ -336,11 +346,15 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
         SetError(result, "unsupported widget option or value");
         return false;
     }
-    if widget.kind == CHECKBUTTON && !ConfigureCheck(widget, args, result) { return false }
+    if SelectionButton(widget.kind) && !Check.Configure(*widget.check, args, path, false) {
+        SetError(result, "could not configure selection button");
+        return false;
+    }
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
         if option == "-state" { widget.disabled = TextView(args[2*i+1]) == "disabled"; continue }
-        if option == "-bg" || CheckOption(option) { continue }
+        selection_option := Check.Option(*widget.check, option);
+        if option == "-bg" || SelectionButton(widget.kind) && selection_option { continue }
         #if #defined(TAIJI_TK_LISTBOX) {
             if option == "-width" {
                 pixels, _ := Distance(TextView(args[2*i+1]));
@@ -349,7 +363,7 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
             }
         }
         value: Text = TextCopy(TextView(args[2*i+1]));
-        if option == "-text" { VecSwap(widget.text.bytes, value.bytes) }
+        if option == "-text" || option == "-label" { VecSwap(widget.text.bytes, value.bytes) }
         else { VecSwap(widget.command.bytes, value.bytes) }
     }
     return true;
@@ -379,19 +393,14 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     #if #defined(TAIJI_TK_LISTBOX) {
         if kind == LISTBOX { widget.listbox = Listbox.Default() }
     }
-    if kind == CHECKBUTTON {
-        on: Text = TextCopy("1");
-        off: Text = TextCopy("0");
-        VecSwap(widget.check.on.bytes, on.bytes);
-        VecSwap(widget.check.off.bytes, off.bytes);
-    }
+    widget.check.radio = kind == RADIOBUTTON;
     slot := widgets.count;
     for * widgets { if it.name.bytes.count == 0 { slot = it_index; break } }
     if slot == widgets.count {
         if slot == MAX_WIDGETS { SetError(result, "widget limit exceeded"); return }
         if !VecResize(widgets, slot + 1) { SetError(result, "could not allocate widget"); return }
     }
-    if !Configure(*widget, args[1:], result) { return }
+    if !Configure(*widget, args[1:], result, path) { return }
     if kind == SCALE && widget.scale.big_increment == 0 {
         widget.scale.big_increment = ((widget.scale.last - widget.scale.first) / Scale.UNIT / 10) * Scale.UNIT;
     }
@@ -428,10 +437,7 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     }
     saved.text_height = widget.text_height;
     saved.sent_scroll = false;
-    saved.check.selected = widget.check.selected;
-    VecSwap(saved.check.variable.bytes, widget.check.variable.bytes);
-    VecSwap(saved.check.on.bytes, widget.check.on.bytes);
-    VecSwap(saved.check.off.bytes, widget.check.off.bytes);
+    Check.Swap(*saved.check, *widget.check);
     saved.panel.border = widget.panel.border;
     saved.panel.width = 0;
     saved.panel.height = 0;
@@ -626,8 +632,9 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
         #if #defined(TAIJI_TK_BITMAP) {
             if (widget.kind == LABEL || widget.kind == FRAME) && AppearanceOption(widget, option, result) { return }
         }
-        button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
-        if option == "-text" && (widget.kind == LABEL || widget.kind == MENUBUTTON || button) {
+        button := widget.kind == BUTTON || SelectionButton(widget.kind);
+        if (option == "-text" || option == "-label" && SelectionButton(widget.kind)) &&
+           (widget.kind == LABEL || widget.kind == MENUBUTTON || button) {
             unused BuilderAppend(result.value.bytes, TextView(widget.text)); return;
         }
         if option == "-bg" && widget.kind == ENTRY {
@@ -651,7 +658,7 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     }
     if widget.kind == SCALE { ScaleCommand(widget, args, result); return }
     if widget.kind == PANEL { PanelCommand(widget, args, result); return }
-    if widget.kind == CHECKBUTTON { CheckCommand(widget, args, result, script); return }
+    if SelectionButton(widget.kind) { CheckCommand(widget, args, result, script); return }
     if widget.kind == SCROLLBAR { ScrollCommand(widget, args, result); return }
     #if !#defined(TAIJI_TK_NO_CANVAS) {
         if widget.kind == CANVAS { Canvas.Command(*widget.canvas, args, result); return }
@@ -1057,7 +1064,7 @@ Measure :: (parent: s64) -> Box {
         else {
             length := UTF.Count(TextView(widget.text), 512);
             requested = .{w = length * CHAR_WIDTH + 30, h = ifx widget.kind == BUTTON then 36 else 28};
-            if widget.kind == CHECKBUTTON { requested.w += 10 }
+            if SelectionButton(widget.kind) && widget.check.indicator >= 0 { requested.w += 10 }
             if widget.kind == MENUBUTTON { requested.w += 12 }
         }
         #if !#defined(TAIJI_TK_NO_CANVAS) {
@@ -1238,7 +1245,8 @@ PointerUp :: (x: s32, y: s32) -> Text {
             script: Text;
             if inside && row >= 0 {
                 menu := *widgets[popup].menu;
-                if !menu.rows[row].separator { Menu.Invoke(menu, row, *script); UnpostMenu() }
+                Menu.Invoke(menu, row, *script);
+                if menu.rows[row].kind == .Command { UnpostMenu() }
             } else {
                 UnpostMenu();
             }
@@ -1306,7 +1314,7 @@ MenuPosted :: () -> bool {
         border := menu.border;
         width: s32 = 28;
         for * menu.rows {
-            width = Maximum(width, UTF.Count(TextView(it.label), 512)*CHAR_WIDTH+20);
+            width = Maximum(width, UTF.Count(TextView(it.label), 512)*CHAR_WIDTH+20+Menu.IndicatorWidth(it));
         }
         width = Minimum(viewport.w, width+2*border);
         height := Minimum(viewport.h, Menu.RowTop(menu, menu.rows.count)+2*border);
@@ -1487,9 +1495,10 @@ PointerPress :: (x: s32, y: s32) -> Text {
         }
     }
     check := Over(x, y, CHECKBUTTON);
+    if check < 0 { check = Over(x, y, RADIOBUTTON) }
     if check >= 0 {
         widget := *widgets[check];
-        if Check.Select(*widget.check, !Check.Selected(*widget.check)) { return TextCopy(TextView(widget.command)) }
+        if Check.Invoke(*widget.check) { return TextCopy(TextView(widget.command)) }
         return .{};
     }
     scrollbar := Over(x, y, SCROLLBAR);
@@ -1594,34 +1603,6 @@ PanelImage :: (name: string, width: s32, height: s32) -> s64 {
     return index;
 }
 
-CheckOption :: (name: string) -> bool {
-    return name == "-variable" || name == "-onvalue" || name == "-offvalue";
-}
-
-CopyOption :: (args: []Text, name: string, fallback: string, target: *Text) -> bool {
-    index := args.count-2;
-    while index >= 0 {
-        if TextView(args[index]) == name { return BuilderAppend(target.bytes, TextView(args[index+1])) }
-        index -= 2;
-    }
-    return BuilderAppend(target.bytes, fallback);
-}
-
-ConfigureCheck :: (widget: *Widget, args: []Text, result: *Result) -> bool {
-    next: Check.State;
-    if !CopyOption(args, "-variable", TextView(widget.check.variable), *next.variable) ||
-       !CopyOption(args, "-onvalue", TextView(widget.check.on), *next.on) ||
-       !CopyOption(args, "-offvalue", TextView(widget.check.off), *next.off) ||
-       !Check.Ensure(TextView(next.variable), TextView(next.off)) {
-        SetError(result, "could not allocate checkbutton values"); return false;
-    }
-    widget.check.selected = Check.Selected(*widget.check);
-    VecSwap(widget.check.variable.bytes, next.variable.bytes);
-    VecSwap(widget.check.on.bytes, next.on.bytes);
-    VecSwap(widget.check.off.bytes, next.off.bytes);
-    return true;
-}
-
 VariableCommand :: (_: s64, args: []Text, result: *Result) {
     if args.count < 1 || args.count > 2 { SetError(result, "expected variable name ?value?"); return }
     name := TextView(args[0]);
@@ -1637,27 +1618,21 @@ CheckCommand :: (widget: *Widget, args: []Text, result: *Result, script: *Text) 
     check := *widget.check;
     if operation == "cget" && args.count == 2 {
         option := TextView(args[1]);
-        if CheckOption(option) {
-            value := TextView(check.off);
-            if option == "-variable" { value = TextView(check.variable) }
-            else if option == "-onvalue" { value = TextView(check.on) }
-            unused BuilderAppend(result.value.bytes, value);
-            return;
-        }
+        if Check.Option(check, option, *result.value) { return }
     }
     if args.count == 1 {
         if operation == "select" || operation == "deselect" {
             if !Check.Select(check, operation == "select") { SetError(result, "could not store Tk variable") }
             return;
         }
-        if operation == "toggle" || operation == "invoke" {
+        if operation == "toggle" && !check.radio || operation == "invoke" {
             if widget.disabled { return }
-            if !Check.Select(check, !Check.Selected(check)) { SetError(result, "could not store Tk variable"); return }
+            if !Check.Invoke(check) { SetError(result, "could not store Tk variable"); return }
             if operation == "invoke" { unused BuilderAppend(script.bytes, TextView(widget.command)) }
             return;
         }
     }
-    SetError(result, "unsupported checkbutton subcommand or arguments");
+    SetError(result, "unsupported selection button subcommand or arguments");
 }
 
 Distance :: (value: string) -> (pixels: s32, ok: bool) {

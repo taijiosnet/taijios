@@ -225,7 +225,7 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         }
         if box.w < 4 || box.h < 4 { continue }
         if it.kind == Tk.SCALE { DrawScale(*canvas, it, it_index); continue }
-        if it.kind == Tk.CHECKBUTTON { DrawCheck(*canvas, it); continue }
+        if Tk.SelectionButton(it.kind) { DrawCheck(*canvas, it); continue }
         if it.kind == Tk.SCROLLBAR { DrawScroll(*canvas, it, it_index); continue }
         if it.kind == Tk.PANEL { DrawPanel(*canvas, it); continue }
         #if #defined(TAIJI_TK_LISTBOX) {
@@ -386,12 +386,20 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         for * menu.rows {
             height := Tk.Minimum(Menu.Height(it), bottom-y);
             if height <= 0 { break }
-            if it.separator {
+            if it.kind == .Separator {
                 Fill(canvas, .{x = x+4, y = y+height/2, w = width-8, h = 1}, BORDER);
             } else {
-                if menu.active == it_index { Fill(canvas, .{x = x, y = y, w = width, h = height}, PRESSED) }
-                DrawText(canvas, .{x = x+8, y = y, w = width-16, h = height}, TextView(it.label), false,
-                         ifx it.disabled then MUTED else LETTER);
+                indicator := Menu.IndicatorWidth(it);
+                selected := Menu.SelectionEntry(it) && Check.Selected(*it.check);
+                if menu.active == it_index || indicator == 0 && selected {
+                    Fill(canvas, .{x = x, y = y, w = width, h = height}, PRESSED);
+                }
+                ink := ifx it.disabled then MUTED else LETTER;
+                if indicator > 0 && width >= 24 && height >= 16 {
+                    DrawIndicator(canvas, x+5, y+(height-16)/2, it.check.radio, selected, ink);
+                }
+                DrawText(canvas, .{x = x+8+indicator, y = y, w = width-16-indicator, h = height},
+                         TextView(it.label), false, ink);
             }
             y += height;
         }
@@ -574,17 +582,42 @@ Render :: (pixels: []u8, width: s32, height: s32) {
     }
 }
 
+DrawIndicator :: (canvas: *Canvas, x: s32, y: s32, radio: bool, selected: bool, ink: Ink) {
+    if radio {
+        for i: 0..12 {
+            dy := cast(s32)i-6;
+            span: s32 = 6;
+            while span*span+dy*dy > 40 { span -= 1 }
+            Fill(canvas, .{x = x+8-span, y = y+8+dy, w = 2*span+1, h = 1}, BORDER);
+            span -= 1;
+            if dy > -6 && dy < 6 { Fill(canvas, .{x = x+8-span, y = y+8+dy, w = 2*span+1, h = 1}, ENTRY) }
+            if selected && dy >= -3 && dy <= 3 {
+                dot: s32 = ifx dy == -3 || dy == 3 then 1 else 3;
+                Fill(canvas, .{x = x+8-dot, y = y+8+dy, w = 2*dot+1, h = 1}, ink);
+            }
+        }
+        return;
+    }
+    Fill(canvas, .{x = x, y = y, w = 16, h = 16}, BORDER);
+    Fill(canvas, .{x = x+1, y = y+1, w = 14, h = 14}, ENTRY);
+    if selected {
+        Stroke(canvas, x+3, y+1, "0314", ink);
+        Stroke(canvas, x+3, y+1, "1441", ink);
+    }
+}
+
 DrawCheck :: (canvas: *Canvas, widget: *Tk.Widget) {
     box := widget.box;
     ink := ifx widget.disabled then MUTED else LETTER;
-    indicator := Tk.Box.{x = box.x+6, y = box.y+(box.h-16)/2, w = 16, h = 16};
+    selected := Check.Selected(*widget.check);
+    if widget.check.indicator < 0 {
+        Fill(canvas, box, BORDER);
+        Fill(canvas, .{x = box.x+1, y = box.y+1, w = box.w-2, h = box.h-2}, ifx selected then PRESSED else BUTTON);
+        DrawText(canvas, box, TextView(widget.text), true, ink);
+        return;
+    }
     if box.w >= 24 && box.h >= 16 {
-        Fill(canvas, indicator, BORDER);
-        Fill(canvas, .{x = indicator.x+1, y = indicator.y+1, w = 14, h = 14}, ENTRY);
-        if Check.Selected(*widget.check) {
-            Stroke(canvas, indicator.x+3, indicator.y+1, "0314", ink);
-            Stroke(canvas, indicator.x+3, indicator.y+1, "1441", ink);
-        }
+        DrawIndicator(canvas, box.x+6, box.y+(box.h-16)/2, widget.check.radio, selected, ink);
     }
     DrawText(canvas, .{x = box.x+29, y = box.y, w = box.w-29, h = box.h}, TextView(widget.text), false, ink);
 }

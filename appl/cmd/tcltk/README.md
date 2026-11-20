@@ -85,6 +85,7 @@ target="$PWD/dis/tcltk.zx"
 (cd appl/cmd && mk install-coffee-zx install-man-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
 python3 appl/cmd/tcltk/test_menu.py --installed
+python3 appl/cmd/tcltk/test_radio.py --installed
 (cd appl/cmd && mk install-about-zx)
 python3 appl/cmd/tcltk/test_about.py --installed
 python3 appl/cmd/tcltk/test_logwindow.py
@@ -205,6 +206,13 @@ callback redraw, disabled items, separators, outside dismissal, and direct
 posting. It also loads `Tk 0.1` and discovers a separate Tcl script package from
 the guest namespace through `auto_path`. Run without `--installed` to build the launcher first.
 
+`test_radio.py` compares radio buttons and radio and check menu entries with
+`tkcmd`. It switches the stock Directory Browser to text, sorts by size, and
+toggles Walk while Options stays posted. The hosted test checks that pointer
+presses and direct variable writes move the visible selection, that disabled
+controls ignore pointer input, and that menu entries and standalone buttons
+share one Tk variable. Run without `--installed` to build the launcher first.
+
 `test_about.py` compares label, bitmap, frame, and packing commands with
 `tkcmd`. It opens and closes the stock and ZX About windows, compares all
 62,100 logo pixels, and checks that the ZX app updates its version label when the
@@ -221,12 +229,13 @@ In the Taiji graphical shell, launch About with `zxrun -w /dis/wm/about.zx`.
 | `button .path` | `-text text`, `-command script`, and `-state normal` or `disabled` |
 | `menubutton .path` | `-text`, `-menu`, and `-state normal` or `disabled`. Press to post, drag to a row, and release to invoke it |
 | `menu .path` | `-bd` or `-borderwidth`. A popup may be a child of its menubutton |
-| `.menu add type ?options?`, `insert index type ?options?`, `delete first ?last?` | Edit command and separator rows. Command options include `-label` or `-text`, `-command`, and `-state` |
-| `.menu entryconfigure index option value`, `entrycget index option` | Change or query a command row |
+| `.menu add type ?options?`, `insert index type ?options?`, `delete first ?last?` | Edit `command`, `separator`, `checkbutton`, and `radiobutton` rows. Selection entries support the options of their widget counterparts and leave the menu posted when invoked with the pointer |
+| `.menu entryconfigure index option value`, `entrycget index option` | Change or query options of a command or selection row |
 | `.menu index index`, `type index`, `yposition index`, `activate index`, `invoke index` | Query or act on rows by number, `end`, `last`, `active`, `none`, or `@y` |
 | `.menu post x y`, `unpost` | Show a popup at application-surface coordinates or dismiss it. An outside press dismisses a posted popup |
-| `checkbutton .path` | Button options plus `-variable`, `-onvalue`, and `-offvalue`. A left press toggles the value and runs the callback |
-| `variable name ?value?` | Read or write the Tk variable associated with one or more checkbuttons |
+| `checkbutton .path` | Button options plus `-label`, `-variable`, `-onvalue`, `-offvalue`, and `-indicatoron`. A left press toggles the value and runs the callback. The default stored values are `1` and `0` |
+| `radiobutton .path` | Button options plus `-label`, `-variable`, `-value`, and `-indicatoron`. A left press selects the value and runs the callback. The default variable is `selectedButton`; a standalone button bound to it uses its path by default. A menu radio entry defaults to an empty value |
+| `variable name ?value?` | Read or write a Tk root variable shared by standalone buttons and menu entries |
 | `frame .path` | Container for nested widgets. With bitmap support, accepts the same color, border width, and relief options as labels |
 | `image create bitmap ?name? ?-file bitmap?`, `image names`, `image width name`, `image height name`, `image type name`, `image delete name ?name ...?` | Create and query named bitmaps. A label retains its bitmap when a name is deleted or replaced |
 | `entry .path` | Single-line UTF-8 text with `-bg white` and `-width` |
@@ -264,7 +273,8 @@ In the Taiji graphical shell, launch About with `zxrun -w /dis/wm/about.zx`.
 | `.text tag configure name -underline 0\|1`, `tag bind name <ButtonRelease-1> script` | Underline tagged ranges or bind a click to them. `%x` and `%y` give widget-relative coordinates |
 | `.text yview ?moveto fraction\|scroll count units\|pages?` | Read viewport fractions or scroll by a fraction, lines, or pages |
 | `.button invoke` | Evaluate the button's script and return its Tcl result |
-| `.checkbutton select`, `deselect`, `toggle`, `invoke` | Change selection. `invoke` also evaluates the callback after updating the variable |
+| `.checkbutton select`, `deselect`, `toggle`, `invoke` | Change selection. `invoke` evaluates the callback after toggling the variable |
+| `.radiobutton select`, `deselect`, `invoke` | Store the radio value or clear the variable. `invoke` stores the value and evaluates the callback. Disabled buttons still accept explicit `select` and `deselect` |
 | `destroy .path ?path ...?` | Remove widgets and their descendants. `destroy .` closes the root |
 
 Click an entry to focus it and position the cursor. Left, Right, Home, End,
@@ -281,17 +291,17 @@ empty string for transparency.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements a subset of 19 of the 25 commands advertised by the
-[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining six are `bitmap`,
-`grab`, `lower`, `radiobutton`, `raise`, and `toplevel`. The shipped engine
+The port implements a subset of 20 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining five are `bitmap`,
+`grab`, `lower`, `raise`, and `toplevel`. The shipped engine
 exposes bitmap loading through widget options and the `image` command.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
 commands include `choicebutton`, `cursor`, `grid`, `send`, and `winfo`.
 
-Menus still need cascade, checkbutton and radiobutton entries, `-postcommand`,
-keyboard navigation, autoscroll, and the wider visual options. Graphical
-menus currently share the root's pixel buffer when posted. Separate windows
+Menus still need cascade entries, `-postcommand`, keyboard navigation,
+autoscroll, and the wider visual options. Posted menus share the root's pixel
+buffer. Separate windows
 and screen-relative posting depend on addressable guest surfaces.
 The remaining scale API includes coordinate-based `get`, `coords`,
 `identify`, `-jump`, `-label`, tick marks, slider size and relief, and trough
@@ -304,13 +314,20 @@ files with up to 262,144 pixels each. The registry holds up to 32 live bitmaps
 across file-backed labels and named references. Other channels, legacy bitmap
 headers, the `<fd` form, `image create bitmap -maskfile`, Canvas images, and
 bitmap fonts remain open. Label and frame colors use the Canvas color subset.
-Checkbutton indicator customization and keyboard activation, scrollbar
-`activate`, `delta`, `fraction`, `-jump`, and hold autorepeat remain open.
+Selection buttons still need keyboard activation and wider style options.
+Scrollbars still need `activate`, `delta`, `fraction`, `-jump`, and hold autorepeat.
 Canvas still needs tags, item bindings and hit testing, item deletion and
 stacking, scrolling, polygon and arc items, images, embedded windows,
 physical-unit coordinates, more font, color, join and cap options, and
 additional pointer bindings. Canvas background can be configured, and
 `cget -background` remains open.
+Directory Browser's Options uses the implemented selection entries. Its view
+still needs masked bitmap loading, Canvas image items, per-item double and
+right-button bindings, item deletion, `-scrollregion`, `-yscrollincrement`,
+`-yscrollcommand`, `yview`, and the actions for opening other guest windows and
+files. Its waiting pointer uses `cursor -image` and `cursor -default`.
+[Inferno source](../../wm/dir.b)
+
 The text widget still needs horizontal scrolling and `-xscrollcommand`.
 The Tk variable command still needs Inferno's `lasterror` query.
 The remaining listbox API includes `nearest`, `xview`, `-xscrollcommand`,

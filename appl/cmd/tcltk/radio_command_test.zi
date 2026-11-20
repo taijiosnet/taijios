@@ -1,0 +1,21 @@
+// Compare selection widget commands with stock Inferno tkcmd.
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using Fixture :: #import "radio_fixture"
+
+main :: () -> s32 {
+    tcl: Tcl.Interpreter;
+    if !Tk.Attach(*tcl) { return 1 }
+    commands := Fixture.Commands;
+    start: s64;
+    for i: 0..commands.count-1 {
+        if commands[i] != 10 { continue }
+        result := Tcl.Eval(*tcl, commands[start:i]);
+        if result.code == .Error { print("!%\n", TextView(result.value)) }
+        else if result.code != .OK { return 2 }
+        else if result.value.bytes.count > 0 { print("%\n", TextView(result.value)) }
+        start = i+1;
+    }
+    return 0;
+}
