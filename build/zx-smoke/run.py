@@ -31,6 +31,63 @@ if '--precision' in sys.argv[2:]:
     assert precision.stdout == 'literal true parsed true sum true sqrt(2) 1.4142135623730951\n0\n\n'
     assert not precision.stderr
 
+if '--tee' in sys.argv[2:]:
+    from hashlib import file_digest, sha256
+    from tempfile import TemporaryDirectory
+
+    assert run('whatis tee /dis/tee.dis').stdout.splitlines() == ['/dis/tee.zx', '/dis/tee.dis']
+    with TemporaryDirectory(prefix='tee-', dir=files) as temporary:
+        scratch = Path(temporary)
+        prefix = f'bind -c /{scratch.relative_to(root)} /chan; cd /chan; '
+        data = bytes(range(256)) * 4096
+        expected = sha256()
+        with (scratch / 'input').open('wb') as input_file:
+            for _ in range(16):
+                input_file.write(data)
+                expected.update(data)
+            input_file.write(b'\x00\xff\n')
+            expected.update(b'\x00\xff\n')
+        (scratch / 'short').write_bytes(b'\x00caf\xc3\xa9\xff\n')
+        names = [f'out-{index}' for index in range(65)]
+        for tool in ('/dis/tee.dis', 'tee'):
+            suffix = 'dis' if tool.endswith('.dis') else 'zx'
+            pipeline = run(prefix + f"/dis/cat.dis input | {tool} 'file café' copy | /dis/cat.dis > output; echo $status")
+            assert pipeline.stdout == '\n' and not pipeline.stderr
+            for path in ('file café', 'copy', 'output'):
+                with (scratch / path).open('rb') as output_file:
+                    assert file_digest(output_file, 'sha256').digest() == expected.digest(), (tool, path)
+            append_to = scratch / '-café'
+            append_to.write_bytes(b'prefix\x00')
+            (scratch / 'fresh').unlink(missing_ok=True)
+            appended = run(prefix + f"{tool} -aa -- '-café' fresh < short > output; echo $status")
+            assert appended.stdout == '\n' and not appended.stderr
+            short = (scratch / 'short').read_bytes()
+            assert append_to.read_bytes() == b'prefix\x00' + short
+            assert (scratch / 'fresh').read_bytes() == (scratch / 'output').read_bytes() == short
+            many = run(prefix + f"{tool} {' '.join(names)} < short > output; echo $status")
+            assert many.stdout == '\n' and not many.stderr
+            assert all((scratch / name).read_bytes() == short for name in names)
+            plain = run(prefix + f'{tool} < short > output; echo $status')
+            assert plain.stdout == '\n' and not plain.stderr and (scratch / 'output').read_bytes() == short
+            empty = run(prefix + f'{tool} fresh < /dev/null > output; echo $status')
+            assert empty.stdout == '\n' and not empty.stderr and not (scratch / 'fresh').read_bytes()
+            for index, (arguments, status, message) in enumerate((
+                    ('-q', 'usage', 'Usage: tee [-a] [file ...]'),
+                    ("'' < short", 'error', 'tee: cannot open : '),
+                    ('fresh missing-dir/file < short', 'error', 'tee: cannot open missing-dir/file: '),
+                    ('fresh >[0] writeonly', 'error', 'tee: read error: '),
+                    ('fresh < short <[1] short', 'error', 'tee: error writing standard output: '))):
+                diagnostic = f'{suffix}-{index}.err'
+                attempt = run(prefix + f'{tool} {arguments} >[2] {diagnostic}; echo $status')
+                assert attempt.stdout == status + '\n' and not attempt.stderr
+                text = (scratch / diagnostic).read_text()
+                assert text.startswith(message), text
+                if suffix == 'zx':
+                    assert text == (scratch / f'dis-{index}.err').read_text(), (arguments, text)
+                if 'missing-dir' in arguments or 'writeonly' in arguments:
+                    assert (scratch / 'fresh').stat().st_size == 0
+    print('ZX tee matched Dis on flags, 65 files, diagnostics, statuses and binary streams beyond 16 MiB')
+
 if '--heap' in sys.argv[2:]:
     heap = run('zxrun -c /build/zx-smoke/arena-reuse.zx; echo $status')
     assert heap.stdout == '64 rounds passed\n\n' and not heap.stderr

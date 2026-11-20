@@ -213,7 +213,7 @@ SYSMODULES=\
 
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
-ZXCOMMANDS=cat echo basename cleanname wc uniq tr
+ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 RUNESZX=zx_runes.zi
 NAMEZX=$ZXLIB/taijios_names.zi
@@ -255,6 +255,9 @@ uniq.zx: uniq.zi $UTILZX $RUNESZX
 tr.zx: tr.zi $UTILZX $RUNESZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry tr:main -o $target tr.zi
 
+tee.zx: tee.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry tee:main -o $target tee.zi
+
 tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi $TCLZX
 	zi2zx --root . --module-path $ZXLIB --bind-host taijios_stdin --bind-host taijios_files --bind-host taijios_io --entry tclsh_stdin:main -o $target tclsh_stdin.zi
 
@@ -270,7 +273,7 @@ logwindow.zx: tcltk/logwindow_app.zi tcltk/logwindow_input.zi tcltk/logwindow_st
 memory.zx: tcltk/memory_app.zi tcltk/memory_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi ../wm/taijios_clock.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --module-path ../wm --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry memory_app:main -o $target tcltk/memory_app.zi
 
-install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-utilities-zx install-streams-zx
+install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-utilities-zx install-streams-zx install-file-commands-zx
 	(cd sh && mk sh.install)
 install-cat-zx:V: $DISBIN/cat.zx
 install-tclsh-zx:V: $DISBIN/tclsh.zx
@@ -280,6 +283,7 @@ install-logwindow-zx:V: $DISBIN/wm/logwindow.zx tcltk/logwindow.tcl
 install-memory-zx:V: $DISBIN/wm/memory.zx tcltk/memory.tcl
 install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
 install-streams-zx:V: $DISBIN/wc.zx $DISBIN/uniq.zx $DISBIN/tr.zx
+install-file-commands-zx:V: $DISBIN/tee.zx
 
 $DISBIN/cat.zx: cat.zx mkfile
 $DISBIN/tclsh.zx: tclsh.zx
@@ -293,6 +297,7 @@ $DISBIN/cleanname.zx: cleanname.zx mkfile
 $DISBIN/wc.zx: wc.zx mkfile
 $DISBIN/uniq.zx: uniq.zx mkfile
 $DISBIN/tr.zx: tr.zx mkfile
+$DISBIN/tee.zx: tee.zx mkfile
 
 $DISBIN/%.zx: %.zx
 	mode=0644

@@ -1,0 +1,70 @@
+// Stream guest stdin to files and stdout in the same order as the Dis command.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+Fail :: (message: string, name: string = "", named: bool = true, file_error: bool = true) -> s32 {
+    problem := Io.LastError();
+    unused Cli.WriteAll(2, "tee: ");
+    unused Cli.WriteAll(2, message);
+    if named { unused Cli.WriteAll(2, name); unused Cli.WriteAll(2, ": ") }
+    if file_error { unused Cli.WriteAll(2, problem) }
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Copy :: (files: []s32, first: s32) -> s32 {
+    buffer: [8192]u8;
+    while true {
+        count := Io.ReadBytes(0, buffer[:]);
+        if count < 0 { return Fail("read error: ", named = false) }
+        if count == 0 { return 0 }
+        data := TextView(buffer[:count]);
+        for index: 0..files.count-1 {
+            if Io.WriteBytes(files[index], data) != count {
+                return Fail("error writing ", Args.Operand(first + cast(s32)index));
+            }
+        }
+        if Io.WriteBytes(1, data) != count { return Fail("error writing ", "standard output") }
+    }
+}
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    first: s32;
+    append := false;
+    while first < count {
+        option := Args.Operand(first);
+        if option.count < 2 || option[0] != 45 { break }
+        first += 1;
+        if option == "--" { break }
+        for index: 1..option.count-1 {
+            if option[index] != 97 { return Cli.Usage("Usage: tee [-a] [file ...]\n") }
+        }
+        append = true;
+    }
+    handles: Vec(s32);
+    if !VecResize(handles, cast(s64)(count - first)) {
+        return Fail("cannot allocate output handles", named = false, file_error = false);
+    }
+    opened: s32;
+    status: s32;
+    while opened < handles.count {
+        name := Args.Operand(first + opened);
+        handle: s32 = -1;
+        if append { handle = Io.OpenFile(name, 1) }
+        if handle < 0 { handle = Io.CreateFile(name, 1, 0x1b6) }
+        else { unused Io.SeekFile(handle, 0, 2) }
+        if handle < 0 {
+            status = Fail("cannot open ", name);
+            break;
+        }
+        handles[opened] = handle;
+        opened += 1;
+    }
+    if status == 0 { status = Copy(handles[:], first) }
+    for index: 0..opened-1 { unused Io.CloseFile(handles[index]) }
+    return status;
+}

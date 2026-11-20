@@ -214,6 +214,15 @@ can compare the `-c` flag from the current Limbo source.
 python3 build/zx-smoke/run.py Linux/386/bin/emu --streams
 ```
 
+`tee` copies guest stdin to its output files and stdout. `-a` appends and
+`--` ends option parsing. It uses the guest file bindings for create, seek,
+read, and write. Install it and check byte-for-byte parity with Dis using:
+
+```sh
+(cd appl/cmd && mk install-file-commands-zx)
+python3 -u build/zx-smoke/run.py Linux/386/bin/emu --tee
+```
+
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
 with the shell's `Command.init` signature. That includes 160 entries directly
 under `/dis` and 52 under `/dis/wm`. This inventory checks the entry

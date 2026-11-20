@@ -22,7 +22,7 @@ enum {
 	ZxTitleBytes = 512,
 	ZxGuestPathBytes = 1024,
 	ZxIoBytes = 8192,
-	ZxOpenFiles = 32,
+	ZxInitialFiles = 32,
 };
 
 static int
@@ -445,7 +445,8 @@ typedef struct ZxCommand ZxCommand;
 struct ZxCommand {
 	HostValue *args;
 	int argc;
-	int fd[ZxOpenFiles];
+	int *fd;
+	int nfd;
 	char err[ERRMAX];
 	char failure[ERRMAX];
 };
@@ -575,6 +576,29 @@ zxiopath(const HostValue *name, char *path)
 }
 
 static int
+zxioslot(ZxCommand *command)
+{
+	int slot, count, *fds;
+
+	for(slot = 0; slot < command->nfd && command->fd[slot] >= 0; slot++)
+		;
+	if(slot < command->nfd)
+		return slot;
+	if(slot == MAXNFD)
+		return -1;
+	count = slot == 0 ? ZxInitialFiles : slot * 2;
+	if(count > MAXNFD)
+		count = MAXNFD;
+	fds = realloc(command->fd, count * sizeof(*fds));
+	if(fds == nil)
+		return -1;
+	command->fd = fds;
+	while(command->nfd < count)
+		fds[command->nfd++] = -1;
+	return slot;
+}
+
+static int
 zxioopen(ZxCommand *command, const HostValue *args, int n, int create, HostValue *result)
 {
 	static const int modes[] = {OREAD, OWRITE, ORDWR};
@@ -589,9 +613,8 @@ zxioopen(ZxCommand *command, const HostValue *args, int n, int create, HostValue
 	mode = args[1].integer;
 	if(mode < 0 || mode >= nelem(modes))
 		return zxioerror(command, result, "invalid open mode");
-	for(slot = 0; slot < nelem(command->fd) && command->fd[slot] >= 0; slot++)
-		;
-	if(slot == nelem(command->fd))
+	slot = zxioslot(command);
+	if(slot < 0)
 		return zxioerror(command, result, "too many open ZX files");
 	fd = create ? kcreate(path, modes[mode], (uint32_t)args[2].integer) : kopen(path, modes[mode]);
 	if(fd < 0)
@@ -682,7 +705,7 @@ zxio(void *context, const char *module, const char *function,
 	handle = args[0].integer;
 	if(handle >= 0 && handle < 3)
 		fd = handle;
-	else if(handle >= 3 && handle - 3 < nelem(command->fd))
+	else if(handle >= 3 && handle - 3 < command->nfd)
 		fd = command->fd[handle - 3];
 	else
 		fd = -1;
@@ -846,8 +869,6 @@ zxrun(String *s, List *args, ZX_Window *win)
 		zxfreeargs(&command);
 		error("out of memory copying ZX arguments");
 	}
-	for(i = 0; i < nelem(command.fd); i++)
-		command.fd[i] = -1;
 	surface.win = win;
 	release();
 	bundle = zxopen(path, result.problem);
@@ -899,9 +920,10 @@ zxrun(String *s, List *args, ZX_Window *win)
 		free(bindings);
 		BundleClose(bundle);
 	}
-	for(i = 0; i < nelem(command.fd); i++)
+	for(i = 0; i < command.nfd; i++)
 		if(command.fd[i] >= 0)
 			kclose(command.fd[i]);
+	free(command.fd);
 	zxfreeargs(&command);
 	acquire();
 	return result;
