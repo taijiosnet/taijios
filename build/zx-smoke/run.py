@@ -147,9 +147,9 @@ if '--stock-zx' in sys.argv[2:]:
     from shutil import copyfile
     from tempfile import TemporaryDirectory
 
-    lookup = run('whatis cat echo basename cleanname ls /dis/cat.dis /dis/cat.zx')
+    lookup = run('whatis cat echo basename cleanname date /dis/cat.dis /dis/cat.zx')
     assert lookup.stdout.splitlines() == ['/dis/cat.zx', '/dis/echo.zx', '/dis/basename.zx',
-                                          '/dis/cleanname.zx', '/dis/ls.dis', '/dis/cat.dis',
+                                          '/dis/cleanname.zx', '/dis/date.dis', '/dis/cat.dis',
                                           '/dis/cat.zx']
     assert not lookup.stderr
 
@@ -188,6 +188,54 @@ if '--stock-zx' in sys.argv[2:]:
     builtin = run('load /dis/sh/echo.dis; whatis echo; echo builtin')
     assert builtin.stdout == 'load /dis/sh/echo.dis; echo\nbuiltin\n' and not builtin.stderr
     print('Stock ZX: lookup, UTF-8 argv, pipeline, named errors, path precedence and Dis fallback')
+
+if '--ls' in sys.argv[2:]:
+    import os
+    import time
+    from tempfile import TemporaryDirectory
+
+    resolved = run('whatis ls; whatis /dis/ls.dis')
+    assert resolved.stdout == '/dis/ls.zx\n/dis/ls.dis\n' and not resolved.stderr
+    with TemporaryDirectory(dir=files, prefix='ls-') as directory:
+        directory = Path(directory)
+        for folder in ('first', 'second', 'many'):
+            (directory / folder).mkdir()
+        now = int(time.time())
+        for index, name in enumerate(('zeta', 'café blanc', 'alfa', '-switch', 'exec')):
+            path = directory / 'first' / name
+            path.write_bytes(b'x' * (index * 1024 + 1))
+            if name == 'exec':
+                path.chmod(0o751)
+            os.utime(path, (now - index * 3600, 1000000000 + index * 86400))
+        (directory / 'first' / 'child').mkdir()
+        (directory / 'second' / 'alfa').write_bytes(b'duplicate')
+        (directory / 'second' / 'only-second').touch()
+        for index in range(256):
+            (directory / 'many' / f'item-{255-index:03}').touch()
+
+        path = '/' + str(directory.relative_to(root))
+        prefix = (f'bind -c {path} /chan; cd /chan; bind -a second first; '
+                  "echo 'TEST -18000 TEST -18000' > /env/timezone; ")
+        cases = (
+            ('', ''), ('first', ''), ('-pF first/', ''), ('-nc first', ''),
+            ('-c first', ''), ('-d first', ''), ('-dF first', ''),
+            ('-dp first/ /', ''), ('-s first', ''), ('-sr first', ''),
+            ('-tr first', ''), ('-tu first', ''), ('-tn first', ''),
+            ('-le first', ''), ('-lue first', ''), ('-lu first', ''),
+            ('-lmqkTF first', ''), ('-cmqd first/zeta first/alfa', ''),
+            ('-r first/zeta first second/alfa second', ''),
+            ('-p -- first/-switch', ''), ('-lpd /dev/cons', ''),
+            ('many', ''), ('-nr many', ''), ('-Z first', 'usage'),
+            ('missing first/zeta absent first/alfa', 'errors'),
+        )
+        for arguments, status in cases:
+            outputs = []
+            for tool in ('/dis/ls.dis', 'ls'):
+                result = run(prefix + f'{tool} {arguments} > output >[2] diagnostic; echo $status')
+                assert result.stdout == status + '\n' and not result.stderr, (tool, arguments, result)
+                outputs.append(((directory / 'output').read_bytes(), (directory / 'diagnostic').read_bytes()))
+            assert outputs[0] == outputs[1], (arguments, outputs)
+        print(f'ls ZX matched {len(cases)} Dis cases for metadata, order, union mounts, and errors')
 
 if '--file-commands' in sys.argv[2:]:
     from hashlib import file_digest

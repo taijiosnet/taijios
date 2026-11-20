@@ -1,0 +1,419 @@
+// Guest namespace listing, following appl/cmd/ls.b.
+#import "std/vec";
+#import "std/number_text";
+using UTF :: #import "std/utf8";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Fs :: #import "taijios_stat";
+using Names :: #import "taijios_names";
+using Runes :: #import "zx_runes";
+
+Usage :: "usage: ls [-delmnpqrstucFT] [files]\n";
+Order :: enum { Name; Size; Modified; Accessed; None; }
+Options :: struct {
+    directory: bool; epoch: bool; long_view: bool; modifier: bool; bare: bool;
+    qid: bool; blocks: bool; accessed: bool; mark: bool; temporary: bool;
+    compact: bool; reverse: bool; order: Order;
+}
+Entry :: struct { info: Fs.Info; operand: string; }
+Widths :: struct { blocks: s64; modifier: s64; version: s64; dev: s64; owner: s64; group: s64; length: s64; }
+State :: struct {
+    options: Options; failed: bool; now: s32;
+    zone: [2048]u8; zone_count: s32; line: Text;
+}
+
+Parse :: (options: *Options, count: s32) -> s32 {
+    next: s32;
+    unsorted: bool;
+    time_order: bool;
+    while next < count {
+        arg := Args.Operand(next);
+        if arg.count < 2 || arg[0] != 45 { break }
+        next += 1;
+        if arg == "--" { break }
+        for i: 1..arg.count-1 {
+            if arg[i] == {
+                case #char "d"; options.directory = true;
+                case #char "e"; options.epoch = true;
+                case #char "l"; options.long_view = true;
+                case #char "m"; options.modifier = true;
+                case #char "n"; unsorted = true;
+                case #char "p"; options.bare = true;
+                case #char "q"; options.qid = true;
+                case #char "k"; options.blocks = true;
+                case #char "t"; time_order = true;
+                case #char "u"; options.accessed = true;
+                case #char "s"; options.order = .Size;
+                case #char "c"; options.compact = true;
+                case #char "r"; options.reverse = true;
+                case #char "T"; options.temporary = true;
+                case #char "F"; options.mark = true;
+                case; return -1;
+            }
+        }
+    }
+    if unsorted { options.order = .None }
+    else if time_order { options.order = ifx options.accessed then .Accessed else .Modified }
+    return next;
+}
+
+Warn :: (state: *State, path: string, detail: string) {
+    state.failed = true;
+    unused Cli.WriteAll(2, "ls: ");
+    if path.count > 0 {
+        unused Cli.WriteAll(2, path);
+        unused Cli.WriteAll(2, ": ");
+    }
+    unused Cli.WriteAll(2, detail);
+    unused Cli.WriteAll(2, "\n");
+}
+
+CopyText :: (text: string) -> string { return TextDetach(TextCopy(text)); }
+
+Save :: (list: *Vec(Entry), info: Fs.Info, operand: string) -> bool {
+    stored := info;
+    if operand.count == 0 || Names.LastSlash(operand) < 0 { stored.name = CopyText(info.name) }
+    else { stored.name = operand }
+    stored.owner = CopyText(info.owner);
+    stored.group = CopyText(info.group);
+    stored.modifier = CopyText(info.modifier);
+    if (info.name.count > 0 && stored.name.count == 0) ||
+       (info.owner.count > 0 && stored.owner.count == 0) ||
+       (info.group.count > 0 && stored.group.count == 0) ||
+       (info.modifier.count > 0 && stored.modifier.count == 0) { return false }
+    return VecPush(list.*, .{info = stored, operand = operand});
+}
+
+ReadDirectory :: (state: *State, path: string, handle: s32, list: *Vec(Entry)) -> bool {
+    bytes: [Fs.BufferSize]u8;
+    while true {
+        size := Io.ReadBytes(handle, bytes[:]);
+        if size < 0 { Warn(state, path, Io.LastError()); return false }
+        if size == 0 { return true }
+        offset: s64;
+        while offset < size {
+            info := Fs.Decode(bytes[offset:size]);
+            if info.size == 0 { Warn(state, path, "invalid directory entry"); return false }
+            offset += info.size;
+            seen: bool;
+            if state.options.compact {
+                for i: 0..list.count-1 { if list.*[i].info.name == info.name { seen = true; break } }
+            }
+            if !seen && !Save(list, info, "") { Warn(state, path, "out of memory"); return false }
+        }
+    }
+}
+
+NameGreater :: (a: string, b: string) -> bool {
+    end := ifx a.count < b.count then a.count else b.count;
+    for i: 0..end-1 {
+        if a[i] != b[i] { return a[i] > b[i] }
+    }
+    return a.count > b.count;
+}
+
+Greater :: (a: Fs.Info, b: Fs.Info, order: Order) -> bool {
+    if order == {
+        case .Name; return NameGreater(a.name, b.name);
+        case .Size; return a.length > b.length;
+        case .Modified; return a.modified < b.modified;
+        case .Accessed; return a.accessed < b.accessed;
+        case; return false;
+    }
+}
+
+MergeSort :: (entries: *Vec(Entry), indices: *Vec(s64), scratch: *Vec(s64),
+              first: s64, end: s64, order: Order, reverse: bool) {
+    if end - first < 2 { return }
+    middle := first + (end - first + 1) / 2;
+    MergeSort(entries, indices, scratch, first, middle, order, reverse);
+    MergeSort(entries, indices, scratch, middle, end, order, reverse);
+    for i: first..end-1 { scratch.*[i] = indices.*[i] }
+    left := first;
+    right := middle;
+    for i: first..end-1 {
+        take_right := left == middle;
+        if left < middle && right < end {
+            a := entries.*[scratch.*[left]].info;
+            b := entries.*[scratch.*[right]].info;
+            take_right = ifx reverse then Greater(b, a, order) else Greater(a, b, order);
+        }
+        if take_right { indices.*[i] = scratch.*[right]; right += 1 }
+        else { indices.*[i] = scratch.*[left]; left += 1 }
+    }
+}
+
+ReadSmall :: (path: string, bytes: []u8) -> s32 {
+    handle := Io.OpenFile(path, 0);
+    if handle < 0 { return -1 }
+    count := Io.ReadBytes(handle, bytes);
+    unused Io.CloseFile(handle);
+    return count;
+}
+
+LoadTime :: (state: *State) {
+    time: [128]u8;
+    count := ReadSmall("/dev/time", time[:]);
+    if count > 0 {
+        micros, used := IntegerPrefix(TextView(time[:count]));
+        if used > 0 { state.now = cast(s32)(micros / 1000000) }
+    }
+    size := ReadSmall("/env/timezone", state.zone[:]);
+    if size <= 0 { size = ReadSmall("/locale/timezone", state.zone[:]) }
+    if size > 0 && (state.zone[0] == 47 || state.zone[0] == 35) {
+        path: [2048]u8;
+        if state.zone[size-1] == 10 { size -= 1 }
+        for i: 0..size-1 { path[i] = state.zone[i] }
+        size = ReadSmall(TextView(path[:size]), state.zone[:]);
+    }
+    state.zone_count = size;
+}
+
+Space :: (byte: u8) -> bool { return byte == 32 || byte == 9 || byte == 10 || byte == 13; }
+
+Word :: (text: string, at: *s64) -> string {
+    while at.* < text.count && Space(text[at.*]) { at.* += 1 }
+    start := at.*;
+    while at.* < text.count && !Space(text[at.*]) { at.* += 1 }
+    return text[start:at.*];
+}
+
+ZoneOffset :: (zone: string, utc: s32) -> s32 {
+    at: s64;
+    unused Word(zone, *at);
+    standard, _ := IntegerPrefix(Word(zone, *at));
+    unused Word(zone, *at);
+    summer, _ := IntegerPrefix(Word(zone, *at));
+    local: s32 = utc + cast(s32)standard;
+    while at < zone.count {
+        first, a := IntegerPrefix(Word(zone, *at));
+        last, b := IntegerPrefix(Word(zone, *at));
+        if a == 0 || b == 0 { break }
+        if local >= first && local < last { return cast(s32)summer }
+    }
+    return cast(s32)standard;
+}
+
+DateLabel :: (state: *State, utc: s32) {
+    seconds := utc;
+    if state.zone_count > 0 { seconds += ZoneOffset(TextView(state.zone[:state.zone_count]), utc) }
+    days := cast(s64)(seconds / 86400);
+    part := seconds % 86400;
+    if part < 0 { days -= 1; part += 86400 }
+    // Split a Gregorian date into 400-year eras starting on March 1.
+    days += 719468;
+    era := (ifx days >= 0 then days else days - 146096) / 146097;
+    in_era := days - era * 146097;
+    in_year := (in_era - in_era/1460 + in_era/36524 - in_era/146096) / 365;
+    day := in_era - (365*in_year + in_year/4 - in_year/100);
+    month := (5*day + 2)/153;
+    date := day - (153*month+2)/5 + 1;
+    month = month + (ifx month < 10 then 3 else -9);
+    year := in_year + era*400 + (ifx month <= 2 then 1 else 0);
+    months := "JanFebMarAprMayJunJulAugSepOctNovDec";
+    unused BuilderAppend(state.line.bytes, months[3*(month-1):3*month]);
+    unused BuilderAppend(state.line.bytes, " ");
+    Decimal(*state.line, date, 2, "0");
+    unused BuilderAppend(state.line.bytes, " ");
+    if state.now - utc < 15552000 {
+        Decimal(*state.line, part / 3600, 2, "0");
+        unused BuilderAppend(state.line.bytes, ":");
+        Decimal(*state.line, (part / 60) % 60, 2, "0");
+    } else {
+        unused BuilderAppend(state.line.bytes, " ");
+        Decimal(*state.line, year, 0, " ");
+    }
+}
+
+Repeat :: (line: *Text, fill: string, count: s64) {
+    for i: 0..count-1 { unused BuilderAppend(line.bytes, fill) }
+}
+
+Decimal :: (line: *Text, value: s64, width: s64, fill: string) {
+    buffer: [21]u8;
+    digits := FormatInteger(value, buffer[:]);
+    Repeat(line, fill, width - digits.count);
+    unused BuilderAppend(line.bytes, digits);
+}
+
+Digits :: (value: s64) -> s64 {
+    buffer: [21]u8;
+    return FormatInteger(value, buffer[:]).count;
+}
+
+Hex :: (line: *Text, value: u64, width: s64) {
+    digits := "0123456789abcdef";
+    for i: 0..width-1 {
+        n := cast(s64)((value >> cast(u64)(4*(width-i-1))) & 15);
+        unused BuilderAppend(line.bytes, digits[n:n+1]);
+    }
+}
+
+RuneCount :: (text: string) -> s64 {
+    count: s64;
+    at: s32;
+    while at < text.count { at = UTF.Decode(text, at).after; count += 1 }
+    return count;
+}
+
+Maximum :: (a: s64, b: s64) -> s64 { return ifx a > b then a else b; }
+Device :: (info: Fs.Info) -> s64 { return cast(s32)(info.identity.dev >> 16); }
+Blocks :: (info: Fs.Info) -> s64 { return (info.length+1023)/1024; }
+
+ColumnWidths :: (entries: *Vec(Entry), options: Options) -> Widths {
+    widths: Widths;
+    for i: 0..entries.count-1 {
+        info := entries.*[i].info;
+        if options.blocks { widths.blocks = Maximum(widths.blocks, Digits(Blocks(info))) }
+        if options.modifier { widths.modifier = Maximum(widths.modifier, RuneCount(info.modifier)) }
+        if options.qid { widths.version = Maximum(widths.version, Digits(cast(s32)info.identity.version)) }
+        if options.long_view {
+            widths.dev = Maximum(widths.dev, Digits(Device(info)));
+            widths.owner = Maximum(widths.owner, RuneCount(info.owner));
+            widths.group = Maximum(widths.group, RuneCount(info.group));
+            widths.length = Maximum(widths.length, Digits(info.length));
+        }
+    }
+    return widths;
+}
+
+Permissions :: (line: *Text, mode: u32) {
+    kind := "-";
+    if (mode & Fs.Directory) != 0 { kind = "d" }
+    else if (mode & Fs.AppendOnly) != 0 { kind = "a" }
+    else if (mode & Fs.Authentication) != 0 { kind = "A" }
+    unused BuilderAppend(line.bytes, kind);
+    unused BuilderAppend(line.bytes, ifx (mode & Fs.Exclusive) != 0 then "l" else "-");
+    perms := "-----x-w--wxr--r-xrw-rwx";
+    for i: 0..2 {
+        offset := 3*cast(s64)((mode >> cast(u32)(6-3*i)) & 7);
+        unused BuilderAppend(line.bytes, perms[offset:offset+3]);
+    }
+}
+
+Field :: (line: *Text, text: string, width: s64) {
+    unused BuilderAppend(line.bytes, text);
+    Repeat(line, " ", width - RuneCount(text) + 1);
+}
+
+PrintEntry :: (state: *State, dirname: string, entry: Entry, widths: Widths) -> bool {
+    opt := state.options;
+    info := entry.info;
+    line := *state.line;
+    unused VecResize(line.bytes, 0);
+    if opt.blocks {
+        Decimal(line, Blocks(info), widths.blocks, " ");
+        unused BuilderAppend(line.bytes, " ");
+    }
+    if opt.modifier {
+        unused BuilderAppend(line.bytes, "[");
+        unused BuilderAppend(line.bytes, info.modifier);
+        unused BuilderAppend(line.bytes, "] ");
+        Repeat(line, " ", widths.modifier - RuneCount(info.modifier));
+    }
+    if opt.qid {
+        unused BuilderAppend(line.bytes, "(");
+        Hex(line, info.identity.qid, 16);
+        unused BuilderAppend(line.bytes, " ");
+        Decimal(line, cast(s64)info.identity.version, widths.version, " ");
+        unused BuilderAppend(line.bytes, " ");
+        Hex(line, cast(u64)info.identity.qtype, 2);
+        unused BuilderAppend(line.bytes, ") ");
+    }
+    if opt.temporary { unused BuilderAppend(line.bytes, ifx (info.mode & Fs.Temporary) != 0 then "t " else "- ") }
+    if opt.long_view {
+        Permissions(line, info.mode);
+        unused BuilderAppend(line.bytes, " ");
+        rune: [4]u8;
+        device := cast(s32)(info.identity.dev & 0xffff);
+        size := Runes.Encode(device, rune[:]);
+        unused BuilderAppend(line.bytes, TextView(rune[:size]));
+        unused BuilderAppend(line.bytes, " ");
+        Decimal(line, Device(info), widths.dev, " ");
+        unused BuilderAppend(line.bytes, " ");
+        Field(line, info.owner, widths.owner);
+        Field(line, info.group, widths.group);
+        Decimal(line, info.length, widths.length, " ");
+        unused BuilderAppend(line.bytes, " ");
+        when := ifx opt.accessed then info.accessed else info.modified;
+        if opt.epoch { Decimal(line, when, 0, " ") } else { DateLabel(state, when) }
+        unused BuilderAppend(line.bytes, " ");
+    }
+    name := info.name;
+    if opt.bare && entry.operand.count > 0 {
+        slash := Names.LastSlash(entry.operand);
+        if slash >= 0 { name = entry.operand[slash+1:] }
+    } else if !opt.bare && dirname.count > 0 {
+        unused BuilderAppend(line.bytes, dirname);
+        if dirname[dirname.count-1] != 47 { unused BuilderAppend(line.bytes, "/") }
+    }
+    unused BuilderAppend(line.bytes, name);
+    if opt.mark {
+        if (info.identity.qtype & 0x80) != 0 { unused BuilderAppend(line.bytes, "/") }
+        else if (info.mode & 0x49) != 0 { unused BuilderAppend(line.bytes, "*") }
+    }
+    unused BuilderAppend(line.bytes, "\n");
+    return Cli.WriteAll(1, TextView(line.*));
+}
+
+PrintGroup :: (state: *State, dirname: string, list: *Vec(Entry), order: Order) {
+    if list.count == 0 { return }
+    indices: Vec(s64);
+    sorted := order != .None && list.count > 1;
+    if sorted {
+        scratch: Vec(s64);
+        if !VecResize(indices, list.count) || !VecResize(scratch, list.count) {
+            Warn(state, dirname, "out of memory");
+            return;
+        }
+        for i: 0..list.count-1 { indices[i] = i }
+        MergeSort(list, *indices, *scratch, 0, list.count, order, state.options.reverse);
+    }
+    widths := ColumnWidths(list, state.options);
+    for i: 0..list.count-1 {
+        index := ifx sorted then indices[i] else i;
+        if !PrintEntry(state, dirname, list.*[index], widths) { Warn(state, dirname, Io.LastError()); break }
+    }
+    unused VecResize(list.*, 0);
+}
+
+ListPath :: (state: *State, explicit: *Vec(Entry), path: string) {
+    bytes: [Fs.BufferSize]u8;
+    info := Fs.PathInfo(path, bytes[:]);
+    if info.size == 0 { Warn(state, path, Io.LastError()); return }
+    if state.options.directory || (info.mode & Fs.Directory) == 0 {
+        if !Save(explicit, info, path) { Warn(state, path, "out of memory") }
+        return;
+    }
+    order := state.options.order;
+    PrintGroup(state, "", explicit, ifx state.options.compact then .None else order);
+    handle := Io.OpenFile(path, 0);
+    if handle < 0 { Warn(state, path, Io.LastError()); return }
+    list: Vec(Entry);
+    read := ReadDirectory(state, path, handle, *list);
+    unused Io.CloseFile(handle);
+    if read { PrintGroup(state, path, *list, order) }
+}
+
+#program_export
+main :: () -> s32 {
+    state: State;
+    count := Args.Count();
+    next := Parse(*state.options, count);
+    if next < 0 { return Cli.Usage(Usage) }
+    if state.options.long_view && !state.options.epoch { LoadTime(*state) }
+    explicit: Vec(Entry);
+    if next == count {
+        state.options.bare = true;
+        ListPath(*state, *explicit, ".");
+    }
+    for i: next..count-1 { ListPath(*state, *explicit, Args.Operand(i)) }
+    order := ifx state.options.compact then Order.None else state.options.order;
+    PrintGroup(*state, "", *explicit, order);
+    if state.failed {
+        unused Args.SetFailure("errors");
+        return 1;
+    }
+    return 0;
+}

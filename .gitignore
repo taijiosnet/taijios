@@ -37,6 +37,7 @@ y.debug
 /appl/cmd/tee.zx
 /appl/cmd/cp.zx
 /appl/cmd/test.zx
+/appl/cmd/ls.zx
 /appl/cmd/coffee.zx
 /appl/cmd/logwindow.zx
 /appl/cmd/memory.zx
@@ -53,6 +54,7 @@ y.debug
 /dis/tee.zx
 /dis/cp.zx
 /dis/test.zx
+/dis/ls.zx
 /dis/coffee.zx
 /dis/tclsh.zx
 /dis/tcltk.zx

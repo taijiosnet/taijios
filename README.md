@@ -219,15 +219,17 @@ can compare the `-c` flag from the current Limbo source.
 python3 build/zx-smoke/run.py Linux/386/bin/emu --streams
 ```
 
-`tee`, `cp`, and `test` are installed as executable ZX commands. `tee`
+`tee`, `cp`, `test`, and `ls` are installed as executable ZX commands. `tee`
 fans out guest stdin and supports `-a` and `--`. `cp` supports recursive
 copies and guest owner, group, mode, and timestamp flags. `test` uses guest
-file metadata, descriptor paths, and named shell statuses. The Dis versions
-are available as `/dis/tee.dis`, `/dis/cp.dis`, and `/dis/test.dis`.
+file metadata, descriptor paths, and named shell statuses. `ls` reads packed
+directory entries through `taijios_io` and keeps union-directory order,
+metadata, sorting, and formatting in Ziran. The Dis versions are available
+as `/dis/tee.dis`, `/dis/cp.dis`, `/dis/test.dis`, and `/dis/ls.dis`.
 
 ```sh
 (cd appl/cmd && mk install-file-commands-zx)
-python3 -u build/zx-smoke/run.py Linux/386/bin/emu --tee --file-commands
+python3 -u build/zx-smoke/run.py Linux/386/bin/emu --tee --file-commands --ls
 ```
 
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
@@ -239,7 +241,7 @@ signature without invoking each program.
 | --- | --- | --- |
 | 1 | `echo`, `basename`, `cleanname` (ported) | Argument handling, text output, path-string operations |
 | 2 | `wc`, `uniq`, `tr` (ported) | Guest stdin, stdout, and sequential file access |
-| 3 | `test`, `tee`, `cp` (ported), `ls` | File metadata, directory reads, and file creation |
+| 3 | `test`, `tee`, `cp`, `ls` (ported) | File metadata, directory reads, and file creation |
 | 4 | `wm/about`, `wm/clock`, `wm/colors` | Guest surfaces and input, wall-clock time, and display sampling as needed |
 | 5 | `sh`, `wm/wm`, compiler and service commands | Process control, namespaces, window management, and service-specific APIs |
 
