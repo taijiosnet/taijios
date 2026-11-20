@@ -1,0 +1,31 @@
+using Io :: #import "taijios_io";
+
+main :: () -> s32 {
+    metadata: [16]u8;
+    metadata[12] = 0x7f;
+    if Io.Stat(".", metadata[:]) != 0 || (metadata[11] & 0x80) == 0 { return 1 }
+    if Io.StatFile("absent test path", metadata[:]) != -1 || Io.LastError() == "" ||
+        (metadata[11] & 0x80) == 0 { return 2 }
+    if Io.StatFile(".", metadata[:11]) != -1 || Io.LastError() == "" { return 3 }
+
+    fd := Io.CreateFile("lifecycle.txt", 2, 0x180);
+    if fd != 3 { return 4 }
+    if Io.StatFile("lifecycle.txt", metadata[:]) != 0 || metadata[0] != 0 { return 5 }
+    if Io.WriteBytes(fd, "alpha") != 5 || Io.SeekFile(fd, 0, 1) != 5 { return 6 }
+    if Io.SeekFile(fd, 4294967311, 0) != 4294967311 || Io.SeekFile(fd, -2, 2) != 3 { return 7 }
+    if Io.SeekFile(fd, 0, 3) != -1 || Io.LastError() == "" { return 8 }
+
+    buf: [8]u8;
+    if Io.ReadBytes(fd, buf[:]) != 2 || TextView(buf[:2]) != "ha" { return 9 }
+    second := Io.OpenFile("lifecycle.txt", 0);
+    if second != 4 || Io.ReadBytes(second, buf[:]) != 5 || TextView(buf[:5]) != "alpha" { return 10 }
+    if Io.ReadBytes(fd, buf[:]) != 0 || Io.CloseFile(fd) != 0 || Io.CloseFile(second) != 0 { return 11 }
+    if Io.SeekFile(fd, 0, 0) != -1 || Io.LastError() == "" { return 12 }
+    if Io.StatFile("lifecycle.txt", metadata[:]) != 0 || metadata[0] != 5 ||
+        metadata[7] != 0 || (metadata[11] & 0x80) != 0 || metadata[12] != 0x7f { return 13 }
+
+    fd = Io.CreateFile("new lifecycle.txt", 1, 0x180);
+    if fd != 3 || Io.WriteBytes(fd, "new") != 3 { return 14 }
+    if Io.Write(1, "guest stdout\n") != 13 || Io.Write(2, "guest stderr\n") != 13 { return 15 }
+    return 7; // Propagate command status and close the still-open handle on exit.
+}

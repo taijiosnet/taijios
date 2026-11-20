@@ -21,6 +21,12 @@ service as Man. Ziran decodes the compressed images, composites each frame,
 and renders the Tk widgets. The guest surface supplies window events and
 presents the resulting pixels. [ZX source](coffee_app.zi) · [Inferno source](../../wm/coffee.b)
 
+Log Window reads a live guest pipe. It starts as a toolbar task and pops up
+when a message arrives. Scroll follows the newest lines when checked. Clear it
+to keep the current view while new lines arrive, or drag the scrollbar to read
+earlier lines. Clear Pop up to keep a tasked window hidden until you restore it
+from the toolbar. [ZX source](logwindow_app.zi) · [Inferno source](../../wm/logwindow.b)
+
 ## Run in Taiji
 
 From the TaijiOS root, with `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
@@ -32,6 +38,9 @@ install -m 0644 build/tcltk/tcltk.zx dis/tcltk.zx
 install -m 0644 build/tcltk/man.zx dis/man.zx
 (cd appl/cmd && mk install-coffee-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
+python3 appl/cmd/tcltk/test_logwindow.py
+(cd appl/cmd && mk install-logwindow-zx)
+python3 appl/cmd/tcltk/test_logwindow.py --installed
 ```
 
 The general Tk launcher reads guest stdin until EOF and accepts scripts up to
@@ -42,7 +51,13 @@ Taiji graphical shell run:
 zxrun -w /dis/tcltk.zx < /appl/cmd/tcltk/bounce_controls.tcl
 zxrun -w /dis/man.zx
 zxrun -w /dis/coffee.zx
+zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log
 ```
+
+Log Window accepts `-e` to close when input ends. By default it prints `Got EOF`
+and keeps the log open. For the original standalone process group, launch with
+`zxrun -p -w`. To retain the caller's group, use `zxrun -w` and pass `-g` after
+the image path. Both forms accept an optional title.
 
 To start the manual browser directly from the project root:
 
@@ -93,15 +108,28 @@ and leaves the paused frame frozen. To run the Coffee tests alone, use
 `python3 appl/cmd/tcltk/test_tcltk.py --coffee-only` and add `--installed` to
 exercise `/dis/coffee.zx`.
 
+`test_logwindow.py` compares the Tk model with Inferno `tkcmd` and runs the
+original and hosted Log Window against a live guest pipe in a private WM
+session. It checks the two toggles while the stream is idle, dragging the
+scrollbar, toolbar task and restore, the title operand, and both EOF modes.
+The hosted run verifies continued display after more than 256 KiB of input.
+The stream model checks split UTF-8, idle and failed reads, and passes log
+text directly to the Tk text buffer. Run `--oracle-only` to compare the model and the
+original Dis app without the windowed ZX host bindings.
+
 ## Supported commands
 
 | Command | Options and behavior |
 | --- | --- |
 | `label .path` | `-text text` |
 | `button .path` | `-text text`, `-command script`, and `-state normal` or `disabled` |
+| `checkbutton .path` | Button options plus `-variable`, `-onvalue`, and `-offvalue`. A left press toggles the value and runs the callback |
+| `variable name ?value?` | Read or write the Tk variable associated with one or more checkbuttons |
 | `frame .path` | Container for nested widgets |
 | `entry .path` | Single-line UTF-8 text, with `-bg white` |
-| `text .path` | Wrapped, scrollable text. Tcl scripts supply the text |
+| `text .path` | Wrapped, scrollable text. `-height` sets the requested height. `-yscrollcommand` receives the first and last visible fractions |
+| `scrollbar .path` | `-orient vertical` or `horizontal`, and `-command`. Arrows and troughs call `scroll` by units and pages. A held thumb drag calls `moveto` |
+| `.scrollbar set first last`, `.scrollbar get`, `.scrollbar identify x y` | Update or read clamped viewport fractions and identify the part under local coordinates |
 | `scale .path` | `-from`, `-to`, `-resolution`, `-bigincrement`, pixel `-length`, `-orient horizontal` or `vertical`, `-showvalue 0` or `1`, and `-command script` |
 | `.scale set value`, `.scale get` | Set or read a fixed-point value with up to three decimal places. `set` quantizes and clamps silently. Pointer drags and trough or arrow-key steps append the changed value to the callback |
 | `panel .path` | `-bd` or `-borderwidth` in pixels and `-relief flat`. `Tk.PanelImage` allocates a writable RGBA8 backing image centered and clipped to the panel |
@@ -120,6 +148,7 @@ exercise `/dis/coffee.zx`.
 | `.text tag configure name -underline 0\|1`, `tag bind name <ButtonRelease-1> script` | Underline tagged ranges or bind a click to them. `%x` and `%y` give widget-relative coordinates |
 | `.text yview ?moveto fraction\|scroll count units\|pages?` | Read viewport fractions or scroll by a fraction, lines, or pages |
 | `.button invoke` | Evaluate the button's script and return its Tcl result |
+| `.checkbutton select`, `deselect`, `toggle`, `invoke` | Change selection. `invoke` also evaluates the callback after updating the variable |
 | `destroy .path ?path ...?` | Remove widgets and their descendants. `destroy .` closes the root |
 
 Click an entry to focus it and position the cursor. Left, Right, Home, End,
@@ -134,10 +163,10 @@ grapheme navigation, and broader bindings are outside this subset.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements a subset of 11 of the 25 commands advertised by the
-[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining 14 are `bitmap`,
-`canvas`, `checkbutton`, `grab`, `image`, `listbox`, `lower`, `menu`,
-`menubutton`, `radiobutton`, `raise`, `scrollbar`, `toplevel`, and `variable`.
+The port implements a subset of 14 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining 11 are `bitmap`,
+`canvas`, `grab`, `image`, `listbox`, `lower`, `menu`, `menubutton`,
+`radiobutton`, `raise`, and `toplevel`.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
 commands include `choicebutton`, `cursor`, `grid`, `send`, and `winfo`.
@@ -148,8 +177,10 @@ autorepeat. The remaining panel API includes `-anchor`, `origin`,
 `panelx`/`panely`, `screenx`/`screeny`, mattes, and partial damage tracking.
 `pack forget` and `pack propagate`, case-insensitive text search, marks,
 embedded windows, editable selections, and the wider tag API remain open.
-`checkbutton` with `-variable` and `scrollbar` with text `-yscrollcommand`
-are used together by the shipped [Log Window](../../wm/logwindow.b).
+Checkbutton indicator customization and keyboard activation, scrollbar
+`activate`, `delta`, `fraction`, `-jump`, and hold autorepeat remain open.
+The text widget still needs horizontal scrolling and `-xscrollcommand`.
+The Tk variable command still needs Inferno's `lasterror` query.
 `listbox` with `curselection`, `get`, `yview`, and its scroll callback is used
 by [Unicode Browser](../../wm/unibrowse.b).
 See the [Tcl command comparison](../../lib/tcl.md#comparison-with-shipped-inferno-tcl)

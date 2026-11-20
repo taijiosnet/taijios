@@ -1,0 +1,135 @@
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Io :: #import "tcl_io"
+using Scripts :: #import "tcl_channel_input"
+
+ModelFile :: struct { data: [128]u8; count: s64; exists: bool; }
+ModelDescriptor :: struct { file: s64; offset: s64; active: bool; mode: s32; }
+files: [3]ModelFile;
+handles: [8]ModelDescriptor;
+created_permissions: s32;
+close_count: s32;
+
+ModelPath :: (path: string) -> s64 {
+    if path == "/build/tcl/channel-suite/input" { return 0 }
+    if path == "/build/tcl/channel-suite/existing" { return 1 }
+    if path == "/build/tcl/channel-suite/created" { return 2 }
+    return -1;
+}
+
+Seed :: (index: s64, value: string) {
+    files[index].exists = true;
+    files[index].count = value.count;
+    for i: 0..value.count-1 { files[index].data[i] = value[i] }
+}
+
+ModelOpen :: (context: s64, path: string, mode: s32) -> s32 {
+    index := ModelPath(path);
+    if context != 71 || index < 0 || !files[index].exists { return -1 }
+    for i: 3..handles.count-1 {
+        if !handles[i].active {
+            handles[i] = ModelDescriptor.{file = index, active = true, mode = mode};
+            return cast(s32)i;
+        }
+    }
+    return -1;
+}
+
+ModelCreate :: (context: s64, path: string, mode: s32, permissions: s32) -> s32 {
+    if ModelPath(path) != 2 { return -1 }
+    created_permissions = permissions;
+    Seed(2, "");
+    return ModelOpen(context, path, mode);
+}
+
+ModelRead :: (context: s64, handle: s32, buffer: []u8) -> s32 {
+    h := *handles[handle];
+    if context != 71 || !h.active || h.mode == 1 { return -1 }
+    f := *files[h.file];
+    available := f.count-h.offset;
+    if available <= 0 { return 0 }
+    count := ifx buffer.count < available then buffer.count else available;
+    if count > 2 { count = 2 }
+    for i: 0..count-1 { buffer[i] = f.data[h.offset+i] }
+    h.offset += count;
+    return cast(s32)count;
+}
+
+ModelWrite :: (context: s64, handle: s32, data: string) -> s32 {
+    h := *handles[handle];
+    if context != 71 || !h.active || h.mode == 0 { return -1 }
+    f := *files[h.file];
+    count: s64 = ifx data.count > 2 then 2 else data.count;
+    if h.offset+count > f.data.count { return -1 }
+    for i: 0..count-1 { f.data[h.offset+i] = data[i] }
+    h.offset += count;
+    if h.offset > f.count { f.count = h.offset }
+    return cast(s32)count;
+}
+
+ModelClose :: (context: s64, handle: s32) -> s32 {
+    if context != 71 || !handles[handle].active { return -1 }
+    handles[handle].active = false;
+    close_count += 1;
+    return 0;
+}
+
+ModelSeek :: (context: s64, handle: s32, offset: s64, origin: s32) -> s64 {
+    h := *handles[handle];
+    if context != 71 || !h.active { return -1 }
+    if origin == 1 { offset += h.offset }
+    if origin == 2 { offset += files[h.file].count }
+    if offset < 0 { return -1 }
+    h.offset = offset;
+    return offset;
+}
+
+ModelStat :: (context: s64, path: string, metadata: []u8) -> s32 {
+    if context != 71 || metadata.count < 12 { return -1 }
+    if path == "/build/tcl/channel-suite" { metadata[11] = 128; return 0 }
+    if path == "/sparse" { metadata[0] = 3; metadata[4] = 2; return 0 }
+    index := ModelPath(path);
+    if index < 0 || !files[index].exists { return -1 }
+    metadata[0] = cast(u8)files[index].count;
+    return 0;
+}
+
+ModelError :: (context: s64) -> string { return "model I/O error" }
+
+CheckScript :: (tcl: *Tcl.Interpreter, script: string, expected: string) -> bool {
+    result := Tcl.Eval(tcl, script);
+    output: Text = Tcl.TakeOutput(tcl);
+    if result.code == .OK && TextView(output) == expected { return true }
+    print("Tcl channel test failed: %\n%", TextView(result.value), TextView(output));
+    return false;
+}
+
+main :: () -> s32 {
+    Seed(0, "first\nsecond\nzebra");
+    Seed(1, "ABCDE");
+    tcl: Tcl.Interpreter;
+    other: Tcl.Interpreter;
+    configured := Tcl.SetChannelBackend(*tcl, Io.Backend.{context = 71, open = ModelOpen, create = ModelCreate, read = ModelRead, write = ModelWrite, close = ModelClose, seek = ModelSeek, stat = ModelStat, error = ModelError});
+    if configured.code != .OK { return 1 }
+    if !CheckScript(*tcl, Scripts.Channels, Scripts.ChannelsExpected) { return 2 }
+    if !CheckScript(*tcl, Scripts.File, Scripts.FileExpected) { return 3 }
+    if created_permissions != 438 { return 4 }
+    if !CheckScript(*tcl, "set fd [open /build/tcl/channel-suite/created r]; puts [file size /sparse]", "8589934595\n") { return 5 }
+    if !CheckScript(*tcl, "puts [read $fd 2]", "ok\n") { return 6 }
+    wide_seek := "seek $fd 4294967297; puts [tell $fd]; puts [catch {seek $fd 9223372036854775808}]; seek $fd -4294967297 current; puts [read $fd 2]";
+    if !CheckScript(*tcl, wide_seek, "4294967297\n1\nok\n") { return 13 }
+    separate := Tcl.Eval(*other, "read file0 2");
+    if separate.code != .Error || TextView(separate.value) != "bad file identifier \"file0\"" { return 7 }
+    failure := Tcl.Eval(*tcl, "open /build/tcl/channel-suite/missing OREAD");
+    if failure.code != .Error || TextView(failure.value) != "couldn't open \"/build/tcl/channel-suite/missing\": model I/O error" { return 8 }
+    previous := close_count;
+    closed := Tcl.CloseChannels(*tcl);
+    if closed.code != .OK || close_count != previous+1 { return 9 }
+    if !CheckScript(*tcl, "puts [catch {read $fd 1}]", "1\n") { return 10 }
+    stopped := Tcl.Eval(*tcl, "proc stop {} {exit}; catch {puts [stop]}; puts after");
+    after: Text = Tcl.TakeOutput(*tcl);
+    if stopped.code != .Exit || TextView(after) != "" { return 11 }
+    if !CheckScript(*tcl, "puts stdout stream; close stdout; puts implicit; puts [catch {puts stdout closed}]", "stream\nimplicit\n1\n") { return 12 }
+    print("Tcl channels API OK\n");
+    return 0;
+}

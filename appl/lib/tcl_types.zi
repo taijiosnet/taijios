@@ -2,7 +2,7 @@
 #import "std/vec"
 #import "std/number_text"
 
-Code :: enum s32 { OK; Error; Return; Break; Continue; }
+Code :: enum s32 { OK; Error; Return; Break; Continue; Exit; }
 
 Result :: struct {
     code: Code;

@@ -7,11 +7,12 @@ ZX: module
 	runargs:	fn(path: string, args: list of string): (big, int, string);
 
 	# Requests from the engine to the window process.
-	Open, Event, Buffer, Present, Close: con iota;
+	Open, Event, Buffer, Present, Close, Poll, SetTasked: con iota;
 	# Events returned to the program.
-	Idle, Closed, Redraw, Resize, Move, Down, Up, Key, Keyup, Text: con iota;
+	Idle, Closed, Redraw, Resize, Move, Down, Up, Key, Keyup, Text, Visibility: con iota;
 	Maxside: con 4096;
 	Maxpixels: con 4194304;
+	StdinChunk: con 4096;
 
 	Input: adt {
 		kind, x, y, button, key, modifiers, width, height: int;
@@ -24,7 +25,11 @@ ZX: module
 		width, height, wait, message: int;
 		image: ref Draw->Image;
 		input: Input;
+		hide, tasked: int;
+		stdinlen, reader: int;
+		stdin: array of byte;
 	};
 
 	runwindow:	fn(path: string, win: ref Window): (big, int, string);
+	runwindowargs:	fn(path: string, args: list of string, win: ref Window): (big, int, string);
 };

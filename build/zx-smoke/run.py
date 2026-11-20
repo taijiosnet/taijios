@@ -112,13 +112,34 @@ if '--utilities' in sys.argv[2:]:
             assert actual == wanted, (command, operands, actual, wanted)
 
 
+if '--guest-io' in sys.argv[2:]:
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory(dir=files, prefix='filesystem-') as directory:
+        directory = Path(directory)
+        guest = '/' + str(directory.relative_to(root))
+        (directory / 'lifecycle.txt').write_bytes(b'long file to truncate')
+        result = run(f'bind -c {guest} /chan; cd /chan; '
+                     'zxrun -c /build/zx-smoke/filesystem.zx > io.out >[2] io.err; '
+                     'echo $status; echo GUEST_IO_DONE')
+        assert result.stdout == '7\nGUEST_IO_DONE\n' and not result.stderr
+        assert (directory / 'lifecycle.txt').read_bytes() == b'alpha'
+        assert (directory / 'new lifecycle.txt').read_bytes() == b'new'
+        assert (directory / 'new lifecycle.txt').stat().st_mode & 0o777 == 0o600
+        assert (directory / 'io.out').read_bytes() == b'guest stdout\n'
+        assert (directory / 'io.err').read_bytes() == b'guest stderr\n'
+        print('ZX guest I/O: create, truncate, stat, s64 seek, independent handles, streams and status')
+
+
 def graphics():
+    import errno
     import io
     import os
     import select
     import signal
     import time
     from collections import deque
+    from tempfile import TemporaryDirectory
     from PIL import Image, ImageChops
 
     env = {k: v for k, v in os.environ.items() if k not in (
@@ -204,6 +225,69 @@ def graphics():
             print('ZX stdin: windowed runner honored guest fd 0 redirection')
         finally:
             stop(proc)
+
+    def windowed_pipe(cancel):
+        with TemporaryDirectory(dir=files, prefix='windowio-') as directory:
+            setup = Path(directory)
+            feed = setup / 'input'
+            os.mkfifo(feed)
+            guest = '/' + str(setup.relative_to(root))
+            # Use a real guest pipe and toolbar in this emulator's namespace.
+            (setup / 'wmsetup').write_text(
+                f"{{cat {guest}/input | {{zxrun -c -p -w /build/zx-smoke/windowio.zx "
+                "mode 'café marker'; echo WINDOWIO_STATUS $status; ps; echo WINDOWIO_DONE}} &\n")
+            proc = subprocess.Popen([emu, '-r', root, '-g', '800x600', '/dis/sh.dis', '-c',
+                                     f'bind -b {guest} /lib; wm/wm'], env=env,
+                                    stdin=subprocess.DEVNULL, start_new_session=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            transcript = bytearray()
+
+            def observed(marker):
+                for error, data in output(proc):
+                    assert not error, data
+                    transcript.extend(data)
+                assert len(transcript) < 8192, 'unexpected pipe test output'
+                return marker in transcript
+
+            def input_writer():
+                try:
+                    return (os.open(feed, os.O_WRONLY | os.O_NONBLOCK),)
+                except OSError as err:
+                    if err.errno != errno.ENXIO:
+                        raise
+
+            try:
+                window = until(owned_window, 'guest pipe emulator did not map')
+                (writer,) = until(input_writer, 'guest pipe producer did not open its input')
+                with os.fdopen(writer, 'wb', buffering=0) as stream:
+                    until(lambda: observed(b'windowio pending\n'), 'ZX did not observe a pending pipe read')
+                    _, box = until(lambda: surface(window), 'ZX pipe test did not draw')
+                    command('xdotool', 'mousemove', '700', '400', check=True)
+                    click(window, box[0] + 30, box[1] + 30)
+                    command('xdotool', 'key', '--window', window, 'a', check=True)
+                    until(lambda: observed(b'windowio key 65\n'), 'key input stalled behind guest stdin')
+                    if cancel:
+                        close(window, box)
+                    else:
+                        command('xdotool', 'key', '--window', window, 'h', check=True)
+                        until(lambda: observed(b'windowio visibility 1\n'), 'ZX did not receive task event')
+                        until(lambda: surface(window) is None, 'tasked ZX window is still visible')
+                        assert stream.write(b'abcde') == 5
+                        until(lambda: observed(b'windowio bytes abc\n'), 'ZX did not read a short slice')
+                        until(lambda: observed(b'windowio bytes de\n'), 'ZX discarded unread bytes')
+                        until(lambda: observed(b'windowio visibility 0\n'), 'ZX did not receive restore event')
+                        until(lambda: surface(window), 'restored ZX window did not draw')
+                        stream.close()
+                    until(lambda: observed(b'WINDOWIO_DONE\n'), 'ZX did not return to its guest shell')
+                    status = 8 if cancel else 7
+                    assert f'WINDOWIO_STATUS {status}\n'.encode() in transcript, transcript
+                    processes = transcript.split(f'WINDOWIO_STATUS {status}\n'.encode(), 1)[1]
+                    assert b'zxrun' not in processes, processes
+            except AssertionError:
+                print('ZX guest pipe transcript:', repr(transcript))
+                raise
+            finally:
+                stop(proc)
 
     def fuel():
         proc = launch('zxrun', '-w', '/build/zx-smoke/budget.zx')
@@ -399,6 +483,10 @@ def graphics():
             fuel()
         if '--stdin' in sys.argv[2:]:
             windowed_stdin()
+        if '--guest-io' in sys.argv[2:]:
+            windowed_pipe(cancel=False)
+            windowed_pipe(cancel=True)
+            print('ZX window I/O: UTF-8 argv, live guest pipe, keys, task/restore, EOF and cancellation')
     finally:
         os.close(reader)
         xvfb.terminate()

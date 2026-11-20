@@ -57,13 +57,74 @@ def stdin_suite(image):
     print("Hosted Tcl stdin passed file redirection, multiple reads, pipes, EOF, source and error status")
 
 
+def prepare_channel_files():
+    directory = BUILD / "channel-suite"
+    directory.mkdir(exist_ok=True)
+    (directory / "input").write_bytes(b"first\nsecond\nzebra")
+    (directory / "existing").write_bytes(b"ABCDE")
+    (directory / "created").unlink(missing_ok=True)
+    return directory
+
+
+def channel_suite(image):
+    contract = {"Channels": "channels.tcl", "ChannelsExpected": "channels.out",
+                "File": "channel_file.tcl", "FileExpected": "channel_file.out"}
+    (BUILD / "tcl_channel_input.zi").write_text("".join(
+        f"{name} :: #string TCL_FIXTURE\n{(FIXTURES / path).read_text()}TCL_FIXTURE;\n"
+        for name, path in contract.items()))
+
+    model = BUILD / "tcl_channels_api.zx"
+    compile_zx(FIXTURES / "tcl_channels_api.zi", "tcl_channels_api:main", model, BUILD)
+    expect(capture(["zi2zx", "run", "--backend", "engine", model]), "Tcl channels API OK\n0\n")
+    expect(guest("zxrun /build/tcl/tcl_channels_api.zx"), "Tcl channels API OK\n0\n", codes=(0, -9))
+    print("Injected channel backend verified on ZX and Taiji")
+
+    directory = prepare_channel_files()
+    expected = (FIXTURES / "channels.out").read_text()
+    (BUILD / "legacy-channels.tcl").write_text((FIXTURES / "channels.tcl").read_text() + "exit\n")
+    expect(guest("tclsh /build/tcl/legacy-channels.tcl"), expected, codes=(0, -9))
+    assert (directory / "existing").read_bytes() == b"xyq\nE"
+    print("Channel compatibility fixture matched shipped Limbo Dis")
+
+    if image:
+        directory = prepare_channel_files()
+        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/channels.tcl"), expected + "0\n", codes=(0, -9))
+        assert (directory / "existing").read_bytes() == b"xyq\nE"
+        expected = (FIXTURES / "channel_file.out").read_text()
+        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/channel_file.tcl"), expected + "0\n", codes=(0, -9))
+        assert (directory / "created").read_bytes() == b"ok"
+        print("Hosted Tcl matched Limbo channels and passed guest create, seek, tell and file metadata")
+
+        payload = "Tcl channel bytes\n" * 900
+        (BUILD / "large-channel.tcl").write_text(
+            "set path {/build/tcl/channel-suite/large file}\n"
+            "set out [open $path w+]\n"
+            f"puts -nonewline $out {{{payload}}}\n"
+            "seek $out 0\nputs \"[string length [read $out 10000]]:[string length [read $out 10000]]:[eof $out]\"\n"
+            "read $out 1\nputs [eof $out]\nclose $out\n")
+        length = len(payload)
+        expect(guest(f"zxrun {image} < /build/tcl/large-channel.tcl"),
+               f"10000:{length - 10000}:0\n1\n0\n", codes=(0, -9))
+        assert (directory / "large file").read_bytes() == payload.encode()
+
+    script = "puts before\nproc stop {} {exit 7; puts after-exit}\ncatch {stop}; puts after-catch\n"
+    (BUILD / "channel-exit.tcl").write_text(script)
+    expect(guest("tclsh /build/tcl/channel-exit.tcl"), "before\n", codes=(0, -9))
+    if image:
+        expect(guest(f"zxrun -c {image} < /build/tcl/channel-exit.tcl; echo $status"),
+               "before\n\n", codes=(0, -9))
+        expect(guest(f"echo 'read missing 1' | zxrun -c {image}; echo $status"),
+               'tclsh: bad file identifier "missing"\n|1\n', codes=(0, -9))
+        print("Hosted Tcl passed oversized transfers, noncatchable exit and shell status")
+
+
 def source_script(path):
     return f"proc loadScript {{value}} {{source {{{path}}}; return $value}}\nputs sourced=[loadScript 5]\n"
 
 
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--stdin", metavar="GUEST_IMAGE", help="test a ZX-enabled guest stdin image")
+    cli.add_argument("--stdin", metavar="GUEST_IMAGE", help="test hosted Tcl stdin and guest I/O")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     native = BUILD / "native"
@@ -125,6 +186,7 @@ def main():
     print("Extension dispatch, interpreter isolation and recovery verified on ZX and Taiji")
     if args.stdin:
         stdin_suite(args.stdin)
+    channel_suite(args.stdin)
 
 
 if __name__ == "__main__":

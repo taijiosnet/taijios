@@ -3,6 +3,8 @@ using Tk :: #import "tcl_tk"
 using UTF :: #import "tcl_tk_text"
 using View :: #import "tcl_tk_view"
 using Scale :: #import "tcl_tk_scale"
+using Check :: #import "tcl_tk_check"
+using Scroll :: #import "tcl_tk_scrollbar"
 #import "std/vec"
 
 Canvas :: struct { pixels: []u8; width: s32; height: s32; }
@@ -164,6 +166,8 @@ Render :: (pixels: []u8, width: s32, height: s32) {
         box := it.box;
         if it.kind == Tk.FRAME { continue }
         if it.kind == Tk.SCALE { DrawScale(*canvas, it, it_index); continue }
+        if it.kind == Tk.CHECKBUTTON { DrawCheck(*canvas, it); continue }
+        if it.kind == Tk.SCROLLBAR { DrawScroll(*canvas, it, it_index); continue }
         if it.kind == Tk.PANEL { DrawPanel(*canvas, it); continue }
         if it.kind == Tk.TEXT {
             Fill(*canvas, box, ifx it_index == Tk.focused then LETTER else BORDER);
@@ -201,6 +205,50 @@ Render :: (pixels: []u8, width: s32, height: s32) {
                  ifx it_index == Tk.pressed then PRESSED else BUTTON);
         }
         DrawText(*canvas, box, TextView(it.text), true, ifx it.disabled then MUTED else LETTER);
+    }
+}
+
+DrawCheck :: (canvas: *Canvas, widget: *Tk.Widget) {
+    box := widget.box;
+    ink := ifx widget.disabled then MUTED else LETTER;
+    indicator := Tk.Box.{x = box.x+6, y = box.y+(box.h-16)/2, w = 16, h = 16};
+    if box.w >= 24 && box.h >= 16 {
+        Fill(canvas, indicator, BORDER);
+        Fill(canvas, .{x = indicator.x+1, y = indicator.y+1, w = 14, h = 14}, ENTRY);
+        if Check.Selected(*widget.check) {
+            Stroke(canvas, indicator.x+3, indicator.y+1, "0314", ink);
+            Stroke(canvas, indicator.x+3, indicator.y+1, "1441", ink);
+        }
+    }
+    DrawText(canvas, .{x = box.x+29, y = box.y, w = box.w-29, h = box.h}, TextView(widget.text), false, ink);
+}
+
+ScrollSegment :: (box: Tk.Box, horizontal: bool, first: s32, last: s32, inset: s32 = 0) -> Tk.Box {
+    if horizontal { return .{x = box.x+first, y = box.y+inset, w = last-first, h = box.h-2*inset} }
+    return .{x = box.x+inset, y = box.y+first, w = box.w-2*inset, h = last-first};
+}
+
+DrawScroll :: (canvas: *Canvas, widget: *Tk.Widget, index: s64) {
+    box := widget.box;
+    horizontal := widget.scroll.horizontal;
+    length := Tk.ScrollLength(widget);
+    track := Scroll.Track(*widget.scroll, length);
+    Fill(canvas, box, BORDER);
+    Fill(canvas, ScrollSegment(box, horizontal, 1, length-1, 1), BUTTON);
+    Fill(canvas, ScrollSegment(box, horizontal, track.first, track.last), BORDER);
+    Fill(canvas, ScrollSegment(box, horizontal, track.first+1, track.last-1, 1),
+         ifx index == Tk.pressed then PRESSED else ENTRY);
+    for arrow: 0..1 {
+        center := ifx arrow == 0 then track.arrow/2 else length-1-track.arrow/2;
+        for row: 0..3 {
+            spread := cast(s32)row;
+            major := center + (ifx arrow == 0 then spread-2 else 2-spread);
+            minor := ifx horizontal then box.h/2 else box.w/2;
+            if track.arrow < 8 || minor < 4 { continue }
+            pixels := ifx horizontal then Tk.Box.{x = box.x+major, y = box.y+minor-spread, w = 1, h = 1+2*spread}
+                      else Tk.Box.{x = box.x+minor-spread, y = box.y+major, w = 1+2*spread, h = 1};
+            Fill(canvas, pixels, LETTER);
+        }
     }
 }
 

@@ -3,7 +3,18 @@
 using Tcl :: #import "tcl"
 using Stdin :: #import "taijios_stdin"
 using Files :: #import "taijios_files"
+using Guest :: #import "taijios_io"
+using Io :: #import "tcl_io"
 using Types :: #import "tcl_types"
+
+GuestOpen :: (context: s64, path: string, mode: s32) -> s32 { return Guest.OpenFile(path, mode) }
+GuestCreate :: (context: s64, path: string, mode: s32, permissions: s32) -> s32 { return Guest.CreateFile(path, mode, permissions) }
+GuestRead :: (context: s64, handle: s32, buffer: []u8) -> s32 { return Guest.ReadBytes(handle, buffer) }
+GuestWrite :: (context: s64, handle: s32, data: string) -> s32 { return Guest.WriteBytes(handle, data) }
+GuestClose :: (context: s64, handle: s32) -> s32 { return Guest.CloseFile(handle) }
+GuestSeek :: (context: s64, handle: s32, offset: s64, origin: s32) -> s64 { return Guest.SeekFile(handle, offset, origin) }
+GuestStat :: (context: s64, path: string, metadata: []u8) -> s32 { return Guest.StatFile(path, metadata) }
+GuestError :: (context: s64) -> string { return Guest.LastError() }
 
 LoadScript :: (context: s64, path: string, result: *Types.Result) {
     script: Text;
@@ -22,10 +33,19 @@ main :: () -> s32 {
     if error != "" { print("tclsh: %\n", error); return 1 }
     tcl: Tcl.Interpreter;
     Tcl.SetSourceLoader(*tcl, LoadScript);
+    backend := Io.Backend.{open = GuestOpen, create = GuestCreate, read = GuestRead, write = GuestWrite, seek = GuestSeek, stat = GuestStat, close = GuestClose, error = GuestError, stdin = true};
+    unused Tcl.SetChannelBackend(*tcl, backend);
     result := Tcl.Eval(*tcl, TextView(source));
+    closed := Tcl.CloseChannels(*tcl);
     output: Text = Tcl.TakeOutput(*tcl);
     print("%", TextView(output));
-    if result.code == .OK { return 0 }
-    print("tclsh: %\n", TextView(result.value));
-    return 1;
+    if result.code != .OK && result.code != .Exit {
+        print("tclsh: %\n", TextView(result.value));
+        return 1;
+    }
+    if closed.code != .OK {
+        print("tclsh: %\n", TextView(closed.value));
+        return 1;
+    }
+    return 0;
 }

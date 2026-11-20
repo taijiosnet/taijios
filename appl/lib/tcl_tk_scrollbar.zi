@@ -1,0 +1,35 @@
+// Fractional scrollbar geometry and pointer hit testing.
+
+UNIT :: 10000;
+WIDTH :: 18;
+LENGTH :: 54;
+MIN_THUMB :: 8;
+
+State :: struct { first: s64; last: s64; horizontal: bool; }
+Geometry :: struct { arrow: s32; travel: s32; first: s32; last: s32; }
+
+Clamp :: (fraction: s64) -> s64 {
+    if fraction < 0 { return 0 }
+    return ifx fraction > UNIT then UNIT else fraction;
+}
+
+Track :: (state: *State, length: s32) -> Geometry {
+    small := length/2;
+    arrow := ifx small < WIDTH then small else WIDTH;
+    space := length - 2*arrow;
+    minimum := ifx space < MIN_THUMB then space else MIN_THUMB;
+    travel := space - minimum;
+    first := arrow + cast(s32)(state.first*travel/UNIT);
+    last := arrow + cast(s32)(state.last*travel/UNIT) + minimum;
+    if last < first + minimum { last = first + minimum }
+    return .{arrow = arrow, travel = travel, first = first, last = last};
+}
+
+Hit :: (track: Geometry, offset: s32, length: s32) -> string {
+    if offset < 0 || offset >= length { return "" }
+    if offset < track.arrow { return "arrow1" }
+    if offset >= length-track.arrow { return "arrow2" }
+    if offset < track.first { return "trough1" }
+    if offset >= track.last { return "trough2" }
+    return "slider";
+}

@@ -1,0 +1,58 @@
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using Scroll :: #import "tcl_tk_scrollbar"
+using Fixture :: #import "logwindow_fixture"
+
+Expect :: (tcl: *Tcl.Interpreter, script: string, value: string) -> bool {
+    result := Tcl.Eval(tcl, script);
+    return result.code == .OK && TextView(result.value) == value;
+}
+
+main :: () -> s32 {
+    tcl: Tcl.Interpreter;
+    if !Tk.Attach(*tcl) { return 1 }
+    script := Fixture.Commands;
+    start: s64;
+    for i: 0..script.count-1 {
+        if script[i] != 10 { continue }
+        value := Tcl.Eval(*tcl, script[start:i]);
+        if value.code != .OK { print("%\n", TextView(value.value)); return 2 }
+        if value.value.bytes.count > 0 { print("%\n", TextView(value.value)) }
+        start = i+1;
+    }
+    if !Expect(*tcl, "set follow local; variable follow", "enabled") { return 3 }
+    invalid := Tcl.Eval(*tcl, ".follow configure -variable extra -unsupported 1");
+    if invalid.code != .Error || !Expect(*tcl, ".follow cget -variable", "follow") ||
+       !Expect(*tcl, "variable extra", "") { return 4 }
+
+    Tk.Layout(390, 450);
+    check := Tk.widgets[Tk.Find(".follow")].box;
+    pressed: Text = Tk.PointerPress(check.x+10, check.y+10);
+    if TextView(pressed) != "variable follow" || !Expect(*tcl, TextView(pressed), "paused") { return 5 }
+    released: Text = Tk.PointerUp(check.x+10, check.y+10);
+    if released.bytes.count != 0 || !Expect(*tcl, "variable follow", "paused") { return 6 }
+    if !Expect(*tcl, ".follow configure -state disabled; .follow invoke", "") ||
+       !Expect(*tcl, "variable follow", "paused") { return 7 }
+
+    for 1..80 {
+        if !Expect(*tcl, ".log insert end {a log line\n}", "") { return 8 }
+    }
+    bar := Tk.Find(".bar");
+    log := Tk.Find(".log");
+    if Tk.widgets[bar].scroll.first != 0 || Tk.widgets[bar].scroll.last >= Scroll.UNIT { return 9 }
+    if !Expect(*tcl, ".log see end", "") || Tk.widgets[bar].scroll.first <= 0 ||
+       Tk.widgets[bar].scroll.last != Scroll.UNIT { return 10 }
+    box := Tk.widgets[bar].box;
+    track := Scroll.Track(*Tk.widgets[bar].scroll, box.h);
+    x := box.x + box.w/2;
+    unused Tk.PointerPress(x, box.y + (track.first+track.last)/2);
+    if !Tk.Dragging() { return 11 }
+    drag: Text = Tk.PointerMove(x, box.y + track.arrow);
+    if !Expect(*tcl, TextView(drag), "") || Tk.widgets[log].view.top >= 8 { return 12 }
+    unused Tk.PointerUp(x, box.y + track.arrow);
+    if Tk.Dragging() { return 13 }
+    arrow: Text = Tk.PointerPress(x, box.y+box.h-1);
+    if TextView(arrow) != ".log yview scroll 1 unit" || !Expect(*tcl, TextView(arrow), "") { return 14 }
+    return 0;
+}

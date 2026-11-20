@@ -111,6 +111,29 @@ rest of the buffer. For a nonempty buffer, the call returns `0` at EOF or
 `-1` on a read error. An empty buffer returns `0` without reading. Dis pipes and input
 redirection supply the stream in both console and windowed runs.
 
+Windowed bundles can use `taijios_stdin.Poll(buffer)` to read guest fd 0
+while continuing to process window events. A call copies up to 4096 bytes,
+returns `-2` while input is pending, `0` at EOF, or `-1` on error. An empty
+buffer returns `0` without starting a read. The runner cancels a pending
+read when the window closes or the bundle exits. A windowed app can wait
+with `zx_surface.Event` between polls to keep input responsive.
+
+`zxrun -w file.zx [args ...]` passes operands through `taijios_args`.
+`zxrun -c -w file.zx [args ...]` reports the returned value as shell status.
+Add `-p` before the bundle path to start the runner and its workers in a
+new guest process group while retaining the caller's redirections.
+
+`zx_surface.SetTasked(true)` tasks a presented window through TaijiOS's
+window manager. `SetTasked(false)` restores it. Apps that request this
+capability get the title bar's Hide control. `Event` delivers kind `10`
+for a visibility change, with `button` equal to `1` when tasked and `0`
+when restored.
+
+Log Window uses these bindings to follow a live guest pipe with its window
+responsive. Install it with `(cd appl/cmd && mk install-logwindow-zx)` and
+run `zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log` from a
+graphical guest shell. See the [Tk applications guide](appl/cmd/tcltk/README.md).
+
 ### Build and run ZX `cat`
 
 With `zi2zx`, `mk`, and `limbo` on `PATH`, build and install the hosted
@@ -140,6 +163,12 @@ ZX commands use two typed capabilities declared in `appl/cmd`.
   those handles when the bundle exits. Operations return `-1` on error and
   `Error()` returns the last I/O error. A read into a nonempty buffer returns
   zero at EOF.
+- `taijios_io.Create(path, mode, permissions)` creates or truncates a guest
+  file and returns a handle. `Seek(handle, offset, origin)` sets its position
+  and returns the absolute byte offset as `s64`. Origins `0`, `1`, and `2`
+  are start, current, and end. `Stat(path, metadata)` writes twelve bytes
+  on success and returns `0`. The first eight bytes are the signed file
+  length and the next four are the unsigned Inferno mode, both little endian.
 
 Test the command against its Dis counterpart with
 `python3 -u build/zx-smoke/run.py Linux/386/bin/emu --cat`.
@@ -185,6 +214,18 @@ printf 'invalid ZX\n' > build/zx-smoke/bad.zx
 zi2zx --root build/zx-smoke/keyevents --entry zx_surface:main \
     -o build/zx-smoke/keyevents.zx build/zx-smoke/keyevents/zx_surface.zi
 python3 build/zx-smoke/run.py Linux/386/bin/emu --graphics
+```
+
+Build these two fixtures to exercise file descriptors, windowed operands,
+pending reads, keyboard input, task and restore, and closing an idle pipe.
+
+```sh
+zi2zx --root build/zx-smoke --module-path appl/cmd --bind-host taijios_io \
+    --entry filesystem:main -o build/zx-smoke/filesystem.zx build/zx-smoke/filesystem.zi
+zi2zx --root build/zx-smoke/keyevents --module-path appl/cmd \
+    --bind-host zx_surface --bind-host taijios_args --bind-host taijios_stdin \
+    --entry windowio:main -o build/zx-smoke/windowio.zx build/zx-smoke/keyevents/windowio.zi
+python3 -u build/zx-smoke/run.py Linux/386/bin/emu --guest-io --graphics
 ```
 
 To include guest module resolution and graphical step-budget checks, build

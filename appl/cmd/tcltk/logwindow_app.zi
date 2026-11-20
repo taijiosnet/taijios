@@ -1,0 +1,69 @@
+// Inferno Log Window adapted from appl/wm/logwindow.b. See NOTICE.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using Files :: #import "taijios_files"
+using Stdin :: #import "taijios_stdin"
+using Tcl :: #import "tcl"
+using Window :: #import "tcltk"
+using Surface :: #import "zx_surface"
+using Stream :: #import "logwindow_stream"
+using Input :: #import "logwindow_input"
+
+Options :: struct { title: string; close_on_end: bool; }
+
+input: Stream.Stream;
+message: Text;
+exit_on_end: bool;
+tasked: bool;
+
+Parse :: () -> (options: Options, ok: bool) {
+    opts: Options = .{title = "Log Window"};
+    index: s32;
+    count := Args.OperandCount();
+    while index < count {
+        value := Args.Operand(index);
+        if value.count <= 1 || value[0] != 45 { break }
+        index += 1;
+        if value == "--" { break }
+        for i: 1..value.count-1 {
+            if value[i] == 101 { opts.close_on_end = true }
+            // The launcher chooses the group before it spawns its worker.
+            else if value[i] == 103 { continue }
+            else { return opts, false }
+        }
+    }
+    if index < count { opts.title = Args.Operand(index) }
+    return opts, true;
+}
+
+Start :: () -> bool {
+    tasked = Surface.SetWindowTasked(true);
+    return tasked;
+}
+
+Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResult {
+    restored := event.kind == Surface.Visibility && event.button == 0;
+    if event.kind == Surface.Visibility { tasked = !restored }
+    Stream.Poll(*input, Stdin.PollBytes, *message);
+    if message.bytes.count == 0 { return ifx restored then .Changed else .Idle }
+    if exit_on_end && input.ended { return ifx Window.Execute(tcl, "destroy .") then .Idle else .Failed }
+    if !Input.Append(TextView(message)) { print("logwindow: could not grow text widget\n"); return .Failed }
+    if tasked && Input.Checked(".bf.popup") {
+        if !Surface.SetWindowTasked(false) { return .Failed }
+        tasked = false;
+    }
+    return ifx tasked then .Idle else .Changed;
+}
+
+main :: () -> s32 {
+    options, ok := Parse();
+    if !ok { print("usage: logwindow [-ge] [title]\n"); return 2 }
+    exit_on_end = options.close_on_end;
+    script: Text;
+    if Files.ReadFile("/appl/cmd/tcltk/logwindow.tcl", *script, 16384) != 0 {
+        print("logwindow: could not read controls\n");
+        return 1;
+    }
+    tcl: Tcl.Interpreter;
+    return Window.RunPolled(*tcl, TextView(script), options.title, 408, 374, Start, Tick, 25);
+}

@@ -1,0 +1,41 @@
+using Surface :: #import "zx_surface";
+using Args :: #import "taijios_args";
+using Stdin :: #import "taijios_stdin";
+
+main :: () -> s32 {
+    if Args.OperandCount() != 2 || Args.Operand(1) != "café marker" { return 1 }
+    if !Surface.OpenWindow("ZX pipe", 160, 100) { return 2 }
+    defer Surface.CloseWindow();
+    rgba: [64000]u8;
+    for i: 0..15999 {
+        at := i * 4;
+        rgba[at] = 248;
+        rgba[at + 1] = 250;
+        rgba[at + 2] = 252;
+        rgba[at + 3] = 255;
+    }
+    if !Surface.PresentRGBA(160, 100, TextView(rgba[:])) { return 3 }
+    buf: [3]u8;
+    if Stdin.PollBytes(buf[:0]) != 0 || Stdin.PollBytes(buf[:]) != -2 { return 4 }
+    print("windowio pending\n");
+    tasked := false;
+    while true {
+        event := Surface.NextEvent(40);
+        if event.kind == 1 { return 8 }
+        if event.kind == 7 {
+            print("windowio key %\n", event.key);
+            if event.key == 72 && !Surface.SetWindowTasked(true) { return 5 }
+        }
+        if event.kind == 10 {
+            tasked = event.button == 1;
+            print("windowio visibility %\n", event.button);
+        }
+        n := Stdin.PollBytes(buf[:]);
+        if n == -2 { continue }
+        if n == -1 { return 9 }
+        if n == 0 { return 7 }
+        if tasked && !Surface.SetWindowTasked(false) { return 6 }
+        print("windowio bytes %\n", TextView(buf[:n]));
+    }
+    return 0;
+}

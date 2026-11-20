@@ -32,6 +32,7 @@ y.debug
 /appl/cmd/basename.zx
 /appl/cmd/cleanname.zx
 /appl/cmd/coffee.zx
+/appl/cmd/logwindow.zx
 /appl/cmd/tclsh.zx
 /dis/cat.zx
 /dis/echo.zx
@@ -40,13 +41,16 @@ y.debug
 /dis/coffee.zx
 /dis/tclsh.zx
 /dis/wm/stopwatch.zx
+/dis/wm/logwindow.zx
 /build/zx-smoke/*
 !/build/zx-smoke/hello.zi
 !/build/zx-smoke/taijios_stdin.zi
+!/build/zx-smoke/filesystem.zi
 !/build/zx-smoke/run.py
 !/build/zx-smoke/keyevents/
 /build/zx-smoke/keyevents/*
 !/build/zx-smoke/keyevents/zx_surface.zi
+!/build/zx-smoke/keyevents/windowio.zi
 !/build/zx-smoke/modules/
 /build/zx-smoke/modules/*
 !/build/zx-smoke/modules/*.zi

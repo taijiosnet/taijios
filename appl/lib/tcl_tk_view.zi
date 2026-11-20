@@ -17,6 +17,7 @@ State :: struct {
     columns: s32;
     visible: s32;
     top: s32;
+    appended: bool;
 }
 
 FindTag :: (view: *State, name: string) -> s64 {
@@ -55,6 +56,7 @@ Reset :: (view: *State) {
     unused VecResize(view.ranges, 0);
     view.columns = 0;
     view.top = 0;
+    view.appended = false;
 }
 
 Clamp :: (view: *State) {
@@ -65,13 +67,22 @@ Clamp :: (view: *State) {
 
 Reflow :: (view: *State, source: string, columns: s32, visible: s32) {
     view.visible = visible;
-    if columns == view.columns { Clamp(view); return }
+    same_width := columns == view.columns;
+    if same_width && !view.appended { Clamp(view); return }
     before: s64;
     if view.top < view.rows.count { before = view.rows[view.top] }
-    unused VecResize(view.rows, 0);
-    view.columns = columns;
-    view.top = 0;
     at: s64;
+    if same_width && view.rows.count > 0 {
+        // Appending can change the wrap of the last row, but all earlier row offsets still apply.
+        last := view.rows.count - 1;
+        at = view.rows[last];
+        unused VecResize(view.rows, last);
+    } else {
+        unused VecResize(view.rows, 0);
+        view.top = 0;
+    }
+    view.columns = columns;
+    view.appended = false;
     while at < source.count {
         if at <= before { view.top = cast(s32)view.rows.count }
         if !VecPush(view.rows, at) { break }

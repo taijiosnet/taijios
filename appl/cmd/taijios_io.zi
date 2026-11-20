@@ -2,13 +2,20 @@ host_api :: #system_library "host_api";
 
 #scope_export
 Open :: (path: string, mode: s32) -> s32 #foreign host_api;
+Create :: (path: string, mode: s32, permissions: s32) -> s32 #foreign host_api;
 Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 Write :: (handle: s32, data: string) -> s32 #foreign host_api;
+Seek :: (handle: s32, offset: s64, origin: s32) -> s64 #foreign host_api;
+Stat :: (path: string, metadata: []u8) -> s32 #foreign host_api;
 Close :: (handle: s32) -> s32 #foreign host_api;
 Error :: () -> string #foreign host_api;
 
 OpenFile :: (path: string, mode: s32) -> s32 { return Open(path, mode) }
+CreateFile :: (path: string, mode: s32, permissions: s32) -> s32 { return Create(path, mode, permissions) }
 ReadBytes :: (handle: s32, buffer: []u8) -> s32 { return Read(handle, buffer) }
 WriteBytes :: (handle: s32, data: string) -> s32 { return Write(handle, data) }
+SeekFile :: (handle: s32, offset: s64, origin: s32) -> s64 { return Seek(handle, offset, origin) }
+// The first 12 bytes hold a little-endian s64 byte length and u32 Inferno mode.
+StatFile :: (path: string, metadata: []u8) -> s32 { return Stat(path, metadata) }
 CloseFile :: (handle: s32) -> s32 { return Close(handle) }
 LastError :: () -> string { return Error() }

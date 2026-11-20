@@ -22,7 +22,7 @@ State :: struct {
 
 Default :: () -> State { return .{last = 100 * UNIT, resolution = UNIT, length = 80, show_value = true} }
 
-Parse :: (text: string) -> (value: s64, ok: bool) {
+Parse :: (text: string, unit: s64 = UNIT) -> (value: s64, ok: bool) {
     i: s64;
     negative := text.count > 0 && text[0] == 45;
     if negative || (text.count > 0 && text[0] == 43) { i += 1 }
@@ -35,7 +35,7 @@ Parse :: (text: string) -> (value: s64, ok: bool) {
         digits += 1;
     }
     fraction: s64;
-    place := UNIT / 10;
+    place := unit / 10;
     if i < text.count && text[i] == 46 {
         i += 1;
         while i < text.count && T.Digit(text[i]) {
@@ -45,20 +45,20 @@ Parse :: (text: string) -> (value: s64, ok: bool) {
             digits += 1;
         }
     }
-    value := whole * UNIT + fraction;
+    value := whole * unit + fraction;
     if negative { value = -value }
     return value, digits > 0 && i == text.count && T.InRange(value);
 }
 
-Append :: (target: *Text, value: s64) {
+Append :: (target: *Text, value: s64, unit: s64 = UNIT) {
     digits: [24]u8;
     magnitude := value;
     if magnitude < 0 { unused BuilderAppend(target.bytes, "-"); magnitude = -magnitude }
-    unused BuilderAppend(target.bytes, FormatInteger(magnitude / UNIT, digits[:]));
-    fraction := magnitude % UNIT;
+    unused BuilderAppend(target.bytes, FormatInteger(magnitude / unit, digits[:]));
+    fraction := magnitude % unit;
     if fraction == 0 { return }
     unused BuilderAppend(target.bytes, ".");
-    place := UNIT / 10;
+    place := unit / 10;
     while fraction != 0 {
         unused VecPush(target.bytes, cast(u8)(48 + fraction / place));
         fraction %= place;

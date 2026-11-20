@@ -22,7 +22,7 @@ Run :: (script: string) -> s32 {
     result := Tcl.Eval(*interpreter, script);
     output: Text = Tcl.TakeOutput(*interpreter);
     WriteOutput(TextView(output));
-    if result.code != .OK {
+    if result.code != .OK && result.code != .Exit {
         PrintError(TextView(result.value));
         PrintError("\n");
         return 1;

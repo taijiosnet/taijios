@@ -56,6 +56,10 @@ that also charges loop iterations, and permits 48 nested script levels.
   inside an expression must yield a single integer or boolean. Overflow and
   division by zero return errors.
 - `puts string` and `puts -nonewline string` write to the output buffer.
+- `exit` stops the current evaluation, including from a procedure, source
+  file or `catch` body. `Eval` returns `.Exit` to the embedding application.
+  The shell entry points finish successfully. As in Limbo, arguments to
+  `exit` are ignored.
 - `source fileName` evaluates the loaded script in the current frame and
   shares the command and nesting budgets. Library callers can supply the
   reader with `SetSourceLoader`. The callback receives its context ID,
@@ -65,18 +69,46 @@ that also charges loop iterations, and permits 48 nested script levels.
   The Taiji loader resolves paths in the invoking guest namespace.
 
 Namespaces, `{*}` word expansion, numeric and Unicode backslash escapes, wide
-integers, floating-point and lazy expression operators, Tcl packages and channels
-are unsupported. The headless library can be imported by itself or used with
-the optional Tk module below.
+expression integers, floating-point and lazy expression operators, and Tcl
+packages are unsupported. The headless library can be imported by itself or
+used with the optional Tk module below.
+
+### Channels and files
+
+- `open` supports Limbo `OREAD` (the default), `OWRITE` and `ORDWR` on
+  existing files. `r` and `r+` are aliases. `w` and `w+` create or truncate
+  a file, with optional octal or decimal permissions (default `0666`).
+  `OWRITE` preserves unwritten bytes. Append modes are unsupported.
+- `close`, `eof`, `flush`, `gets`, `read`, `seek`, `tell` and channel
+  `puts ?-nonewline? fileId string` are available. `seek` accepts
+  `SEEKSTART`, `SEEKRELA` and `SEEKEND`, as well as `start`, `current`
+  and `end`. Offsets and file sizes are signed 64-bit integers. Failed
+  seeks return Tcl errors.
+- Counted `read` returns up to the requested number of bytes. The Limbo
+  line forms read one line. Bare `read` appends a newline and
+  `read -nonewline` returns the original line. `gets` strips the last
+  character and accepts the legacy optional variable name without setting
+  it. EOF becomes sticky after an empty read. Reads and lines are bounded
+  to 1 MiB per command.
+- `file exists`, `file size`, `file isfile` and `file isdirectory` query
+  the guest path. Writes take effect immediately, so `flush` validates
+  the channel and returns success without sending another write.
+
+The Taiji stdin shell configures the guest I/O backend. Its script is read
+to EOF before evaluation, which leaves stdin at EOF for channel reads.
+The native shell supplies `source` file loading. Embedders can install
+their own channel backend via `SetChannelBackend` with a `tcl_io.Backend`.
+Callbacks receive the backend's context ID and use the typed guest I/O
+conventions. File channels persist between `Eval` calls. `CloseChannels`
+releases them, including after `.Exit`. Explicit `stdout` and implicit
+`puts` share `TakeOutput`.
 
 ### Comparison with shipped Inferno Tcl
 
-The shipped Limbo interpreter additionally registers `dumpstack`, `exit`,
-`load`, `time`, `close`, `eof`, `file`, `flush`, `gets`, `open`, `read`,
-`seek` and `tell`, and accepts channel arguments for `puts`. Limbo `load`
-requires a Dis module. The shipped calculator supports floating-point math
-and named functions. These commands, options and arithmetic features still
-need a port. `string match`, `wordstart` and `wordend` are empty stubs in
+The shipped Limbo interpreter additionally registers `dumpstack`, `load`
+and `time`. Limbo `load` requires a Dis module. The shipped calculator
+supports floating-point math and named functions. Its `file`, `flush` and
+`tell` are empty stubs. `string match`, `wordstart` and `wordend` are empty stubs in
 the shipped interpreter and are unsupported here. The Ziran implementation
 also handles ASCII `string toupper`, string search and trim, and `format`
 literal text where the Limbo implementation has stubs or bugs.
@@ -92,13 +124,14 @@ build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
 ```
 
 The native shell also reads stdin with `-` or when given no filename. The
-test runner compares the reference and compatibility scripts with the existing
-Limbo `tclsh`, runs the scripts under ZX and hosted Taiji, and tests the library
-API separately. `zxrun` prints a final scalar `0` on success and `1` on a Tcl
-error.
+test runner compares the reference, compatibility and channel scripts with
+the existing Limbo `tclsh`, runs the scripts under ZX and hosted Taiji, and
+tests the library API with an injected channel backend. `zxrun` prints a
+final scalar `0` on success and `1` on a Tcl error. `zxrun -c` reports the
+result as a guest command status.
 
-With a Taiji emulator that provides `taijios_stdin.Read` and
-`taijios_files.ReadAt`, build the shell that
+With a Taiji emulator that provides `taijios_stdin`, `taijios_files` and
+`taijios_io` including `Create`, `Seek` and `Stat`, build the shell that
 reads a script from the guest's standard input. It evaluates after EOF and
 accepts scripts up to 1 MiB.
 
@@ -144,5 +177,5 @@ use that API. Their window binds to Taiji's generic surface ABI.
 
 This port follows the Inferno Limbo sources `appl/cmd/tclsh.b`,
 `appl/lib/tcl.m`, `tcl_core.b`, `tcl_list.b`, `tcl_utils.b`, `tcl_calc.b`,
-and `tcl_string.b`. These files carry the Inferno distribution attribution and
+`tcl_string.b`, and `tcl_io.b`. These files carry the Inferno distribution attribution and
 MIT terms in [NOTICE](../../NOTICE).

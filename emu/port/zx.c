@@ -294,7 +294,14 @@ zxsurface(void *context, const char *module, const char *function,
 		ok = zxevent(surface, args, n, result);
 	else if(strcmp(function, "Present") == 0)
 		ok = zxpresent(surface->win, args, n, result);
-	else{
+	else if(strcmp(function, "SetTasked") == 0){
+		ok = n == 1 && args[0].kind == HOST_INTEGER && args[0].type != nil &&
+			strcmp(args[0].type, "bool") == 0;
+		if(ok){
+			surface->win->tasked = args[0].integer != 0;
+			zxbool(result, zxrequest(surface->win, ZX_SetTasked));
+		}
+	}else{
 		ok = n == 0 && zxrequest(surface->win, ZX_Close);
 		result->kind = HOST_VOID;
 	}
@@ -307,20 +314,39 @@ static int
 zxstdin(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
 {
-	uchar bytes[4096];
+	ZxSurface *surface = context;
+	ZX_Window *win;
+	uchar bytes[ZX_StdinChunk];
 	size_t length;
 	long count, i;
 
-	USED(context);
 	USED(module);
-	USED(function);
 	if(n != 1 || args[0].kind != HOST_SLICE || args[0].type == nil ||
 	   strcmp(args[0].type, "[]u8") != 0 || (args[0].length != 0 && args[0].elements == nil))
 		return 0;
 	length = args[0].length;
 	if(length > sizeof(bytes))
 		length = sizeof(bytes);
-	count = length == 0 ? 0 : kread(0, bytes, length);
+	count = 0;
+	if(length != 0 && strcmp(function, "Poll") == 0){
+		win = surface->win;
+		acquire();
+		if(waserror()){
+			release();
+			return 0;
+		}
+		win->stdinlen = length;
+		count = zxrequest(win, ZX_Poll) ? win->stdinlen : -1;
+		if(count > 0){
+			if(count > (long)length || win->stdin == H || count > win->stdin->len)
+				count = -1;
+			else
+				memmove(bytes, win->stdin->data, count);
+		}
+		poperror();
+		release();
+	}else if(length != 0)
+		count = kread(0, bytes, length);
 	for(i = 0; i < count; i++)
 		args[0].elements[i].bits = bytes[i];
 	result->kind = HOST_INTEGER;
@@ -491,27 +517,45 @@ zxargs(void *context, const char *module, const char *function,
 	return 1;
 }
 
-static int
-zxioerror(ZxCommand *command, HostValue *result, const char *message)
+static void
+zxioerrstr(ZxCommand *command, const char *message)
 {
 	if(message == nil)
 		kgerrstr(command->err, sizeof(command->err));
 	else
 		snprint(command->err, sizeof(command->err), "%s", message);
+}
+
+static int
+zxioerror(ZxCommand *command, HostValue *result, const char *message)
+{
+	zxioerrstr(command, message);
 	return zxs32(result, -1);
 }
 
 static int
-zxioopen(ZxCommand *command, const HostValue *args, int n, HostValue *result)
+zxiopath(const HostValue *name, char *path)
+{
+	if(name->length > ZxGuestPathBytes || (name->length != 0 &&
+	   (name->data == nil || memchr(name->data, 0, name->length) != nil)))
+		return 0;
+	if(name->length != 0)
+		memmove(path, name->data, name->length);
+	path[name->length] = 0;
+	return 1;
+}
+
+static int
+zxioopen(ZxCommand *command, const HostValue *args, int n, int create, HostValue *result)
 {
 	static const int modes[] = {OREAD, OWRITE, ORDWR};
 	char path[ZxGuestPathBytes + 1];
 	int slot, mode, fd;
 
-	if(n != 2 || args[0].kind != HOST_STRING || !zxisindex(args + 1))
+	if(n != (create ? 3 : 2) || args[0].kind != HOST_STRING || !zxisindex(args + 1) ||
+	   (create && !zxisindex(args + 2)))
 		return 0;
-	if(args[0].length > ZxGuestPathBytes || (args[0].length != 0 &&
-	   (args[0].data == nil || memchr(args[0].data, 0, args[0].length) != nil)))
+	if(!zxiopath(args, path))
 		return zxioerror(command, result, "invalid file name");
 	mode = args[1].integer;
 	if(mode < 0 || mode >= nelem(modes))
@@ -520,14 +564,63 @@ zxioopen(ZxCommand *command, const HostValue *args, int n, HostValue *result)
 		;
 	if(slot == nelem(command->fd))
 		return zxioerror(command, result, "too many open ZX files");
-	if(args[0].length != 0)
-		memmove(path, args[0].data, args[0].length);
-	path[args[0].length] = 0;
-	fd = kopen(path, modes[mode]);
+	fd = create ? kcreate(path, modes[mode], (uint32_t)args[2].integer) : kopen(path, modes[mode]);
 	if(fd < 0)
 		return zxioerror(command, result, nil);
 	command->fd[slot] = fd;
 	return zxs32(result, slot + 3);
+}
+
+static int
+zxiostat(ZxCommand *command, const HostValue *args, int n, HostValue *result)
+{
+	char path[ZxGuestPathBytes + 1];
+	const HostValue *buffer;
+	Dir *dir;
+	int i;
+
+	if(n != 2 || args[0].kind != HOST_STRING)
+		return 0;
+	buffer = args + 1;
+	if(buffer->kind != HOST_SLICE || buffer->type == nil || strcmp(buffer->type, "[]u8") != 0 ||
+	   (buffer->length != 0 && buffer->elements == nil))
+		return 0;
+	if(buffer->length < 12)
+		return zxioerror(command, result, "stat needs a 12-byte buffer");
+	if(!zxiopath(args, path))
+		return zxioerror(command, result, "invalid file name");
+	dir = kdirstat(path);
+	if(dir == nil)
+		return zxioerror(command, result, nil);
+	for(i = 0; i < 8; i++)
+		buffer->elements[i].bits = (uchar)((uint64_t)dir->length >> (8*i));
+	for(i = 0; i < 4; i++)
+		buffer->elements[8+i].bits = (uchar)((uint32_t)dir->mode >> (8*i));
+	free(dir);
+	return zxs32(result, 0);
+}
+
+static int
+zxioseek(ZxCommand *command, int fd, const HostValue *args, int n, HostValue *result)
+{
+	vlong offset;
+	int origin;
+
+	if(n != 3 || args[1].kind != HOST_INTEGER || args[1].type == nil ||
+	   strcmp(args[1].type, "s64") != 0 || !zxisindex(args + 2))
+		return 0;
+	origin = args[2].integer;
+	offset = -1;
+	if(fd < 0)
+		zxioerrstr(command, "invalid ZX file handle");
+	else if(origin < 0 || origin > 2)
+		zxioerrstr(command, "invalid seek origin");
+	else if((offset = kseek(fd, args[1].integer, origin)) < 0)
+		zxioerrstr(command, nil);
+	result->kind = HOST_INTEGER;
+	result->type = "s64";
+	result->integer = offset;
+	return 1;
 }
 
 static int
@@ -550,7 +643,11 @@ zxio(void *context, const char *module, const char *function,
 		return 1;
 	}
 	if(strcmp(function, "Open") == 0)
-		return zxioopen(command, args, n, result);
+		return zxioopen(command, args, n, 0, result);
+	if(strcmp(function, "Create") == 0)
+		return zxioopen(command, args, n, 1, result);
+	if(strcmp(function, "Stat") == 0)
+		return zxiostat(command, args, n, result);
 	if(n < 1 || !zxisindex(args))
 		return 0;
 	handle = args[0].integer;
@@ -560,6 +657,8 @@ zxio(void *context, const char *module, const char *function,
 		fd = command->fd[handle - 3];
 	else
 		fd = -1;
+	if(strcmp(function, "Seek") == 0)
+		return zxioseek(command, fd, args, n, result);
 	if(fd < 0)
 		return zxioerror(command, result, "invalid ZX file handle");
 	if(strcmp(function, "Close") == 0){
@@ -609,8 +708,8 @@ zxmodule(const char *actual, const char *leaf)
 static size_t
 zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *bindings)
 {
-	static const char *names[] = {"Open", "Event", "Present", "Close"};
-	static const char *io[] = {"Open", "Read", "Write", "Close", "Error"};
+	static const char *names[] = {"Open", "Event", "Present", "Close", "SetTasked"};
+	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error"};
 	BundleCapabilityAbi abi;
 	size_t i, count = 0;
 	int j;
@@ -618,8 +717,9 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 	for(i = 0; i < BundleCapabilityCount(bundle); i++){
 		if(!BundleCapabilityAbiAt(bundle, i, &abi))
 			continue;
-		if(zxmodule(abi.module, "taijios_stdin") && strcmp(abi.function, "Read") == 0){
-			bindings[count++] = (HostBinding){abi.module, abi.function, zxstdin, nil};
+		if(zxmodule(abi.module, "taijios_stdin")){
+			if(strcmp(abi.function, "Read") == 0 || (surface->win != H && strcmp(abi.function, "Poll") == 0))
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxstdin, surface};
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_files") && strcmp(abi.function, "ReadAt") == 0){
@@ -648,6 +748,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		for(j = 0; j < nelem(names); j++)
 			if(strcmp(abi.function, names[j]) == 0){
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxsurface, surface};
+				if(strcmp(abi.function, "SetTasked") == 0)
+					surface->win->hide = 1;
 				break;
 			}
 	}
@@ -764,6 +866,19 @@ ZX_runwindow(void *fp)
 	if(f->win == H || f->win->request == H || f->win->reply == H)
 		error("invalid ZX window channels");
 	result = zxrun(f->path, H, f->win);
+	f->ret->t0 = result.value;
+	f->ret->t1 = result.status;
+	retstr(result.problem, &f->ret->t2);
+}
+
+void
+ZX_runwindowargs(void *fp)
+{
+	F_ZX_runwindowargs *f = fp;
+	ZxResult result;
+	if(f->win == H || f->win->request == H || f->win->reply == H)
+		error("invalid ZX window channels");
+	result = zxrun(f->path, f->args, f->win);
 	f->ret->t0 = result.value;
 	f->ret->t1 = result.status;
 	retstr(result.problem, &f->ret->t2);

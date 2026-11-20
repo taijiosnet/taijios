@@ -1,0 +1,49 @@
+// Checkbutton values live in the Tk root, following Inferno libtk/varbl.c.
+#import "std/vec"
+using V :: #import "tcl_variables"
+
+variables: V.VariableTable;
+
+State :: struct {
+    variable: Text;
+    on: Text;
+    off: Text;
+    selected: bool;
+}
+
+Find :: (name: string) -> s64 {
+    return V.FindVariable(*variables, name);
+}
+
+Read :: (name: string, output: *Text) {
+    index := Find(name);
+    if index >= 0 {
+        entry := *variables.entries[index];
+        unused BuilderAppend(output.bytes, TextView(entry.value));
+    }
+}
+
+Put :: (name: string, value: string) -> bool {
+    if name == "" { return true }
+    if variables.entries.count >= 1024 && Find(name) < 0 { return false }
+    return V.StoreValue(*variables, name, value);
+}
+
+Ensure :: (name: string, fallback: string) -> bool {
+    return Find(name) >= 0 || Put(name, fallback);
+}
+
+Selected :: (check: *State) -> bool {
+    variable := Find(TextView(check.variable));
+    if variable < 0 { return check.selected }
+    entry := *variables.entries[variable];
+    return TextView(entry.value) == TextView(check.on);
+}
+
+Select :: (check: *State, selected: bool) -> bool {
+    value := TextView(check.off);
+    if selected { value = TextView(check.on) }
+    if !Put(TextView(check.variable), value) { return false }
+    check.selected = selected;
+    return true;
+}

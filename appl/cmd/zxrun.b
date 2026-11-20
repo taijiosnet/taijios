@@ -21,6 +21,7 @@ Zxrun: module
 };
 
 Zxresult: type (big, int, string);
+Stdin: type (int, array of byte);
 QueueSize: con 64;
 KeyCount: con 350;
 RGBAbytes: con Draw->Chans(16r48281808);
@@ -39,16 +40,18 @@ init(ctxt: ref Draw->Context, args: list of string)
 	path: string;
 	window := 0;
 	command := 0;
+	newgroup := 0;
 	if(args != nil)
 		args = tl args;
-	if(args != nil){
+	while(args != nil && (hd args == "-w" || hd args == "-c" || hd args == "-p")){
 		case hd args {
 		"-w" => window = 1; args = tl args;
 		"-c" => command = 1; args = tl args;
+		"-p" => newgroup = 1; args = tl args;
 		}
 	}
-	if(args == nil || hd args == nil || (window && tl args != nil)){
-		sys->fprint(stderr, "usage: zxrun [-c] file.zx [args ...]\n       zxrun -w file.zx\n");
+	if(args == nil || hd args == nil){
+		sys->fprint(stderr, "usage: zxrun [-c] [-w] [-p] file.zx [args ...]\n");
 		raise "fail:usage";
 	}
 	path = hd args;
@@ -59,12 +62,16 @@ init(ctxt: ref Draw->Context, args: list of string)
 		sys->fprint(stderr, "zxrun: ZX runtime unavailable: %r\n");
 		raise "fail:zx";
 	}
+	if(newgroup && sys->pctl(Sys->NEWPGRP, nil) < 0){
+		sys->fprint(stderr, "zxrun: cannot start a process group: %r\n");
+		raise "fail:zx";
+	}
 
 	value: big;
 	status: int;
 	problem: string;
 	if(window)
-		(value, status, problem) = runwindow(zx, ctxt, path);
+		(value, status, problem) = runwindow(zx, ctxt, path, args);
 	else if(command || args != nil)
 		(value, status, problem) = zx->runargs(path, args);
 	else
@@ -84,7 +91,7 @@ init(ctxt: ref Draw->Context, args: list of string)
 	}
 }
 
-runwindow(zx: ZX, ctxt: ref Draw->Context, path: string): Zxresult
+runwindow(zx: ZX, ctxt: ref Draw->Context, path: string, args: list of string): Zxresult
 {
 	if(ctxt == nil || ctxt.wm == nil)
 		return (big 0, -1, "graphical ZX needs a window manager context");
@@ -100,30 +107,62 @@ runwindow(zx: ZX, ctxt: ref Draw->Context, path: string): Zxresult
 	bridge.reply = chan[1] of int;
 	pid := chan of int;
 	done := chan[1] of Zxresult;
-	spawn engine(zx, path, bridge, pid, done);
+	spawn engine(zx, path, args, bridge, pid, done);
 	worker := <-pid;
 	{
 		result := serve(ctxt, bridge, done);
+		stopreader(bridge);
 		timers->shutdown();
 		return result;
 	} exception e {
 	"*" =>
-		fd := sys->open("/prog/" + string worker + "/ctl", Sys->OWRITE);
-		if(fd != nil)
-			sys->fprint(fd, "kill");
+		kill(worker);
+		stopreader(bridge);
 		timers->shutdown();
 		return (big 0, -1, e);
 	}
 }
 
-engine(zx: ZX, path: string, bridge: ref ZX->Window, pid: chan of int, done: chan of Zxresult)
+engine(zx: ZX, path: string, args: list of string, bridge: ref ZX->Window, pid: chan of int, done: chan of Zxresult)
 {
 	pid <-= sys->pctl(0, nil);
 	{
-		done <-= zx->runwindow(path, bridge);
+		done <-= zx->runwindowargs(path, args, bridge);
 	} exception e {
 	"*" =>
 		done <-= (big 0, -1, e);
+	}
+}
+
+kill(pid: int)
+{
+	if(pid <= 0)
+		return;
+	fd := sys->open("/prog/" + string pid + "/ctl", Sys->OWRITE);
+	if(fd != nil)
+		sys->fprint(fd, "kill");
+}
+
+stopreader(bridge: ref ZX->Window)
+{
+	kill(bridge.reader);
+	bridge.reader = 0;
+}
+
+readstdin(out: chan of Stdin, pid: chan of int)
+{
+	pid <-= sys->pctl(0, nil);
+	if(sys->pctl(Sys->NEWFD, 0 :: nil) < 0){
+		out <-= (-1, nil);
+		return;
+	}
+	fd := sys->fildes(0);
+	for(;;){
+		data := array[ZX->StdinChunk] of byte;
+		n := sys->read(fd, data, len data);
+		out <-= (n, data);
+		if(n <= 0)
+			return;
 	}
 }
 
@@ -136,6 +175,12 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 	noctl := chan of string;
 	notitle := chan of string;
 	notimeout := chan of int;
+	nostdin := chan of Stdin;
+	stream := chan of Stdin;
+	stdin := nostdin;
+	data: array of byte;
+	offset := 0;
+	readcount := -2;
 	kbd := nokbd;
 	ptr := noptr;
 	ctl := noctl;
@@ -147,6 +192,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 	buttons := 0;
 	waiting := 0;
 	closed := 0;
+	tasked := 0;
 	rawkeys := 0;
 	held := array[KeyCount] of { * => 0 };
 
@@ -173,7 +219,10 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			ZX->Open =>
 				ok = w == nil && !closed;
 				if(ok){
-					w = wm->window(ctxt, bridge.title, Wmclient->Resize);
+					controls := Wmclient->Resize;
+					if(bridge.hide)
+						controls |= Wmclient->Hide;
+					w = wm->window(ctxt, bridge.title, controls);
 					w.reshape(((0, 0), (bridge.width, bridge.height)));
 					bounds = ((0, 0), (bridge.width, bridge.height));
 					ctl = w.ctxt.ctl;
@@ -223,6 +272,41 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 					continue;
 				}
 				bridge.input = event(ZX->Idle, bounds);
+			ZX->Poll =>
+				if(closed){
+					bridge.stdinlen = -1;
+				}else{
+					if(bridge.stdin == nil){
+						bridge.stdin = array[ZX->StdinChunk] of byte;
+						pid := chan of int;
+						spawn readstdin(stream, pid);
+						bridge.reader = <-pid;
+						stdin = stream;
+					}
+					n := min(bridge.stdinlen, readcount - offset);
+					bridge.stdinlen = n;
+					if(n > 0){
+						bridge.stdin[0:] = data[offset:offset+n];
+						offset += n;
+						if(offset == readcount){
+							stdin = stream;
+							readcount = -2;
+							offset = 0;
+							data = nil;
+						}
+					}
+				}
+				ok = 1;
+			ZX->SetTasked =>
+				ok = !closed && w != nil && w.image != nil;
+				if(ok && tasked != bridge.tasked){
+					c := "untask";
+					if(bridge.tasked)
+						c = "task";
+					ok = w.wmctl(c) == nil;
+					if(ok)
+						tasked = visibility(queue, w.image.r, bridge.tasked);
+				}
 			ZX->Close =>
 				forget(w);
 				w = nil;
@@ -231,10 +315,16 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				ctl = noctl;
 				title = notitle;
 				presented = bridge.image = nil;
+				stdin = nostdin;
+				stopreader(bridge);
 				closed = 1;
 				ok = 1;
 			}
 			bridge.reply <-= ok;
+		(readcount, data) = <-stdin =>
+			stdin = nostdin;
+			if(readcount <= 0)
+				bridge.reader = 0;
 		<-timeout =>
 			timer = nil;
 			timeout = notimeout;
@@ -255,10 +345,16 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				ptr = noptr;
 				ctl = noctl;
 				title = notitle;
+				stdin = nostdin;
+				stopreader(bridge);
 				closed = 1;
 				continue;
 			}
 			w.wmctl(c);
+			if(c == "task" && !tasked)
+				tasked = visibility(queue, bounds, 1);
+			else if(c == "untask" && tasked)
+				tasked = visibility(queue, bounds, 0);
 			if(w.image != nil && (c == "raise" || (c != nil && c[0] == '!'))){
 				kind := ZX->Redraw;
 				if(!bounds.size().eq(w.image.r.size()))
@@ -300,6 +396,21 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			}
 		}
 	}
+}
+
+min(a, b: int): int
+{
+	if(a < b)
+		return a;
+	return b;
+}
+
+visibility(queue: ref Events, bounds: Draw->Rect, tasked: int): int
+{
+	e := event(ZX->Visibility, bounds);
+	e.button = tasked;
+	queue.push(e);
+	return tasked;
 }
 
 forget(w: ref Wmclient->Window)

@@ -9,7 +9,7 @@ main :: () -> s32 {
     result := Tcl.Eval(*interpreter, Input.Script);
     output: Text = Tcl.TakeOutput(*interpreter);
     print("%", TextView(output));
-    if result.code != .OK {
+    if result.code != .OK && result.code != .Exit {
         print("tclsh: %\n", TextView(result.value));
         return 1;
     }

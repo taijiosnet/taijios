@@ -4,6 +4,7 @@ using T :: #import "tcl_types"
 using L :: #import "tcl_lists"
 using C :: #import "tcl_calc"
 using S :: #import "tcl_strings"
+using Io :: #import "tcl_io"
 
 #import "tcl_variables"
 Parameter :: struct { name: Text; fallback: Text; optional: bool; }
@@ -29,6 +30,7 @@ Interpreter :: struct {
     source_loader: SourceLoader;
     source_context: s64;
     output: Text;
+    channels: Io.ChannelTable;
     steps: s64;
 }
 
@@ -50,6 +52,23 @@ TakeOutput :: (interpreter: *Interpreter) -> Text {
 SetSourceLoader :: (interpreter: *Interpreter, loader: SourceLoader, context: s64 = 0) {
     interpreter.source_loader = loader;
     interpreter.source_context = context;
+}
+
+// Reconfiguration closes any channels previously opened by the interpreter.
+SetChannelBackend :: (interpreter: *Interpreter, backend: Io.Backend) -> Result {
+    table := *interpreter.channels;
+    closed := Io.CloseAll(table);
+    table.backend = backend;
+    table.input.active = backend.stdin && backend.read != null;
+    table.input.eof = false;
+    table.input.next = 0;
+    table.input.end = 0;
+    table.stdout_closed = false;
+    return closed;
+}
+
+CloseChannels :: (interpreter: *Interpreter) -> Result {
+    return Io.CloseAll(*interpreter.channels);
 }
 
 RegisterCommand :: (interpreter: *Interpreter, name: string, handler: CommandHandler, context: s64 = 0) -> bool {
@@ -79,9 +98,9 @@ CopyResult :: (result: *Result) -> Result {
     return .{code = result.code, value = TextCopy(TextView(result.value))};
 }
 
-CORE_COMMANDS :: "append array break calc catch continue error eval expr for foreach format global if incr info lappend level proc puts return set source string switch unset uplevel upvar while";
+CORE_COMMANDS :: "append array break calc catch continue error eval exit expr for foreach format global if incr info lappend level proc return set source string switch unset uplevel upvar while";
 
-IsBuiltin :: (name: string) -> bool { return IsListCommand(name) || WordIn(CORE_COMMANDS, name) }
+IsBuiltin :: (name: string) -> bool { return IsListCommand(name) || WordIn(CORE_COMMANDS, name) || WordIn(Io.COMMANDS, name) }
 
 VariableSubstitution :: (interpreter: *Interpreter, frame: *Frame, cursor: *Cursor, depth: s32) -> Result {
     if depth > 48 { return Failure("script nesting limit exceeded") }
@@ -495,6 +514,8 @@ RunInfo :: (interpreter: *Interpreter, frame: *Frame, args: []Text) -> Result {
             unused BuilderAppend(names.bytes, CORE_COMMANDS);
             unused BuilderAppend(names.bytes, " ");
             unused BuilderAppend(names.bytes, LIST_COMMANDS);
+            unused BuilderAppend(names.bytes, " ");
+            unused BuilderAppend(names.bytes, Io.COMMANDS);
             for * interpreter.extensions { AppendElement(*names.bytes, TextView(it.name)) }
         }
         for * interpreter.procedures { AppendElement(*names.bytes, TextView(it.name), names.bytes.count > 0) }
@@ -560,6 +581,7 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
     name := TextView(words[0]);
     args := words[1:];
     if IsListCommand(name) { return RunList(name, args) }
+    if WordIn(Io.COMMANDS, name) { return Io.Run(*interpreter.channels, *interpreter.output, name, args) }
     if name == "string" { return RunString(args) }
     if name == "format" { return RunFormat(args) }
     if name == "info" { return RunInfo(interpreter, frame, args) }
@@ -601,6 +623,7 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
     if name == "catch" {
         if args.count < 1 || args.count > 2 { return WrongArgs("catch script ?resultVarName?") }
         caught := EvalScript(interpreter, frame, TextView(args[0]), depth + 1);
+        if caught.code == .Exit { return CopyResult(*caught) }
         if args.count == 2 {
             stored := StoreVariable(frame, TextView(args[1]), TextView(caught.value));
             if stored.code != .OK { return stored }
@@ -621,6 +644,8 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
         if args.count != 1 { return WrongArgs("error message") }
         return Failure(TextView(args[0]));
     }
+    // The Inferno command terminates evaluation regardless of its arguments.
+    if name == "exit" { return .{code = .Exit} }
     if name == "return" {
         if args.count > 1 { return WrongArgs("return ?result?") }
         value: string = "";
@@ -634,13 +659,6 @@ Dispatch :: (interpreter: *Interpreter, frame: *Frame, words: []Text, depth: s32
     if name == "continue" {
         if args.count != 0 { return WrongArgs("continue") }
         return .{code = .Continue};
-    }
-    if name == "puts" {
-        no_newline := args.count == 2 && TextView(args[0]) == "-nonewline";
-        if args.count != 1 && !no_newline { return WrongArgs("puts ?-nonewline? string") }
-        unused BuilderAppend(interpreter.output.bytes, TextView(args[args.count-1]));
-        if !no_newline { unused VecPush(interpreter.output.bytes, cast(u8)10) }
-        return Success();
     }
     index := FindProcedure(interpreter, name);
     if index >= 0 { return CallProcedure(interpreter, frame, index, args, depth) }

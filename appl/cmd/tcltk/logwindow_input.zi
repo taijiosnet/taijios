@@ -1,0 +1,24 @@
+// Pass guest pipe bytes directly to the Tk text model.
+#import "std/vec"
+using Tk :: #import "tcl_tk"
+using Check :: #import "tcl_tk_check"
+using View :: #import "tcl_tk_view"
+
+Checked :: (path: string) -> bool {
+    found := Tk.Find(path);
+    if found < 0 { return false }
+    widget := *Tk.widgets[found];
+    return Check.Selected(*widget.check);
+}
+
+Append :: (message: string) -> bool {
+    found := Tk.Find(".t.t");
+    if found < 0 { return false }
+    widget := *Tk.widgets[found];
+    if !Tk.AppendText(widget, message) { return false }
+    if Checked(".bf.scroll") {
+        Tk.TextLayout(widget);
+        View.See(*widget.view, widget.text.bytes.count);
+    }
+    return true;
+}
