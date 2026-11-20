@@ -18,7 +18,7 @@ BUILD = ROOT / "build/tcltk"
 EMU = ROOT / "Linux/386/bin/emu"
 BACKGROUND = (244, 246, 247)
 RUNNER_FLAGS = ("--define", "TAIJI_TK_LISTBOX", "--define", "TAIJI_TK_MENU",
-                "--define", "TAIJI_TK_PACKAGES", "--bind-host", "zx_surface", "--bind-host", "taijios_stdin",
+                "--define", "TAIJI_TK_BITMAP", "--define", "TAIJI_TK_PACKAGES", "--bind-host", "zx_surface", "--bind-host", "taijios_stdin",
                 "--bind-host", "taijios_files")
 COFFEE_RESULTS = (".range", "0", "2.5", "-1.5", "horizontal", "0.5", "-4", "5", ".image", "3", "flat")
 

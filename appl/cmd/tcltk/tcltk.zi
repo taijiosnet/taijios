@@ -4,8 +4,15 @@ using Tcl :: #import "tcl"
 using Tk :: #import "tcl_tk"
 #if #defined(TAIJI_TK_PACKAGES) {
     using Packages :: #import "tcl_packages"
-    using Files :: #import "taijios_files"
     using Types :: #import "tcl_types"
+}
+#if #defined(TAIJI_TK_PACKAGES) || #defined(TAIJI_TK_BITMAP) {
+    using Files :: #import "taijios_files"
+}
+#if #defined(TAIJI_TK_BITMAP) {
+    LoadBitmap :: (path: string, bytes: *Text) -> bool {
+        return Files.ReadFile(path, bytes, 1048576) == 0;
+    }
 }
 using Paint :: #import "tcl_tk_paint"
 using Surface :: #import "zx_surface"
@@ -86,6 +93,9 @@ RunPolled :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, 
 RunWindow :: (tcl: *Tcl.Interpreter, script: string, title: string, width: s32, height: s32, interval: s32,
               prepare: Prepare, animate: Animate, started: Prepare, poll: Poll) -> s32 {
     if !Tk.Attach(tcl) { return 1 }
+    #if #defined(TAIJI_TK_BITMAP) {
+        Tk.SetImageLoader(LoadBitmap)
+    }
     #if #defined(TAIJI_TK_PACKAGES) {
         Packages.Attach(tcl);
         Tcl.SetSourceLoader(tcl, LoadScript);

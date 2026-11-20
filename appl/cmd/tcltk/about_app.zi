@@ -1,0 +1,33 @@
+// About Inferno, ported from appl/wm/about.b. See ../../../NOTICE (MIT).
+#import "std/vec"
+using Tcl :: #import "tcl"
+using Tk :: #import "tcl_tk"
+using UTF :: #import "tcl_tk_text"
+using Lists :: #import "tcl_lists"
+using Window :: #import "tcltk"
+using Files :: #import "taijios_files"
+
+CONTROLS :: #string END_CONTROLS
+frame .f -bg black -borderwidth 2 -relief ridge
+label .b -bg black -bitmap @/icons/inferno.bit
+label .l1 -bg black -fg #ff5500
+pack .b .l1 -in .f -padx 0 -pady 0
+pack .f -ipadx 4 -ipady 2 -padx 0 -pady 0
+pack propagate . 0
+END_CONTROLS;
+
+main :: () -> s32 {
+    buffer: [128]u8;
+    version: Text = TextCopy("Inferno ");
+    count := Files.ReadBytesAt("/dev/sysctl", 0, buffer[:]);
+    if count > 0 && count <= buffer.count {
+        unused BuilderAppend(version.bytes, TextView(buffer[:count]));
+    }
+    script: Text = TextCopy(CONTROLS);
+    unused BuilderAppend(script.bytes, "\n.l1 configure -text");
+    Lists.AppendElement(*script.bytes, TextView(version));
+    unused BuilderAppend(script.bytes, "\nupdate\n");
+    interpreter: Tcl.Interpreter;
+    width := Tk.Maximum(344, Tk.Minimum(768, UTF.Count(TextView(version))*Tk.CHAR_WIDTH + 44));
+    return Window.Run(*interpreter, TextView(script), "About Inferno", width, 260);
+}

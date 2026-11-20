@@ -285,8 +285,13 @@ logwindow.zx: tcltk/logwindow_app.zi tcltk/logwindow_input.zi tcltk/logwindow_st
 memory.zx: tcltk/memory_app.zi tcltk/memory_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi ../wm/taijios_clock.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --module-path ../wm --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry memory_app:main -o $target tcltk/memory_app.zi
 
-tcltk.zx: tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi $TCLZX $TKZX $ZXLIB/tcl_tk_menu.zi $ZXLIB/tcl_packages.zi mkfile
-	zi2zx --root tcltk --module-path $ZXLIB --module-path . --define TAIJI_TK_LISTBOX --define TAIJI_TK_MENU --define TAIJI_TK_PACKAGES --bind-host zx_surface --bind-host taijios_stdin --bind-host taijios_files --entry tcltk:main -o $target tcltk/tcltk.zi
+TKBITMAP=$ZXLIB/tcl_tk_bitmap.zi $ZXLIB/tcl_tk_image.zi
+
+about.zx: tcltk/about_app.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi $TCLZX $TKZX $TKBITMAP mkfile
+	zi2zx --root tcltk --module-path $ZXLIB --module-path . --define TAIJI_TK_BITMAP --define TAIJI_TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --entry about_app:main -o $target tcltk/about_app.zi
+
+tcltk.zx: tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi $TCLZX $TKZX $ZXLIB/tcl_tk_menu.zi $ZXLIB/tcl_packages.zi $TKBITMAP mkfile
+	zi2zx --root tcltk --module-path $ZXLIB --module-path . --define TAIJI_TK_LISTBOX --define TAIJI_TK_MENU --define TAIJI_TK_BITMAP --define TAIJI_TK_PACKAGES --bind-host zx_surface --bind-host taijios_stdin --bind-host taijios_files --entry tcltk:main -o $target tcltk/tcltk.zi
 
 linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi ../wm/taijios_clock.zi $TCLZX $TKZX
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --module-path ../wm --define TAIJI_TK_LISTBOX --define TAIJI_TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry linbench_app:main -o $target tcltk/linbench_app.zi
@@ -294,7 +299,7 @@ linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/
 graph0.zx: tcltk/graph0_app.zi tcltk/graph0_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_args.zi taijios_files.zi $TCLZX $TKZX mkfile
 	zi2zx --root tcltk --module-path $ZXLIB --module-path . --bind-host taijios_args --bind-host taijios_files --bind-host zx_surface --entry graph0_app:main -o $target tcltk/graph0_app.zi
 
-install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-linbench-zx install-graph0-zx install-utilities-zx install-streams-zx install-file-commands-zx
+install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-linbench-zx install-graph0-zx install-about-zx install-utilities-zx install-streams-zx install-file-commands-zx
 	(cd sh && mk sh.install)
 install-cat-zx:V: $DISBIN/cat.zx
 install-tclsh-zx:V: $DISBIN/tclsh.zx
@@ -304,6 +309,7 @@ install-logwindow-zx:V: $DISBIN/wm/logwindow.zx tcltk/logwindow.tcl
 install-memory-zx:V: $DISBIN/wm/memory.zx tcltk/memory.tcl
 install-linbench-zx:V: $DISBIN/math/linbench.zx $DISBIN/tcltk.zx tcltk/linbench.tcl
 install-graph0-zx:V: $DISBIN/math/graph0.zx tcltk/graph0.tcl
+install-about-zx:V: $DISBIN/wm/about.zx $ROOT/icons/inferno.bit
 install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
 install-streams-zx:V: $DISBIN/wc.zx $DISBIN/uniq.zx $DISBIN/tr.zx
 install-file-commands-zx:V: $DISBIN/tee.zx $DISBIN/cp.zx $DISBIN/test.zx $DISBIN/ls.zx $DISBIN/mkdir.zx
@@ -314,6 +320,10 @@ $DISBIN/coffee.zx: coffee.zx
 $DISBIN/man.zx: man.zx mkfile
 $DISBIN/wm/logwindow.zx: logwindow.zx
 $DISBIN/wm/memory.zx: memory.zx mkfile
+$DISBIN/wm/about.zx: about.zx mkfile
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 about.zx "$staged" && mv "$staged" "$target"
 $DISBIN/tcltk.zx: tcltk.zx mkfile
 $DISBIN/math/linbench.zx: linbench.zx mkfile
 	staged=$(mktemp "$target.XXXXXX") &&

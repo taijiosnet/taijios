@@ -1,0 +1,154 @@
+// A Tk root owns its names; labels can keep references to deleted names.
+// File loading is supplied by the application using the current namespace.
+#import "std/vec"
+#import "std/number_text"
+using T :: #import "tcl_types"
+using Bitmap :: #import "tcl_tk_bitmap"
+
+MAX_IMAGES :: 32;
+Loader :: #type (path: string, bytes: *Text) -> bool;
+Entry :: struct { name: Text; pixels: Bitmap.Bitmap; refs: s32; order: s64; }
+Store :: struct { items: Vec(Entry); open: Loader; next_name: s64; order: s64; }
+
+SetError :: (result: *T.Result, reason: string) {
+    result.code = .Error;
+    unused VecResize(result.value.bytes, 0);
+    unused BuilderAppend(result.value.bytes, reason);
+}
+
+Find :: (store: *Store, name: string) -> s64 {
+    if name == "" { return -1 }
+    for * store.items {
+        if TextView(it.name) == name { return it_index }
+    }
+    return -1;
+}
+
+Read :: (store: *Store, source: string, bitmap: *Bitmap.Bitmap) -> bool {
+    if store.open == null || source.count == 0 { return false }
+    file: Text;
+    if source[0] == 64 {
+        if source.count == 1 || !store.open(source[1:], *file) { return false }
+    } else {
+        path: Text = TextCopy("/icons/tk/");
+        unused BuilderAppend(path.bytes, source);
+        if !store.open(TextView(path), *file) { return false }
+    }
+    return Bitmap.Decode(TextView(file), bitmap);
+}
+
+Allocate :: (store: *Store, bitmap: *Bitmap.Bitmap) -> s64 {
+    at := store.items.count;
+    for * store.items { if it.refs == 0 { at = it_index; break } }
+    if at == store.items.count && (at >= MAX_IMAGES || !VecResize(store.items, at+1)) { return -1 }
+    entry := *store.items[at];
+    VecSwap(entry.pixels.pixels, bitmap.pixels);
+    entry.pixels.width = bitmap.width;
+    entry.pixels.height = bitmap.height;
+    entry.pixels.pitch = bitmap.pitch;
+    entry.pixels.start_bit = bitmap.start_bit;
+    entry.pixels.encoding = bitmap.encoding;
+    entry.refs = 1;
+    return at;
+}
+
+Retain :: (store: *Store, handle: s64) {
+    if handle >= 0 { store.items[handle].refs += 1 }
+}
+
+Release :: (store: *Store, handle: s64) {
+    if handle < 0 { return }
+    entry := *store.items[handle];
+    entry.refs -= 1;
+    if entry.refs == 0 { unused VecResize(entry.pixels.pixels, 0) }
+}
+
+Forget :: (store: *Store, index: s64) {
+    entry := *store.items[index];
+    unused VecResize(entry.name.bytes, 0);
+    Release(store, index);
+}
+
+Create :: (store: *Store, args: []Text, result: *T.Result) {
+    if args.count == 0 || TextView(args[0]) != "bitmap" { SetError(result, "bad value"); return }
+    first_option: s64 = 1;
+    name: Text;
+    if args.count > 1 {
+        candidate := TextView(args[1]);
+        if candidate.count > 0 && candidate[0] != 45 {
+            unused BuilderAppend(name.bytes, candidate);
+            first_option = 2;
+        }
+    }
+    source: string;
+    if (args.count-first_option)%2 != 0 { SetError(result, "bad value"); return }
+    for i: 0..(args.count-first_option)/2-1 {
+        option := TextView(args[first_option+2*i]);
+        if option != "-file" { SetError(result, "bad option"); return }
+        source = TextView(args[first_option+2*i+1]);
+    }
+    bitmap: Bitmap.Bitmap;
+    if source != "" && !Read(store, source, *bitmap) {
+        SetError(result, "failed to load bitmap");
+        return;
+    }
+    if name.bytes.count == 0 {
+        digits: [24]u8;
+        unused BuilderAppend(name.bytes, "image");
+        unused BuilderAppend(name.bytes, FormatInteger(store.next_name, digits[:]));
+        store.next_name += 1;
+    }
+    existing := Find(store, TextView(name));
+    index := Allocate(store, *bitmap);
+    if index < 0 { SetError(result, "image limit exceeded"); return }
+    if existing >= 0 { Forget(store, existing) }
+    store.order += 1;
+    entry := *store.items[index];
+    entry.order = store.order;
+    unused BuilderAppend(result.value.bytes, TextView(name));
+    VecSwap(entry.name.bytes, name.bytes);
+}
+
+Names :: (store: *Store, result: *T.Result) {
+    before := store.order+1;
+    while before > 0 {
+        index: s64 = -1;
+        order: s64;
+        for * store.items {
+            if it.name.bytes.count == 0 || it.order >= before || it.order <= order { continue }
+            index = it_index;
+            order = it.order;
+        }
+        if index < 0 { return }
+        if result.value.bytes.count > 0 { unused BuilderAppend(result.value.bytes, " ") }
+        unused BuilderAppend(result.value.bytes, TextView(store.items[index].name));
+        before = order;
+    }
+}
+
+Command :: (store: *Store, args: []Text, result: *T.Result) {
+    if args.count == 0 { SetError(result, "bad command"); return }
+    op := TextView(args[0]);
+    if op == "create" { Create(store, args[1:], result); return }
+    if op == "names" { Names(store, result); return }
+    if args.count < 2 { SetError(result, "bad value"); return }
+    if op == "delete" {
+        for * args[1:] {
+            index := Find(store, TextView(it));
+            if index < 0 { SetError(result, "bad value"); return }
+            Forget(store, index);
+        }
+        return;
+    }
+    index := Find(store, TextView(args[1]));
+    if index < 0 { SetError(result, "bad value"); return }
+    if op == "type" { unused BuilderAppend(result.value.bytes, "bitmap"); return }
+    bitmap := *store.items[index].pixels;
+    if op == "width" || op == "height" {
+        value := ifx op == "width" then bitmap.width else bitmap.height;
+        digits: [24]u8;
+        unused BuilderAppend(result.value.bytes, FormatInteger(cast(s64)value, digits[:]));
+        return;
+    }
+    SetError(result, "bad command");
+}

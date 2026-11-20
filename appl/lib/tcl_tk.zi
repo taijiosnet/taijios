@@ -17,6 +17,11 @@ using Canvas :: #import "tcl_tk_canvas"
     using Menu :: #import "tcl_tk_menu"
 }
 
+#if #defined(TAIJI_TK_BITMAP) {
+    using Bitmap :: #import "tcl_tk_bitmap"
+    using Images :: #import "tcl_tk_image"
+}
+
 MAX_WIDGETS :: 32;
 MAX_ENTRY_BYTES :: 16384;
 LABEL :: 0;
@@ -47,6 +52,11 @@ Packing :: struct {
     expand: s32;
     anchor_x: s32;
     anchor_y: s32;
+    #if #defined(TAIJI_TK_BITMAP) {
+        ipadx: s32;
+        ipady: s32;
+        master: s64;
+    }
 }
 Panel :: struct {
     pixels: Vec(u8);
@@ -77,6 +87,9 @@ Widget :: struct {
     #if #defined(TAIJI_TK_MENU) {
         menu: Menu.State;
     }
+    #if #defined(TAIJI_TK_BITMAP) {
+        style: Style;
+    }
     text_height: s32;
     last_scroll: Scroll.State;
     sent_scroll: bool;
@@ -105,6 +118,124 @@ drag_value: s64;
     viewport: Box;
 }
 
+#if #defined(TAIJI_TK_BITMAP) {
+    Relief :: enum { Flat; Raised; Sunken; Ridge; Groove; }
+    RELIEFS :: string.["flat", "raised", "sunken", "ridge", "groove"];
+    Style :: struct {
+        background: s32;
+        foreground: s32;
+        border: s32;
+        relief: Relief;
+        bitmap: s64;
+        image: s64;
+    }
+    image_store: Images.Store;
+
+    SetImageLoader :: (loader: Images.Loader) { image_store.open = loader }
+
+    ImageCommand :: (_: s64, args: []Text, result: *Result) { Images.Command(*image_store, args, result) }
+
+    LabelBitmap :: (widget: *Widget) -> *Bitmap.Bitmap {
+        index := ifx widget.style.image >= 0 then widget.style.image else widget.style.bitmap;
+        if index < 0 { return null }
+        return *image_store.items[index].pixels;
+    }
+
+    ClearImages :: (style: *Style) {
+        Images.Release(*image_store, style.bitmap);
+        Images.Release(*image_store, style.image);
+        style.bitmap = -1;
+        style.image = -1;
+    }
+
+    ConfigureAppearance :: (widget: *Widget, args: []Text, result: *Result) -> bool {
+        style := widget.style;
+        bitmap_source: string;
+        bitmap_changed := false;
+        text: string;
+        text_changed := false;
+        for i: 0..args.count/2-1 {
+            option := TextView(args[2*i]);
+            value := TextView(args[2*i+1]);
+            if option == "-bg" || option == "-background" || option == "-fg" || option == "-foreground" {
+                color, valid := Canvas.ParseColor(value);
+                if !valid { SetError(result, "bad value"); return false }
+                if option[1] == 98 { style.background = color } else { style.foreground = color }
+            } else if option == "-bd" || option == "-borderwidth" {
+                border, valid := Distance(value);
+                if !valid { SetError(result, "bad value"); return false }
+                style.border = border;
+            } else if option == "-relief" {
+                found := false;
+                for RELIEFS {
+                    if value == it { style.relief = cast(Relief)it_index; found = true; break }
+                }
+                if !found { SetError(result, "bad value"); return false }
+            } else if widget.kind == LABEL && (option == "-text" || option == "-label") {
+                text = value;
+                text_changed = true;
+            } else if widget.kind == LABEL && option == "-bitmap" {
+                bitmap_source = value;
+                bitmap_changed = true;
+            } else if widget.kind == LABEL && option == "-image" {
+                style.image = Images.Find(*image_store, value);
+                if style.image < 0 && value != "" { SetError(result, "bad value"); return false }
+            } else { SetError(result, "unsupported widget option or value"); return false }
+        }
+        updated: Text;
+        if text_changed && !BuilderAppend(updated.bytes, text) {
+            SetError(result, "could not allocate label text"); return false;
+        }
+        if bitmap_changed {
+            style.bitmap = -1;
+            if bitmap_source != "" && bitmap_source[0] != 45 {
+                pixels: Bitmap.Bitmap;
+                if !Images.Read(*image_store, bitmap_source, *pixels) {
+                    SetError(result, "failed to load bitmap"); return false;
+                }
+                style.bitmap = Images.Allocate(*image_store, *pixels);
+                if style.bitmap < 0 { SetError(result, "image limit exceeded"); return false }
+            }
+            Images.Release(*image_store, widget.style.bitmap);
+        }
+        if style.image != widget.style.image {
+            Images.Retain(*image_store, style.image);
+            Images.Release(*image_store, widget.style.image);
+        }
+        widget.style = style;
+        if text_changed { VecSwap(widget.text.bytes, updated.bytes) }
+        return true;
+    }
+
+    AppearanceOption :: (widget: *Widget, option: string, result: *Result) -> bool {
+        style := widget.style;
+        color: s32;
+        if option == "-bg" || option == "-background" {
+            color = ifx style.background == Canvas.NONE then 0xdddddd else style.background;
+        } else if option == "-fg" || option == "-foreground" {
+            color = ifx style.foreground == Canvas.NONE then 0 else style.foreground;
+        } else {
+            if option == "-bd" || option == "-borderwidth" {
+                digits: [24]u8;
+                unused BuilderAppend(result.value.bytes, FormatInteger(cast(s64)style.border, digits[:]));
+            }
+            else if option == "-relief" { unused BuilderAppend(result.value.bytes, RELIEFS[cast(s64)style.relief]) }
+            else if widget.kind == LABEL && (option == "-text" || option == "-label") {
+                unused BuilderAppend(result.value.bytes, TextView(widget.text));
+            } else if widget.kind == LABEL && (option == "-bitmap" || option == "-image") {
+                index := ifx option == "-bitmap" then style.bitmap else style.image;
+                unused BuilderAppend(result.value.bytes, ifx index >= 0 then "1" else "0");
+            } else { return false }
+            return true;
+        }
+        hex := "0123456789abcdef";
+        unused BuilderAppend(result.value.bytes, "#");
+        for shift: 0..5 { unused VecPush(result.value.bytes, hex[(color >> ((5-shift)*4)) & 15]) }
+        unused BuilderAppend(result.value.bytes, "ff");
+        return true;
+    }
+}
+
 Attach :: (interpreter: *Tcl.Interpreter) -> bool {
     if attached { return false }
     commands := interpreter.extensions.count;
@@ -127,6 +258,9 @@ Attach :: (interpreter: *Tcl.Interpreter) -> bool {
     #if #defined(TAIJI_TK_MENU) {
         attached = attached && Tcl.RegisterCommand(interpreter, "menu", Create, MENU) &&
                    Tcl.RegisterCommand(interpreter, "menubutton", Create, MENUBUTTON);
+    }
+    #if #defined(TAIJI_TK_BITMAP) {
+        attached = attached && Tcl.RegisterCommand(interpreter, "image", ImageCommand);
     }
     attached = attached &&
                Tcl.RegisterCommand(interpreter, "variable", VariableCommand) &&
@@ -179,6 +313,9 @@ Configure :: (widget: *Widget, args: []Text, result: *Result) -> bool {
         if widget.kind == MENU { return Menu.Configure(*widget.menu, args, result) }
     }
     if widget.kind == TEXT || widget.kind == SCROLLBAR { return ConfigureScroll(widget, args, result) }
+    #if #defined(TAIJI_TK_BITMAP) {
+        if widget.kind == LABEL || widget.kind == FRAME { return ConfigureAppearance(widget, args, result) }
+    }
     button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
     for i: 0..args.count/2-1 {
         option := TextView(args[2*i]);
@@ -229,6 +366,9 @@ Create :: (kind: s64, args: []Text, result: *Result) {
         if parent < 0 || (kind != MENU && widgets[parent].kind != FRAME) { SetError(result, "expected a frame parent"); return }
     }
     widget := Widget.{name = TextCopy(path), kind = kind, parent = parent};
+    #if #defined(TAIJI_TK_BITMAP) {
+        widget.style = .{background = Canvas.NONE, foreground = Canvas.NONE, bitmap = -1, image = -1};
+    }
     if kind == SCALE { widget.scale = Scale.Default() }
     #if #defined(TAIJI_TK_MENU) {
         if kind == MENU { Menu.Initialize(*widget.menu) }
@@ -245,17 +385,20 @@ Create :: (kind: s64, args: []Text, result: *Result) {
         VecSwap(widget.check.on.bytes, on.bytes);
         VecSwap(widget.check.off.bytes, off.bytes);
     }
-    if !Configure(*widget, args[1:], result) { return }
-    if kind == SCALE && widget.scale.big_increment == 0 {
-        widget.scale.big_increment = ((widget.scale.last - widget.scale.first) / Scale.UNIT / 10) * Scale.UNIT;
-    }
     slot := widgets.count;
     for * widgets { if it.name.bytes.count == 0 { slot = it_index; break } }
     if slot == widgets.count {
         if slot == MAX_WIDGETS { SetError(result, "widget limit exceeded"); return }
         if !VecResize(widgets, slot + 1) { SetError(result, "could not allocate widget"); return }
     }
+    if !Configure(*widget, args[1:], result) { return }
+    if kind == SCALE && widget.scale.big_increment == 0 {
+        widget.scale.big_increment = ((widget.scale.last - widget.scale.first) / Scale.UNIT / 10) * Scale.UNIT;
+    }
     saved := *widgets[slot];
+    #if #defined(TAIJI_TK_BITMAP) {
+        saved.style = widget.style;
+    }
     saved.kind = widget.kind;
     saved.parent = widget.parent;
     saved.cursor = 0;
@@ -296,6 +439,9 @@ Create :: (kind: s64, args: []Text, result: *Result) {
     saved.order = 0;
     saved.box = .{};
     saved.pack = .{padx = DEFAULT_PAD_X, pady = DEFAULT_PAD_Y};
+    #if #defined(TAIJI_TK_BITMAP) {
+        saved.pack.master = parent
+    }
     VecSwap(saved.name.bytes, widget.name.bytes);
     VecSwap(saved.text.bytes, widget.text.bytes);
     VecSwap(saved.command.bytes, widget.command.bytes);
@@ -304,8 +450,24 @@ Create :: (kind: s64, args: []Text, result: *Result) {
 
 Pack :: (_: s64, args: []Text, result: *Result) {
     if args.count == 0 { SetError(result, "expected pack path ?path ...? ?options?"); return }
+    #if #defined(TAIJI_TK_BITMAP) {
+        if TextView(args[0]) == "propagate" {
+            if args.count != 3 || TextView(args[1]) != "." {
+                SetError(result, "bad value"); return;
+            }
+            value := TextView(args[2]);
+            // The host supplies the root's fixed viewport.
+            if !T.WordIn("0 1 no yes off on false true", value) { SetError(result, "bad value") }
+            return;
+        }
+    }
     count: s64;
     options := Packing.{side = -1, padx = -1, pady = -1, fill = -1, expand = -1, anchor_x = -2, anchor_y = -2};
+    #if #defined(TAIJI_TK_BITMAP) {
+        options.ipadx = -1;
+        options.ipady = -1;
+        options.master = -2;
+    }
     while count < args.count && ParentEnd(TextView(args[count])) >= 0 {
         index := Find(TextView(args[count]));
         if index < 0 { SetError(result, "cannot pack unknown widget"); return }
@@ -316,6 +478,21 @@ Pack :: (_: s64, args: []Text, result: *Result) {
     for i: 0..(args.count-count)/2-1 {
         option := TextView(args[count+2*i]);
         value := TextView(args[count+2*i+1]);
+        #if #defined(TAIJI_TK_BITMAP) {
+            if option == "-in" {
+                options.master = Find(value);
+                if value != "." && (options.master < 0 || widgets[options.master].kind != FRAME) {
+                    SetError(result, "bad window path"); return;
+                }
+                continue;
+            }
+            if option == "-ipadx" || option == "-ipady" {
+                amount, valid := Distance(value);
+                if !valid { SetError(result, "invalid pack padding"); return }
+                if option == "-ipadx" { options.ipadx = amount } else { options.ipady = amount }
+                continue;
+            }
+        }
         if option == "-side" {
             if value == "top" { options.side = 0 }
             else if value == "left" { options.side = 1 }
@@ -345,8 +522,31 @@ Pack :: (_: s64, args: []Text, result: *Result) {
             else { SetError(result, "expected 0 or 1 for pack -expand"); return }
         } else { SetError(result, "unsupported pack option"); return }
     }
+    #if #defined(TAIJI_TK_BITMAP) {
+        // Validate the proposed tree before changing any layout links.
+        masters: [MAX_WIDGETS]s64;
+        for * widgets { masters[it_index] = it.pack.master }
+        for 0..count-1 {
+            index := Find(TextView(args[it]));
+            masters[index] = ifx options.master == -2 then widgets[index].parent else options.master;
+        }
+        for 0..count-1 {
+            ancestor := Find(TextView(args[it]));
+            depth := 0;
+            while ancestor >= 0 && depth < widgets.count {
+                ancestor = masters[ancestor];
+                depth += 1;
+            }
+            if ancestor >= 0 { SetError(result, "cannot pack recursively"); return }
+        }
+    }
     for 0..count-1 {
         widget := *widgets[Find(TextView(args[it]))];
+        #if #defined(TAIJI_TK_BITMAP) {
+            widget.pack.master = ifx options.master == -2 then widget.parent else options.master;
+            if options.ipadx >= 0 { widget.pack.ipadx = options.ipadx }
+            if options.ipady >= 0 { widget.pack.ipady = options.ipady }
+        }
         sequence += 1;
         widget.order = sequence;
         if options.side >= 0 { widget.pack.side = options.side }
@@ -370,6 +570,17 @@ Destroy :: (_: s64, args: []Text, result: *Result) {
             ancestor := it_index;
             while ancestor >= 0 && ancestor != index { ancestor = widgets[ancestor].parent }
             if ancestor != index { continue }
+            #if #defined(TAIJI_TK_BITMAP) {
+                ClearImages(*it.style);
+                removed := it_index;
+                for * child: widgets {
+                    if child.pack.master == removed {
+                        child.order = 0;
+                        child.pack.master = child.parent;
+                        child.box = .{};
+                    }
+                }
+            }
             unused VecResize(it.name.bytes, 0);
             unused VecResize(it.text.bytes, 0);
             unused VecResize(it.command.bytes, 0);
@@ -412,6 +623,9 @@ WidgetCommand :: (_: s64, name: string, args: []Text, result: *Result, script: *
     }
     if subcommand == "cget" && args.count == 2 {
         option := TextView(args[1]);
+        #if #defined(TAIJI_TK_BITMAP) {
+            if (widget.kind == LABEL || widget.kind == FRAME) && AppearanceOption(widget, option, result) { return }
+        }
         button := widget.kind == BUTTON || widget.kind == CHECKBUTTON;
         if option == "-text" && (widget.kind == LABEL || widget.kind == MENUBUTTON || button) {
             unused BuilderAppend(result.value.bytes, TextView(widget.text)); return;
@@ -801,7 +1015,11 @@ NonNegative :: (x: s32) -> s32 { return ifx x > 0 then x else 0 }
 NextChild :: (parent: s64, after: s32) -> s64 {
     index: s64 = -1;
     for * widgets {
-        if it.parent == parent && it.order > after && (index < 0 || it.order < widgets[index].order) { index = it_index }
+        master := it.parent;
+        #if #defined(TAIJI_TK_BITMAP) {
+            master = it.pack.master
+        }
+        if master == parent && it.order > after && (index < 0 || it.order < widgets[index].order) { index = it_index }
     }
     return index;
 }
@@ -851,6 +1069,17 @@ Measure :: (parent: s64) -> Box {
         #if #defined(TAIJI_TK_LISTBOX) {
             if widget.kind == LISTBOX { requested = .{w = widget.listbox.width, h = widget.listbox.height} }
         }
+        #if #defined(TAIJI_TK_BITMAP) {
+            if widget.kind == LABEL {
+                bitmap := LabelBitmap(widget);
+                if bitmap != null { requested = .{w = bitmap.width, h = bitmap.height} }
+                else if widget.style.background != Canvas.NONE || widget.style.foreground != Canvas.NONE {
+                    requested = .{w = UTF.Count(TextView(widget.text), 512)*CHAR_WIDTH + 4, h = Canvas.TEXT_HEIGHT + 5};
+                }
+            }
+            requested.w += 2*(widget.pack.ipadx + widget.style.border);
+            requested.h += 2*(widget.pack.ipady + widget.style.border);
+        }
         widget.requested = requested;
         w := requested.w + widget.pack.padx * 2;
         h := requested.h + widget.pack.pady * 2;
@@ -878,7 +1107,11 @@ Expansion :: (index: s64, cavity: s32, horizontal: bool) -> s32 {
             available -= needed;
             expanders += widget.pack.expand;
         } else if expanders > 0 { extra = Minimum(extra, (available - needed) / expanders) }
-        index = NextChild(widget.parent, widget.order);
+        master := widget.parent;
+        #if #defined(TAIJI_TK_BITMAP) {
+            master = widget.pack.master
+        }
+        index = NextChild(master, widget.order);
     }
     if expanders == 0 { return 0 }
     return NonNegative(Minimum(extra, available / expanders));
@@ -915,7 +1148,17 @@ Place :: (parent: s64, cavity: Box) {
         if inner_w == 0 { x = available.x + available.w/2 }
         if inner_h == 0 { y = available.y + available.h/2 }
         widget.box = .{x = x, y = y, w = w, h = h};
-        if widget.kind == FRAME { Place(index, widget.box) }
+        if widget.kind == FRAME {
+            area := widget.box;
+            #if #defined(TAIJI_TK_BITMAP) {
+                border := widget.style.border;
+                area.x += border;
+                area.y += border;
+                area.w = NonNegative(area.w-2*border);
+                area.h = NonNegative(area.h-2*border);
+            }
+            Place(index, area);
+        }
         else if widget.kind == TEXT { TextLayout(widget) }
         #if #defined(TAIJI_TK_LISTBOX) {
             if widget.kind == LISTBOX { Listbox.Layout(*widget.listbox, h) }

@@ -14,14 +14,16 @@ display, and history from Inferno's [manual browser](../../wm/man.b) and
 [lookup library](../../lib/man.b). This port uses the Inferno
 [MIT notice](../../../NOTICE).
 
-Man and Coffee define `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
+Man, Coffee and About define `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
 renderer, leaving more of the default Linux/386 guest memory pool available
 for manual pages and Coffee artwork. The general Tk launcher, Memory, and
 Graph0 builds include Canvas.
 The general Tk launcher and LINPACK builds define `TAIJI_TK_LISTBOX` to add
 listboxes and entry `-width` support. LINPACK omits Canvas. The general launcher
 also defines `TAIJI_TK_MENU` for menus and menubuttons and `TAIJI_TK_PACKAGES`
-for the optional Tcl package registry. The launcher registers this Tk subset as
+for the optional Tcl package registry. About and the general launcher both define
+`TAIJI_TK_BITMAP` for image labels, named images, frame and label appearance,
+and the extended packing options. The launcher registers this Tk subset as
 `Tk 0.1`, so a script can use `package require Tk`. Other Tcl script packages
 can register via `package ifneeded` or use `pkgIndex.tcl` in a guest directory
 added to `auto_path`. The launcher reads these scripts through the guest file
@@ -33,6 +35,12 @@ and Rate, Jitter, and Skip sliders. It reads the shipped
 service as Man. Ziran decodes the compressed images, composites each frame,
 and renders the Tk widgets. The guest surface supplies window events and
 presents the resulting pixels. [ZX source](coffee_app.zi) · [Inferno source](../../wm/coffee.b)
+
+About Inferno displays the shipped 300×207 `/icons/inferno.bit` and reads up to
+128 bytes from the live guest `/dev/sysctl`. The window uses the stock bitmap,
+black ridge frame, and orange version label. The version uses the shared stroke
+font and the window closes through the guest window manager.
+[ZX source](about_app.zi) · [Inferno source](../../wm/about.b)
 
 Log Window reads a live guest pipe. It starts as a toolbar task and pops up
 when a message arrives. Scroll follows the newest lines when checked. Clear it
@@ -77,6 +85,8 @@ target="$PWD/dis/tcltk.zx"
 (cd appl/cmd && mk install-coffee-zx install-man-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
 python3 appl/cmd/tcltk/test_menu.py --installed
+(cd appl/cmd && mk install-about-zx)
+python3 appl/cmd/tcltk/test_about.py --installed
 python3 appl/cmd/tcltk/test_logwindow.py
 (cd appl/cmd && mk install-logwindow-zx)
 python3 appl/cmd/tcltk/test_logwindow.py --installed
@@ -195,11 +205,19 @@ callback redraw, disabled items, separators, outside dismissal, and direct
 posting. It also loads `Tk 0.1` and discovers a separate Tcl script package from
 the guest namespace through `auto_path`. Run without `--installed` to build the launcher first.
 
+`test_about.py` compares label, bitmap, frame, and packing commands with
+`tkcmd`. It opens and closes the stock and ZX About windows, compares all
+62,100 logo pixels, and checks that the ZX app updates its version label when the
+guest namespace supplies a different `/dev/sysctl`. It also opens a script in
+the generic runner and compares the exact foreground pixels of a 1-bit bitmap
+after deleting its name. Run without `--installed` to build both ZX apps first.
+In the Taiji graphical shell, launch About with `zxrun -w /dis/wm/about.zx`.
+
 ## Supported commands
 
 | Command | Options and behavior |
 | --- | --- |
-| `label .path` | `-text text` |
+| `label .path` | `-text`; with bitmap support, `-label` as an alias, `-bitmap @path` or a name under `/icons/tk`, `-image name`, `-bg` or `-background`, `-fg` or `-foreground`, `-bd` or `-borderwidth`, and `-relief flat`, `raised`, `sunken`, `ridge` or `groove`. `cget -bitmap` and `cget -image` return `0` or `1` |
 | `button .path` | `-text text`, `-command script`, and `-state normal` or `disabled` |
 | `menubutton .path` | `-text`, `-menu`, and `-state normal` or `disabled`. Press to post, drag to a row, and release to invoke it |
 | `menu .path` | `-bd` or `-borderwidth`. A popup may be a child of its menubutton |
@@ -209,7 +227,8 @@ the guest namespace through `auto_path`. Run without `--installed` to build the 
 | `.menu post x y`, `unpost` | Show a popup at application-surface coordinates or dismiss it. An outside press dismisses a posted popup |
 | `checkbutton .path` | Button options plus `-variable`, `-onvalue`, and `-offvalue`. A left press toggles the value and runs the callback |
 | `variable name ?value?` | Read or write the Tk variable associated with one or more checkbuttons |
-| `frame .path` | Container for nested widgets |
+| `frame .path` | Container for nested widgets. With bitmap support, accepts the same color, border width, and relief options as labels |
+| `image create bitmap ?name? ?-file bitmap?`, `image names`, `image width name`, `image height name`, `image type name`, `image delete name ?name ...?` | Create and query named bitmaps. A label retains its bitmap when a name is deleted or replaced |
 | `entry .path` | Single-line UTF-8 text with `-bg white` and `-width` |
 | `text .path` | Wrapped, scrollable text. `-height` sets the requested height. `-yscrollcommand` receives the first and last visible fractions |
 | `listbox .path` | Configurable `-width`, `-height`, `-selectmode single` or `browse`, and `-yscrollcommand`. A click selects a row. Up and Down move the active row. Enter or Space selects it |
@@ -232,6 +251,7 @@ the guest namespace through `auto_path`. Run without `--installed` to build the 
 | `.panel dirty ?x0 y0 x1 y1?` | Accept a redraw request for the panel. The surface presents the current pixels on refresh |
 | `update` | Request the regular surface refresh after the Tcl evaluation |
 | `pack .path ?path ...?` | `-side top`, `bottom`, `left` or `right`, `-padx pixels`, `-pady pixels`, `-fill none`, `x`, `y` or `both`, `-expand 0` or `1`, and `-anchor center`, `n`, `ne`, `e`, `se`, `s`, `sw`, `w` or `nw` |
+| `pack .path ... -in frame -ipadx pixels -ipady pixels`, `pack propagate . 0` | With bitmap support, choose a packing container and add internal space. The launcher supplies the root viewport |
 | `focus ?path?` | Read or set the focused entry, text view, scale, or listbox |
 | `bind .entry <Return> script` | Set an entry's Enter callback. Inferno's `<Key-\n>` spelling also works |
 | `.path configure option value` | Set one or more of that widget's supported options |
@@ -261,9 +281,10 @@ empty string for transparency.
 
 ### Comparison with shipped Inferno Tk
 
-The port implements a subset of 18 of the 25 commands advertised by the
-[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining seven are `bitmap`,
-`grab`, `image`, `lower`, `radiobutton`, `raise`, and `toplevel`.
+The port implements a subset of 19 of the 25 commands advertised by the
+[Limbo Tcl/Tk bridge](../../lib/tcl_tk.b). The remaining six are `bitmap`,
+`grab`, `lower`, `radiobutton`, `raise`, and `toplevel`. The shipped engine
+exposes bitmap loading through widget options and the `image` command.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
 commands include `choicebutton`, `cursor`, `grid`, `send`, and `winfo`.
@@ -276,8 +297,13 @@ The remaining scale API includes coordinate-based `get`, `coords`,
 `identify`, `-jump`, `-label`, tick marks, slider size and relief, and trough
 autorepeat. The remaining panel API includes `-anchor`, `origin`,
 `panelx`/`panely`, `screenx`/`screeny`, mattes, and partial damage tracking.
-`pack forget` and `pack propagate`, case-insensitive text search, marks,
+Frame propagation, `pack forget`, case-insensitive text search, marks,
 embedded windows, editable selections, and the wider tag API remain open.
+The bitmap reader supports compressed and uncompressed Inferno `m8` and `k1`
+files with up to 262,144 pixels each. The registry holds up to 32 live bitmaps
+across file-backed labels and named references. Other channels, legacy bitmap
+headers, the `<fd` form, `image create bitmap -maskfile`, Canvas images, and
+bitmap fonts remain open. Label and frame colors use the Canvas color subset.
 Checkbutton indicator customization and keyboard activation, scrollbar
 `activate`, `delta`, `fraction`, `-jump`, and hold autorepeat remain open.
 Canvas still needs tags, item bindings and hit testing, item deletion and

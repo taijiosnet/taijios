@@ -1,0 +1,108 @@
+// Inferno bitmap pixels follow libmemdraw/cread.c, cload.c, and libdraw/rgb.c.
+// See ../../NOTICE (MIT).
+#import "std/vec"
+using T :: #import "tcl_types"
+
+MAX_PIXELS :: 262144;
+Encoding :: enum { Palette; Mask; }
+Bitmap :: struct { pixels: Vec(u8); width: s32; height: s32; pitch: s32; start_bit: s32; encoding: Encoding; }
+
+DecodeBlock :: (input: string, pixels: []u8, row_bytes: s64) -> bool {
+    src: s64;
+    dst: s64;
+    while src < input.count && dst < pixels.count {
+        control := cast(s64)input[src];
+        src += 1;
+        if control >= 128 {
+            length := control - 127;
+            if length > input.count-src || length > row_bytes-dst%row_bytes { return false }
+            for i: 0..length-1 { pixels[dst+i] = input[src+i] }
+            src += length;
+            dst += length;
+        } else {
+            if src == input.count { return false }
+            distance := (control & 3)*256 + cast(s64)input[src] + 1;
+            length := (control >> 2) + 3;
+            if distance > dst || length > row_bytes-dst%row_bytes { return false }
+            for i: 0..length-1 { pixels[dst+i] = pixels[dst+i-distance] }
+            src += 1;
+            dst += length;
+        }
+    }
+    return src == input.count && dst == pixels.count;
+}
+
+// Each coordinate is a signed 32-bit Inferno rectangle endpoint. Keep span
+// arithmetic in s64 until the allocation and renderer bounds are known.
+Coordinate :: (field: string) -> (value: s64, valid: bool) {
+    value, ok := T.ParseInteger(field);
+    return value, ok && value >= -2147483648 && value <= 2147483647;
+}
+
+Decode :: (bytes: string, bitmap: *Bitmap) -> bool {
+    compressed := bytes.count >= 11 && bytes[:11] == "compressed\n";
+    start: s64 = ifx compressed then 11 else 0;
+    if bytes.count-start < 60 { return false }
+    header := bytes[start:start+60];
+    channel := header[:12];
+    mask := channel == "         k1 ";
+    if !mask && channel != "         m8 " { return false }
+    left, left_ok := Coordinate(header[12:24]);
+    top, top_ok := Coordinate(header[24:36]);
+    right, right_ok := Coordinate(header[36:48]);
+    bottom, bottom_ok := Coordinate(header[48:60]);
+    width := right-left;
+    height := bottom-top;
+    if !left_ok || !top_ok || !right_ok || !bottom_ok || width < 1 || height < 1 { return false }
+    if width > MAX_PIXELS || height > MAX_PIXELS || width*height > MAX_PIXELS { return false }
+    start_bit := ifx mask then left & 7 else 0;
+    pitch := ifx mask then (width+start_bit+7)/8 else width;
+    pixels: Vec(u8);
+    if !VecResizeBounded(pixels, pitch*height, MAX_PIXELS) { return false }
+    cursor := start+60;
+    if compressed {
+        row := top;
+        while row < bottom {
+            if bytes.count-cursor < 24 { return false }
+            end, end_ok := Coordinate(bytes[cursor:cursor+12]);
+            size, size_ok := T.ParseInteger(bytes[cursor+12:cursor+24]);
+            cursor += 24;
+            if !end_ok || !size_ok || end <= row || end > bottom || size < 1 || size > bytes.count-cursor { return false }
+            if !DecodeBlock(bytes[cursor:cursor+size], VecSlice(pixels, (row-top)*pitch, (end-top)*pitch), pitch) { return false }
+            cursor += size;
+            row = end;
+        }
+    } else {
+        if bytes.count-cursor < pixels.count { return false }
+        for i: 0..pixels.count-1 { pixels[i] = bytes[cursor+i] }
+        cursor += pixels.count;
+    }
+    if cursor != bytes.count { return false }
+    VecSwap(bitmap.pixels, pixels);
+    bitmap.width = cast(s32)width;
+    bitmap.height = cast(s32)height;
+    bitmap.pitch = cast(s32)pitch;
+    bitmap.start_bit = cast(s32)start_bit;
+    bitmap.encoding = ifx mask then Encoding.Mask else Encoding.Palette;
+    return true;
+}
+
+// RGBA byte order on the hosted Linux/386 surface.
+Color :: (index: s32) -> u32 {
+    red := index >> 6;
+    v := (index >> 4) & 3;
+    j := (index - v + red) & 15;
+    green := j >> 2;
+    blue := j & 3;
+    maximum := red;
+    if green > maximum { maximum = green }
+    if blue > maximum { maximum = blue }
+    if maximum == 0 { red = 17*v; green = red; blue = red }
+    else {
+        value := 17 * (4*maximum + v);
+        red = red * value / maximum;
+        green = green * value / maximum;
+        blue = blue * value / maximum;
+    }
+    return cast(u32)(red | (green << 8) | (blue << 16)) | 0xff000000;
+}

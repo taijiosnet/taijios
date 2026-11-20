@@ -12,6 +12,9 @@ using Items :: #import "tcl_tk_canvas"
 #if #defined(TAIJI_TK_MENU) {
     using Menu :: #import "tcl_tk_menu"
 }
+#if #defined(TAIJI_TK_BITMAP) {
+    using Bitmap :: #import "tcl_tk_bitmap"
+}
 #import "std/vec"
 
 Canvas :: struct {
@@ -208,10 +211,19 @@ RenderFocusedEntry :: (pixels: []u8, width: s32, height: s32) {
 Render :: (pixels: []u8, width: s32, height: s32) {
     canvas := Canvas.{pixels = pixels, width = width, height = height};
     Fill(*canvas, .{w = width, h = height}, PAPER);
+    #if #defined(TAIJI_TK_BITMAP) {
+        DrawFrames(*canvas, -1)
+    }
     for * Tk.widgets {
-        if it.order == 0 || it.box.w < 4 || it.box.h < 4 { continue }
+        if it.order == 0 || it.kind == Tk.FRAME { continue }
         box := it.box;
-        if it.kind == Tk.FRAME { continue }
+        #if #defined(TAIJI_TK_BITMAP) {
+            if it.kind == Tk.LABEL {
+                if box.w > 0 && box.h > 0 { DrawLabel(*canvas, it) }
+                continue;
+            }
+        }
+        if box.w < 4 || box.h < 4 { continue }
         if it.kind == Tk.SCALE { DrawScale(*canvas, it, it_index); continue }
         if it.kind == Tk.CHECKBUTTON { DrawCheck(*canvas, it); continue }
         if it.kind == Tk.SCROLLBAR { DrawScroll(*canvas, it, it_index); continue }
@@ -252,6 +264,96 @@ Render :: (pixels: []u8, width: s32, height: s32) {
     }
     #if #defined(TAIJI_TK_MENU) {
         if Tk.MenuPosted() { DrawMenu(*canvas) }
+    }
+}
+
+#if #defined(TAIJI_TK_BITMAP) {
+    DrawFrames :: (canvas: *Canvas, parent: s64) {
+        index := Tk.NextChild(parent, 0);
+        while index >= 0 {
+            widget := *Tk.widgets[index];
+            if widget.kind == Tk.FRAME && widget.box.w > 0 && widget.box.h > 0 {
+                DrawAppearance(canvas, widget.box, widget.style);
+                DrawFrames(canvas, index);
+            }
+            index = Tk.NextChild(parent, widget.order);
+        }
+    }
+
+    DrawAppearance :: (canvas: *Canvas, box: Tk.Box, style: Tk.Style) {
+        bg := ifx style.background == Items.NONE then PAPER else Color(style.background);
+        if style.background != Items.NONE { Fill(canvas, box, bg) }
+        if style.relief == .Flat { return }
+        light := Ink.{cast(u8)Tk.Minimum(cast(s32)bg.r+96, 255),
+                      cast(u8)Tk.Minimum(cast(s32)bg.g+96, 255),
+                      cast(u8)Tk.Minimum(cast(s32)bg.b+96, 255)};
+        dark := Ink.{bg.r/2, bg.g/2, bg.b/2};
+        if style.background == 0 { light = .{96, 96, 96}; dark = .{48, 48, 48} }
+        limit := Tk.Minimum(style.border, Tk.Minimum(box.w, box.h)/2);
+        for i: 0..limit-1 {
+            ridge := style.relief == .Ridge || style.relief == .Groove;
+            raised := style.relief == .Raised || style.relief == .Ridge;
+            if ridge && i >= (style.border+1)/2 { raised = !raised }
+            top := ifx raised then light else dark;
+            bottom := ifx raised then dark else light;
+            offset := cast(s32)i;
+            x := box.x+offset;
+            y := box.y+offset;
+            w := box.w-2*offset;
+            h := box.h-2*offset;
+            Fill(canvas, .{x, y, w, 1}, top);
+            Fill(canvas, .{x, y, 1, h}, top);
+            Fill(canvas, .{x, y+h-1, w, 1}, bottom);
+            Fill(canvas, .{x+w-1, y+1, 1, h-1}, bottom);
+        }
+    }
+
+    DrawLabel :: (canvas: *Canvas, widget: *Tk.Widget) {
+        style := widget.style;
+        box := widget.box;
+        DrawAppearance(canvas, box, style);
+        border := style.border;
+        box = .{x = box.x+border, y = box.y+border, w = box.w-2*border, h = box.h-2*border};
+        if box.w <= 0 || box.h <= 0 { return }
+        bitmap := Tk.LabelBitmap(widget);
+        if bitmap != null {
+            foreground := ifx style.foreground == Items.NONE then Color(0) else Color(style.foreground);
+            DrawBitmap(canvas, box, bitmap, foreground);
+        } else {
+            foreground := ifx style.foreground == Items.NONE then LETTER else Color(style.foreground);
+            DrawText(canvas, box, TextView(widget.text), true, foreground);
+        }
+    }
+
+    DrawBitmap :: (canvas: *Canvas, box: Tk.Box, bitmap: *Bitmap.Bitmap, ink: Ink) {
+        x := box.x + (box.w-bitmap.width)/2;
+        y := box.y + (box.h-bitmap.height)/2;
+        left := Tk.Maximum(x, Tk.NonNegative(box.x));
+        top := Tk.Maximum(y, Tk.NonNegative(box.y));
+        right := Tk.Minimum(x+bitmap.width, Tk.Minimum(box.x+box.w, canvas.width));
+        bottom := Tk.Minimum(y+bitmap.height, Tk.Minimum(box.y+box.h, canvas.height));
+        pixels := VecSlice(bitmap.pixels, 0, bitmap.pixels.count);
+        palette: [256]u32;
+        mask := bitmap.encoding == .Mask;
+        if !mask { for i: 0..255 { palette[i] = Bitmap.Color(cast(s32)i) } }
+        fg := cast(u32)ink.r | (cast(u32)ink.g << 8) | (cast(u32)ink.b << 16);
+        for row: top..bottom-1 {
+            source := (row-y)*bitmap.pitch;
+            destination := (row*canvas.width+left)*4;
+            for column: left..right-1 {
+                sample := column-x;
+                color := fg;
+                if mask {
+                    bit := sample+bitmap.start_bit;
+                    if ((pixels[source+bit/8] >> (7-bit%8)) & 1) == 0 { destination += 4; continue }
+                } else { color = palette[pixels[source+sample]] }
+                canvas.pixels[destination] = cast(u8)color;
+                canvas.pixels[destination+1] = cast(u8)(color >> 8);
+                canvas.pixels[destination+2] = cast(u8)(color >> 16);
+                canvas.pixels[destination+3] = 255;
+                destination += 4;
+            }
+        }
     }
 }
 
@@ -320,11 +422,13 @@ Render :: (pixels: []u8, width: s32, height: s32) {
     }
 }
 
-#if !#defined(TAIJI_TK_NO_CANVAS) {
+#if !#defined(TAIJI_TK_NO_CANVAS) || #defined(TAIJI_TK_BITMAP) {
     Color :: (rgb: s32) -> Ink {
         return .{r = cast(u8)(rgb >> 16), g = cast(u8)(rgb >> 8), b = cast(u8)rgb};
     }
+}
 
+#if !#defined(TAIJI_TK_NO_CANVAS) {
     DrawCanvas :: (canvas: *Canvas, widget: *Tk.Widget) {
         box := widget.box;
         border := widget.canvas.border;
