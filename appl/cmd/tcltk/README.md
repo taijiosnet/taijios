@@ -1,10 +1,10 @@
-# Tk for Ziran Tcl
+# Tk applications on TaijiOS
 
-Import `tcl_tk` and call `Attach` with a Tcl interpreter to enable Tk commands.
-The package manages one root `.` and up to 32 widgets under it. The separate
-renderer draws the widgets into an RGBA pixel buffer. The Taiji launcher
-uses `zx_surface` to open the window, present those pixels and receive events.
-The Tcl core runs headless on its own.
+The standalone [Tk package](https://git.waozi.xyz/ziranlang/tk) provides
+`tk/widgets` and `tk/paint`. The launcher calls `Attach` with a
+[`tcl/interpreter`](https://git.waozi.xyz/ziranlang/tcl) instance and uses
+TaijiOS's `zx_surface` binding to present the RGBA render buffer and receive
+window events. The root TaijiOS package manifest selects both packages.
 
 The [Bounce toolbar script](bounce_controls.tcl) adapts the label and count
 controls from Inferno's [Bounce demo](../../wm/bounce.b). The buttons run Tcl
@@ -14,16 +14,16 @@ display, and history from Inferno's [manual browser](../../wm/man.b) and
 [lookup library](../../lib/man.b). This port uses the Inferno
 [MIT notice](../../../NOTICE).
 
-Man, Coffee and About define `TAIJI_TK_NO_CANVAS` to omit the Canvas widget and its
+Man, Coffee and About define `TK_NO_CANVAS` to omit the Canvas widget and its
 renderer, leaving more of the default Linux/386 guest memory pool available
 for manual pages and Coffee artwork. The general Tk launcher, Memory, and
-Graph0 builds include Canvas.
-The general Tk launcher and LINPACK builds define `TAIJI_TK_LISTBOX` to add
-listboxes and entry `-width` support. LINPACK omits Canvas. The general launcher
-also defines `TAIJI_TK_MENU` for menus and menubuttons and `TAIJI_TK_PACKAGES`
-for the optional Tcl package registry. About and the general launcher both define
-`TAIJI_TK_BITMAP` for image labels, named images, frame and label appearance,
-and the extended packing options. The launcher registers this Tk subset as
+Graph0 and Directory Browser builds include Canvas.
+The general Tk launcher and LINPACK builds define `TK_LISTBOX` to add
+listboxes and entry `-width` support. LINPACK omits Canvas. The general
+launcher and Directory Browser define `TK_MENU` for menus and menubuttons. The general launcher also
+defines `TK_PACKAGES` for the optional Tcl package registry. About,
+Directory Browser, and the general launcher define `TK_BITMAP` for image
+labels, named images, frame and label appearance, and extended packing options. The launcher registers this Tk subset as
 `Tk 0.1`, so a script can use `package require Tk`. Other Tcl script packages
 can register via `package ifneeded` or use `pkgIndex.tcl` in a guest directory
 added to `auto_path`. The launcher reads these scripts through the guest file
@@ -67,16 +67,34 @@ Graph0 reads whitespace-separated X and Y coordinates from a guest file. It
 scales the axes to the data, draws ticks and circular markers, and connects
 the points in file order. Click inside the plot to read the data coordinates
 at the pointer. The port accepts up to 3,072 pairs in a 32 KiB file and uses
-the shared stroke font and plain-text scientific tick labels. It scales the
-plot area to 480×384 to fit full-frame uploads in the default 32 MiB guest.
+the shared stroke font and plain-text scientific tick labels. The plot area
+is 480×384. Graph0 paints and uploads 128 rows at a time in the default
+32 MiB guest.
 Its connected stroke and markers share one Canvas path. The app computes
 data bounds while reading the file and fills the allocated path directly.
 [ZX source](graph0_app.zi) · [Inferno source](../../math/graph0.b)
 
+Directory Browser opens a guest directory in the stock icon grid, with the
+shipped folder, file, executable and picture bitmaps. Use Options → use
+text for file kind, size, modification time and name. The `exe` row kind and
+executable icon identify `.dis` modules and `.zx` images. Options also sorts by
+name, access or modification time, or size. Click an icon, label or row to
+select the entry. Changing views preserves sort order, Walk and selection.
+Double-click a directory to open a second Directory Browser. With Walk enabled,
+the same action navigates in place, and `..` returns to the parent. The title
+follows the current path. Double-click an ordinary file to edit it, a recognized
+picture to view it, or a `.dis` or `.zx` file to run it in the guest. ZX images
+can launch without filesystem execute bits. The port passes the resolved `.dis`
+path directly, avoiding stock Directory Browser's trailing slash load error.
+Right-click sends the clicked entry's name and directory to
+the guest plumber when available. The status line reports directory and launch
+failures. [ZX source](dir_app.zi) · [Inferno source](../../wm/dir.b)
+
 ## Run in Taiji
 
-From the TaijiOS root, with `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
-Python Pillow, and a ZX-enabled Linux/386 emulator built from this checkout:
+From the TaijiOS root, with `ziran`, `zi2zx`, `mk`, Xvfb, `xdotool`, ImageMagick `import`,
+Python Pillow, and a matching ZX-enabled Linux/386 emulator and `zxrun`
+built from this checkout:
 
 ```sh
 python3 appl/cmd/tcltk/test_tcltk.py
@@ -86,6 +104,8 @@ target="$PWD/dis/tcltk.zx"
 python3 appl/cmd/tcltk/test_tcltk.py --installed
 python3 appl/cmd/tcltk/test_menu.py --installed
 python3 appl/cmd/tcltk/test_radio.py --installed
+python3 appl/cmd/tcltk/test_canvas_items.py --installed
+python3 appl/cmd/tcltk/test_canvas_images.py --installed
 (cd appl/cmd && mk install-about-zx)
 python3 appl/cmd/tcltk/test_about.py --installed
 python3 appl/cmd/tcltk/test_logwindow.py
@@ -100,6 +120,13 @@ python3 appl/cmd/tcltk/test_linbench.py --installed
 python3 appl/cmd/tcltk/test_graph0.py
 (cd appl/cmd && mk install-graph0-zx)
 python3 appl/cmd/tcltk/test_graph0.py --installed
+python3 appl/cmd/tcltk/test_dir.py
+python3 appl/cmd/tcltk/test_dir_actions.py
+(cd appl/cmd && mk install-dir-zx)
+python3 appl/cmd/tcltk/test_dir.py --installed
+python3 appl/cmd/tcltk/test_dir_actions.py --installed
+python3 appl/cmd/tcltk/test_dir_geometry.py --installed
+python3 appl/cmd/tcltk/test_cursor.py
 ```
 
 The general Tk launcher reads guest stdin until EOF and accepts scripts up to
@@ -114,6 +141,7 @@ zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log
 zxrun -p -w /dis/wm/memory.zx
 zxrun -p -w /dis/math/linbench.zx
 zxrun -w /dis/math/graph0.zx /path/to/coordinates.xy
+zxrun -w /dis/wm/dir.zx /path/to/directory
 ```
 
 Log Window accepts `-e` to close when input ends. By default it prints `Got EOF`
@@ -213,6 +241,65 @@ presses and direct variable writes move the visible selection, that disabled
 controls ignore pointer input, and that menu entries and standalone buttons
 share one Tk variable. Run without `--installed` to build the launcher first.
 
+`test_dir.py` runs the stock Dis Directory Browser and the Ziran port in
+private Xvfb. It compares the default grid pixels, including the four bitmap
+types and their labels, then exercises the sort and view commands and Walk
+from the icon grid. It compares text rows, all four sort orders, and live
+window titles, and checks selection, scrolling and recovery when a directory
+in the listing disappears. Run with `--installed` to exercise
+`/dis/wm/dir.zx`.
+
+`test_dir_geometry.py` compares the startup Canvas width and the full glyphs
+of a 65-character UTF-8 filename with the Dis Directory Browser in private Xvfb.
+It also checks that Walk widens the existing window without moving it, and
+that the same window can navigate back through `..`. Run with `--installed`
+to test `/dis/wm/dir.zx`.
+
+`test_cursor.py` compares `cursor -image` and `cursor -default` with stock
+`tkcmd`. It reads the cursor pixels and hotspot from private Xvfb and checks
+missing-image and invalid-bitmap errors. The test application attaches the
+same optional Ziran cursor adapter as Directory Browser.
+
+`test_dir_actions.py` compares the child Directory Browser, the editor contents,
+the picture viewer, and the raw UTF-8 `WmDir` plumbing message in private Xvfb.
+It opens copies of the installed About Inferno Dis and ZX apps through
+Directory Browser and compares each rendered logo with a direct launch of the
+same app. The ZX copy has a UTF-8 filename with a space and mode `0644`. The
+test checks that it shares the executable icon and text kind with the Dis
+module. Launches use the guest window service. Directory Browser chooses what
+to open and formats the plumbing message in Ziran. Run with `--installed` to
+test `/dis/wm/dir.zx`.
+
+`test_canvas_items.py` compares tag and item command results with `tkcmd`. It
+drives overlapping Canvas items on both the stock and hosted desktops in
+private Xvfb and checks shared tag and numeric item callbacks, press and
+release, double-click, held-button motion, and the pixels exposed after
+deletion. Run without `--installed` to build the runner first.
+
+`test_canvas_images.py` compares image and Canvas geometry commands with
+`tkcmd` and checks that deletion releases retained images. It draws the shipped
+Directory Browser folder and file icons in private Xvfb and compares their
+pixels, mask-only and offset masks, and clicking the transparent part of an item.
+Run without `--installed` to build and use a runner in `build/tcltk`.
+
+`test_canvas_viewport.py` compares vertical Canvas commands with `tkcmd` and
+uses the Directory Browser's masked folder bitmap and scrollbar wiring in
+private Xvfb. It checks pixel clipping, scrollbar arrow and trough presses,
+allocated widths, and item hits and coordinates after scrolling. Use
+`python3 appl/cmd/tcltk/test_canvas_viewport.py --installed` to test
+`/dis/tcltk.zx`.
+
+`test_canvas_distances.py` compares Canvas dimensions, item coordinates, stroke
+widths, and scroll distances with `tkcmd`. In private Xvfb it verifies the
+Directory Browser's `10c` requested width and compares rendered pixels before
+and after a click reconfigures the Canvas. Run without `--installed` to build
+and use a runner in `build/tcltk`.
+
+`test_canvas_fonts.py` compares Canvas font selection, metrics, and item
+bounds with `tkcmd`. It also compares the pixels and hit area of the shipped
+Directory Browser font in private Xvfb. Run without `--installed` to build
+and use a runner in `build/tcltk`.
+
 `test_about.py` compares label, bitmap, frame, and packing commands with
 `tkcmd`. It opens and closes the stock and ZX About windows, compares all
 62,100 logo pixels, and checks that the ZX app updates its version label when the
@@ -237,20 +324,28 @@ In the Taiji graphical shell, launch About with `zxrun -w /dis/wm/about.zx`.
 | `radiobutton .path` | Button options plus `-label`, `-variable`, `-value`, and `-indicatoron`. A left press selects the value and runs the callback. The default variable is `selectedButton`; a standalone button bound to it uses its path by default. A menu radio entry defaults to an empty value |
 | `variable name ?value?` | Read or write a Tk root variable shared by standalone buttons and menu entries |
 | `frame .path` | Container for nested widgets. With bitmap support, accepts the same color, border width, and relief options as labels |
-| `image create bitmap ?name? ?-file bitmap?`, `image names`, `image width name`, `image height name`, `image type name`, `image delete name ?name ...?` | Create and query named bitmaps. A label retains its bitmap when a name is deleted or replaced |
+| `image create bitmap ?name? ?-file bitmap? ?-maskfile mask?`, `image names`, `image width name`, `image height name`, `image type name`, `image delete name ?name ...?` | Create and query named bitmaps. A `k1` mask can accompany the bitmap or supply the shape of a black bitmap. Labels and Canvas items retain their bitmaps when a name is deleted or replaced |
 | `entry .path` | Single-line UTF-8 text with `-bg white` and `-width` |
 | `text .path` | Wrapped, scrollable text. `-height` sets the requested height. `-yscrollcommand` receives the first and last visible fractions |
 | `listbox .path` | Configurable `-width`, `-height`, `-selectmode single` or `browse`, and `-yscrollcommand`. A click selects a row. Up and Down move the active row. Enter or Space selects it |
 | `.listbox insert index element ?element ...?`, `delete first ?last?`, `get first ?last?`, `size`, `index index` | Edit or read rows by numeric index, `end`, `active`, `anchor`, or `@x,y` |
 | `.listbox activate index`, `curselection`, `selection anchor index`, `selection includes index`, `selection set first ?last?`, `selection clear first ?last?` | Move the active row or read and change selection and its anchor |
 | `.listbox see index`, `yview ?index\|moveto fraction\|scroll count units/pages?` | Reveal a row or read and set the vertical viewport |
-| `canvas .path` | Integer-pixel `-width`, `-height`, `-borderwidth` or `-bd`, `-background` or `-bg`, and `-relief flat` or `sunken` |
+| `canvas .path` | `-width`, `-height`, `-borderwidth` or `-bd` in screen units, `-background` or `-bg`, `-relief flat` or `sunken`, four-coordinate `-scrollregion`, `-yscrollincrement`, and `-yscrollcommand` |
+| `.canvas yview`, `.canvas yview moveto fraction`, `.canvas yview scroll count units\|pages` | Query or move the vertical viewport. A nonpositive rounded increment uses one tenth of the visible height. Page moves use nine tenths of that height. The viewport clips drawing and translates item hit testing |
+| `.canvas canvasy screenY ?grid?`, `.canvas cget actwidth`, `.scrollbar cget actwidth` | Convert an absolute Y coordinate to Canvas space, optionally snapping to a pixel grid. Read each widget's allocated interior width |
 | `.canvas create rectangle x0 y0 x1 y1 ?options?` | Add a rectangle with `-fill` and `-outline`. Return its numeric item ID |
-| `.canvas create text x y ?options?` | Add a single-line stroke-font label with `-anchor`, `-text`, and `-fill`. Return its numeric item ID |
+| `.canvas create text x y ?options?` | Add a label with `-anchor`, `-text`, and `-fill`. With bitmap support, the item inherits the current Canvas font or accepts its own `-font` guest path, with line breaks, bitmap glyph metrics, and viewport clipping. Return its numeric item ID |
+| `.canvas configure -font path`, `.canvas cget -font`, `.canvas itemconfigure id -font path`, `.canvas itemcget id -font` | Set or query a packed 1-bit Inferno font. Existing items keep their face when the Canvas font changes. Shared faces stay loaded while any item uses them |
+| `.canvas create image x y ?-image name? ?-anchor anchor?` | Add a named bitmap with a center anchor by default. `coords` and `bbox` report its position and bounds. `itemconfigure` changes its anchor or bitmap. `itemcget -image` reports `1` for an attached image or `0` otherwise. Pointer bindings use the full image rectangle, including transparent pixels |
 | `.canvas create line x0 y0 x1 y1 ?x y ...? ?options?` | Add a polyline with `-fill` and `-width`. Return its numeric item ID |
 | `.canvas create oval x0 y0 x1 y1 ?options?` | Add an oval with `-fill`, `-outline`, and `-width`. Return its numeric item ID |
-| `.canvas coords id ?coordinates?`, `.canvas bbox id` | Read or set an item's coordinates with up to four decimal places, or read its pixel bounds using Ziran font metrics for text |
+| `.canvas coords id ?coordinates?`, `.canvas bbox id` | Read or set an item's coordinates with up to four decimal places, or read its pixel bounds using the text item’s font metrics |
 | `.canvas itemconfigure id option value`, `.canvas itemcget id -text`, `.canvas itemcget id -width` | Set supported item options or read a text item's label or a line or oval's stroke width |
+| `.canvas create type ... -tags list` | Attach named tags to a new item. Item IDs increase within each Canvas, including after deletion. Use `addtag` to attach tags to existing items |
+| `.canvas find all`, `.canvas find withtag tagOrId`, `.canvas gettags tagOrId` | List items in stack order or tag membership order. `gettags` reads the topmost match and includes its numeric ID. `find withtag current` returns the item under the pointer |
+| `.canvas addtag tag all`, `.canvas addtag tag withtag tagOrId`, `.canvas dtag tagOrId ?tag?`, `.canvas delete ?tagOrId ...?` | Add or remove named tags and delete items by ID, tag, or `all` |
+| `.canvas bind tagOrId event ?script?` | Install or query Canvas item bindings for buttons 1 through 3, release, double-click, motion with or without held buttons, and item enter and leave. Dispatch to the topmost hit item's `all`, named-tag, and numeric-ID bindings. `%b`, `%x` and `%y`, `%X` and `%Y`, `%W`, and `%%` supply the button, local and absolute pointer coordinates, widget path, and literal percent sign |
 | `bind .canvas <ButtonPress-1> script` | Run a left-press callback. `<Button-1>` is an alias. `%x` and `%y` give coordinates inside the Canvas border |
 | `scrollbar .path` | `-orient vertical` or `horizontal`, and `-command`. Arrows and troughs call `scroll` by units and pages. A held thumb drag calls `moveto` |
 | `.scrollbar set first last`, `.scrollbar get`, `.scrollbar identify x y` | Update or read clamped viewport fractions and identify the part under local coordinates |
@@ -277,6 +372,13 @@ In the Taiji graphical shell, launch About with `zxrun -w /dis/wm/about.zx`.
 | `.radiobutton select`, `deselect`, `invoke` | Store the radio value or clear the variable. `invoke` stores the value and evaluates the callback. Disabled buttons still accept explicit `select` and `deselect` |
 | `destroy .path ?path ...?` | Remove widgets and their descendants. `destroy .` closes the root |
 
+Canvas width, height, border, item coordinates, stroke width, scroll region,
+and scroll increment accept decimals in pixels or with `c` (centimeters), `m`
+(millimeters), `i` (inches), or `p` (points). Inferno uses a fixed 100 pixels per
+inch and whole-pixel conversion factors for centimeters and millimeters, so
+`10c` is 390 pixels. Layout rounds width, height, and border to whole pixels.
+`cget -width` and `cget -height` retain the requested precision.
+
 Click an entry to focus it and position the cursor. Left, Right, Home, End,
 Backspace, and Delete work on Unicode code points. Entries hold up to 16 KiB
 of text and scroll horizontally as needed to keep the cursor visible. A
@@ -297,7 +399,11 @@ The port implements a subset of 20 of the 25 commands advertised by the
 exposes bitmap loading through widget options and the `image` command.
 The [Inferno Tk engine](../../../libtk/utils.c) also supplies `panel`, now
 available in Ziran with the backing-image and redraw subset above. Its other
-commands include `choicebutton`, `cursor`, `grid`, `send`, and `winfo`.
+commands include `choicebutton`, `grid`, `send`, and `winfo`. Directory Browser
+attaches an optional `cursor` command for `-image name` and `-default`. The
+hosted bridge supports byte-aligned, 1-bit cursor shapes up to 32 by 32 pixels
+with a negative or zero hotspot offset. The other stock cursor options are
+still outside this subset.
 
 Menus still need cascade entries, `-postcommand`, keyboard navigation,
 autoscroll, and the wider visual options. Posted menus share the root's pixel
@@ -311,21 +417,26 @@ Frame propagation, `pack forget`, case-insensitive text search, marks,
 embedded windows, editable selections, and the wider tag API remain open.
 The bitmap reader supports compressed and uncompressed Inferno `m8` and `k1`
 files with up to 262,144 pixels each. The registry holds up to 32 live bitmaps
-across file-backed labels and named references. Other channels, legacy bitmap
-headers, the `<fd` form, `image create bitmap -maskfile`, Canvas images, and
-bitmap fonts remain open. Label and frame colors use the Canvas color subset.
+across file-backed labels and named references, including Canvas items retaining
+a deleted name. Other channels, masks with more than one bit per pixel, legacy
+bitmap headers outside 1-bit subfonts, and the `<fd` form remain open.
+Label and frame colors use the Canvas color subset. Bitmap fonts currently
+apply to Canvas text. Subfonts with more than one bit per pixel and font
+options on other widget types remain open.
 Selection buttons still need keyboard activation and wider style options.
 Scrollbars still need `activate`, `delta`, `fraction`, `-jump`, and hold autorepeat.
-Canvas still needs tags, item bindings and hit testing, item deletion and
-stacking, scrolling, polygon and arc items, images, embedded windows,
-physical-unit coordinates, more font, color, join and cap options, and
-additional pointer bindings. Canvas background can be configured, and
-`cget -background` remains open.
-Directory Browser's Options uses the implemented selection entries. Its view
-still needs masked bitmap loading, Canvas image items, per-item double and
-right-button bindings, item deletion, `-scrollregion`, `-yscrollincrement`,
-`-yscrollcommand`, `yview`, and the actions for opening other guest windows and
-files. Its waiting pointer uses `cursor -image` and `cursor -default`.
+Canvas still needs stacking commands, geometric `find` and `addtag` selectors,
+group item configuration by tag, key bindings, additive and subtractive
+bindings, item grab and focus, `xview`, `canvasx`, `see`, polygon and arc items,
+embedded windows, richer font, color, join and cap options,
+and `cget -background`.
+Directory Browser widens its icon view to fit the longest filename at
+startup and during Walk, within the space available on the guest desktop.
+The stock browser matches startup geometry. The stock Walk probe into the
+same long-name directory hit a nil dereference during reconfiguration.
+Directory Browser uses the shipped `cursor.wait` bitmap while opening a
+selection and restores the default cursor when the action returns. The stock
+Dis app remains available as `wm/dir`.
 [Inferno source](../../wm/dir.b)
 
 The text widget still needs horizontal scrolling and `-xscrollcommand`.

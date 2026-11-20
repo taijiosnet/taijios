@@ -1,0 +1,360 @@
+// Directory Browser, ported from appl/wm/dir.b.
+#import "std/vec";
+using Tcl :: #import "tcl/interpreter";
+using Tk :: #import "tk/widgets";
+using T :: #import "tcl/types";
+using Canvas :: #import "tk/canvas";
+using Images :: #import "tk/image";
+using UTF :: #import "tk/text";
+using Surface :: #import "zx_surface";
+using Window :: #import "tcltk";
+using Cursor :: #import "tk_window_cursor";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Wm :: #import "taijios_wm";
+using Names :: #import "taijios_names";
+using Ls :: #import "ls";
+using Dir :: #import "dir_model";
+
+CONTROLS :: #string END_CONTROLS
+frame .mbar
+menubutton .mbar.opt -text {Options} -menu .opt
+pack .mbar.opt -side left -padx 0 -pady 0
+frame .fc
+scrollbar .fc.scroll -command {.fc.c yview}
+canvas .fc.c -relief sunken -yscrollincrement 25 -borderwidth 2 -bg #dddddd -width 10c -height 300 -yscrollcommand {.fc.scroll set} -font /fonts/misc/latin1.8x13.font
+pack .fc.scroll -side right -fill y -padx 0 -pady 0
+pack .fc.c -fill both -expand 1 -padx 0 -pady 0
+label .status -fg red
+pack .mbar -fill x -padx 0 -pady 0
+pack .status -side bottom -fill x -anchor w -padx 0 -pady 0
+pack .fc -fill both -expand 1 -padx 0 -pady 0
+pack propagate . 0
+menu .opt
+.opt add radiobutton -text {by name} -variable sort -value n -command {dir_sort n}
+.opt add radiobutton -text {by access} -variable sort -value a -command {dir_sort a}
+.opt add radiobutton -text {by modify} -variable sort -value m -command {dir_sort m}
+.opt add radiobutton -text {by size} -variable sort -value s -command {dir_sort s}
+.opt add separator
+.opt add radiobutton -text {use icons} -variable show -value i -command {dir_view i}
+.opt add radiobutton -text {use text} -variable show -value t -command {dir_view t}
+.opt add separator
+.opt add checkbutton -text {Walk} -command dir_walk
+set sort n
+set show i
+image create bitmap dir_folder -file dir.bit -maskfile dir.mask
+image create bitmap dir_file -file file.bit -maskfile file.mask
+image create bitmap dir_dis -file dis.bit -maskfile dis.mask
+image create bitmap dir_picture -file pic.bit -maskfile pic.mask
+image create bitmap waiting -file cursor.wait
+.fc.c bind all <Button-1> dir_select
+.fc.c bind all <Double-Button-1> dir_open
+.fc.c bind all <Button-3> dir_plumb
+dir_draw
+END_CONTROLS;
+
+SELECTED :: 0x0000cc;
+// Match the 390-pixel stock Canvas after the shared Tk inset, border and scrollbar.
+WINDOW_WIDTH :: 436;
+WINDOW_HEIGHT :: 351;
+CANVAS_WIDTH :: 390;
+// Stock's toplevel width includes six pixels outside its Canvas and scrollbar.
+STOCK_INSET :: 6;
+view_width: s32 = WINDOW_WIDTH;
+view_height: s32 = WINDOW_HEIGHT;
+requested_width: s32;
+path: Text;
+system_name: Text;
+listing: Dir.Listing;
+format: Ls.State;
+order: Dir.Order;
+walk: bool;
+icon_view: bool = true;
+selected: s64 = -1;
+plumber: s32 = -1;
+
+Title :: (directory: string) -> Text {
+    title: Text = TextCopy(TextView(system_name));
+    unused BuilderAppend(title.bytes, ":");
+    unused BuilderAppend(title.bytes, directory);
+    if directory != "/" { unused BuilderAppend(title.bytes, "/") }
+    return title;
+}
+
+Status :: (detail: string, destination: string = "") {
+    label := *Tk.widgets[Tk.Find(".status")].text;
+    unused VecResize(label.bytes, 0);
+    unused BuilderAppend(label.bytes, detail);
+    if destination.count > 0 {
+        unused BuilderAppend(label.bytes, " ");
+        unused BuilderAppend(label.bytes, destination);
+    }
+}
+
+ListCanvas :: () -> *Canvas.State {
+    return *Tk.widgets[Tk.Find(".fc.c")].canvas;
+}
+
+MinimumIconWidth :: (contents: *Dir.Listing) -> s32 {
+    longest: s32;
+    names := TextView(contents.names);
+    for entry: contents.entries {
+        longest = Canvas.Maximum(longest, UTF.Count(Dir.Name(names, entry)));
+    }
+    return 8*(longest+2);
+}
+
+RequiredWidth :: (contents: *Dir.Listing) -> s32 {
+    width := MinimumIconWidth(contents) - STOCK_INSET + WINDOW_WIDTH - CANVAS_WIDTH;
+    return Canvas.Minimum(4096, width);
+}
+
+WidenIfNeeded :: () {
+    width := RequiredWidth(*listing);
+    if width <= view_width { requested_width = 0; return }
+    if width == requested_width { return }
+    // An accepted request may be clamped by the window manager.
+    requested_width = width;
+    unused Wm.Resize(width, view_height);
+}
+
+AddIcon :: (canvas: *Canvas.State, handle: s64, x: s32, y: s32) -> bool {
+    if handle < 0 { return false }
+    id := Canvas.Add(canvas, .Image, .{x, y, 0, 0}, Canvas.NONE, Canvas.NONE, .Center);
+    if id == 0 { return false }
+    Images.Retain(canvas.images, handle);
+    canvas.items[canvas.items.count-1].image = handle;
+    return true;
+}
+
+BuildItems :: (canvas: *Canvas.State, contents: *Dir.Listing, rows: *Vec(s64), selection: s64,
+               icons: bool, width: s32) -> (height: s32, ok: bool) {
+    names := TextView(contents.names);
+    spacing: s32;
+    x: s32 = 10;
+    y: s32 = 10;
+    handles: [4]s64;
+    if icons {
+        minimum := MinimumIconWidth(contents);
+        width = Canvas.Maximum(width, minimum);
+        spacing = Canvas.Maximum(50, width/Canvas.Maximum(1, width/minimum));
+        x = spacing/2;
+        y = 20;
+        icon_names: [4]string = .{"dir_folder", "dir_file", "dir_dis", "dir_picture"};
+        for i: 0..3 { handles[i] = Images.Find(canvas.images, icon_names[i]) }
+    }
+    for i: 0..rows.count-1 {
+        index := rows.*[i];
+        fill := ifx index == selection then SELECTED else Canvas.BLACK;
+        if icons {
+            name := Dir.Name(names, contents.entries[index]);
+            icon := Dir.EntryKind(contents, index);
+            if !AddIcon(canvas, handles[cast(s64)icon], x, y) ||
+               Canvas.AddText(canvas, x, y+25, .Center, name, cast(s32)fill) == 0 { return 0, false }
+            x += spacing;
+            if x > width { x = spacing/2; y += 50 }
+        } else {
+            Dir.Line(*format, contents, index);
+            if Canvas.AddText(canvas, x, y, .West, TextView(format.line), cast(s32)fill) == 0 { return 0, false }
+            y += 15;
+        }
+    }
+    return ifx icons then y+50 else y, true;
+}
+
+Render :: (contents: *Dir.Listing, rows: *Vec(s64), selection: s64, icons: bool, title: string = "") -> bool {
+    canvas := ListCanvas();
+    // Preserve the displayed items if preparing the rows or updating the title fails.
+    next := Canvas.Default();
+    next.fonts = canvas.fonts;
+    next.font = canvas.font;
+    next.images = canvas.images;
+    width := canvas.viewport.width;
+    height, ok := BuildItems(*next, contents, rows, selection, icons, width);
+    if !ok || (title.count > 0 && !Surface.SetWindowTitle(title)) {
+        Canvas.DeleteAll(*next);
+        return false;
+    }
+    Canvas.DeleteAll(canvas);
+    VecSwap(canvas.items, next.items);
+    canvas.last_id = next.last_id;
+    canvas.viewport.region = .{0, 0, cast(s64)width * Canvas.FRACTION, cast(s64)height * Canvas.FRACTION};
+    canvas.viewport.y = 0;
+    Canvas.ClampViewport(*canvas.viewport);
+    canvas.viewport.resized = true;
+    return true;
+}
+
+Draw :: (_: s64, args: []Text, result: *T.Result) {
+    Tk.Layout(view_width, view_height);
+    if !Render(*listing, *listing.rows, selected, icon_view) {
+        failure := T.QuotedError("could not draw directory", "", "");
+        result.code = failure.code;
+        VecSwap(result.value.bytes, failure.value.bytes);
+    }
+}
+
+Poll :: (_: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResult {
+    if event.kind != Surface.Resize && event.kind != Surface.Redraw { return .Idle }
+    view_width = event.width;
+    view_height = event.height;
+    if !icon_view { return .Idle }
+    before := ListCanvas().viewport.width;
+    Tk.Layout(event.width, event.height);
+    if ListCanvas().viewport.width == before { return .Idle }
+    WidenIfNeeded();
+    if !Render(*listing, *listing.rows, selected, true) { Status("Could not resize icon view") }
+    return .Changed;
+}
+
+View :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count != 1 { return }
+    icons := TextView(args[0]) == "i";
+    if icons == icon_view { return }
+    if !Render(*listing, *listing.rows, selected, icons) {
+        Status("Could not change directory view");
+        return;
+    }
+    icon_view = icons;
+    requested_width = 0;
+    if icons { WidenIfNeeded() }
+    Status("");
+}
+
+Sort :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count != 1 { return }
+    next: Dir.Order;
+    value := TextView(args[0]);
+    if value == "a" { next = .Accessed }
+    else if value == "m" { next = .Modified }
+    else if value == "s" { next = .Size }
+    rows: Vec(s64);
+    if VecResize(rows, listing.rows.count) {
+        for i: 0..rows.count-1 { rows[i] = listing.rows[i] }
+        if Dir.Sort(*listing, VecSlice(rows, 0, rows.count), next, 0) && Render(*listing, *rows, selected, icon_view) {
+            VecSwap(listing.rows, rows);
+            order = next;
+            Status("");
+            return;
+        }
+    }
+    Status("Could not sort directory");
+}
+
+ToggleWalk :: (_: s64, args: []Text, result: *T.Result) { walk = !walk }
+
+CurrentRow :: (canvas: *Canvas.State) -> s64 {
+    item := canvas.current-1;
+    if item < 0 || item >= canvas.items.count { return -1 }
+    // Each icon row has its image followed by the label. Text rows have just the label.
+    return ifx icon_view then item/2 else item;
+}
+
+RowLabel :: (canvas: *Canvas.State, row: s64) -> *Canvas.Item {
+    return *canvas.items[ifx icon_view then 2*row+1 else row];
+}
+
+Select :: (_: s64, args: []Text, result: *T.Result) {
+    canvas := ListCanvas();
+    row := CurrentRow(canvas);
+    if row < 0 || selected == listing.rows[row] { return }
+    for i: 0..listing.rows.count-1 {
+        if listing.rows[i] == selected { RowLabel(canvas, i).fill = Canvas.BLACK; break }
+    }
+    selected = listing.rows[row];
+    RowLabel(canvas, row).fill = SELECTED;
+}
+
+Plumb :: (_: s64, args: []Text, result: *T.Result) {
+    if plumber < 0 { return }
+    row := CurrentRow(ListCanvas());
+    if row < 0 { return }
+    name := Dir.Name(TextView(listing.names), listing.entries[listing.rows[row]]);
+    message: Text;
+    if Dir.PackPlumb(TextView(path), name, *message) {
+        // Plumbing consumes a complete message in one write. A missing plumber is silent.
+        unused Io.WriteBytes(plumber, TextView(message));
+    }
+}
+
+Launch :: (kind: Dir.Kind, destination: string) {
+    arguments: Text;
+    name := Dir.Name(TextView(listing.names), listing.entries[selected]);
+    if !Dir.PackArguments(kind, name, destination, *arguments) ||
+       Wm.Launch(Dir.Program(kind, destination), TextView(arguments)) != 0 {
+        Status("Could not open", destination);
+        return;
+    }
+    Status("");
+}
+
+Open :: (_: s64, args: []Text, result: *T.Result) {
+    row := CurrentRow(ListCanvas());
+    if row < 0 { return }
+    same_entry := selected == listing.rows[row];
+    Select(0, args, result);
+    if !same_entry { return }
+    waiting := Cursor.SetImage("waiting");
+    defer { if waiting { Cursor.Reset() } }
+    destination: Text;
+    if !Dir.EntryPath(*listing, selected, TextView(path), *destination) {
+        Status("Could not prepare path");
+        return;
+    }
+    kind := Dir.EntryKind(*listing, selected);
+    if kind != .Folder || !walk {
+        Launch(kind, TextView(destination));
+        return;
+    }
+    pending: Dir.Listing;
+    failure := Dir.Read(*pending, TextView(destination), order);
+    if failure != "" { Status(failure, TextView(destination)); return }
+    title: Text = Title(TextView(destination));
+    if !Render(*pending, *pending.rows, -1, icon_view, TextView(title)) {
+        Status("Could not display directory", TextView(destination));
+        return;
+    }
+    VecSwap(path.bytes, destination.bytes);
+    VecSwap(listing.entries, pending.entries);
+    VecSwap(listing.names.bytes, pending.names.bytes);
+    VecSwap(listing.rows, pending.rows);
+    selected = -1;
+    requested_width = 0;
+    if icon_view { WidenIfNeeded() }
+    Status("");
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() > 1 { return Args.SetFailure("usage: dir [directory]") }
+    operand := ifx Args.OperandCount() == 0 then "/" else Args.Operand(0);
+    if !Names.Clean(ifx operand.count == 0 then "/" else operand, *path) {
+        return Args.SetFailure("dir: could not prepare path");
+    }
+    failure := Dir.Read(*listing, TextView(path), order);
+    if failure != "" {
+        message: Text = TextCopy("dir: ");
+        unused BuilderAppend(message.bytes, failure);
+        unused BuilderAppend(message.bytes, " ");
+        unused BuilderAppend(message.bytes, TextView(path));
+        return Args.SetFailure(TextView(message));
+    }
+    view_width = Canvas.Maximum(WINDOW_WIDTH, RequiredWidth(*listing));
+    hostname: [128]u8;
+    count := Ls.ReadSmall("#c/sysname", hostname[:]);
+    unused BuilderAppend(system_name.bytes, ifx count > 0 then TextView(hostname[:count]) else "Anon");
+    Ls.LoadTime(*format);
+    title: Text = Title(TextView(path));
+    interpreter: Tcl.Interpreter;
+    if !Cursor.Attach(*interpreter) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_draw", Draw) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_sort", Sort) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_view", View) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_walk", ToggleWalk) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_select", Select) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_open", Open) ||
+       !Tcl.RegisterCommand(*interpreter, "dir_plumb", Plumb) { return 1 }
+    plumber = Io.OpenFile("/chan/plumb.input", 1);
+    defer { if plumber >= 0 { unused Io.CloseFile(plumber) } }
+    return Window.RunPolled(*interpreter, CONTROLS, TextView(title), view_width, WINDOW_HEIGHT,
+                            Window.NoPrepare, Poll, 500);
+}

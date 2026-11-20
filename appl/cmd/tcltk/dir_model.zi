@@ -1,0 +1,168 @@
+// Directory Browser listing and ordering, following appl/wm/dir.b and appl/lib/readdir.b.
+#import "std/vec";
+#import "std/number_text";
+using Fs :: #import "taijios_stat";
+using Io :: #import "taijios_io";
+using Names :: #import "taijios_names";
+using Ls :: #import "ls";
+
+Kind :: enum { Folder; File; Executable; Picture; }
+Order :: enum { Name; Accessed; Modified; Size; }
+DirEntry :: struct { start: s64; end: s64; mode: u32; accessed: s32; modified: s32; length: s64; }
+Listing :: struct { entries: Vec(DirEntry); names: Text; rows: Vec(s64); }
+
+Name :: (names: string, entry: DirEntry) -> string {
+    return names[entry.start:entry.end];
+}
+
+ZxName :: (name: string) -> bool {
+    return name.count >= 3 && name[name.count-3:] == ".zx";
+}
+
+Append :: (listing: *Listing, info: Fs.Info, name: string) -> bool {
+    start := listing.names.bytes.count;
+    if !BuilderAppend(listing.names.bytes, name) { return false }
+    mode := info.mode;
+    if (name.count > 4 && name[name.count-4:] == ".dis") || ZxName(name) { mode |= 0x49 }
+    return VecPush(listing.entries, .{start = start, end = listing.names.bytes.count,
+                   mode = mode, accessed = info.accessed, modified = info.modified, length = info.length});
+}
+
+ChildPath :: (path: string, name: string, clean: *Text) -> bool {
+    joined: Text;
+    return BuilderAppend(joined.bytes, path) && BuilderAppend(joined.bytes, "/") && BuilderAppend(joined.bytes, name) &&
+           Names.Clean(TextView(joined), clean);
+}
+
+ReadEntries :: (listing: *Listing, handle: s32, path: string) -> string {
+    bytes: [Fs.BufferSize]u8;
+    info := Fs.DescriptorInfo(handle, bytes[:]);
+    if info.size == 0 { return "could not inspect directory" }
+    if (info.mode & Fs.Directory) == 0 { return "not a directory" }
+    if Names.RootLength(path) != path.count {
+        parent: Text;
+        if !ChildPath(path, "..", *parent) { return "out of memory" }
+        ancestor := Fs.PathInfo(TextView(parent), bytes[:]);
+        ancestor.mode |= Fs.Directory;
+        if !Append(listing, ancestor, "..") { return "out of memory" }
+    }
+    while true {
+        count := Io.ReadBytes(handle, bytes[:]);
+        if count < 0 { return "could not read directory" }
+        if count == 0 { return "" }
+        offset: s64;
+        while offset < count {
+            next := Fs.Decode(bytes[offset:count]);
+            if next.size == 0 { return "invalid directory entry" }
+            if !Append(listing, next, next.name) { return "out of memory" }
+            offset += next.size;
+        }
+    }
+}
+
+After :: (listing: *Listing, a: DirEntry, b: DirEntry, order: Order) -> bool {
+    if order == .Accessed { return a.accessed < b.accessed }
+    if order == .Modified { return a.modified < b.modified }
+    if order == .Size { return a.length > b.length }
+    return Ls.NameGreater(Name(TextView(listing.names), a), Name(TextView(listing.names), b));
+}
+
+MergeSort :: (listing: *Listing, rows: []s64, scratch: []s64, order: Order) {
+    if rows.count < 2 { return }
+    middle := rows.count / 2;
+    MergeSort(listing, rows[:middle], scratch[:middle], order);
+    MergeSort(listing, rows[middle:], scratch[middle:], order);
+    for i: 0..rows.count-1 { scratch[i] = rows[i] }
+    left: s64;
+    right := middle;
+    for i: 0..rows.count-1 {
+        take_right := left == middle;
+        if left < middle && right < rows.count {
+            take_right = After(listing, listing.entries[scratch[left]], listing.entries[scratch[right]], order);
+        }
+        if take_right { rows[i] = scratch[right]; right += 1 }
+        else { rows[i] = scratch[left]; left += 1 }
+    }
+}
+
+Sort :: (listing: *Listing, rows: []s64, order: Order, first: s64) -> bool {
+    scratch: Vec(s64);
+    size := rows.count-first;
+    if !VecResize(scratch, size) { return false }
+    MergeSort(listing, rows[first:], VecSlice(scratch, 0, size), order);
+    return true;
+}
+
+Read :: (listing: *Listing, path: string, order: Order) -> string {
+    handle := Io.OpenFile(path, 0);
+    if handle < 0 { return "could not open directory" }
+    failure := ReadEntries(listing, handle, path);
+    unused Io.CloseFile(handle);
+    if failure != "" { return failure }
+    if !VecResize(listing.rows, listing.entries.count) { return "out of memory" }
+    for i: 0..listing.rows.count-1 { listing.rows[i] = i }
+    // A fresh listing pins its parent above the sorted entries, as readdir does.
+    first := ifx Names.RootLength(path) == path.count then 0 else 1;
+    if !Sort(listing, VecSlice(listing.rows, 0, listing.rows.count), order, first) { return "out of memory" }
+    return "";
+}
+
+EntryPath :: (listing: *Listing, index: s64, directory: string, destination: *Text) -> bool {
+    return ChildPath(directory, Name(TextView(listing.names), listing.entries[index]), destination);
+}
+
+IsDirectory :: (listing: *Listing, index: s64) -> bool {
+    return (listing.entries[index].mode & Fs.Directory) != 0;
+}
+
+EntryKind :: (listing: *Listing, index: s64) -> Kind {
+    if IsDirectory(listing, index) { return .Folder }
+    name := Name(TextView(listing.names), listing.entries[index]);
+    suffix: string;
+    for i: 0..name.count-1 {
+        if name[i] == 46 { suffix = name[i+1:] }
+    }
+    // Match only lowercase suffixes, as stock Directory Browser does for Dis and pictures.
+    if suffix == "dis" || ZxName(name) { return .Executable }
+    if suffix == "bit" || suffix == "gif" || suffix == "jpg" || suffix == "jpeg" || suffix == "mask" { return .Picture }
+    return .File;
+}
+
+Program :: (kind: Kind, path: string) -> string {
+    if kind == .Folder { return "/dis/wm/dir.zx" }
+    if kind == .Executable { return path }
+    if kind == .Picture { return "/dis/wm/view.dis" }
+    return "/dis/wm/edit.dis";
+}
+
+PackArguments :: (kind: Kind, name: string, path: string, arguments: *Text) -> bool {
+    // The host takes argv[0] and any operands as NUL-terminated words.
+    if !BuilderAppend(arguments.bytes, ifx kind == .Folder then "dir" else name) || !VecPush(arguments.bytes, cast(u8)0) {
+        return false;
+    }
+    return kind == .Executable || (BuilderAppend(arguments.bytes, path) && VecPush(arguments.bytes, cast(u8)0));
+}
+
+PackPlumb :: (directory: string, name: string, message: *Text) -> bool {
+    // Stock Plumbmsg needs six newline-terminated fields followed by exactly the given byte count.
+    length: [24]u8;
+    return BuilderAppend(message.bytes, "WmDir\n\n") && BuilderAppend(message.bytes, directory) &&
+           (directory == "/" || BuilderAppend(message.bytes, "/")) && BuilderAppend(message.bytes, "\ntext\n\n") &&
+           BuilderAppend(message.bytes, FormatInteger(name.count, length[:])) && BuilderAppend(message.bytes, "\n") &&
+           BuilderAppend(message.bytes, name);
+}
+
+Line :: (format: *Ls.State, listing: *Listing, index: s64) {
+    entry := listing.entries[index];
+    unused VecResize(format.line.bytes, 0);
+    kind := "file";
+    if (entry.mode & Fs.Directory) != 0 { kind = "dir " }
+    else if (entry.mode & 0x49) != 0 { kind = "exe " }
+    unused BuilderAppend(format.line.bytes, kind);
+    unused BuilderAppend(format.line.bytes, " ");
+    Ls.Decimal(*format.line, entry.length, 7, " ");
+    unused BuilderAppend(format.line.bytes, " ");
+    Ls.DateLabel(format, entry.modified);
+    unused BuilderAppend(format.line.bytes, " ");
+    unused BuilderAppend(format.line.bytes, Name(TextView(listing.names), entry));
+}

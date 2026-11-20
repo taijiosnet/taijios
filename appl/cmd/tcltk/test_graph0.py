@@ -7,7 +7,7 @@ from PIL import Image, ImageChops
 
 from test_logwindow import private_display, read_output
 from test_memory import desktop
-from test_tcltk import BUILD, ROOT, SOURCES, color_bounds, command, compile_image, until
+from test_tcltk import BUILD, ROOT, SOURCES, color_bounds, command, compile_image, until, write_fixture
 
 
 POINTS = ((0, 0), (1, 2), (2, -1), (3, 3), (4, 1))
@@ -15,7 +15,8 @@ MAX_POINTS = 3072
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 DESKTOP = (119, 119, 119)
-FLAGS = ("--bind-host", "taijios_args", "--bind-host", "taijios_files", "--bind-host", "zx_surface")
+FLAGS = ("--define", "TK_BANDED", "--bind-host", "taijios_args", "--bind-host", "taijios_files",
+         "--bind-host", "zx_surface")
 
 
 def oracle_commands(env):
@@ -33,7 +34,7 @@ def oracle_commands(env):
 
 def model_commands():
     fixture = (SOURCES / "graph0_canvas_commands.tcl").read_text()
-    (BUILD / "graph0_canvas_input.zi").write_text(f"Commands :: #string GRAPH_COMMANDS_END\n{fixture}GRAPH_COMMANDS_END;\n")
+    write_fixture("graph0_canvas_input.zi", f"Commands :: #string GRAPH_COMMANDS_END\n{fixture}GRAPH_COMMANDS_END;\n")
     model = BUILD / "graph0_canvas_test.zx"
     compile_image("graph0_canvas_test", model)
     result = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)

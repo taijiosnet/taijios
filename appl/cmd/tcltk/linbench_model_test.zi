@@ -1,7 +1,7 @@
 #import "std/vec"
 using Model :: #import "linbench_model"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
 using Input :: #import "linbench_listbox_input"
 
 CheckSolve :: (state: *Model.State, order: s64) -> bool {

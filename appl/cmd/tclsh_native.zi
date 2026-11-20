@@ -4,9 +4,9 @@
 #import "std/stdio_linux"
 #import "std/file"
 using Timer :: #import "std/timer_linux"
-using Tcl :: #import "tcl"
-using Packages :: #import "tcl_packages"
-using Types :: #import "tcl_types"
+using Tcl :: #import "tcl/interpreter"
+using Packages :: #import "tcl/packages"
+using Types :: #import "tcl/types"
 
 LoadScript :: (context: s64, path: string, result: *Types.Result) {
     script, ok := ReadEntireFile(path);

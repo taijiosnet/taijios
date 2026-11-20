@@ -15,10 +15,11 @@ from PIL import Image, ImageChops
 SOURCES = Path(__file__).resolve().parent
 ROOT = SOURCES.parents[2]
 BUILD = ROOT / "build/tcltk"
+FIXTURES = BUILD / "fixtures"
 EMU = ROOT / "Linux/386/bin/emu"
 BACKGROUND = (244, 246, 247)
-RUNNER_FLAGS = ("--define", "TAIJI_TK_LISTBOX", "--define", "TAIJI_TK_MENU",
-                "--define", "TAIJI_TK_BITMAP", "--define", "TAIJI_TK_PACKAGES", "--bind-host", "zx_surface", "--bind-host", "taijios_stdin",
+RUNNER_FLAGS = ("--define", "TK_LISTBOX", "--define", "TK_MENU",
+                "--define", "TK_BITMAP", "--define", "TK_PACKAGES", "--bind-host", "zx_surface", "--bind-host", "taijios_stdin",
                 "--bind-host", "taijios_files")
 COFFEE_RESULTS = (".range", "0", "2.5", "-1.5", "horizontal", "0.5", "-4", "5", ".image", "3", "flat")
 
@@ -27,9 +28,16 @@ def command(*args, **options):
     return subprocess.run(args, cwd=ROOT, timeout=30, **options)
 
 
+def write_fixture(name, source):
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+    (FIXTURES / name).write_text(source, encoding="utf-8")
+
+
 def compile_image(module, image, *flags):
-    command("zi2zx", "--root", SOURCES, "--module-path", ROOT / "appl/lib", "--module-path", ROOT / "appl/cmd",
-            "--module-path", BUILD,
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+    command("ziran", "bundle", "--project", "--root", SOURCES, "--module-path", SOURCES,
+            "--module-path", ROOT / "appl/cmd",
+            "--module-path", FIXTURES,
             *flags, "--entry", f"{module}:main", "-o", image, SOURCES / f"{module}.zi", check=True)
 
 
@@ -437,7 +445,8 @@ def main():
     model = BUILD / "tcltk_model_test.zx"
     fixture = (SOURCES / "tk_commands.tcl").read_text()
     coffee_fixture = (SOURCES / "coffee_commands.tcl").read_text()
-    (BUILD / "tcltk_input.zi").write_text(
+    write_fixture(
+        "tcltk_input.zi",
         f"Script :: #string TCLTK_SCRIPT_END\n{fixture}TCLTK_SCRIPT_END;\n"
         f"CoffeeCommands :: #string COFFEE_COMMANDS_END\n{coffee_fixture}COFFEE_COMMANDS_END;\n"
     )
@@ -456,9 +465,9 @@ def main():
             compile_image("tcltk", image, *RUNNER_FLAGS)
         manual = BUILD / "man.zx"
         if not args.coffee_only:
-            compile_image("man_app", manual, "--define", "TAIJI_TK_NO_CANVAS",
+            compile_image("man_app", manual, "--define", "TK_NO_CANVAS",
                           "--bind-host", "zx_surface", "--bind-host", "taijios_files")
-        compile_image("coffee_app", coffee, "--define", "TAIJI_TK_NO_CANVAS",
+        compile_image("coffee_app", coffee, "--define", "TK_NO_CANVAS",
                       "--bind-host", "zx_surface", "--bind-host", "taijios_files")
 
     env = os.environ.copy()

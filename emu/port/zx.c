@@ -21,6 +21,8 @@ enum {
 	ZxSteps = 16000000,
 	ZxTitleBytes = 512,
 	ZxGuestPathBytes = 1024,
+	ZxLaunchArgBytes = 4096,
+	ZxCursorSide = 32,
 	ZxIoBytes = 8192,
 	ZxInitialFiles = 32,
 };
@@ -135,6 +137,9 @@ struct ZxSurface {
 	ZX_Window *win;
 	HostField event[9];
 	uchar text[UTFmax];
+	int nextrow, framewidth, frameheight;
+	vlong pointermillis, pointerepoch;
+	uint pointertick;
 };
 
 /* Requests use scalar channels. Keep Limbo references on the managed Window. */
@@ -164,6 +169,8 @@ zxevent(ZxSurface *surface, const HostValue *args, int n, HostValue *result)
 	HostField *event = surface->event;
 	String *s;
 	Rune rune;
+	uint tick;
+	int pointer;
 
 	if(n != 1 || args[0].kind != HOST_INTEGER || args[0].integer > INT32_MAX)
 		return 0;
@@ -173,11 +180,20 @@ zxevent(ZxSurface *surface, const HostValue *args, int n, HostValue *result)
 	input = &win->input;
 	if(input->kind != ZX_Closed && (win->wait > 0 || input->kind != ZX_Idle))
 		BundleHostRenewSteps();
+	pointer = input->kind == ZX_Move || input->kind == ZX_Down || input->kind == ZX_Up;
+	surface->pointermillis = -1;
+	if(pointer && input->key != 0){
+		tick = (uint)input->key;
+		if(tick < surface->pointertick && surface->pointertick - tick > 0x80000000U)
+			surface->pointerepoch += (vlong)1 << 32;
+		surface->pointertick = tick;
+		surface->pointermillis = surface->pointerepoch + tick;
+	}
 	zxinteger(&event[0], "kind", input->kind);
 	zxinteger(&event[1], "x", input->x);
 	zxinteger(&event[2], "y", input->y);
 	zxinteger(&event[3], "button", input->button);
-	zxinteger(&event[4], "key", input->key);
+	zxinteger(&event[4], "key", pointer ? 0 : input->key);
 	zxinteger(&event[5], "modifiers", input->modifiers);
 	zxinteger(&event[6], "width", input->width);
 	zxinteger(&event[7], "height", input->height);
@@ -215,25 +231,33 @@ zxbool(HostValue *result, int value)
 }
 
 static int
-zxopenwindow(ZX_Window *win, const HostValue *args, int n, HostValue *result)
+zxtitle(ZX_Window *win, const HostValue *title)
 {
-	const HostValue *title = args;
 	String *s;
 
-	if(n != 3 || !zxsize(args + 1) || title->kind != HOST_STRING ||
+	if(title->kind != HOST_STRING ||
 	   title->length > ZxTitleBytes || (title->length != 0 &&
-	   (title->data == nil || memchr(title->data, 0, title->length) != nil))){
-		zxbool(result, 0);
-		return 1;
-	}
+	   (title->data == nil || memchr(title->data, 0, title->length) != nil)))
+		return 0;
 	s = title->length == 0 ? H : c2string((char *)title->data, title->length);
 	destroy(win->title);
 	win->title = s;
-	if(s != H){
+	if(s != H)
 		Setmark(D2H(s));
+	return 1;
+}
+
+static int
+zxopenwindow(ZX_Window *win, const HostValue *args, int n, HostValue *result)
+{
+	if(n != 3 || !zxsize(args + 1) || !zxtitle(win, args)){
+		zxbool(result, 0);
+		return 1;
 	}
 	win->width = args[1].integer;
 	win->height = args[2].integer;
+	/* The launcher reuses the pointer event's internal key slot for the timestamp. */
+	win->input.key = 1;
 	zxbool(result, zxrequest(win, ZX_Open));
 	return 1;
 }
@@ -260,11 +284,57 @@ zxupload(Image *image, const uchar *data, int width, int height)
 }
 
 static int
+zxopaque(const uchar *data, size_t size)
+{
+	size_t i;
+
+	for(i = 3; i < size; i += 4)
+		if(data[i] != 255)
+			return 0;
+	return 1;
+}
+
+static int
+zxuploadopaque(Image *image, const uchar *data, int width, int first, int height)
+{
+	enum { Chunk = 8192 / 3 };
+	uchar packed[Chunk*3];
+	const uchar *source;
+	int maxpixels, x, y, i, columns, rows, count;
+
+	/* BGR24's bytes are ordered R, G, B in Draw. */
+	maxpixels = (image->display->bufsize - 64) / 3;
+	if(maxpixels <= 0 || image->chan != BGR24 || Dx(image->r) != width || first+height > Dy(image->r))
+		return 0;
+	if(maxpixels > Chunk)
+		maxpixels = Chunk;
+	for(y = 0; y < height; y += rows){
+		/* Pack full rows when possible, or split a wide row horizontally. */
+		rows = width <= maxpixels ? maxpixels / width : 1;
+		if(rows > height-y)
+			rows = height-y;
+		for(x = 0; x < width; x += columns){
+			columns = width-x < maxpixels ? width-x : maxpixels;
+			count = columns * rows;
+			source = data + (y*width + x)*4;
+			for(i = 0; i < count; i++){
+				packed[3*i] = source[4*i];
+				packed[3*i+1] = source[4*i+1];
+				packed[3*i+2] = source[4*i+2];
+			}
+			if(loadimage(image, Rect(x, first+y, x+columns, first+y+rows), packed, count*3) != count*3)
+				return 0;
+		}
+	}
+	return 1;
+}
+
+static int
 zxpresent(ZX_Window *win, const HostValue *args, int n, HostValue *result)
 {
 	const HostValue *pixels;
 	Image *image;
-	int ok = 0, prepared, locked;
+	int ok = 0, prepared, locked, opaque;
 
 	if(n != 3 || !zxsize(args)){
 		zxbool(result, 0);
@@ -275,12 +345,22 @@ zxpresent(ZX_Window *win, const HostValue *args, int n, HostValue *result)
 	   pixels->length == (size_t)args[0].integer * args[1].integer * 4){
 		win->width = args[0].integer;
 		win->height = args[1].integer;
-		prepared = zxrequest(win, ZX_Buffer);
+		opaque = zxopaque(pixels->data, pixels->length);
+		prepared = zxrequest(win, opaque ? ZX_OpaqueBuffer : ZX_Buffer);
+		if(opaque && prepared != 2 && (prepared != 1 ||
+		   (image = lookupimage(win->image)) == nil || image->chan != BGR24)){
+			/* A guest can still be running an older zxrun.dis. */
+			opaque = 0;
+			prepared = zxrequest(win, ZX_Buffer);
+		}
 		if(prepared == 2)
 			ok = 1; /* Close is queued. */
 		else if(prepared == 1 && (image = lookupimage(win->image)) != nil){
 			locked = lockdisplay(image->display);
-			ok = zxupload(image, pixels->data, win->width, win->height);
+			if(opaque)
+				ok = zxuploadopaque(image, pixels->data, win->width, 0, win->height);
+			else
+				ok = zxupload(image, pixels->data, win->width, win->height);
 			if(locked)
 				unlockdisplay(image->display);
 			if(ok)
@@ -289,6 +369,54 @@ zxpresent(ZX_Window *win, const HostValue *args, int n, HostValue *result)
 	}
 	zxbool(result, ok);
 	return 1;
+}
+
+static int
+zxpresentrows(ZxSurface *surface, const HostValue *args, int n)
+{
+	ZX_Window *win = surface->win;
+	const HostValue *pixels;
+	Image *image;
+	int first, width, height, rows, stride, prepared, locked, ok;
+	int next = surface->nextrow;
+
+	surface->nextrow = 0;
+	if(n != 4 || !zxsize(args) || args[2].kind != HOST_INTEGER ||
+	   args[2].integer < 0 || args[2].integer >= args[1].integer)
+		return 0;
+	width = args[0].integer;
+	height = args[1].integer;
+	first = args[2].integer;
+	if(first != 0 && (first != next || width != surface->framewidth || height != surface->frameheight))
+		return 0;
+	pixels = args + 3;
+	stride = width*4;
+	if(pixels->kind != HOST_STRING || pixels->data == nil || pixels->length == 0 ||
+	   pixels->length > (size_t)(height-first)*stride || pixels->length % stride != 0 ||
+	   !zxopaque(pixels->data, pixels->length))
+		return 0;
+	rows = pixels->length / stride;
+	win->width = width;
+	win->height = height;
+	prepared = zxrequest(win, ZX_OpaqueBuffer);
+	if(prepared == 2)
+		ok = 1; /* Close is queued. */
+	else if(prepared != 1 || (image = lookupimage(win->image)) == nil)
+		return 0;
+	else{
+		locked = lockdisplay(image->display);
+		ok = zxuploadopaque(image, pixels->data, width, first, rows);
+		if(locked)
+			unlockdisplay(image->display);
+		if(ok && first+rows == height)
+			ok = zxrequest(win, ZX_Present);
+	}
+	if(ok && first+rows < height){
+		surface->nextrow = first + rows;
+		surface->framewidth = width;
+		surface->frameheight = height;
+	}
+	return ok;
 }
 
 static int
@@ -308,9 +436,21 @@ zxsurface(void *context, const char *module, const char *function,
 		ok = zxopenwindow(surface->win, args, n, result);
 	else if(strcmp(function, "Event") == 0)
 		ok = zxevent(surface, args, n, result);
-	else if(strcmp(function, "Present") == 0)
+	else if(strcmp(function, "PointerMillis") == 0){
+		ok = n == 0;
+		result->kind = HOST_INTEGER;
+		result->type = "s64";
+		result->integer = surface->pointermillis;
+	}else if(strcmp(function, "Present") == 0){
+		surface->nextrow = 0;
 		ok = zxpresent(surface->win, args, n, result);
-	else if(strcmp(function, "SetTasked") == 0){
+	}else if(strcmp(function, "PresentOpaqueRows") == 0){
+		zxbool(result, zxpresentrows(surface, args, n));
+		ok = 1;
+	}else if(strcmp(function, "SetTitle") == 0){
+		zxbool(result, n == 1 && zxtitle(surface->win, args) && zxrequest(surface->win, ZX_SetTitle));
+		ok = 1;
+	}else if(strcmp(function, "SetTasked") == 0){
 		ok = n == 1 && args[0].kind == HOST_INTEGER && args[0].type != nil &&
 			strcmp(args[0].type, "bool") == 0;
 		if(ok){
@@ -318,12 +458,136 @@ zxsurface(void *context, const char *module, const char *function,
 			zxbool(result, zxrequest(surface->win, ZX_SetTasked));
 		}
 	}else{
+		surface->nextrow = 0;
 		ok = n == 0 && zxrequest(surface->win, ZX_Close);
 		result->kind = HOST_VOID;
 	}
 	poperror();
 	release();
 	return ok;
+}
+
+/* Call with the interpreter acquired. Older launchers leave the payload intact. */
+static int
+zxtextrequest(ZX_Window *win, int operation, const char *text, int length)
+{
+	String *payload;
+	int ok;
+
+	payload = c2string((char *)text, length);
+	destroy(win->input.text);
+	win->input.text = payload;
+	Setmark(D2H(payload));
+	ok = zxrequest(win, operation) && win->input.text == H;
+	destroy(win->input.text);
+	win->input.text = H;
+	return ok;
+}
+
+static int
+zxwmlaunch(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxSurface *surface = context;
+	ZX_Window *win = surface->win;
+	const HostValue *program, *argv;
+	char request[ZxGuestPathBytes + 1 + ZxLaunchArgBytes];
+
+	USED(module);
+	USED(function);
+	result->kind = HOST_INTEGER;
+	result->type = "s32";
+	result->integer = -1;
+	if(n != 2)
+		return 0;
+	program = args;
+	argv = args + 1;
+	if(program->kind != HOST_STRING || program->length == 0 ||
+	   program->length > ZxGuestPathBytes || program->data == nil ||
+	   memchr(program->data, 0, program->length) != nil ||
+	   argv->kind != HOST_STRING || argv->length == 0 || argv->length > ZxLaunchArgBytes ||
+	   argv->data == nil || argv->data[argv->length-1] != 0)
+		return 1;
+	memmove(request, program->data, program->length);
+	request[program->length] = '\0';
+	memmove(request+program->length+1, argv->data, argv->length);
+	acquire();
+	if(waserror()){
+		release();
+		return 0;
+	}
+	if(zxtextrequest(win, ZX_Launch, request, program->length+1+argv->length))
+		result->integer = 0;
+	poperror();
+	release();
+	return 1;
+}
+
+static int
+zxresize(ZX_Window *win, const HostValue *args, int n)
+{
+	if(n != 2 || !zxsize(args))
+		return 0;
+	win->width = args[0].integer;
+	win->height = args[1].integer;
+	/* The launcher clears this on receipt, including if the window is closed. */
+	win->input.kind = 1;
+	return zxrequest(win, ZX_ResizeWindow) && win->input.kind == 0;
+}
+
+static int
+zxcursor(ZX_Window *win, const HostValue *args, int n)
+{
+	static const char hex[] = "0123456789abcdef";
+	const uchar *bytes;
+	vlong x, y, width, height;
+	char request[64 + 4 * ZxCursorSide * ZxCursorSide / 8];
+	int i, length;
+
+	if(n != 5 || args[0].kind != HOST_INTEGER || args[1].kind != HOST_INTEGER ||
+	   args[2].kind != HOST_INTEGER || args[3].kind != HOST_INTEGER || args[4].kind != HOST_STRING)
+		return 0;
+	x = args[0].integer;
+	y = args[1].integer;
+	width = args[2].integer;
+	height = args[3].integer;
+	if(width == 0 && height == 0 && args[4].length == 0)
+		return zxtextrequest(win, ZX_SetCursor, "cursor", sizeof("cursor")-1);
+	if(width <= 0 || width > ZxCursorSide || width % 8 != 0 ||
+	   height <= 0 || height > 2 * ZxCursorSide || height % 2 != 0 ||
+	   x > 0 || x <= -width || y > 0 || y <= -(height/2) ||
+	   args[4].data == nil || args[4].length != (size_t)(width/8*height))
+		return 0;
+	length = snprint(request, sizeof request, "cursor %d %d %d %d ", (int)x, (int)y, (int)width, (int)height);
+	bytes = args[4].data;
+	for(i = 0; i < (int)args[4].length; i++){
+		request[length++] = hex[bytes[i] >> 4];
+		request[length++] = hex[bytes[i] & 15];
+	}
+	return zxtextrequest(win, ZX_SetCursor, request, length);
+}
+
+static int
+zxwmwindow(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxSurface *surface = context;
+	int ok;
+
+	USED(module);
+	acquire();
+	if(waserror()){
+		release();
+		return 0;
+	}
+	if(strcmp(function, "Resize") == 0)
+		ok = zxresize(surface->win, args, n);
+	else
+		ok = zxcursor(surface->win, args, n);
+	zxbool(result, ok);
+	poperror();
+	release();
+	return 1;
 }
 
 static int
@@ -812,7 +1076,8 @@ zxmodule(const char *actual, const char *leaf)
 static size_t
 zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *bindings)
 {
-	static const char *names[] = {"Open", "Event", "Present", "Close", "SetTasked"};
+	static const char *names[] = {"Open", "Event", "Present", "Close", "SetTasked", "SetTitle",
+		"PresentOpaqueRows", "PointerMillis"};
 	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error",
 		"StatPacked", "FstatPacked", "WstatPacked", "FdPath"};
 	BundleCapabilityAbi abi;
@@ -847,6 +1112,13 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 					bindings[count++] = (HostBinding){abi.module, abi.function, zxio, command};
 					break;
 				}
+			continue;
+		}
+		if(surface->win != H && zxmodule(abi.module, "taijios_wm")){
+			if(strcmp(abi.function, "Launch") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxwmlaunch, surface};
+			else if(strcmp(abi.function, "Resize") == 0 || strcmp(abi.function, "SetCursor") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxwmwindow, surface};
 			continue;
 		}
 		if(surface->win == H || !zxmodule(abi.module, "zx_surface"))
@@ -892,7 +1164,7 @@ static ZxResult
 zxrun(String *s, List *args, ZX_Window *win)
 {
 	static const char *const roots[] = {"/dis/lib"};
-	ZxSurface surface = {0};
+	ZxSurface surface = {.pointermillis = -1};
 	ZxCommand command = {0};
 	HostBinding *bindings;
 	size_t count;
@@ -944,11 +1216,16 @@ zxrun(String *s, List *args, ZX_Window *win)
 			if(ready){
 				program = ZxModuleProgramOpen(loader, bundle, bindings, count);
 				if(program != nil){
-					/* Present consumes the framebuffer within the host call. */
+					/* Present consumes the pixels within the host call. */
 					for(size_t i = 0; i < count; i++){
-						if(bindings[i].call == zxsurface && strcmp(bindings[i].function, "Present") == 0)
+						if(bindings[i].call != zxsurface)
+							continue;
+						if(strcmp(bindings[i].function, "Present") == 0)
 							ZxModuleProgramBorrowHostString(program, bindings[i].module,
 								    bindings[i].function, 2);
+						else if(strcmp(bindings[i].function, "PresentOpaqueRows") == 0)
+							ZxModuleProgramBorrowHostString(program, bindings[i].module,
+							    bindings[i].function, 3);
 					}
 					ran = ZxModuleProgramRun(program, &result.value, &result.status);
 				}

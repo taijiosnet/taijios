@@ -1,6 +1,6 @@
 // Plain text layout for the manual macros used by Inferno's Parseman. See NOTICE.
 #import "std/vec"
-using T :: #import "tcl_types"
+using T :: #import "tcl/types"
 
 // Reference spans use the start and exclusive end byte offsets in body.
 ManualReference :: struct { first: s64; last: s64; }

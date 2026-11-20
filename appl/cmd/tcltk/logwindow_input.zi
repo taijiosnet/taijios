@@ -1,8 +1,8 @@
 // Pass guest pipe bytes directly to the Tk text model.
 #import "std/vec"
-using Tk :: #import "tcl_tk"
-using Check :: #import "tcl_tk_check"
-using View :: #import "tcl_tk_view"
+using Tk :: #import "tk/widgets"
+using Check :: #import "tk/check"
+using View :: #import "tk/view"
 
 Checked :: (path: string) -> bool {
     found := Tk.Find(path);

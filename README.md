@@ -23,11 +23,12 @@ zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
 For the Linux/386 emulator, build the hosted runtime from the Ziran revision
-`8e8e53bacd207ad8ed9d9a92a96483893e6788d8`. It includes binary64 fixes for Tcl's fixed-point
-formatter and compact execution plans, decoded instructions, and value locations
-for the default 32 MiB main pool. The loader releases the guest image buffer
-after decoding and before execution planning. The GUI package dependencies are
-pinned separately in `appl/wm/ziran.lock`.
+`86827bb4cd3bce7030e941829b353b832e6ed94b`. It includes binary64 fixes for Tcl's
+fixed-point formatter, compact execution plans, decoded instructions and value
+locations, and smaller growth steps for large heap and address tables. The
+loader releases the guest image buffer after decoding and before execution
+planning. The GUI package dependencies are pinned separately in
+`appl/wm/ziran.lock`.
 Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
 Use a host-built `zi2c` for code generation and keep the target objects in
 their own build directory.
@@ -97,9 +98,15 @@ app. To launch any compatible bundle in a TaijiOS window manager context, use
 `zxrun -w /path/to/app.zx`.
 
 The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
-`Close` to the guest window manager and Draw. `Present` uploads a packed RGBA8
-frame to a guest Draw image. The runtime borrows the RGBA bytes during the
-synchronous upload, so it can pass the frame without a temporary copy.
+`Close` to the guest window manager and Draw. `Present` accepts packed RGBA8
+pixels. It uploads opaque frames to a 24-bit Draw image and uses a 32-bit
+image for frames with transparency. The runtime borrows the RGBA bytes
+during the synchronous upload, so it can pass the frame without a temporary
+frame copy. `PresentOpaqueRows` lets opaque renderers submit a frame in
+contiguous rows, starting at row zero. The last upload displays the frame.
+The Taiji `SetTitle` binding updates the UTF-8 title of an open window and
+accepts up to 512 bytes without embedded NULs. `PointerMillis` returns the
+original timestamp of the latest pointer event, or `-1` when unavailable.
 `Event` supplies pointer buttons and movement, keyboard input, UTF-8 text,
 and redraw, resize, and close events. The X11 emulator exposes physical key
 presses, releases, and Shift, Control, and Alt through
@@ -109,6 +116,21 @@ ZX text input. Window managers without the key event path use the rune channel
 for both presses and text. Surfaces are limited to 4,194,304 pixels and 4,096
 pixels per axis.
 The `taijios_clock.MonotonicMillis` capability supplies elapsed time.
+
+Graphical ZX apps with an open window can use `taijios_wm.Launch` to start a
+graphical Dis or ZX child in the same guest namespace and working directory.
+Build with `--bind-host taijios_wm` and pass the program path and its UTF-8
+arguments, including `argv[0]`. End each argument with a NUL byte. The runner
+accepts up to 64 arguments in 4,096 bytes and a path up to 1,024 bytes.
+`Launch` returns `0` after dispatching the child in its own process group and
+`-1` if dispatch fails. The result covers dispatch only. The child runs
+independently of the parent window.
+
+`taijios_wm.Resize` changes a visible window's content size. The window manager
+may clamp the request to fit the display. Use the next resize event to get the
+actual dimensions. `taijios_wm.SetCursor` applies a packed Inferno cursor bitmap
+while the app's window has focus. Pass zero dimensions and an empty bitmap to
+restore the default cursor.
 
 ### Build and run ZX Clock
 
@@ -172,10 +194,26 @@ using the `taijios_clock` and `zx_surface` bindings. Install it with
 `(cd appl/cmd && mk install-memory-zx)` and run
 `zxrun -p -w /dis/wm/memory.zx` from the graphical guest shell.
 
+### Tcl and Tk packages
+
+The hosted Tcl shell and Tk apps use the standalone [Tcl](https://git.waozi.xyz/ziranlang/tcl)
+and [Tk](https://git.waozi.xyz/ziranlang/tk) packages selected by the root
+`ziran.toml` and `ziran.lock`. Use the Ziran package CLI on `PATH` and run
+`ziran pkg path tcl` or `ziran pkg path tk` to see the selected source.
+For development, add local package paths to the ignored root `ziran.local.toml`
+under `[overrides]`. Source edits use these paths with the existing lock.
+Run `ziran lock` when dependency declarations change. Use the checked-in
+lock for production.
+The Kryon applications use the separate manifest and lock under `appl/wm`.
+
+Build and install the guest Tcl shell and Tk applications with
+`(cd appl/cmd && mk install-zx)`. See the [Tcl integration guide](appl/lib/tcl.md)
+and [Tk applications guide](appl/cmd/tcltk/README.md) for launch and test commands.
+
 ### Build and run ZX `cat`
 
-With `zi2zx`, `mk`, and `limbo` on `PATH`, build and install the hosted
-emulator as above, then install the ZX commands, launcher, and shell.
+With `ziran`, `zi2zx`, `mk`, and `limbo` on `PATH`, build and install the
+hosted emulator as above, then install the ZX commands, launcher, and shell.
 
 ```sh
 (cd appl/cmd && mk install-zx)

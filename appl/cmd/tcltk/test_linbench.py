@@ -8,12 +8,12 @@ from PIL import Image
 
 from test_logwindow import private_display, read_output
 from test_memory import desktop
-from test_tcltk import BUILD, ROOT, SOURCES, command, compile_image, until
+from test_tcltk import BUILD, ROOT, SOURCES, command, compile_image, until, write_fixture
 
 
 FIXTURE = SOURCES / "linbench_listbox_commands.tcl"
-LISTBOX = ("--define", "TAIJI_TK_LISTBOX")
-LINBENCH = (*LISTBOX, "--define", "TAIJI_TK_NO_CANVAS")
+LISTBOX = ("--define", "TK_LISTBOX")
+LINBENCH = (*LISTBOX, "--define", "TK_NO_CANVAS")
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,8 @@ HOSTED = Window((52, 63), (120, 62), (46, 104, 451, 250), (25, 47, 67), 30, 474)
 
 
 def model_results():
-    (BUILD / "linbench_listbox_input.zi").write_text(
+    write_fixture(
+        "linbench_listbox_input.zi",
         "Script :: #string LISTBOX_END\n" + FIXTURE.read_text() + "LISTBOX_END;\n"
     )
     model = BUILD / "linbench_model_test.zx"

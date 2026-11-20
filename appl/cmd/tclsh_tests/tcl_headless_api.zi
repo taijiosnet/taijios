@@ -1,7 +1,7 @@
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Packages :: #import "tcl_packages"
-using T :: #import "tcl_types"
+using Tcl :: #import "tcl/interpreter"
+using Packages :: #import "tcl/packages"
+using T :: #import "tcl/types"
 using Fixture :: #import "tcl_headless_input"
 
 elapsed: s64;

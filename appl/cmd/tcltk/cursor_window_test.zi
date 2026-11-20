@@ -1,0 +1,33 @@
+using Tcl :: #import "tcl/interpreter";
+using Window :: #import "tcltk";
+using Cursor :: #import "tk_window_cursor";
+
+SCRIPT :: #string END_SCRIPT
+catch {cursor -image waiting} message
+puts $message
+image create bitmap waiting -file cursor.wait
+image create bitmap invalid -file dir.bit
+catch {cursor -image invalid} message
+puts $message
+set busy 0
+proc toggle_cursor {} {
+    global busy
+    if {$busy} {
+        cursor -default
+        set busy 0
+        puts default
+    } else {
+        cursor -image waiting
+        set busy 1
+        puts waiting
+    }
+}
+button .toggle -text {Toggle cursor} -command toggle_cursor
+pack .toggle
+END_SCRIPT;
+
+main :: () -> s32 {
+    interpreter: Tcl.Interpreter;
+    if !Cursor.Attach(*interpreter) { return 1 }
+    return Window.Run(*interpreter, SCRIPT, "Cursor test", 180, 100);
+}

@@ -1,8 +1,8 @@
 // The stock graphical LINPACK benchmark, adapted from appl/math/linbench.b. See NOTICE.
 #import "std/vec"
 #import "std/number_text"
-using Tcl :: #import "tcl"
-using T :: #import "tcl_types"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
 using Model :: #import "linbench_model"
 using Clock :: #import "taijios_clock"
 using Files :: #import "taijios_files"

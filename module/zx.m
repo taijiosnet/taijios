@@ -8,7 +8,7 @@ ZX: module
 	runargs:	fn(path: string, args: list of string): (big, int, string);
 
 	# Requests from the engine to the window process.
-	Open, Event, Buffer, Present, Close, Poll, SetTasked: con iota;
+	Open, Event, Buffer, Present, Close, Poll, SetTasked, OpaqueBuffer, SetTitle, Launch, ResizeWindow, SetCursor: con iota;
 	# Events returned to the program.
 	Idle, Closed, Redraw, Resize, Move, Down, Up, Key, Keyup, Text, Visibility: con iota;
 	Maxside: con 4096;

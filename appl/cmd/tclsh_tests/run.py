@@ -30,7 +30,7 @@ def expect(run, expected, *, codes=(0,), error=""):
 
 
 def compile_zx(source, entry, output, *module_paths):
-    args = ["zi2zx", "--root", source.parent, "--module-path", "appl/lib"]
+    args = ["ziran", "bundle", "--project", "--root", source.parent]
     for path in module_paths:
         args.extend(["--module-path", path])
     subprocess.run([*args, "--entry", entry, "-o", output, source], cwd=ROOT,
@@ -238,8 +238,8 @@ def main():
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     native = BUILD / "native"
-    subprocess.run(["ziran", "build", "--target=c", "--exe", "--root", "appl/cmd",
-                    "--module-path", "appl/lib", "--entry", "tclsh_native:main",
+    subprocess.run(["ziran", "build", "--project", "--target=c", "--exe", "--root", "appl/cmd",
+                    "--entry", "tclsh_native:main",
                     "-o", native, "appl/cmd/tclsh_native.zi"], cwd=ROOT, env=ENV, check=True)
     shell = native / "tclsh_native"
 

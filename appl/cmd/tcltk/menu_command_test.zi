@@ -1,7 +1,7 @@
 // Compare a line-by-line command transcript to the shipped Inferno tkcmd.
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
 using Fixture :: #import "menu_fixture"
 
 main :: () -> s32 {

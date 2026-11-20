@@ -1,5 +1,5 @@
 #import "std/vec"
-using UTF :: #import "tcl_tk_text"
+using UTF :: #import "tk/text"
 
 Stream :: struct {
     bytes: [4096]u8;

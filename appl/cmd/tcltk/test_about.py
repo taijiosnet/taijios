@@ -9,7 +9,7 @@ from PIL import Image, ImageChops
 from test_logwindow import private_display, read_output
 from test_memory import desktop
 from test_menu import inferno_window, pointer
-from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until
+from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until, write_fixture
 
 DESKTOP = (119, 119, 119)
 VERSION_INK = (255, 85, 0)
@@ -17,7 +17,7 @@ ART_SIZE = 300, 207
 STOCK_ORIGIN = 7, 25
 FIXTURE = SOURCES / "about_bitmap_commands.tcl"
 END = b"ABOUT-RETURNED"
-BITMAP_FLAGS = ("--define", "TAIJI_TK_BITMAP", "--define", "TAIJI_TK_NO_CANVAS",
+BITMAP_FLAGS = ("--define", "TK_BITMAP", "--define", "TK_NO_CANVAS",
                 "--bind-host", "zx_surface", "--bind-host", "taijios_files")
 
 
@@ -140,7 +140,7 @@ def main():
     if not args.installed:
         compile_image("about_app", about, *BITMAP_FLAGS)
         compile_image("tcltk", runner, *RUNNER_FLAGS)
-    (BUILD / "about_bitmap_fixture.zi").write_text(f"Commands :: #string ABOUT_END\n{FIXTURE.read_text()}ABOUT_END;\n")
+    write_fixture("about_bitmap_fixture.zi", f"Commands :: #string ABOUT_END\n{FIXTURE.read_text()}ABOUT_END;\n")
     model = BUILD / "about_bitmap_test.zx"
     compile_image("about_bitmap_test", model, *BITMAP_FLAGS)
     with private_display() as env:

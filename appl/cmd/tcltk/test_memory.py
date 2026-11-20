@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from PIL import Image
 
 from test_logwindow import private_display, read_output
-from test_tcltk import BUILD, EMU, ROOT, SOURCES, command, compile_image, launch, stop, until
+from test_tcltk import BUILD, EMU, ROOT, SOURCES, command, compile_image, launch, stop, until, write_fixture
 
 
 @contextmanager
@@ -164,7 +164,7 @@ def main():
         print("Inferno Memory verified three usage bars, high-water marks, refreshed size labels and window close")
         if not args.oracle_only:
             commands = (SOURCES / "memory_canvas_commands.tcl").read_text()
-            (BUILD / "memory_canvas_fixture.zi").write_text(f"Commands :: #string CANVAS_END\n{commands}CANVAS_END;\n")
+            write_fixture("memory_canvas_fixture.zi", f"Commands :: #string CANVAS_END\n{commands}CANVAS_END;\n")
             canvas = BUILD / "memory_canvas_test.zx"
             compile_image("memory_canvas_test", canvas)
             portable = command("zi2zx", "run", "--backend", "engine", canvas, capture_output=True, text=True, check=True)

@@ -1,13 +1,13 @@
 // Hosted shell script reader using the guest's redirected standard input.
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Packages :: #import "tcl_packages"
+using Tcl :: #import "tcl/interpreter"
+using Packages :: #import "tcl/packages"
 using Stdin :: #import "taijios_stdin"
 using Clock :: #import "taijios_clock"
 using Files :: #import "taijios_files"
 using Guest :: #import "taijios_io"
-using Io :: #import "tcl_io"
-using Types :: #import "tcl_types"
+using Io :: #import "tcl/io"
+using Types :: #import "tcl/types"
 
 GuestMillis :: (context: s64) -> s64 { return Clock.Millis() }
 

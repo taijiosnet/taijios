@@ -1,10 +1,10 @@
 // Live Inferno arena usage monitor, adapted from appl/wm/memory.b. See NOTICE.
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
 using Surface :: #import "zx_surface"
 using Window :: #import "tcltk"
-using Canvas :: #import "tcl_tk_canvas"
+using Canvas :: #import "tk/canvas"
 using Clock :: #import "taijios_clock"
 using Files :: #import "taijios_files"
 using Memory :: #import "memory_model"

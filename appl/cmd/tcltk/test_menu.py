@@ -7,12 +7,12 @@ from PIL import Image, ImageChops
 
 from test_logwindow import private_display, read_output
 from test_memory import desktop
-from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until
+from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until, write_fixture
 
 
 MENU_SCRIPT = SOURCES / "menu_commands.tcl"
 END_MARKER = "#MENU-READY"
-MENU_FLAGS = ("--define", "TAIJI_TK_MENU")
+MENU_FLAGS = ("--define", "TK_MENU")
 BORDER = (119, 149, 173)
 PRESSED = (188, 213, 231)
 DESKTOP = (119, 119, 119)
@@ -136,9 +136,9 @@ def main():
     if not args.oracle_only:
         BUILD.mkdir(parents=True, exist_ok=True)
         commands = MENU_SCRIPT.read_text()
-        (BUILD / "menu_fixture.zi").write_text(f"Commands :: #string MENU_END\n{commands}MENU_END;\n")
+        write_fixture("menu_fixture.zi", f"Commands :: #string MENU_END\n{commands}MENU_END;\n")
         model = BUILD / "menu_command_test.zx"
-        compile_image("menu_command_test", model, *MENU_FLAGS, "--define", "TAIJI_TK_NO_CANVAS")
+        compile_image("menu_command_test", model, *MENU_FLAGS, "--define", "TK_NO_CANVAS")
         portable = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
         if not args.installed:
             compile_image("tcltk", image, *RUNNER_FLAGS)

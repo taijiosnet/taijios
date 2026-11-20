@@ -20,11 +20,17 @@ Zxrun: module
 	init:	fn(ctxt: ref Draw->Context, args: list of string);
 };
 
+Wm: module
+{
+	init:	fn(ctxt: ref Draw->Context, args: list of string);
+};
+
 Zxresult: type (big, int, string);
 Stdin: type (int, array of byte);
 QueueSize: con 64;
 KeyCount: con 350;
 RGBAbytes: con Draw->Chans(16r48281808);
+RGBbytes: con Draw->Chans(16r281808);
 
 Events: adt {
 	ring: array of ZX->Input;
@@ -198,6 +204,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 	waiting := 0;
 	closed := 0;
 	tasked := 0;
+	timedpointer := 0;
 	rawkeys := 0;
 	held := array[KeyCount] of { * => 0 };
 
@@ -224,6 +231,8 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			ZX->Open =>
 				ok = w == nil && !closed;
 				if(ok){
+					# New engines request timestamps using the unused input key at Open.
+					timedpointer = bridge.input.key != 0;
 					controls := Wmclient->Resize;
 					if(bridge.hide)
 						controls |= Wmclient->Hide;
@@ -233,12 +242,15 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 					ctl = w.ctxt.ctl;
 					title = w.ctl;
 				}
-			ZX->Buffer =>
+			ZX->Buffer or ZX->OpaqueBuffer =>
 				ok = w != nil && !closed;
 				if(ok){
 					size := Draw->Point(bridge.width, bridge.height);
-					if(bridge.image == nil || !bridge.image.r.size().eq(size))
-						bridge.image = w.display.newimage(((0, 0), size), RGBAbytes, 0, Draw->Nofill);
+					format := RGBAbytes;
+					if(op == ZX->OpaqueBuffer)
+						format = RGBbytes;
+					if(bridge.image == nil || bridge.image.chans.desc != format.desc || !bridge.image.r.size().eq(size))
+						bridge.image = w.display.newimage(((0, 0), size), format, 0, Draw->Nofill);
 					ok = bridge.image != nil;
 				}else if(closed)
 					ok = 2;
@@ -261,7 +273,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				if(ok && w.image != nil && bounds.size().eq(bridge.image.r.size())){
 					ok = paint(w, bridge.image);
 					if(ok)
-						(presented, bridge.image) = (bridge.image, presented);
+						(presented, bridge.image) = (bridge.image, nil);
 				}
 				else if(closed)
 					ok = 1; # deliver close on the next Event
@@ -312,6 +324,30 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 					if(ok)
 						tasked = visibility(queue, w.image.r, bridge.tasked);
 				}
+			ZX->SetTitle =>
+				ok = !closed && w != nil;
+				if(ok)
+					w.settitle(bridge.title);
+			ZX->Launch =>
+				payload := bridge.input.text;
+				bridge.input.text = nil;
+				ok = !closed && w != nil && launchwindow(ctxt, payload);
+			ZX->ResizeWindow =>
+				bridge.input.kind = 0;
+				ok = !closed && !tasked && w != nil && w.image != nil;
+				if(ok){
+					size := Draw->Point(bridge.width, bridge.height);
+					if(!bounds.size().eq(size)){
+						r := w.screenr((bounds.min, bounds.min.add(size)));
+						ok = w.wmctl(sys->sprint("!reshape . -1 %d %d %d %d onscreen", r.min.x, r.min.y, r.max.x, r.max.y)) == nil;
+						if(ok)
+							bounds = reshapeevent(w, presented, queue, bounds);
+					}
+				}
+			ZX->SetCursor =>
+				spec := bridge.input.text;
+				bridge.input.text = nil;
+				ok = !closed && w != nil && w.image != nil && w.wmctl(spec) == nil;
 			ZX->Close =>
 				forget(w);
 				w = nil;
@@ -360,19 +396,15 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				tasked = visibility(queue, bounds, 1);
 			else if(c == "untask" && tasked)
 				tasked = visibility(queue, bounds, 0);
-			if(w.image != nil && (c == "raise" || (c != nil && c[0] == '!'))){
-				kind := ZX->Redraw;
-				if(!bounds.size().eq(w.image.r.size()))
-					kind = ZX->Resize;
-				bounds = w.image.r;
-				paint(w, presented);
-				queue.push(event(kind, bounds));
-			}
+			if(w.image != nil && (c == "raise" || (c != nil && c[0] == '!')))
+				bounds = reshapeevent(w, presented, queue, bounds);
 		p := <-ptr =>
 			if(!w.pointer(*p)){
 				e := event(ZX->Move, bounds);
 				e.x = p.xy.x - bounds.min.x;
 				e.y = p.xy.y - bounds.min.y;
+				if(timedpointer)
+					e.key = p.msec;
 				queue.push(e);
 				for(i := 0; i < 3; i++){
 					bit := 1 << i;
@@ -403,6 +435,62 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 	}
 }
 
+launchwindow(ctxt: ref Draw->Context, payload: string): int
+{
+	start := 0;
+	program: string;
+	args: list of string;
+	count := 0;
+	for(i := 0; i < len payload; i++){
+		if(payload[i] != 0)
+			continue;
+		word := payload[start:i];
+		if(start == 0)
+			program = word;
+		else{
+			if(++count > 64)
+				return 0;
+			args = word :: args;
+		}
+		start = i+1;
+	}
+	if(count == 0 || start != len payload || program == nil)
+		return 0;
+	argv: list of string;
+	for(; args != nil; args = tl args)
+		argv = hd args :: argv;
+	if(hd argv == nil)
+		return 0;
+	# Keep relative filenames distinct from built-in modules and zxrun options.
+	if(program[0] != '/' && program[0] != '#')
+		program = "./" + program;
+	file := program;
+	if(len program >= 3 && program[len program-3:] == ".zx"){
+		fd := sys->open(program, Sys->OREAD);
+		if(fd == nil)
+			return 0;
+		(n, info) := sys->fstat(fd);
+		if(n < 0 || info.mode & Sys->DMDIR)
+			return 0;
+		file = "/dis/zxrun.dis";
+		argv = hd argv :: "-c" :: "-w" :: program :: tl argv;
+	}
+	app := load Wm file;
+	if(app == nil)
+		return 0;
+	started := chan of int;
+	spawn launchchild(ctxt, app, argv, started);
+	return <-started;
+}
+
+launchchild(ctxt: ref Draw->Context, app: Wm, argv: list of string, started: chan of int)
+{
+	ok := sys->pctl(Sys->NEWPGRP|Sys->FORKFD, nil) >= 0;
+	started <-= ok;
+	if(ok)
+		app->init(ctxt, argv);
+}
+
 min(a, b: int): int
 {
 	if(a < b)
@@ -431,6 +519,16 @@ paint(w: ref Wmclient->Window, source: ref Draw->Image): int
 	w.image.draw(w.image.r, source, nil, source.r.min);
 	w.image.flush(Draw->Flushnow);
 	return 1;
+}
+
+reshapeevent(w: ref Wmclient->Window, presented: ref Draw->Image, queue: ref Events, bounds: Draw->Rect): Draw->Rect
+{
+	kind := ZX->Redraw;
+	if(!bounds.size().eq(w.image.r.size()))
+		kind = ZX->Resize;
+	paint(w, presented);
+	queue.push(event(kind, w.image.r));
+	return w.image.r;
 }
 
 event(kind: int, r: Draw->Rect): ZX->Input

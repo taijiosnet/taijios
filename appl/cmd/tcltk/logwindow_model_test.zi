@@ -1,7 +1,7 @@
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
-using Scroll :: #import "tcl_tk_scrollbar"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
+using Scroll :: #import "tk/scrollbar"
 using Fixture :: #import "logwindow_fixture"
 
 Expect :: (tcl: *Tcl.Interpreter, script: string, value: string) -> bool {

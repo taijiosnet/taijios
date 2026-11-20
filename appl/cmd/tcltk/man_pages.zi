@@ -1,7 +1,7 @@
 // Topic resolution from Inferno appl/lib/man.b and appl/wm/man.b. See NOTICE.
 #import "std/vec"
 using Files :: #import "taijios_files"
-using T :: #import "tcl_types"
+using T :: #import "tcl/types"
 #import "man_roff"
 
 Query :: struct { topic: string; section: s64; }

@@ -1,0 +1,15 @@
+[package]
+name = "taijios"
+module_roots = ["appl/lib"]
+
+[toolchain]
+git = "https://git.waozi.xyz/ziranlang/ziran.git"
+ref = "86827bb4cd3bce7030e941829b353b832e6ed94b"
+
+[dependencies.tcl]
+git = "https://git.waozi.xyz/ziranlang/tcl.git"
+ref = "50c96dd24ad521fb23660ac877f3e8d79b19d7c5"
+
+[dependencies.tk]
+git = "https://git.waozi.xyz/ziranlang/tk.git"
+ref = "9108c3a0e1fd926ca2b9ce355956e2c23bfffa29"

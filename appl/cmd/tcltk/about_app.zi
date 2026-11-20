@@ -1,9 +1,9 @@
 // About Inferno, ported from appl/wm/about.b. See ../../../NOTICE (MIT).
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
-using UTF :: #import "tcl_tk_text"
-using Lists :: #import "tcl_lists"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
+using UTF :: #import "tk/text"
+using Lists :: #import "tcl/lists"
 using Window :: #import "tcltk"
 using Files :: #import "taijios_files"
 

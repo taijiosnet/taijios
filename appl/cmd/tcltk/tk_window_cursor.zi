@@ -1,0 +1,23 @@
+// Attach the portable Tk cursor command to an ordinary Taiji guest window.
+#import "std/vec";
+using Tcl :: #import "tcl/interpreter";
+using Tk :: #import "tk/widgets";
+using T :: #import "tcl/types";
+using Images :: #import "tk/image";
+using Cursor :: #import "tk_cursor";
+using Wm :: #import "taijios_wm";
+
+Apply :: (x: s32, y: s32, width: s32, height: s32, bitmap: string) -> bool {
+    return Wm.SetCursor(x, y, width, height, bitmap);
+}
+
+Command :: (_: s64, args: []Text, result: *T.Result) {
+    Cursor.Command(*Tk.image_store, args, result, Apply);
+}
+
+Attach :: (interpreter: *Tcl.Interpreter) -> bool {
+    return Tcl.RegisterCommand(interpreter, "cursor", Command);
+}
+
+SetImage :: (name: string) -> bool { return Cursor.SetImage(*Tk.image_store, name, Apply) == "" }
+Reset :: () { unused Cursor.Reset(Apply) }

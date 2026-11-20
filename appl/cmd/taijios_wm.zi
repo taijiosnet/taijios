@@ -1,0 +1,18 @@
+host_api :: #system_library "host_api";
+
+#scope_export
+// Start an application in the current guest namespace and window manager.
+// Pass UTF-8 arguments including argv[0], each followed by a NUL byte.
+// Returns 0 when the child starts, or -1 if dispatch fails.
+Launch :: (program: string, argv: string) -> s32 #reads #foreign host_api;
+
+#scope_export
+// Request a new content size for a visible window. Event reports the actual size.
+Resize :: (width: s32, height: s32) -> bool #foreign host_api;
+
+#scope_export
+// Set this window's cursor. The bitmap contains consecutive clear and set
+// planes, at most 32 pixels wide and 32 rows per plane. Width is a multiple of
+// eight, height counts both planes, and the hotspot is a negative pixel offset.
+// Pass zero dimensions and an empty bitmap to restore the default.
+SetCursor :: (hot_x: s32, hot_y: s32, width: s32, height: s32, bitmap: string) -> bool #reads #foreign host_api;

@@ -1,0 +1,52 @@
+#import "std/vec"
+using Surface :: #import "zx_surface"
+
+WIDTH :: 300;
+ROWS :: 32;
+HEIGHT :: 3*ROWS;
+
+WaitClick :: () -> bool {
+    while true {
+        event := Surface.GetEvent(200);
+        if event.kind == Surface.Closed { return false }
+        if event.kind == Surface.Down && event.button == 1 { return true }
+    }
+}
+
+Fill :: (pixels: []u8, rgb: [3]u8, alpha: u8 = 255) {
+    for i: 0..pixels.count/4-1 {
+        for c: 0..2 { pixels[i*4+c] = rgb[c] }
+        pixels[i*4+3] = alpha;
+    }
+}
+
+main :: () -> s32 {
+    frame: Vec(u8);
+    if !VecResize(frame, WIDTH*HEIGHT*4) { return 1 }
+    pixels := VecSlice(frame, 0, frame.count);
+    strip := pixels[:WIDTH*ROWS*4];
+    Fill(pixels, .{244, 246, 247});
+    if !Surface.OpenWindow("Opaque rows", WIDTH, HEIGHT) { return 2 }
+    defer Surface.CloseWindow();
+    if !Surface.PresentRGBA(WIDTH, HEIGHT, TextView(pixels)) { return 3 }
+    if !WaitClick() { return 4 }
+    Fill(strip, .{90, 50, 20});
+    if Surface.PresentOpaqueRows(WIDTH, HEIGHT, ROWS, TextView(strip)) { return 5 }
+    if !Surface.PresentOpaqueRows(WIDTH, HEIGHT, 0, TextView(strip)) { return 6 }
+    if Surface.PresentOpaqueRows(WIDTH, HEIGHT, 2*ROWS, TextView(strip)) { return 7 }
+    if Surface.PresentOpaqueRows(WIDTH, HEIGHT, ROWS, TextView(strip)) { return 8 }
+    if !Surface.PresentOpaqueRows(WIDTH, HEIGHT, 0, TextView(strip)) { return 9 }
+    Fill(strip, .{20, 90, 50}, 150);
+    if Surface.PresentOpaqueRows(WIDTH, HEIGHT, ROWS, TextView(strip)) { return 10 }
+    Fill(strip, .{90, 50, 20});
+    if !Surface.PresentOpaqueRows(WIDTH, HEIGHT, 0, TextView(strip)) { return 11 }
+    print("partial\n");
+    if !WaitClick() { return 12 }
+    Fill(strip, .{20, 90, 50});
+    if !Surface.PresentOpaqueRows(WIDTH, HEIGHT, ROWS, TextView(strip)) { return 13 }
+    Fill(strip, .{50, 20, 90});
+    if !Surface.PresentOpaqueRows(WIDTH, HEIGHT, 2*ROWS, TextView(strip)) { return 14 }
+    print("complete\n");
+    if !WaitClick() { return 15 }
+    return 0;
+}

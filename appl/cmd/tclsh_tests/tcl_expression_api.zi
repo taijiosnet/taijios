@@ -1,4 +1,4 @@
-using Expression :: #import "tcl_calc"
+using Expression :: #import "tcl/calc"
 #import "std/vec"
 
 Expect :: (script: string, expected: string) -> bool {

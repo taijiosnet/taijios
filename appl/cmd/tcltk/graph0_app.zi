@@ -3,11 +3,11 @@
 using Args :: #import "taijios_args"
 using Files :: #import "taijios_files"
 using Graph :: #import "graph0_model"
-using Tcl :: #import "tcl"
-using T :: #import "tcl_types"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
 using Window :: #import "tcltk"
-using Tk :: #import "tcl_tk"
-using Canvas :: #import "tcl_tk_canvas"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
 
 horizontal: Graph.Axis;
 vertical: Graph.Axis;

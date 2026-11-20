@@ -1,8 +1,8 @@
 #import "std/vec"
 using Log :: #import "logwindow_stream"
 using Input :: #import "logwindow_input"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
 
 Check :: (stream: *Log.Stream, input: string, expected: string) -> bool {
     buffer := stream.bytes[stream.pending:];

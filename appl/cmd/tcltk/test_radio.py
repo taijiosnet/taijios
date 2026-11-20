@@ -10,7 +10,7 @@ from test_about import transcript
 from test_logwindow import private_display
 from test_memory import desktop
 from test_menu import BORDER, PRESSED, inferno_window, pointer
-from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until
+from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until, write_fixture
 
 
 def stock_directory(env):
@@ -138,9 +138,9 @@ def main():
     BUILD.mkdir(parents=True, exist_ok=True)
     fixture = SOURCES / "radio_commands.tcl"
     if not args.oracle_only:
-        (BUILD / "radio_fixture.zi").write_text(f"Commands :: #string RADIO_END\n{fixture.read_text()}RADIO_END;\n")
+        write_fixture("radio_fixture.zi", f"Commands :: #string RADIO_END\n{fixture.read_text()}RADIO_END;\n")
         model = BUILD / "radio_command_test.zx"
-        compile_image("radio_command_test", model, "--define", "TAIJI_TK_MENU", "--define", "TAIJI_TK_NO_CANVAS")
+        compile_image("radio_command_test", model, "--define", "TK_MENU", "--define", "TK_NO_CANVAS")
         portable = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
         image = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
         if not args.installed:

@@ -1,6 +1,6 @@
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Io :: #import "tcl_io"
+using Tcl :: #import "tcl/interpreter"
+using Io :: #import "tcl/io"
 using Scripts :: #import "tcl_channel_input"
 
 ModelFile :: struct { data: [128]u8; count: s64; exists: bool; }

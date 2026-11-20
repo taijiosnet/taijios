@@ -13,7 +13,7 @@ import time
 
 from PIL import Image, ImageChops
 
-from test_tcltk import BACKGROUND, BUILD, EMU, ROOT, SOURCES, color_bounds, command, compile_image, launch, stop, until
+from test_tcltk import BACKGROUND, BUILD, EMU, ROOT, SOURCES, color_bounds, command, compile_image, launch, stop, until, write_fixture
 
 
 TK_RESULT = (
@@ -288,7 +288,7 @@ def main():
     ] and not stream.stderr, stream
     print(stream.stdout.splitlines()[0])
     fixture = (SOURCES / "logwindow_commands.tcl").read_text()
-    (BUILD / "logwindow_fixture.zi").write_text(f"Commands :: #string LOG_COMMANDS_END\n{fixture}LOG_COMMANDS_END;\n")
+    write_fixture("logwindow_fixture.zi", f"Commands :: #string LOG_COMMANDS_END\n{fixture}LOG_COMMANDS_END;\n")
     model = BUILD / "logwindow_model_test.zx"
     compile_image("logwindow_model_test", model)
     result = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)

@@ -3,7 +3,7 @@
 using Args :: #import "taijios_args"
 using Files :: #import "taijios_files"
 using Stdin :: #import "taijios_stdin"
-using Tcl :: #import "tcl"
+using Tcl :: #import "tcl/interpreter"
 using Window :: #import "tcltk"
 using Surface :: #import "zx_surface"
 using Stream :: #import "logwindow_stream"
@@ -48,7 +48,9 @@ Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResul
     if message.bytes.count == 0 { return ifx restored then .Changed else .Idle }
     if exit_on_end && input.ended { return ifx Window.Execute(tcl, "destroy .") then .Idle else .Failed }
     if !Input.Append(TextView(message)) { print("logwindow: could not grow text widget\n"); return .Failed }
-    if tasked && Input.Checked(".bf.popup") {
+    // Input can arrive before the task visibility event reaches this loop.
+    // The host treats restoring an already visible window as a no-op.
+    if Input.Checked(".bf.popup") {
         if !Surface.SetWindowTasked(false) { return .Failed }
         tasked = false;
     }

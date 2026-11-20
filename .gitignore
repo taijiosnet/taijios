@@ -122,3 +122,9 @@ y.debug
 /[A-Z]*/*/bin/
 !/[A-Z]*/*/bin/mk
 !/[A-Z]*/*/bin/mkext
+
+/ziran.local.toml
+/build/tcl/ziran-package-inputs
+/build/tcltk/ziran-package-inputs
+/build/tcltk/fixtures/
+/backup/tcl-tk-vendored/

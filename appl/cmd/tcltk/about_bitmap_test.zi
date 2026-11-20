@@ -1,6 +1,6 @@
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
 using Window :: #import "tcltk"
 using Fixture :: #import "about_bitmap_fixture"
 

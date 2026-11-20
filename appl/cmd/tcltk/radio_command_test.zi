@@ -1,7 +1,7 @@
 // Compare selection widget commands with stock Inferno tkcmd.
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Tk :: #import "tcl_tk"
+using Tcl :: #import "tcl/interpreter"
+using Tk :: #import "tk/widgets"
 using Fixture :: #import "radio_fixture"
 
 main :: () -> s32 {

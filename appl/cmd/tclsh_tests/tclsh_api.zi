@@ -1,6 +1,6 @@
 #import "std/vec"
-using Tcl :: #import "tcl"
-using Types :: #import "tcl_types"
+using Tcl :: #import "tcl/interpreter"
+using Types :: #import "tcl/types"
 
 calls: s32;
 

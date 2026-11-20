@@ -1,0 +1,52 @@
+// Inferno Tk cursor image selection. The window service applies the shape.
+#import "std/vec"
+using T :: #import "tcl/types"
+using Bitmap :: #import "tk/bitmap"
+using Images :: #import "tk/image"
+
+SetShape :: #type (hot_x: s32, hot_y: s32, width: s32, height: s32, bitmap: string) -> bool;
+
+Reset :: (set_shape: SetShape) -> bool { return set_shape(0, 0, 0, 0, "") }
+
+SetImage :: (images: *Images.Store, name: string, set_shape: SetShape) -> string {
+    index := Images.Find(images, name);
+    if index < 0 { return "bad value" }
+    bitmap := *images.items[index].pixels;
+    width := bitmap.width;
+    height := bitmap.height;
+    if bitmap.encoding != .Mask || width == 0 || width%8 != 0 || height == 0 ||
+       height%8 != 0 || height > 16000/width {
+        return "bad cursor image";
+    }
+    // The WM expects the clear and set planes in consecutive, byte-aligned rows.
+    pitch := width/8;
+    aligned: Text;
+    data := TextView(VecSlice(bitmap.pixels, 0, bitmap.pixels.count));
+    if bitmap.start_bit != 0 {
+        if !VecResize(aligned.bytes, cast(s64)pitch*height) { return "out of memory" }
+        for y: 0..height-1 {
+            for x: 0..width-1 {
+                if Bitmap.Bit(bitmap, x, y) {
+                    aligned.bytes[y*pitch+x/8] |= cast(u8)(1 << (7-x%8));
+                }
+            }
+        }
+        data = TextView(aligned);
+    }
+    return ifx set_shape(bitmap.left, bitmap.top, width, height, data) then "" else "could not set cursor";
+}
+
+Command :: (images: *Images.Store, args: []Text, result: *T.Result, set_shape: SetShape) {
+    if args.count == 0 { return }
+    option := TextView(args[0]);
+    if option == "-default" && args.count == 1 {
+        if !Reset(set_shape) { Images.SetError(result, "could not set cursor") }
+        return;
+    }
+    if option == "-image" && args.count == 2 {
+        error := SetImage(images, TextView(args[1]), set_shape);
+        if error != "" { Images.SetError(result, error) }
+        return;
+    }
+    Images.SetError(result, "bad value");
+}

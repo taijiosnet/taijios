@@ -1,0 +1,45 @@
+using Surface :: #import "zx_surface";
+using Wm :: #import "taijios_wm";
+using Args :: #import "taijios_args";
+
+Present :: (width: s32, height: s32) -> bool {
+    row: [240*4]u8;
+    for i: 0..width-1 { row[i*4+3] = 255 }
+    pixels := TextView(row[:width*4]);
+    for y: 0..height-1 {
+        if !Surface.PresentOpaqueRows(width, height, y, pixels) { return false }
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    if Wm.Resize(240, 140) || Wm.SetCursor(0, 0, 0, 0, "") { return 1 }
+    if !Surface.Open("Window controls", 160, 100) { return 2 }
+    if Wm.Resize(240, 140) || Wm.SetCursor(0, 0, 0, 0, "") { return 3 }
+    if !Present(160, 100) { return 4 }
+    legacy := Args.OperandCount() != 0;
+    bits: [2]u8 = .{128, 255};
+    bitmap := TextView(bits[:]);
+    short_bitmap := TextView(bits[:1]);
+    if Wm.Resize(0, 140) || Wm.Resize(4096, 4096) || Wm.Resize(240, -1) { return 5 }
+    if Wm.SetCursor(-8, 0, 8, 2, bitmap) || Wm.SetCursor(0, 0, 8, 2, short_bitmap) ||
+       Wm.SetCursor(0, 0, 7, 2, bitmap) || Wm.SetCursor(0, 0, 8, 1, short_bitmap) { return 6 }
+    if Wm.SetCursor(-1, 0, 8, 2, bitmap) == legacy { return 7 }
+    if Wm.SetCursor(0, 0, 0, 0, "") == legacy { return 8 }
+    if Wm.Resize(240, 140) == legacy { return 9 }
+    if !Present(160, 100) { return 10 }
+    actual: bool;
+    for i: 0..14 {
+        e := Surface.GetEvent(40);
+        if e.kind == Surface.Resize && e.width == 240 && e.height == 140 {
+            actual = true;
+            break;
+        }
+    }
+    if actual == legacy { return 11 }
+    if !legacy && (!Wm.Resize(240, 140) || !Present(240, 140)) { return 12 }
+    Surface.Close();
+    if Wm.Resize(160, 100) || Wm.SetCursor(0, 0, 0, 0, "") { return 13 }
+    print("WINDOW CONTROLS OK\n");
+    return 0;
+}
