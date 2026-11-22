@@ -1,0 +1,47 @@
+// Inferno word quoting, as printed by %q and read back by the Limbo String
+// module's unquoted: a word that is empty or holds a space, a control
+// character or a quote is put in single quotes, and a quote inside is
+// written twice.
+
+NeedsQuotes :: (word: string) -> bool {
+    if word.count == 0 { return true }
+    for word { if it <= #char " " || it == #char "'" { return true } }
+    return false
+}
+
+// Appends word to out, quoted when it needs to be.
+Quote :: (out: *Vec(u8), word: string) {
+    if !NeedsQuotes(word) { BuilderAppend(<<out, word); return }
+    VecPush(<<out, #char "'")
+    for word {
+        if it == #char "'" { VecPush(<<out, #char "'") }
+        VecPush(<<out, it)
+    }
+    VecPush(<<out, #char "'")
+}
+
+Blank :: (c: u8) -> bool { return c == #char " " || c == #char "\t" || c == #char "\n" }
+
+// Splits text into words at spaces, tabs and newlines outside quotes and
+// removes the quoting. An unclosed quote ends at the end of the text.
+Unquoted :: (text: string, words: *Vec(Text)) {
+    i: s64 = 0
+    while i < text.count {
+        if Blank(text[i]) { i += 1; continue }
+        word: Text
+        quoted := false
+        while i < text.count {
+            c := text[i]
+            if !quoted && Blank(c) { break }
+            i += 1
+            if c != #char "'" { VecPush(word.bytes, c); continue }
+            if quoted && i < text.count && text[i] == #char "'" {
+                VecPush(word.bytes, c)
+                i += 1
+            } else {
+                quoted = !quoted
+            }
+        }
+        VecPush(<<words, word)
+    }
+}

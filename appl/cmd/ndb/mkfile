@@ -7,7 +7,6 @@ TARG=\
 	mkhash.dis\
 	query.dis\
 	registry.dis\
-	regquery.dis\
 
 SYSMODULES=\
 	sys.m\
@@ -27,13 +26,13 @@ DISBIN=$ROOT/dis/ndb
 <$ROOT/mkfiles/mkdis
 
 # Commands that exist only as ZX bundles.
-ZXCOMMANDS=csquery
-ZXUTIL=../zx_cli.zi ../zx_arg.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi
+ZXCOMMANDS=csquery regquery
+ZXUTIL=../zx_cli.zi ../zx_arg.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi ../../lib/taijios_quote.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
 &.zx: &.zi $ZXUTIL
-	zi2zx --root . --module-path .. --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
 
 $DISBIN/%.zx: %.zx
 	staged=$(mktemp "$target.XXXXXX") &&

@@ -1,6 +1,6 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
-// basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh and
-// ndb/csquery.
+// basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
+// ndb/csquery and ndb/regquery.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -31,10 +31,11 @@ ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 SQUEEZE :: "abczz\naabb\n";
 TCL_FILE :: "puts file-one\nset y 7\nnoSuch arg\nputs after-error\n";
+REGISTRY :: "service=tcp!alpha.example!1\n\tname=alpha owner='a b' kind=x\nservice=tcp!beta.example!2\n\tname=beta kind=y\nservice=tcp!gamma.example!3\n\tname=gamma kind=x\n";
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [79]Case = Case.[
+cases: [86]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -112,6 +113,14 @@ cases: [79]Case = Case.[
     .{args = "kill Cs > /dev/null"},
     .{tool = "ndb/csquery", args = "-s /nonexist x", status = "open", err = "csquery: can't open /nonexist: '/nonexist' file does not exist\n"},
     .{tool = "ndb/csquery", args = "-q", status = "usage", err = "usage: csquery [-x /net] [-s server] [address ...]\n"},
+    .{args = "mount -c {ndb/registry -f reg.db} mnt"},
+    .{tool = "ndb/regquery", args = "-m mnt name alpha", out = "tcp!alpha.example!1 kind x owner 'a b' name alpha\n"},
+    .{tool = "ndb/regquery", args = "-m mnt -n kind x", out = "tcp!alpha.example!1\ntcp!gamma.example!3\n"},
+    .{tool = "ndb/regquery", args = "-mmnt owner 'a b'", out = "tcp!alpha.example!1 kind x owner 'a b' name alpha\n"},
+    .{args = "echo 'kind y' | ndb/regquery -m mnt -n", out = "> tcp!beta.example!2\n> "},
+    // The registry is unmounted so that the emulator can exit.
+    .{tool = "unmount", args = "mnt"},
+    .{tool = "ndb/regquery", args = "-m /nonexist a b", status = "open", err = "regquery: can't open /nonexist/find: '/nonexist' file does not exist\n"},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},
@@ -160,6 +169,7 @@ Prepare :: (binary: string) -> bool {
         Write("empty", "") && Write("bin", binary) && Write("-dash", "dash\n") &&
         Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("file.tcl", TCL_FILE) && Write("two.tcl", "puts file-two\n") && Write("lines.tcl", TCL_LINES) &&
+        Write("reg.db", REGISTRY) && Directory("work/mnt") &&
         Write("fake/date.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
         SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755
 }
