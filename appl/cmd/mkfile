@@ -234,6 +234,9 @@ import.dis:	$MODDIR/encoding.m $MODDIR/factotum.m
 basename.dis: $MODDIR/names.m
 cleanname.dis: $MODDIR/names.m
 zxrun.dis: $MODDIR/daytime.m $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/wmlib.m $MODDIR/wmclient.m $MODDIR/timers.m $MODDIR/keyboard.m
+
+zxrun.zx: zxrun.zi taijios_process.zi taijios_args.zi taijios_io.zi mkfile
+	ziran bundle --root . --bind-host taijios_process --bind-host taijios_args --bind-host taijios_io --entry zxrun:main -o $target zxrun.zi
 cat.zx: cat.zi taijios_args.zi taijios_io.zi
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry cat:main -o $target cat.zi
 

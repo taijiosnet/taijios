@@ -1,0 +1,53 @@
+#import "std/vec";
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Process :: #import "taijios_process";
+
+main :: () -> s64 {
+    count := Args.OperandCount();
+    at: s32 = 0;
+    command := false;
+    named := false;
+    while at < count {
+        option := Args.Operand(at);
+        if option == "--" { at += 1; break }
+        if option == "-w" || option == "-p" {
+            return Fail("zxrun: direct ZX currently supports console execution");
+        }
+        if option != "-c" && option != "-s" { break }
+        command = true;
+        if option == "-s" { named = true }
+        at += 1;
+    }
+    if at == count || Args.Operand(at) == "" {
+        return Fail("usage: zxrun [-c|-s] file.zx [args ...]");
+    }
+    path := Args.Operand(at);
+    at += 1;
+    operands: Vec(string);
+    if !VecResize(operands, cast(s64)(count - at)) { return Fail("zxrun: cannot copy arguments") }
+    for i: 0..operands.count - 1 { operands[i] = Args.Operand(at + cast(s32)i) }
+    result := Process.Run(path, operands[:]);
+    if result.status < 0 {
+        message: Vec(u8);
+        BuilderPrint(*message, "zxrun: %: %", path, result.error);
+        return Fail(TextView(message[:]));
+    }
+    if result.status == 0 { return 0 }
+    if command {
+        if named && result.value != 0 && result.error != "" { unused Args.SetFailure(result.error) }
+        return result.value;
+    }
+    value: Vec(u8);
+    BuilderPrint(*value, "%\n", result.value);
+    if Io.WriteBytes(1, TextView(value[:])) != value.count { return Fail("zxrun: write error") }
+    return 0;
+}
+
+#scope_file
+
+Fail :: (message: string) -> s64 {
+    unused Io.WriteBytes(2, message);
+    unused Io.WriteBytes(2, "\n");
+    return 1;
+}

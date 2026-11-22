@@ -14,9 +14,20 @@ ROOT = Path(__file__).resolve().parents[2]
 PROBE = '''
 using Args :: #import "taijios_args";
 using Io :: #import "taijios_io";
+using Process :: #import "taijios_process";
 
-main :: () -> s32 {
+main :: () -> s64 {
     input_bytes: [8]u8;
+    if Args.Operand(0) == "children" {
+        noargs: [0]string;
+        outcome := Process.Run("/missing.zx", noargs[:]);
+        if outcome.status != -1 || outcome.error == "" { return 31 }
+        operands: [1]string = .{"fail"};
+        child := Process.Run("/probe.zx", operands[:]);
+        if child.status != 1 || child.value != 23 || child.error != "requested failure" { return 32 }
+        if Process.Run("/plain.zx", noargs[:]).status != 0 { return 33 }
+        return 0;
+    }
     if Args.Operand(0) == "streams" {
         if Io.ReadBytes(0, input_bytes[:]) != 2 || input_bytes[0] != 88 ||
            input_bytes[1] != 10 || Io.ReadBytes(0, input_bytes[:]) != 0 { return 18 }
@@ -29,6 +40,7 @@ main :: () -> s32 {
     }
     if Args.Operand(0) == "negative" { return -1 }
     if Args.Operand(0) == "out of range" { return 256 }
+    if Args.Operand(0) == "wide" { return 1099511627783 }
     if Args.OperandCount() != 3 || Args.Operand(0) != "-test" ||
        Args.Operand(1) != "café 猫" || Args.Operand(2) != "" { return 12 }
     input := Io.OpenFile("/input", 0);
@@ -124,6 +136,7 @@ def main():
         subprocess.run([
             'ziran', 'bundle', '--root', root, '--module-path', ROOT / 'appl/cmd',
             '--bind-host', 'taijios_args', '--bind-host', 'taijios_io',
+            '--bind-host', 'taijios_process',
             '--entry', 'probe:main', '-o', root / 'probe.zx', probe,
         ], env=env, check=True, timeout=60)
         plain = root / 'plain.zi'
@@ -131,6 +144,12 @@ def main():
         subprocess.run([
             'ziran', 'bundle', '--root', root, '--entry', 'plain:main',
             '-o', root / 'plain.zx', plain,
+        ], env=env, check=True, timeout=60)
+        commands = ROOT / 'appl/cmd'
+        subprocess.run([
+            'ziran', 'bundle', '--root', commands, '--bind-host', 'taijios_args',
+            '--bind-host', 'taijios_io', '--bind-host', 'taijios_process',
+            '--entry', 'zxrun:main', '-o', root / 'zxrun.zx', commands / 'zxrun.zi',
         ], env=env, check=True, timeout=60)
         assert not any(root.rglob('*.dis'))
 
@@ -163,6 +182,25 @@ def main():
             assert failed.returncode == 1 and f'emu: {path}:' in failed.stderr, failed
             assert 'Initial Dis:' not in failed.stdout, failed
         print('Direct ZX boot, arguments, namespace, standard streams, exit statuses and loader errors passed')
+
+        children = boot('/zxrun.zx', '-c', '/probe.zx', 'children')
+        assert children.returncode == 0 and 'ZX_VOID_OK' in children.stdout and not children.stderr, children
+        command = boot('/zxrun.zx', '-c', '/probe.zx', *operands)
+        assert command.returncode == 0 and 'ZX_BOOT_OK' in command.stdout and not command.stderr, command
+        command = boot('/zxrun.zx', '-c', '/probe.zx', 'streams', stdin='X\n')
+        assert command.returncode == 0 and command.stdout.splitlines()[-1] == 'out', command
+        assert command.stderr == 'err\n', command
+        command = boot('/zxrun.zx', '/probe.zx', 'fail')
+        assert command.returncode == 0 and command.stdout.splitlines()[-1] == '23' and not command.stderr, command
+        command = boot('/zxrun.zx', '/probe.zx', 'wide')
+        assert command.returncode == 0 and command.stdout.splitlines()[-1] == '1099511627783' and not command.stderr, command
+        command = boot('/zxrun.zx', '-c', '/probe.zx', 'fail')
+        assert command.returncode == 23 and not command.stderr, command
+        command = boot('/zxrun.zx', '-s', '/probe.zx', 'fail')
+        assert command.returncode == 23 and 'requested failure' in command.stderr, command
+        command = boot('/zxrun.zx', '/missing.zx')
+        assert command.returncode == 1 and 'zxrun: /missing.zx:' in command.stderr, command
+        print('Direct ZX runner launched child bundles with inherited streams and preserved scalar and named results')
         if args.graphics:
             check_draw(emulator, root, env)
 

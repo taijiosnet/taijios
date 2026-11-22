@@ -1,0 +1,12 @@
+host_api :: #system_library "host_api";
+
+Outcome :: struct {
+    // -1 means the bundle could not run, 0 means void, 1 means a scalar.
+    status: s32;
+    value: s64;
+    error: string;
+}
+
+// Start a console bundle in the caller's guest namespace and wait for it.
+// The child inherits the guest standard streams and receives only the operands.
+Run :: (path: string, operands: []string) -> Outcome #foreign host_api;

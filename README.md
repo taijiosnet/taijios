@@ -32,6 +32,13 @@ graphical bundles can import `guest_draw` and `guest_input` from `appl/lib`.
 The input module receives pointer motion and buttons, key transitions, and
 composed text from one blocking device stream.
 
+Build the direct console runner with `(cd appl/cmd && mk zxrun.zx)`. To run one
+ZX command from another in a guest without Dis, start the emulator with
+`/appl/cmd/zxrun.zx -c /hello.zx operand`. The child inherits the guest streams
+and namespace. A scalar is printed by default. `-c` returns the scalar as
+command status, and `-s` also reports the child's named failure when present.
+Windowed execution and Dis process groups still use the existing Dis runner.
+
 The emulator defaults to a 128 MiB `main` pool for native allocations, including
 the ZX runtime. Use `-p main=64M` or `-p main=32M` before the guest command to set
 a smaller limit. The full Rill desktop uses the 128 MiB default. `/dev/memory`

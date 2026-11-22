@@ -27,6 +27,7 @@ enum {
 	ZxCursorSide = 32,
 	ZxIoBytes = 8192,
 	ZxInitialFiles = 32,
+	ZxProcessDepth = 32,
 	ZxTaskLimit = 1024,
 	ZxTaskNameBytes = 64,
 	ZxPanelLabelBytes = 160,
@@ -883,9 +884,16 @@ struct ZxTask {
 };
 
 typedef struct ZxCommand ZxCommand;
+struct ZxResult {
+	long long value;
+	int status;
+	char problem[ERRMAX];
+};
+
 struct ZxCommand {
 	ZxSurface *surface;
 	int hosted;
+	int depth;
 	HostValue *args;
 	int argc;
 	int *fd;
@@ -900,7 +908,11 @@ struct ZxCommand {
 	vlong tasksample;
 	vlong taskskew;
 	uvlong pools[3][3];
+	ZxResult outcome;
+	HostField outfields[3];
 };
+
+static ZxResult zxexecute(const char *, ZxSurface *, ZxCommand *);
 
 static int
 zxcopyargs(ZxCommand *command, List *args)
@@ -1053,6 +1065,148 @@ zxiopath(const HostValue *name, char *path)
 	path[name->length] = 0;
 	return 1;
 }
+
+#ifdef __linux__
+typedef struct ZxProcess ZxProcess;
+struct ZxProcess {
+	Ref ref;
+	Rendez wait;
+	int done;
+	Fgrp *files;
+	ZxCommand command;
+	ZxResult result;
+	char path[ZxGuestPathBytes + 1];
+};
+
+static void
+zxprocessrelease(ZxProcess *process)
+{
+	if(decref(&process->ref) != 0)
+		return;
+	closefgrp(process->files);
+	zxfreeargs(&process->command);
+	free(process);
+}
+
+static void
+zxprocessworker(void *arg)
+{
+	ZxProcess *process = arg;
+	ZxSurface surface = {.win = H, .pointermillis = -1};
+
+	up->env->fgrp = process->files;
+	process->files = nil;
+	process->result = zxexecute(process->path, &surface, &process->command);
+	closefgrp(up->env->fgrp);
+	up->env->fgrp = nil;
+	lock(&process->wait.l);
+	process->done = 1;
+	unlock(&process->wait.l);
+	Wakeup(&process->wait);
+	zxprocessrelease(process);
+}
+
+static int
+zxprocessdone(void *arg)
+{
+	ZxProcess *process = arg;
+	return process->done;
+}
+
+static int
+zxprocessargs(ZxCommand *command, const HostValue *operands)
+{
+	const HostValue *arg;
+	HostValue *copy;
+	uchar *data;
+	int i;
+
+	if(operands->length == 0)
+		return 1;
+	if(operands->length > INT32_MAX || operands->length > SIZE_MAX / sizeof(*copy) || operands->elements == nil)
+		return 0;
+	command->args = calloc(operands->length, sizeof(*copy));
+	if(command->args == nil)
+		return 0;
+	command->argc = operands->length;
+	for(i = 0; i < command->argc; i++){
+		arg = operands->elements + i;
+		copy = command->args + i;
+		if(arg->kind != HOST_STRING || (arg->length != 0 && arg->data == nil))
+			return 0;
+		*copy = (HostValue){.kind = HOST_STRING, .type = "string", .length = arg->length};
+		if(arg->length != 0){
+			data = malloc(arg->length);
+			if(data == nil)
+				return 0;
+			memmove(data, arg->data, arg->length);
+			copy->data = data;
+		}
+	}
+	return 1;
+}
+
+static ZxResult
+zxprocessrun(ZxCommand *command, const HostValue *args)
+{
+	ZxProcess *process;
+	ZxResult result = {0, -1, ""};
+	const char *problem;
+
+	if(command->depth >= ZxProcessDepth)
+		return (ZxResult){0, -1, "ZX command nesting limit reached"};
+	process = calloc(1, sizeof(*process));
+	if(process == nil)
+		return (ZxResult){0, -1, "cannot allocate ZX process"};
+	process->ref.ref = 1;
+	process->command.depth = command->depth + 1;
+	if(!zxiopath(args, process->path) || process->path[0] == 0)
+		problem = "invalid ZX program path";
+	else if(!zxprocessargs(&process->command, args+1))
+		problem = "cannot copy ZX process arguments";
+	else{
+		if(waserror()){
+			kgerrstr(result.problem, sizeof(result.problem));
+			poperror();
+			zxprocessrelease(process);
+			return result;
+		}
+		process->files = dupfgrp(up->env->fgrp);
+		incref(&process->ref);
+		kproc("ZX command", zxprocessworker, process, KPDUPPG|KPDUPENVG);
+		Sleep(&process->wait, zxprocessdone, process);
+		poperror();
+		result = process->result;
+		zxprocessrelease(process);
+		return result;
+	}
+	snprint(result.problem, sizeof(result.problem), "%s", problem);
+	zxprocessrelease(process);
+	return result;
+}
+
+static int
+zxprocess(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	ZxResult *outcome = &command->outcome;
+	HostField *fields = command->outfields;
+
+	USED(module);
+	USED(function);
+	if(n != 2 || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE)
+		return 0;
+	*outcome = zxprocessrun(command, args);
+	fields[0] = (HostField){"status", {.kind = HOST_INTEGER, .type = "s32", .integer = outcome->status}};
+	fields[1] = (HostField){"value", {.kind = HOST_INTEGER, .type = "s64", .integer = outcome->value}};
+	fields[2] = (HostField){"error", {.kind = HOST_STRING, .type = "string", .data = (uchar*)outcome->problem,
+		.length = strlen(outcome->problem)}};
+	*result = (HostValue){.kind = HOST_RECORD, .type = "taijios_process.Outcome", .fields = fields,
+		.field_count = nelem(command->outfields)};
+	return 1;
+}
+#endif
 
 static int
 zxioslot(ZxCommand *command)
@@ -1923,6 +2077,12 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxargs, command};
 			continue;
 		}
+#ifdef __linux__
+		if(!usesdis() && zxmodule(abi.module, "taijios_process") && strcmp(abi.function, "Run") == 0){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
+			continue;
+		}
+#endif
 		if(zxmodule(abi.module, "taijios_io")){
 			for(j = 0; j < nelem(io); j++)
 				if(strcmp(abi.function, io[j]) == 0){
@@ -1966,12 +2126,6 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 	}
 	return count;
 }
-
-struct ZxResult {
-	long long value;
-	int status;
-	char problem[ERRMAX];
-};
 
 #if defined(__linux__) && defined(__i386__)
 static int
