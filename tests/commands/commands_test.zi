@@ -1,0 +1,203 @@
+// Guest regression for the shell commands rewritten in Ziran: cat, echo,
+// basename, cleanname, wc, uniq, tr, tee, cp, test, ls and mkdir.
+// Every expected status, output and diagnostic below is what the Limbo
+// originals printed when they were replaced. Each case runs through the
+// guest shell, which starts /dis/NAME.zx.
+//
+// From the TaijiOS root, after `(cd appl/cmd && mk install)`:
+//     ziran run --target=c --root tests/commands tests/commands/commands_test.zi -- [EMU]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+
+Case :: struct {
+    tool: string // empty: args is a whole shell command
+    args: string
+    input: string // fixture used as standard input; empty reads /dev/null
+    status: string
+    out: string
+    err: string
+    binary_out: bool // standard output must equal the binary fixture
+}
+
+WORK :: "build/tests/commands";
+
+ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
+WORDS :: "one two  three\nfour\tfive\n";
+SQUEEZE :: "abczz\naabb\n";
+
+
+cases: [71]Case = Case.[
+    .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
+    .{tool = "cat", input = "bin", binary_out = true},
+    .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
+    .{tool = "echo", args = "-n 'café' '' x", out = "café  x"},
+    .{tool = "echo", args = "-- -n hé", out = "-n hé\n"},
+    .{tool = "echo", out = "\n"},
+    .{tool = "basename", args = "/a/b.tar .tar", out = "b\n"},
+    .{tool = "basename", args = "-d /a/b/c", out = "/a/b\n"},
+    .{tool = "basename", args = "foo foo", out = "\n"},
+    .{tool = "basename", args = "-d x extra", status = "usage", err = "usage: basename [-d] string [suffix]\n"},
+    .{tool = "cleanname", args = "-d/pwd a/../b / '#é/ref/..' '../x' '' /../../ '#/' '#/a/..'", out = "/pwd/b\n/\n#é\n/x\n.\n/\n#/\n#/a\n"},
+    .{tool = "cleanname", args = "a/../../b //a///b/.././ '#x/user/../../..' '#é/../a' '#/../x'", out = "../b\n/a\n#x\n#é/a\n#/../x\n"},
+    .{tool = "cleanname", args = "-d", status = "usage", err = "usage: cleanname [-d pwd] name ...\n"},
+    .{tool = "wc", args = "a.txt words", out = "      4       5      23 a.txt\n      2       5      25 words\n      6      10      48 total\n"},
+    .{tool = "wc", args = "-lwc", input = "bin", out = "     40      81   10240\n"},
+    .{tool = "wc", args = "-q", input = "a.txt", status = "usage", err = "usage: wc [-lwcbe] [file ...]\n"},
+    .{tool = "wc", args = "missing words", out = "      2       5      25 words\n      2       5      25 total\n", err = "wc: can't open missing: 'missing' file does not exist\n"},
+    .{tool = "uniq", input = "a.txt", out = "alpha\nbeta\ncafé κ\n"},
+    .{tool = "uniq", args = "-c", input = "a.txt", out = "1\talpha\n2\tbeta\n1\tcafé κ\n"},
+    .{tool = "uniq", args = "-d a.txt", out = "beta\n"},
+    .{tool = "uniq", args = "-u", input = "a.txt", out = "alpha\ncafé κ\n"},
+    .{tool = "uniq", args = "-q", status = "usage", err = "usage: uniq [-udc] [file]\n"},
+    .{tool = "tr", args = "a-z A-Z", input = "a.txt", out = "ALPHA\nBETA\nBETA\nCAFé κ\n"},
+    .{tool = "tr", args = "-d ab", input = "a.txt", out = "lph\net\net\ncfé κ\n"},
+    .{tool = "tr", args = "-s a-c z", input = "squeeze", out = "z\nz\n"},
+    .{tool = "tr", args = "-c abc d", input = "squeeze", out = "abcdddaabbd"},
+    .{tool = "tr", args = "'κ' 'k'", input = "a.txt", out = "alpha\nbeta\nbeta\ncafé k\n"},
+    .{tool = "tee", args = "t1 t2", input = "a.txt", out = "alpha\nbeta\nbeta\ncafé κ\n"},
+    .{tool = "cat", args = "t1 t2", out = "alpha\nbeta\nbeta\ncafé κ\nalpha\nbeta\nbeta\ncafé κ\n"},
+    .{tool = "tee", args = "-a t1", input = "words", out = "one two  three\nfour\tfive\n"},
+    .{tool = "cat", args = "t1", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
+    .{tool = "tee", args = "nodir/x", input = "words", status = "error", err = "tee: cannot open nodir/x: 'nodir' file does not exist\n"},
+    .{tool = "cp", args = "a.txt c1"},
+    .{tool = "cat", args = "c1", out = "alpha\nbeta\nbeta\ncafé κ\n"},
+    .{tool = "cp", args = "-r tree t3"},
+    .{tool = "ls", args = "t3 t3/sub", out = "t3/sub\nt3/x\nt3/sub/y\n"},
+    .{tool = "cat", args = "t3/x t3/sub/y", out = "x\nyy\n"},
+    .{tool = "cp", args = "a.txt a.txt", status = "error", err = "cp: a.txt and a.txt are the same file\n"},
+    .{tool = "cp", args = "missing x", status = "error", err = "cp: missing: 'missing' file does not exist\n"},
+    .{tool = "cp", args = "a.txt empty nowhere", status = "error", err = "cp: nowhere  not a directory\n"},
+    .{tool = "cp", args = "-q", status = "usage", err = "usage: \tcp [-gux] src target\n\tcp [-r] [-gux] src ... directory\n"},
+    .{tool = "test", args = "-f a.txt"},
+    .{tool = "test", args = "-d tree"},
+    .{tool = "test", args = "-e missing", status = "false"},
+    .{tool = "test", args = "010 -eq 10"},
+    .{tool = "test", args = "1 -lt -1", status = "bad syntax", err = "test: bad syntax: unknown operator -lt\n"},
+    .{tool = "test", args = "'café' '=' 'café'"},
+    .{tool = "test", args = "-n ''", status = "false"},
+    .{tool = "test", status = "usage", err = ""},
+    .{tool = "test", args = "-s empty", status = "false"},
+    .{tool = "test", args = "'(' -f a.txt -a ! -d a.txt ')'"},
+    .{tool = "ls", args = "tree", out = "tree/sub\ntree/x\n"},
+    .{tool = "ls", args = "-p tree", out = "sub\nx\n"},
+    .{tool = "ls", args = "-d tree", out = "tree\n"},
+    .{tool = "ls", args = "-s a.txt bin", out = "a.txt\nbin\n"},
+    .{tool = "ls", args = "-r tree", out = "tree/x\ntree/sub\n"},
+    .{tool = "ls", args = "-F tree", out = "tree/sub/\ntree/x\n"},
+    .{tool = "ls", args = "-p -- -dash 'café blanc'", out = "-dash\ncafé blanc\n"},
+    .{tool = "ls", args = "missing a.txt", status = "errors", out = "a.txt\n", err = "ls: missing: 'missing' file does not exist\n"},
+    .{tool = "ls", args = "-Z", status = "usage", err = "usage: ls [-delmnpqrstucFT] [files]\n"},
+    .{tool = "mkdir", args = "m1 'café dir'"},
+    .{tool = "ls", args = "-d m1 'café dir'", out = "café dir\nm1\n"},
+    .{tool = "mkdir", args = "-p m2/a/b"},
+    .{tool = "test", args = "-d m2/a/b"},
+    .{tool = "mkdir", args = "a.txt", status = "error", err = "mkdir: a.txt already exists\n"},
+    .{tool = "mkdir", args = "missing/x", status = "error", err = "mkdir: can't create missing/x: 'missing' file does not exist\n"},
+    .{args = "whatis cat echo basename cleanname wc uniq tr tee cp test ls mkdir date", out = "/dis/cat.zx\n/dis/echo.zx\n/dis/basename.zx\n/dis/cleanname.zx\n/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n/dis/tee.zx\n/dis/cp.zx\n/dis/test.zx\n/dis/ls.zx\n/dis/mkdir.zx\n/dis/date.dis\n"},
+    // Dis commands that load other commands start the ZX bundles too.
+    .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
+    .{args = "time cat empty >[2] /dev/null"},
+    // The shell exports path to /env, so these two stay last.
+    // A .zx that is not executable, or is a directory, falls through to the next path entry.
+    .{args = "path=(fake /dis); whatis date ls", out = "/dis/date.dis\n/dis/ls.zx\n"},
+    // An executable .zx wins even when it is not a valid bundle.
+    .{args = "path=(fake /dis); whatis cat; cat >[2] /dev/null", status = "zx", out = "fake/cat.zx\n"},
+];
+
+failures: s32;
+
+Expect :: (ok: bool, index: s64, what: string, got: string, want: string) {
+    if ok { return }
+    failures += 1
+    print("FAIL case % (% %) %:\n  got  [%]\n  want [%]\n", index, cases[index].tool, cases[index].args, what, got, want)
+}
+
+Write :: (name: string, text: string) -> bool {
+    path: Vec(u8)
+    BuilderPrint(*path, "%/work/%", WORK, name)
+    return WriteEntireFile(BuilderFinish(path), text)
+}
+
+Directory :: (name: string) -> bool {
+    path: Vec(u8)
+    BuilderPrint(*path, "%/%", WORK, name)
+    return CreateDirectory(BuilderFinish(path))
+}
+
+// The bytes 0 through 255, forty times: crosses the 8 KiB transfer size.
+Binary :: () -> Text {
+    bytes: Vec(u8)
+    for 1..40 { for 0..255 { VecPush(bytes, cast(u8)it) } }
+    return BuilderFinish(bytes)
+}
+
+Prepare :: (binary: string) -> bool {
+    unused RemoveTree(WORK)
+    unused CreateDirectory("build")
+    unused CreateDirectory("build/tests")
+    if !CreateDirectory(WORK) || !Directory("work") || !Directory("result") ||
+        !Directory("work/tree") || !Directory("work/tree/sub") || !Directory("work/fake") ||
+        !Directory("work/fake/ls.zx") { return false }
+    return Write("a.txt", ALPHA) && Write("words", WORDS) && Write("squeeze", SQUEEZE) &&
+        Write("empty", "") && Write("bin", binary) && Write("-dash", "dash\n") &&
+        Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
+        Write("fake/date.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
+        SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755
+}
+
+// One guest shell script runs every case and keeps each result in a file.
+Script :: () -> Text {
+    script: Vec(u8)
+    BuilderPrint(*script, "cd /%/work\n", WORK)
+    for cases {
+        if it.tool == "" {
+            BuilderPrint(*script, "{%}", it.args)
+        } else {
+            BuilderPrint(*script, "% %", it.tool, it.args)
+        }
+        input := ifx it.input == "" then "/dev/null" else it.input
+        BuilderPrint(*script, " < % > ../result/out.% >[2] ../result/err.%\n", input, it_index, it_index)
+        BuilderPrint(*script, "echo $status > ../result/status.%\n", it_index)
+    }
+    return BuilderFinish(script)
+}
+
+Result :: (kind: string, index: s64) -> string {
+    path: Vec(u8)
+    BuilderPrint(*path, "%/result/%.%", WORK, kind, index)
+    text, ok := ReadEntireFile(BuilderFinish(path))
+    return ifx ok then text else "<missing>"
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu"
+    binary: Text = Binary()
+    if !Prepare(TextView(binary)) { print("cannot prepare %\n", WORK); return 1 }
+    script: Text = Script()
+    if !WriteEntireFile("build/tests/commands/script", TextView(script)) { return 1 }
+    root: Text = WorkingDirectory()
+    guest: Vec(u8)
+    BuilderPrint(*guest, "/%/script", WORK)
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)]
+    run: ProcessRun
+    started := RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run)
+    if !started { print("cannot start %\n", emu); return 1 }
+    for cases {
+        status_line: Vec(u8)
+        BuilderPrint(*status_line, "%\n", it.status)
+        status := BuilderFinish(status_line)
+        got_status := Result("status", it_index)
+        Expect(got_status == status, it_index, "status", got_status, status)
+        out := Result("out", it_index)
+        want := ifx it.binary_out then TextView(binary) else it.out
+        Expect(out == want, it_index, "stdout", out, want)
+        err := Result("err", it_index)
+        Expect(err == it.err, it_index, "stderr", err, it.err)
+    }
+    if failures != 0 { print("commands: % failures in % cases\n", failures, cases.count); return 1 }
+    print("commands: all % cases match the Limbo originals\n", cases.count)
+    return 0
+}

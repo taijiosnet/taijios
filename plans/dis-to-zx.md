@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **867** open rows = **845** on-disk `dis/` files (**161** top-level `dis/*.dis` + **684** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **855** open rows = **833** on-disk `dis/` files (**149** top-level `dis/*.dis` + **684** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -33,7 +33,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 
 ## Next ready order (independent, boot-ordered)
 
-1. Shell/command rows with installed zx-twins (13 rows): verify private-guest parity, then delete `.dis` + Limbo source in one tested commit.
+1. `dis/tclsh.dis` (1 row, zx-twin): the ZX shell reads one whole script from stdin; the Limbo shell loads its file operands, then reads `tcl%` prompt lines and evaluates each. Add file operands and the line loop to the ZX shell, make `dis/tclsh.zx` executable, then delete `tclsh.dis` + `appl/cmd/tclsh.b`. The `dis/lib/tcl_*.dis` libraries go with it once nothing else loads them.
 2. Non-boot libraries (189 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, ida, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (115 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (96 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
@@ -253,7 +253,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 162 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 150 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -265,22 +265,18 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/asm.dis | appl/cmd/asm/asm.b|appl/cmd/limbo/asm.b |  | - |  |
 | dis/auhdr.dis | appl/cmd/auplay.b (copy rule) |  | - |  |
 | dis/auplay.dis | appl/cmd/auplay.b |  | - |  |
-| dis/basename.dis | appl/cmd/basename.b |  | - | zx-twin |
 | dis/bind.dis | appl/cmd/bind.b |  | - |  |
 | dis/bytes.dis | appl/cmd/bytes.b |  | - |  |
 | dis/cal.dis | appl/cmd/cal.b |  | - |  |
 | dis/calc.dis | appl/cmd/calc.b |  | - |  |
-| dis/cat.dis | appl/cmd/cat.b |  | - | zx-twin |
 | dis/cd.dis | appl/cmd/cd.b |  | - |  |
 | dis/cddb.dis | appl/cmd/cddb.b |  | - |  |
 | dis/charon.dis | appl/charon/charon.b |  | - |  |
 | dis/chgrp.dis | appl/cmd/chgrp.b |  | - |  |
 | dis/chmod.dis | appl/cmd/chmod.b |  | - |  |
-| dis/cleanname.dis | appl/cmd/cleanname.b |  | - | zx-twin |
 | dis/cmp.dis | appl/cmd/cmp.b |  | - |  |
 | dis/comm.dis | appl/cmd/comm.b |  | - |  |
 | dis/cook.dis | appl/cmd/cook.b |  | - |  |
-| dis/cp.dis | appl/cmd/cp.b |  | - | zx-twin |
 | dis/cprof.dis | appl/cmd/cprof.b |  | - |  |
 | dis/cpu.dis | appl/cmd/cpu.b |  | - |  |
 | dis/crypt.dis | appl/cmd/crypt.b | module/crypt.m | - |  |
@@ -291,7 +287,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/disdep.dis | appl/cmd/disdep.b |  | - |  |
 | dis/disdump.dis | appl/cmd/disdump.b |  | - |  |
 | dis/du.dis | appl/cmd/du.b |  | - |  |
-| dis/echo.dis | appl/cmd/echo.b |  | - | zx-twin |
 | dis/ed.dis | appl/cmd/ed.b |  | - |  |
 | dis/emuinit.dis | appl/cmd/emuinit.b |  | - |  |
 | dis/env.dis | appl/cmd/env.b | module/env.m | - |  |
@@ -316,7 +311,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/limbo.dis | appl/cmd/limbo/limbo.b |  | - |  |
 | dis/logfile.dis | appl/cmd/logfile.b |  | - |  |
 | dis/look.dis | appl/cmd/look.b |  | - |  |
-| dis/ls.dis | appl/cmd/ls.b |  | - | zx-twin |
 | dis/lstar.dis | appl/cmd/lstar.b |  | - |  |
 | dis/m4.dis | appl/cmd/m4.b |  | - |  |
 | dis/man2html.dis | appl/cmd/man2html.b |  | - |  |
@@ -327,7 +321,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/mdb.dis | appl/cmd/mdb.b |  | - |  |
 | dis/metamorph.dis | appl/cmd/metamorph.b |  | - |  |
 | dis/mk.dis | appl/cmd/mk/mk.b |  | - |  |
-| dis/mkdir.dis | appl/cmd/mkdir.b |  | - | zx-twin |
 | dis/mount.dis | appl/cmd/mount.b |  | - |  |
 | dis/mouse.dis | appl/cmd/mouse.b |  | - |  |
 | dis/mprof.dis | appl/cmd/mprof.b |  | - |  |
@@ -387,9 +380,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/tail.dis | appl/cmd/tail.b |  | - |  |
 | dis/tclsh.dis | appl/cmd/tclsh.b |  | - | zx-twin |
 | dis/tcs.dis | appl/cmd/tcs.b |  | - |  |
-| dis/tee.dis | appl/cmd/tee.b |  | - | zx-twin |
 | dis/telnet.dis | appl/cmd/telnet.b |  | - |  |
-| dis/test.dis | appl/cmd/test.b |  | - | zx-twin |
 | dis/time.dis | appl/cmd/time.b |  | - |  |
 | dis/timestamp.dis | appl/cmd/timestamp.b |  | - |  |
 | dis/tiny/broke.dis | appl/tiny/broke.b |  | - |  |
@@ -399,10 +390,8 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/tokenize.dis | appl/cmd/tokenize.b |  | - |  |
 | dis/touch.dis | appl/cmd/touch.b |  | - |  |
 | dis/touchcal.dis | appl/cmd/touchcal.b |  | - |  |
-| dis/tr.dis | appl/cmd/tr.b |  | - | zx-twin |
 | dis/tsort.dis | appl/cmd/tsort.b |  | - |  |
 | dis/unicode.dis | appl/cmd/unicode.b |  | - |  |
-| dis/uniq.dis | appl/cmd/uniq.b |  | - | zx-twin |
 | dis/units.dis | appl/cmd/units.b |  | - |  |
 | dis/unmount.dis | appl/cmd/unmount.b |  | - |  |
 | dis/uudecode.dis | appl/cmd/uudecode.b |  | - |  |
@@ -410,7 +399,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/vacget.dis | appl/cmd/vacget.b |  | - |  |
 | dis/vacput.dis | appl/cmd/vacput.b |  | - |  |
 | dis/wav2iaf.dis | appl/cmd/wav2iaf.b |  | - |  |
-| dis/wc.dis | appl/cmd/wc.b |  | - | zx-twin |
 | dis/webgrab.dis | appl/cmd/webgrab.b |  | - |  |
 | dis/wish.dis | appl/cmd/wish.b |  | - |  |
 | dis/wmexport.dis | appl/cmd/wmexport.b |  | - |  |

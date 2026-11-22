@@ -39,14 +39,20 @@ init(ctxt: ref Draw->Context, args: list of string)
 	}
 	cmd := hd args;
 	args = tl args;
-	if(len cmd < 4 || cmd[len cmd -4:]!=".dis")
+	name := cmd;
+	isdis := len cmd >= 4 && cmd[len cmd -4:] == ".dis";
+	if(!isdis)
 		cmd += ".dis";
 	sh := load Command cmd;
 	if (sh == nil){
 		cmd = "/dis/"+cmd;
 		sh = load Command cmd;
 	}
-	if (sh == nil){
+	# Without a Dis module, the shell finds ZX commands and scripts.
+	shell: Sh;
+	if (sh == nil && !isdis)
+		shell = load Sh Sh->PATH;
+	if (sh == nil && shell == nil){
 		sys->fprint(stderr, "xargs: can't load %s: %r\n", cmd);
 		exit;
 	}
@@ -61,6 +67,10 @@ init(ctxt: ref Draw->Context, args: list of string)
 		(nil, rargs) := sys->tokenize(t, " \t\n");
 		if (rargs == nil)
 			continue;
+		if (shell != nil) {
+			shell->run(ctxt, append(name :: args, rargs));
+			continue;
+		}
 		if (args == nil)
 			rargs = cmd :: rargs;
 		else

@@ -457,20 +457,27 @@ Build and install the guest Tcl shell and Tk applications with
 `(cd appl/cmd && mk install-zx)`. See the [Tcl integration guide](appl/lib/tcl.md)
 and [Tk applications guide](appl/cmd/tcltk/README.md) for launch and test commands.
 
-### Build and run ZX `cat`
+### ZX shell commands
 
-With `ziran`, `zi2zx`, `mk`, and `limbo` on `PATH`, build and install the
-hosted emulator as above, then install the ZX commands, launcher, and shell.
+`cat`, `echo`, `basename`, `cleanname`, `wc`, `uniq`, `tr`, `tee`, `cp`,
+`test`, `ls` and `mkdir` are written in Ziran and installed only as
+executable ZX bundles. With `ziran`, `zi2zx`, `mk`, and `limbo` on `PATH`,
+build and install the hosted emulator as above, then install the commands.
 
 ```sh
-(cd appl/cmd && mk install-zx)
+(cd appl/cmd && mk install)
 Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'whatis cat; echo hello | cat'
 ```
 
-Each `-` operand reads stdin. With no operands `cat` reads stdin once.
-Use `/dis/cat.dis` to run the Dis version. `zxrun -c /dis/cat.zx [file ...]`
-accepts void or zero as success and puts a nonzero return value in `$status`.
-`zxrun file.zx [args ...]` prints the returned value.
+For each directory in `$path`, `sh` tries an executable `.zx` when the ZX
+runtime is available, followed by `.dis` and the executable script form.
+Built-ins retain first priority. A name ending in `.dis` selects the Dis
+module. The shell launches a ZX command with `zxrun -s`, so existing scripts
+keep named errors such as `usage` and `bad open`. `xargs` and `time` hand a
+command that has no Dis module to the shell, so they start ZX commands too.
+`zxrun -c /dis/cat.zx [file ...]` accepts void or zero as success and puts a
+nonzero return value in `$status`. `zxrun file.zx [args ...]` prints the
+returned value.
 
 ZX commands use two typed capabilities declared in `appl/cmd`.
 
@@ -502,51 +509,22 @@ ZX commands use two typed capabilities declared in `appl/cmd`.
   `Cwd()` returns the working directory and `Home()` reads the guest `home`
   variable. Both return an empty string if the path is unavailable.
 
-Test the command against its Dis counterpart with
-`python3 -u build/zx-smoke/run.py Linux/386/bin/emu --cat`.
+`basename` and `cleanname` share the Ziran path functions in
+`appl/lib/taijios_names.zi`, and `uniq` and `tr` share a buffered rune
+reader. `tee` fans out guest stdin and supports `-a` and `--`. `cp` supports
+recursive copies and guest owner, group, mode, and timestamp flags. `test`
+uses guest file metadata, descriptor paths, and named shell statuses. `ls`
+reads packed directory entries through `taijios_io` and keeps union-directory
+order, metadata, sorting, and formatting in Ziran. `mkdir` supports `-p`.
 
-### Build and run ZX `echo`, `basename`, and `cleanname`
-
-`mk install-zx` installs `cat`, `echo`, `basename`, and `cleanname` as
-executable bundles. For each directory in `$path`, `sh` tries an executable
-`.zx` when the ZX runtime is available, followed by `.dis` and the executable
-script form. Built-ins retain first priority. A name ending in `.dis`
-selects the Dis module. The shell launches a ZX command with `zxrun -s`,
-so existing scripts keep named errors such as `usage` and `bad open`.
-They use `taijios_args` for operands and `taijios_io` for output and diagnostics.
-`basename` and `cleanname` share the Ziran path functions in `appl/lib/taijios_names.zi`.
+The command test runs each command in the hosted emulator and compares its
+status, output and diagnostics with what the Limbo version printed.
 
 ```sh
-Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'echo hello; basename /a/file.txt .txt; cleanname -d /a b/../c'
-python3 -u build/zx-smoke/run.py Linux/386/bin/emu --stock-zx --cat --utilities
+ziran run --target=c --root tests/commands tests/commands/commands_test.zi
 ```
 
 ### Dis command migration order
-
-`mk install-zx` also installs `wc`, `uniq`, and `tr` as shell commands.
-All three use `taijios_io` for guest I/O. `uniq` and `tr` share a buffered
-rune reader. The stream parity test uses a freshly built Dis `uniq` so it
-can compare the `-c` flag from the current Limbo source.
-
-```sh
-(cd appl/cmd && mk install-streams-zx uniq.dis)
-python3 build/zx-smoke/run.py Linux/386/bin/emu --streams
-```
-
-`tee`, `cp`, `test`, and `ls` are installed as executable ZX commands. `tee`
-fans out guest stdin and supports `-a` and `--`. `cp` supports recursive
-copies and guest owner, group, mode, and timestamp flags. `test` uses guest
-file metadata, descriptor paths, and named shell statuses. `ls` reads packed
-directory entries through `taijios_io` and keeps union-directory order,
-metadata, sorting, and formatting in Ziran. The Dis versions are available
-as `/dis/tee.dis`, `/dis/cp.dis`, `/dis/test.dis`, and `/dis/ls.dis`.
-`mkdir` creates directories and supports `-p` using the guest namespace.
-The original command remains available as `/dis/mkdir.dis`.
-
-```sh
-(cd appl/cmd && mk install-file-commands-zx)
-python3 -u build/zx-smoke/run.py Linux/386/bin/emu --tee --file-commands --ls
-```
 
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
 with the shell's `Command.init` signature. That includes 160 entries directly

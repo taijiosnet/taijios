@@ -13,6 +13,7 @@ Time: module
 };
 
 sys: Sys;
+shell: Sh;
 stderr, waitfd: ref FD;
 
 init(ctxt: ref Context, argv: list of string)
@@ -35,8 +36,9 @@ init(ctxt: ref Context, argv: list of string)
 	}
 
 	file := hd argv;
+	isdis := len file >= 4 && file[len file-4:] == ".dis";
 
-	if(len file<4 || file[len file-4:]!=".dis")
+	if(!isdis)
 		file += ".dis";
 
 	t0 := sys->millisec();
@@ -49,7 +51,10 @@ init(ctxt: ref Context, argv: list of string)
 			if(c == nil)
 				err = sys->sprint("%r");
 		}
-		if(c == nil) {
+		# Without a Dis module, the shell finds ZX commands and scripts.
+		if(c == nil && !isdis)
+			shell = load Sh Sh->PATH;
+		if(c == nil && shell == nil) {
 			sys->fprint(stderr, "time: %s: %s\n", hd argv, err);
 			return;
 		}
@@ -72,7 +77,10 @@ init(ctxt: ref Context, argv: list of string)
 cmd(ctxt: ref Context, c: Command, pidc: chan of int, argv: list of string)
 {
 	pidc <-= sys->pctl(0, nil);
-	c->init(ctxt, argv);
+	if(c != nil)
+		c->init(ctxt, argv);
+	else
+		shell->run(ctxt, argv);
 }
 
 waitfor(pid: int)

@@ -31,23 +31,19 @@ TARG=\
 	archfs.dis\
 	auplay.dis\
 	auhdr.dis\
-	basename.dis\
 	bind.dis\
 	# bit2gif.dis\
 	bytes.dis\
 	cal.dis\
 	calc.dis\
-	cat.dis\
 	cd.dis\
 	cddb.dis\
 	chgrp.dis\
 	chmod.dis\
-	cleanname.dis\
 	cmp.dis\
 	comm.dis\
 	cook.dis\
 	cprof.dis\
-	cp.dis\
 	cpu.dis\
 	crypt.dis\
 	date.dis\
@@ -59,7 +55,6 @@ TARG=\
 	disdump.dis\
 	dossrv.dis\
 	du.dis\
-	echo.dis\
 	ed.dis\
 	emuinit.dis\
 	env.dis\
@@ -88,7 +83,6 @@ TARG=\
 	lockfs.dis\
 	logfile.dis\
 	look.dis\
-	ls.dis\
 	lstar.dis\
 	m4.dis\
 	man2html.dis\
@@ -98,7 +92,6 @@ TARG=\
 	mdb.dis\
 	memfs.dis\
 	metamorph.dis\
-	mkdir.dis\
 	mntgen.dis\
 	mount.dis\
 	mouse.dis\
@@ -146,21 +139,17 @@ TARG=\
 	tarfs.dis\
 	tclsh.dis\
 	tcs.dis\
-	tee.dis\
 	telnet.dis\
-	test.dis\
 	time.dis\
 	timestamp.dis\
 	tkcmd.dis\
 	touch.dis\
 	touchcal.dis\
 	tokenize.dis\
-	tr.dis\
 	trfs.dis\
 	tsort.dis\
 	unicode.dis\
 	units.dis\
-	uniq.dis\
 	unmount.dis\
 	uudecode.dis\
 	uuencode.dis\
@@ -168,7 +157,6 @@ TARG=\
 	vacget.dis\
 	vacput.dis\
 	wav2iaf.dis\
-	wc.dis\
 	webgrab.dis\
 	whois.dis\
 	wish.dis\
@@ -231,8 +219,6 @@ auhdr.dis: auplay.dis
 dbfs.dis: $MODDIR/styxservers.m
 rawdbfs.dis: $MODDIR/styxservers.m
 import.dis:	$MODDIR/encoding.m $MODDIR/factotum.m
-basename.dis: $MODDIR/names.m
-cleanname.dis: $MODDIR/names.m
 zxrun.dis: $MODDIR/daytime.m $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/wmlib.m $MODDIR/wmclient.m $MODDIR/timers.m $MODDIR/keyboard.m
 
 zxrun.zx: zxrun.zi taijios_process.zi taijios_args.zi taijios_io.zi mkfile
@@ -309,6 +295,9 @@ linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/
 
 graph0.zx: tcltk/graph0_app.zi tcltk/graph0_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_args.zi taijios_files.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_BANDED --bind-host taijios_args --bind-host taijios_files --bind-host zx_surface --entry graph0_app:main -o $target tcltk/graph0_app.zi
+
+# These commands exist only as ZX bundles, so the ordinary install builds them.
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
 install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-linbench-zx install-graph0-zx install-about-zx install-dir-zx install-utilities-zx install-streams-zx install-file-commands-zx
 	(cd sh && mk sh.install)
