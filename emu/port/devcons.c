@@ -5,6 +5,7 @@
 #include	"mp.h"
 #include	"libsec.h"
 #include	"keyboard.h"
+#include	"draw.h"
 
 extern int cflag;
 int	exdebug = 0;
@@ -33,7 +34,8 @@ enum
 	Qsysname,
 	Qtime,
 	Quser,
-	Qkeyevent
+	Qkeyevent,
+	Qinput,
 };
 
 Dirtab contab[] =
@@ -60,6 +62,7 @@ Dirtab contab[] =
 	"time",		{Qtime},	0,	0644,
 	"user",		{Quser},	0,	0644,
 	"keyevent",	{Qkeyevent},	0,	0444,
+	"input",	{Qinput},	0,	0444,
 };
 
 Queue*	gkscanq;		/* Graphics keyboard raw scancodes */
@@ -69,6 +72,11 @@ Queue*	kbdq;			/* Console window unprocessed keyboard input */
 Queue*	lineq;			/* processed console input */
 static Queue *gkeyq;
 static Ref gkeyreader;
+static Queue *ginputq;
+static Ref ginputreader;
+
+/* Little-endian event tag, three payload words and a millisecond timestamp. */
+enum { GinputBytes = 5 * 4 };
 
 char	*ossysname;
 
@@ -126,6 +134,27 @@ kbdslave(void *a)
 
 static int collecting;
 
+int
+ginputevent(int kind, int a, int b, int c, ulong msec)
+{
+	uchar record[GinputBytes];
+	int active;
+
+	if(ginputq == nil)
+		return 0;
+	lock(&ginputreader.lk);
+	active = ginputreader.ref != 0;
+	unlock(&ginputreader.lk);
+	if(!active)
+		return 0;
+	BPLONG(record, kind);
+	BPLONG(record+4, a);
+	BPLONG(record+8, b);
+	BPLONG(record+12, c);
+	BPLONG(record+16, msec);
+	return qproduce(ginputq, record, sizeof(record)) == sizeof(record);
+}
+
 void
 gkbdcancelcompose(void)
 {
@@ -155,6 +184,11 @@ gkbdputc(Queue *q, int ch)
 			return;
 		collecting = 0;
 		if(c == -1) {	/* invalid sequence */
+			int i;
+			for(i = 0; i < nk; ){
+				i += chartorune(&r, (char*)kc+i);
+				ginputevent(GiText, r, 0, 0, 0);
+			}
 			qproduce(q, kc, nk);
 			return;
 		}
@@ -163,6 +197,7 @@ gkbdputc(Queue *q, int ch)
 	n = runetochar(buf, &r);
 	if(n == 0)
 		return;
+	ginputevent(GiText, r, 0, 0, 0);
 	/* if(!isdbgkey(r)) */ 
 		qproduce(q, buf, n);
 }
@@ -177,12 +212,14 @@ int
 gkeyevent(int kind, int key, int modifiers)
 {
 	char message[40];
-	int n;
+	int n, queued, event;
 
+	event = kind == 'd' ? GiKeyDown : kind == 'u' ? GiKeyUp : GiKeyReset;
+	queued = ginputevent(event, key, modifiers, 0, osmillisec());
 	if(gkeyq == nil || gkeyreader.ref == 0)
-		return 0;
+		return queued;
 	n = snprint(message, sizeof message, "keyevent %c %d %d", kind, key, modifiers);
-	return qproduce(gkeyq, message, n) == n;
+	return (qproduce(gkeyq, message, n) == n) || queued;
 }
 
 void
@@ -197,6 +234,11 @@ consinit(void)
 	gkbdq = qopen(512, 0, nil, nil);
 	if(gkbdq == 0)
 		panic("no memory");
+	if(!usesdis()){
+		ginputq = qopen(32*1024, Qmsg, nil, nil);
+		if(ginputq == nil)
+			panic("no memory");
+	}
 	randominit();
 }
 
@@ -255,6 +297,22 @@ consopen(Chan *c, int omode)
 		qflush(gkeyq);
 		break;
 
+	case Qinput:
+		if(ginputq == nil){
+			c->flag &= ~COPEN;
+			error("not supported");
+		}
+		lock(&ginputreader.lk);
+		if(ginputreader.ref != 0){
+			unlock(&ginputreader.lk);
+			c->flag &= ~COPEN;
+			error(Einuse);
+		}
+		qflush(ginputq);
+		ginputreader.ref = 1;
+		unlock(&ginputreader.lk);
+		break;
+
 	case Qscancode:
 		qlock(&kbd.gq);
 		if(gkscanq != nil || gkscanid == nil) {
@@ -305,6 +363,10 @@ consclose(Chan *c)
 
 	case Qkeyevent:
 		decref(&gkeyreader);
+		break;
+
+	case Qinput:
+		decref(&ginputreader);
 		break;
 
 	case Qscancode:
@@ -444,6 +506,11 @@ consread(Chan *c, void *va, long n, vlong offset)
 
 	case Qkeyevent:
 		return qread(gkeyq, va, n);
+
+	case Qinput:
+		if(n < GinputBytes)
+			error(Eshort);
+		return qread(ginputq, va, GinputBytes);
 
 	case Qkprint:
 		rlock(&kprintq.l);

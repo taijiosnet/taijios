@@ -90,6 +90,7 @@ mousetrack(int b, int x, int y, int isdelta)
 	mouse.modify = 1;
 	ptrq.put++;
 	Wakeup(&ptrq.r);
+	ginputevent(GiPointer, x, y, b, msec);
 /*	drawactive(1);	*/
 /*	setpointer(x, y); */
 }

@@ -1,23 +1,8 @@
-#import "std/vec";
-#import "std/number_text";
 using Io :: #import "taijios_io";
 using Args :: #import "taijios_args";
-
-SetWord :: (message: []u8, offset: s32, value: u32) {
-    message[offset] = cast(u8)(value & 255);
-    message[offset+1] = cast(u8)((value >> 8) & 255);
-    message[offset+2] = cast(u8)((value >> 16) & 255);
-    message[offset+3] = cast(u8)(value >> 24);
-}
-
-ReadField :: (info: []u8, index: s32) -> s32 {
-    start := index * 12;
-    end := start + 11;
-    while start < end && info[start] == 32 { start += 1 }
-    value, used := IntegerPrefix(TextView(info[start:end]));
-    if used == 0 { return -1 }
-    return cast(s32)(value);
-}
+Draw :: #import "guest_draw";
+Compositor :: #import "compositor";
+Input :: #import "guest_input";
 
 Fail :: (operation: string) -> s32 {
     print("%: %\n", operation, Io.LastError());
@@ -25,56 +10,75 @@ Fail :: (operation: string) -> s32 {
     return 1;
 }
 
-AllocateSolid :: (fd: s32, id: u32, channel: u32, rgba: u32) -> bool {
-    msg: [51]u8;
-    msg[0] = #char "b";
-    SetWord(msg[:], 1, id);
-    SetWord(msg[:], 10, channel);
-    msg[14] = 1;
-    SetWord(msg[:], 23, 1);
-    SetWord(msg[:], 27, 1);
-    SetWord(msg[:], 31, cast(u32)(0xc0000001));
-    SetWord(msg[:], 35, cast(u32)(0xc0000001));
-    SetWord(msg[:], 39, cast(u32)(0x3fffffff));
-    SetWord(msg[:], 43, cast(u32)(0x3fffffff));
-    SetWord(msg[:], 47, rgba);
-    return Io.WriteBytes(fd, TextView(msg[:])) == msg.count;
+Paint :: (display: *Draw.Display) -> bool {
+    screen := Draw.Screen(display);
+    background := Draw.Solid(display, 0x183858ff);
+    defer Draw.Release(display, *background);
+
+    bounds: Draw.Rect = .{-2, -1, 2098, 2};
+    image := Draw.Buffer(display, bounds, 0x000000ff);
+    defer Draw.Release(display, *image);
+    pixels: [2100 * 3 * 4]u8;
+    for y: 0..2 {
+        for x: 0..2099 {
+            offset := (y * 2100 + x) * 4;
+            pixels[offset] = ifx x < 2042 then 230 else 10;
+            pixels[offset + 1] = 30 + cast(u8)(y * 25);
+            pixels[offset + 2] = ifx x < 2042 then 10 else 230;
+            pixels[offset + 3] = 255;
+        }
+    }
+    if Draw.Upload(display, image, bounds, pixels[:4]) || !Draw.Upload(display, image, bounds, pixels[:]) {
+        return false;
+    }
+
+    overlay := Draw.Solid(display, 0xfacd14ff);
+    defer Draw.Release(display, *overlay);
+    layers: [2]Compositor.Layer = .{
+        .{image, .{2038, -1, 2043, 2}, 10, 10},
+        .{overlay, overlay.bounds, 12, 11},
+    };
+    if !Compositor.Repaint(display, background, layers[:], screen.bounds) { return false }
+    // Clear a single pixel of the bottom layer while retaining its neighbors.
+    return Compositor.Repaint(display, background, layers[:0], .{10, 10, 11, 11});
 }
 
 main :: () -> s32 {
-    ctl := Io.OpenFile("#i/draw/new", 2);
-    if ctl < 0 { return Fail("open Draw") }
-    info: [145]u8;
-    if Io.ReadBytes(ctl, info[:]) != 144 { return Fail("read Draw control") }
-    id := ReadField(info[:], 0);
-    x0 := ReadField(info[:], 4);
-    y0 := ReadField(info[:], 5);
-    x1 := ReadField(info[:], 6);
-    y1 := ReadField(info[:], 7);
-    if id < 0 || x1 <= x0 || y1 <= y0 { return Fail("invalid Draw bounds") }
-    path: Vec(u8);
-    defer VecFree(path);
-    BuilderPrint(*path, "#i/draw/%/data", id);
-    fd := Io.OpenFile(TextView(path[:]), 2);
-    if fd < 0 { return Fail("open Draw data") }
-    if !AllocateSolid(fd, 1, 0x081828, 0x183858ff) { return Fail("allocate colour") }
-    if !AllocateSolid(fd, 2, 0x31, 0xffffffff) { return Fail("allocate mask") }
-    msg: [46]u8;
-    msg[0] = #char "d";
-    SetWord(msg[:], 5, 1);
-    SetWord(msg[:], 9, 2);
-    SetWord(msg[:], 13, cast(u32)(x0));
-    SetWord(msg[:], 17, cast(u32)(y0));
-    SetWord(msg[:], 21, cast(u32)(x1));
-    SetWord(msg[:], 25, cast(u32)(y1));
-    msg[45] = #char "v";
-    if Io.WriteBytes(fd, TextView(msg[:])) != msg.count { return Fail("paint") }
+    display: Draw.Display;
+    if !Draw.Open(*display) { return Fail("open Draw") }
+    defer Draw.Close(*display);
+    if !Paint(*display) { return Fail("paint") }
+    input := Input.Open();
+    if input < 0 || Input.Open() >= 0 { return Fail("open exclusive input") }
     keyboard := Io.OpenFile("/dev/keyboard", 0);
     if keyboard < 0 { return Fail("open keyboard") }
-    print("ZX_DRAW_READY %x%\n", x1-x0, y1-y0);
+    defer Io.CloseFile(keyboard);
+    bounds := Draw.Screen(*display).bounds;
+    print("ZX_DRAW_READY %x%\n", bounds.right - bounds.left, bounds.bottom - bounds.top);
+
+    pressed := false;
+    released := false;
+    down := false;
+    up := false;
+    text := false;
+    while !(released && up && text) {
+        event := Input.Next(input);
+        if event.kind == 0 { return Fail("read input") }
+        if event.kind == Input.Pointer && event.x == 120 && event.y == 160 {
+            if event.buttons == 1 { pressed = true }
+            if pressed && event.buttons == 0 { released = true }
+        }
+        if event.kind == Input.KeyDown && event.code == #char "A" { down = true }
+        if event.kind == Input.KeyUp && event.code == #char "A" && down { up = true }
+        if event.kind == Input.Text && event.code == #char "a" { text = true }
+    }
+    Input.Close(input);
+    input = Input.Open();
+    if input < 0 { return Fail("reopen input") }
+    Input.Close(input);
     key: [16]u8;
     n := Io.ReadBytes(keyboard, key[:]);
     if n <= 0 || key[0] != #char "a" { return Fail("read keyboard") }
-    print("ZX_DRAW_KEY_OK\n");
+    print("ZX_DRAW_INPUT_OK\n");
     return 0;
 }

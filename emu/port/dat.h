@@ -438,6 +438,14 @@ struct Procs
 	Proc*	tail;
 };
 
+enum {
+	GiPointer = 1,
+	GiKeyDown,
+	GiKeyUp,
+	GiKeyReset,
+	GiText,
+};
+
 struct Rootdata
 {
 	int	dotdot;

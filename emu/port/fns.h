@@ -81,6 +81,7 @@ void		freeskey(Signerkey*);
 ulong	getcallerpc(void*);
 ulong	getFPcontrol(void);
 ulong	getFPstatus(void);
+int		ginputevent(int, int, int, int, ulong);
 void		gkbdcancelcompose(void);
 void		gkbdputc(Queue*, int);
 void		gkeyinit(void);

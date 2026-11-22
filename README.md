@@ -26,8 +26,11 @@ results and loader errors exit with status 1. A direct bundle can access guest
 Draw and input devices. Window-manager services and Dis task inspection remain
 available through the normal desktop runner.
 Run `python3 tests/desktop/zx_boot_test.py` to verify direct startup in a guest
-root containing only ZX programs. Add `--graphics` to test drawing and keyboard
-input on a private Xvfb display.
+root containing only ZX programs. Add `--graphics` to test compositing, clipped
+updates, pointer input, and keyboard input on a private Xvfb display. Direct
+graphical bundles can import `guest_draw` and `guest_input` from `appl/lib`.
+The input module receives pointer motion and buttons, key transitions, and
+composed text from one blocking device stream.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including
 the ZX runtime. Use `-p main=64M` or `-p main=32M` before the guest command to set

@@ -1,0 +1,204 @@
+// Draw device transport for ZX programs in the guest namespace.
+#import "std/number_text";
+#import "std/vec";
+Io :: #import "taijios_io";
+
+Rect :: struct {
+    left: s32;
+    top: s32;
+    right: s32;
+    bottom: s32;
+}
+
+Image :: struct {
+    id: s32;
+    bounds: Rect;
+    rgba: bool;
+}
+
+// A display owns its descriptors and images. Pass it by address and close it
+// once; closing releases all of the images allocated on this connection.
+Display :: struct {
+    ctl: s32;
+    data: s32;
+    next_id: s32;
+    mask: Image;
+    screen: Image;
+}
+
+Open :: (display: *Display) -> bool {
+    if display.data != 0 { return false }
+    ctl := Io.OpenFile("#i/draw/new", 2);
+    if ctl < 0 { return false }
+    display.ctl = ctl;
+    info: [145]u8;
+    if Io.ReadBytes(ctl, info[:]) != 144 {
+        Close(display);
+        return false;
+    }
+    id, valid_id := Field(info[:], 0);
+    left, valid_left := Field(info[:], 4);
+    top, valid_top := Field(info[:], 5);
+    right, valid_right := Field(info[:], 6);
+    bottom, valid_bottom := Field(info[:], 7);
+    bounds: Rect = .{left, top, right, bottom};
+    if !valid_id || !valid_left || !valid_top || !valid_right || !valid_bottom || id < 0 || !Nonempty(bounds) {
+        Close(display);
+        return false;
+    }
+    path: Vec(u8);
+    BuilderPrint(*path, "#i/draw/%/data", id);
+    fd := Io.OpenFile(TextView(path[:]), 2);
+    if fd < 0 {
+        Close(display);
+        return false;
+    }
+    display.data = fd;
+    display.screen = .{bounds = bounds};
+    display.next_id = 1;
+    display.mask = Allocate(display, .{0, 0, 1, 1}, Grey1, true, 0xffffffff);
+    if display.mask.id != 0 { return true }
+    Close(display);
+    return false;
+}
+
+Close :: (display: *Display) {
+    if display.data != 0 { unused Io.CloseFile(display.data) }
+    if display.ctl != 0 { unused Io.CloseFile(display.ctl) }
+    display.* = .{};
+}
+
+Screen :: (display: *Display) -> Image { return display.screen }
+
+Solid :: (display: *Display, color: u32) -> Image {
+    return Allocate(display, .{0, 0, 1, 1}, PackedRGBA, true, color);
+}
+
+// Image bytes are laid out in red, green, blue, alpha order with premultiplied
+// alpha. Initial and solid colors use Draw's RRGGBBAA encoding.
+Buffer :: (display: *Display, bounds: Rect, color: u32) -> Image {
+    return Allocate(display, bounds, PackedRGBA, false, color);
+}
+
+Release :: (display: *Display, image: *Image) -> bool {
+    if image.id == 0 || image.id == display.mask.id { return false }
+    message: [5]u8;
+    message[0] = #char "f";
+    Word(message[:], 1, image.id);
+    if !Send(display, message[:]) { return false }
+    image.* = .{};
+    return true;
+}
+
+// Draw clips against the target and source images. Flush presents the frame.
+Composite :: (display: *Display, target: Image, source: Image, area: Rect, x: s32, y: s32) -> bool {
+    if !Nonempty(area) || !Nonempty(target.bounds) || !Nonempty(source.bounds) { return false }
+    message: [45]u8;
+    message[0] = #char "d";
+    Word(message[:], 1, target.id);
+    Word(message[:], 5, source.id);
+    Word(message[:], 9, display.mask.id);
+    Rectangle(message[:], 13, area);
+    Word(message[:], 29, x);
+    Word(message[:], 33, y);
+    return Send(display, message[:]);
+}
+
+Upload :: (display: *Display, image: Image, area: Rect, pixels: []u8) -> bool {
+    if !image.rgba || !Nonempty(area) || area.left < image.bounds.left || area.top < image.bounds.top ||
+       area.right > image.bounds.right || area.bottom > image.bounds.bottom { return false }
+    width := cast(s64)area.right - area.left;
+    height := cast(s64)area.bottom - area.top;
+    if pixels.count % 4 != 0 || width > pixels.count / 4 / height || width * height != pixels.count / 4 {
+        return false;
+    }
+    // Each write contains a complete Draw command. Use vertical strips for
+    // ordinary images and horizontal spans when a row exceeds the IO limit.
+    max_pixels: s64 = (IoLimit - UploadHeader) / 4;
+    rows := max_pixels / width;
+    if rows == 0 { rows = 1 }
+    message: Vec(u8);
+    if !VecReserve(message, IoLimit) { return false }
+    y: s64 = 0;
+    while y < height {
+        lines := rows;
+        if lines > height - y { lines = height - y }
+        x: s64 = 0;
+        while x < width {
+            columns := width - x;
+            if columns > max_pixels { columns = max_pixels }
+            tile: Rect = .{cast(s32)(area.left + x), cast(s32)(area.top + y),
+                           cast(s32)(area.left + x + columns), cast(s32)(area.top + y + lines)};
+            start := (y * width + x) * 4;
+            end := start + columns * lines * 4;
+            if !VecResize(message, UploadHeader) { return false }
+            message[0] = #char "y";
+            Word(message[:], 1, image.id);
+            Rectangle(message[:], 5, tile);
+            if !BuilderAppend(message, TextView(pixels[start:end])) || !Send(display, message[:]) { return false }
+            x += columns;
+        }
+        y += lines;
+    }
+    return true;
+}
+
+Flush :: (display: *Display) -> bool {
+    return display.data != 0 && Io.WriteBytes(display.data, "v") == 1;
+}
+
+#scope_file
+
+Grey1 :: 0x31;
+PackedRGBA :: 0x48281808; // ABGR32 channel order, little-endian RGBA bytes.
+IoLimit :: 8192;
+UploadHeader :: 21;
+
+Nonempty :: (r: Rect) -> bool { return r.left < r.right && r.top < r.bottom }
+
+Field :: (info: []u8, index: s32) -> s32, bool {
+    start := index * 12;
+    end := start + 11;
+    while start < end && info[start] == 32 { start += 1 }
+    value, used := IntegerPrefix(TextView(info[start:end]));
+    return cast(s32)value, used != 0 && used == end - start && value >= -2147483648 && value <= 2147483647;
+}
+
+Word :: (message: []u8, offset: s64, value: s32) {
+    bits := cast(u32)value;
+    message[offset] = cast(u8)(bits & 255);
+    message[offset + 1] = cast(u8)((bits >> 8) & 255);
+    message[offset + 2] = cast(u8)((bits >> 16) & 255);
+    message[offset + 3] = cast(u8)(bits >> 24);
+}
+
+Rectangle :: (message: []u8, offset: s64, area: Rect) {
+    Word(message, offset, area.left);
+    Word(message, offset + 4, area.top);
+    Word(message, offset + 8, area.right);
+    Word(message, offset + 12, area.bottom);
+}
+
+Send :: (display: *Display, message: []u8) -> bool {
+    return display.data != 0 && Io.WriteBytes(display.data, TextView(message)) == message.count;
+}
+
+Allocate :: (display: *Display, area: Rect, channel: s32, repeat: bool, color: u32) -> Image {
+    if !Nonempty(area) || display.next_id == 0 || display.next_id == 2147483647 { return .{} }
+    message: [51]u8;
+    message[0] = #char "b";
+    Word(message[:], 1, display.next_id);
+    Word(message[:], 10, channel);
+    Rectangle(message[:], 15, area);
+    clip := area;
+    if repeat {
+        message[14] = 1;
+        clip = .{-1073741823, -1073741823, 1073741823, 1073741823};
+    }
+    Rectangle(message[:], 31, clip);
+    Word(message[:], 47, cast(s32)color);
+    if !Send(display, message[:]) { return .{} }
+    image: Image = .{display.next_id, area, channel == PackedRGBA && !repeat};
+    display.next_id += 1;
+    return image;
+}

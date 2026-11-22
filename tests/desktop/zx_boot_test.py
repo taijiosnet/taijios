@@ -55,6 +55,7 @@ def check_draw(emulator, root, env):
     probe = Path(__file__).with_name('zx_boot_draw.zi')
     subprocess.run([
         'ziran', 'bundle', '--root', probe.parent, '--module-path', ROOT / 'appl/cmd',
+        '--module-path', ROOT / 'appl/lib', '--module-path', ROOT / 'appl/wm',
         '--bind-host', 'taijios_args', '--bind-host', 'taijios_io',
         '--entry', 'zx_boot_draw:main', '-o', root / 'draw.zx', probe,
     ], env=env, check=True, timeout=60)
@@ -81,16 +82,22 @@ def check_draw(emulator, root, env):
                                            '^inferno$', check=False).decode().strip(), 'guest window missing')
             frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
             assert frame.size == (640, 480) and frame.getpixel((320, 240)) == (24, 56, 88)
+            assert frame.getpixel((10, 10)) == (24, 56, 88)
+            assert frame.getpixel((11, 10)) == (230, 30, 10)
+            assert frame.getpixel((12, 10)) == (10, 30, 230)
+            assert frame.getpixel((12, 11)) == (250, 205, 20)
+            assert frame.getpixel((12, 12)) == (10, 80, 230)
             desktop('xdotool', 'windowfocus', window)
+            desktop('xdotool', 'mousemove', '--window', window, '120', '160', 'click', '1')
             desktop('xdotool', 'key', 'a')
-            until(lambda: received(b'ZX_DRAW_KEY_OK'), 'guest keyboard did not deliver input')
+            until(lambda: received(b'ZX_DRAW_INPUT_OK'), 'guest did not receive pointer and keyboard events')
             assert app.wait(timeout=5) == 0
         except (AssertionError, subprocess.SubprocessError) as error:
             raise AssertionError(f'{error}\n{transcript.decode(errors="replace")}') from error
         finally:
             stop(app)
             app.stdout.close()
-    print('Private ZX-only guest drew a frame and received a key through its guest devices')
+    print('Private ZX-only guest composited a frame and received pointer and keyboard events')
 
 
 def main():

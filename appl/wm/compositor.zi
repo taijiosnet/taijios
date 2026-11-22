@@ -1,0 +1,49 @@
+Draw :: #import "guest_draw";
+
+Layer :: struct {
+    image: Draw.Image;
+    source: Draw.Rect;
+    x: s32;
+    y: s32;
+}
+
+// Paint the damaged screen rectangle, in back-to-front order, then present it.
+// Each layer's x and y locate the first pixel of its source rectangle.
+Repaint :: (display: *Draw.Display, background: Draw.Image, layers: []Layer, damage: Draw.Rect) -> bool {
+    screen := Draw.Screen(display);
+    if screen.bounds.left >= screen.bounds.right || screen.bounds.top >= screen.bounds.bottom { return false }
+    area := Intersect(screen.bounds, damage);
+    if area.left >= area.right || area.top >= area.bottom { return true }
+    if !Draw.Composite(display, screen, background, area, area.left, area.top) { return false }
+    for layer: layers {
+        if !PaintLayer(display, screen, layer, area) { return false }
+    }
+    return Draw.Flush(display);
+}
+
+#scope_file
+
+PaintLayer :: (display: *Draw.Display, screen: Draw.Image, layer: Layer, area: Draw.Rect) -> bool {
+    source := layer.source;
+    width := cast(s64)source.right - source.left;
+    height := cast(s64)source.bottom - source.top;
+    if width <= 0 || height <= 0 || source.left < layer.image.bounds.left || source.top < layer.image.bounds.top ||
+       source.right > layer.image.bounds.right || source.bottom > layer.image.bounds.bottom { return false }
+    right := cast(s64)layer.x + width;
+    bottom := cast(s64)layer.y + height;
+    if area.left >= right || area.top >= bottom || area.right <= layer.x || area.bottom <= layer.y { return true }
+    bounds: Draw.Rect = .{layer.x, layer.y, area.right, area.bottom};
+    if right < area.right { bounds.right = cast(s32)right }
+    if bottom < area.bottom { bounds.bottom = cast(s32)bottom }
+    target := Intersect(area, bounds);
+    x := cast(s32)(cast(s64)source.left + target.left - layer.x);
+    y := cast(s32)(cast(s64)source.top + target.top - layer.y);
+    return Draw.Composite(display, screen, layer.image, target, x, y);
+}
+
+Intersect :: (a: Draw.Rect, b: Draw.Rect) -> Draw.Rect {
+    return .{ifx a.left > b.left then a.left else b.left,
+             ifx a.top > b.top then a.top else b.top,
+             ifx a.right < b.right then a.right else b.right,
+             ifx a.bottom < b.bottom then a.bottom else b.bottom};
+}

@@ -1,0 +1,45 @@
+Io :: #import "taijios_io";
+
+// Event tags and record layout match emu/port/devcons.c.
+Pointer :: 1;
+KeyDown :: 2;
+KeyUp :: 3;
+KeyReset :: 4;
+Text :: 5;
+
+Event :: struct {
+    kind: s32;
+    x: s32;
+    y: s32;
+    buttons: s32;
+    code: s32; // Key code for KeyDown/KeyUp, Unicode code point for Text.
+    modifiers: s32;
+    millis: u32;
+}
+
+Open :: () -> s32 { return Io.OpenFile("/dev/input", 0) }
+Close :: (input: s32) { unused Io.CloseFile(input) }
+
+// Wait for the next complete record. A zero kind indicates a failed read.
+Next :: (input: s32) -> Event {
+    record: [20]u8;
+    if Io.ReadBytes(input, record[:]) != record.count { return .{} }
+    kind := cast(s32)Word(record[:], 0);
+    millis := Word(record[:], 16);
+    if kind == Pointer {
+        return .{kind = kind, x = cast(s32)Word(record[:], 4), y = cast(s32)Word(record[:], 8),
+                 buttons = cast(s32)Word(record[:], 12), millis = millis};
+    }
+    if kind >= KeyDown && kind <= Text {
+        return .{kind = kind, code = cast(s32)Word(record[:], 4),
+                 modifiers = cast(s32)Word(record[:], 8), millis = millis};
+    }
+    return .{};
+}
+
+#scope_file
+
+Word :: (record: []u8, at: s32) -> u32 {
+    return cast(u32)record[at] | (cast(u32)record[at + 1] << 8) |
+           (cast(u32)record[at + 2] << 16) | (cast(u32)record[at + 3] << 24);
+}
