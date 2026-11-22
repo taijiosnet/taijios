@@ -3,7 +3,6 @@
 TARG=\
 	cs.dis\
 	dns.dis\
-	mkhash.dis\
 	registry.dis\
 
 SYSMODULES=\
@@ -24,8 +23,8 @@ DISBIN=$ROOT/dis/ndb
 <$ROOT/mkfiles/mkdis
 
 # Commands that exist only as ZX bundles.
-ZXCOMMANDS=csquery dnsquery query regquery
-ZXUTIL=ndb_client.zi ../zx_cli.zi ../zx_arg.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi ../../lib/taijios_quote.zi ../../lib/attrdb.zi
+ZXCOMMANDS=csquery dnsquery mkhash query regquery
+ZXUTIL=ndb_client.zi ../zx_cli.zi ../zx_arg.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi ../../lib/taijios_quote.zi ../../lib/attrdb.zi ../../lib/attrhash.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 

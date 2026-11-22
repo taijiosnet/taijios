@@ -1,0 +1,63 @@
+// mkhash file attr: writes file.attr, the hash index of attr's values in the
+// attribute database file, which readers use while file's mtime matches.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Hash :: #import "attrhash";
+
+Error :: (message: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "mkhash: %\n", message);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+// The mtime field of a packed directory entry: after size[2] type[2]
+// dev[4] qid[13] mode[4] atime[4].
+MTIME_OFFSET :: 29;
+
+Mtime :: (path: string) -> s64 {
+    entry: [1024]u8;
+    count := Io.StatPacked(path, entry[:]);
+    if count < MTIME_OFFSET + 4 { return 0 }
+    mtime: s64 = 0;
+    for < i: 0..3 { mtime = mtime * 256 + cast(s64)entry[MTIME_OFFSET + i] }
+    return mtime;
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() != 2 { return Error("usage: mkhash file attr") }
+    path := Args.Operand(0);
+    attr := Args.Operand(1);
+    fd := Io.OpenFile(path, 0);
+    message: Vec(u8);
+    if fd < 0 {
+        BuilderPrint(*message, "can't open %: %", path, Io.LastError());
+        return Error(BuilderFinish(message));
+    }
+    text: Text;
+    chunk: [8192]u8;
+    count := Io.ReadBytes(fd, chunk[:]);
+    while count > 0 {
+        BuilderAppend(text.bytes, TextView(chunk[:count]));
+        count = Io.ReadBytes(fd, chunk[:]);
+    }
+    unused Io.CloseFile(fd);
+    index := Hash.Build(TextView(text), attr, Mtime(path));
+    name: Vec(u8);
+    BuilderPrint(*name, "%.%", path, attr);
+    hashfile := BuilderFinish(name);
+    out := Io.CreateFile(hashfile, 1, 438);
+    if out < 0 {
+        BuilderPrint(*message, "can't create %: %", hashfile, Io.LastError());
+        return Error(BuilderFinish(message));
+    }
+    defer Io.CloseFile(out);
+    if !Cli.WriteAll(out, TextView(index[:])) {
+        BuilderPrint(*message, "error writing %: %", hashfile, Io.LastError());
+        return Error(BuilderFinish(message));
+    }
+    return 0;
+}

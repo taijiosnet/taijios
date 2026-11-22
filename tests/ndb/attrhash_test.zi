@@ -1,0 +1,82 @@
+// Tests for appl/lib/attrhash.zi. hash.db.sys and hash.db.ip are the
+// indexes the Limbo mkhash wrote for hash.db, with their mtime set to zero.
+// The Limbo command failed on dns, which has two values on a line; its
+// index is checked by looking every value up.
+//
+//     ziran run --target=c --root tests/ndb --module-path appl/lib tests/ndb/attrhash_test.zi
+#import "std/file"
+using Db :: #import "attrdb"
+using Index :: #import "attrhash"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok { failures += 1; print("FAIL: %\n", what) }
+}
+
+SameBytes :: (built: []u8, expected: string) -> bool {
+    if built.count != expected.count { return false }
+    for i: 0..expected.count - 1 { if built[i] != expected[i] { return false } }
+    return true
+}
+
+// Whether every attr value of the database is found through the index at an
+// entry that holds it.
+LookUpAll :: (text: string, attr: string, index: []u8) -> bool {
+    table := Index.Get3(index, 4)
+    entry: Db.Dbentry
+    offset: s64 = 0
+    checked: s64 = 0
+    while true {
+        matched, next := Db.ReadEntry(text, offset, "", "", false, *entry)
+        if !matched { break }
+        for l: 0..entry.lines.count - 1 {
+            for p: 0..entry.lines[l].pairs.count - 1 {
+                if TextView(entry.lines[l].pairs[p].attr) != attr { continue }
+                value := TextView(entry.lines[l].pairs[p].val)
+                found := false
+                slot := Index.NDBHLEN + Index.Hash(value, table) * Index.NDBPLEN
+                pointer := Index.Get3(index, slot)
+                while pointer != Index.NDBNAP && !found {
+                    candidate := pointer
+                    if (pointer & Index.NDBCHAIN) != 0 {
+                        chain := Index.NDBHLEN + (pointer & ~Index.NDBCHAIN)
+                        candidate = Index.Get3(index, chain + Index.NDBPLEN)
+                        pointer = Index.Get3(index, chain)
+                    } else {
+                        pointer = Index.NDBNAP
+                    }
+                    held: Db.Dbentry
+                    hit, _ := Db.ReadEntry(text, candidate, attr, value, true, *held)
+                    found = hit
+                }
+                if !found { print("% % not found\n", attr, value); return false }
+                checked += 1
+            }
+        }
+        offset = next
+    }
+    return checked > 0
+}
+
+main :: () -> s32 {
+    text, ok := ReadEntireFile("tests/ndb/hash.db")
+    Expect(ok, "read hash.db")
+    attrs := string.["sys", "ip"]
+    for attr: attrs {
+        path: Vec(u8)
+        BuilderPrint(*path, "tests/ndb/hash.db.%", attr)
+        expected, expected_ok := ReadEntireFile(BuilderFinish(path))
+        built := Index.Build(text, attr, 0)
+        Expect(expected_ok && SameBytes(built[:], expected), "index equals the Limbo index")
+        Expect(LookUpAll(text, attr, built[:]), "every value is found")
+    }
+    dns := Index.Build(text, "dns", 0)
+    Expect(LookUpAll(text, "dns", dns[:]), "every dns value is found")
+    empty := Index.Build(text, "nosuch", 0)
+    Expect(empty.count == 11 && Index.Get3(empty[:], 8) == Index.NDBNAP, "an attribute nothing holds")
+    Expect(Index.Hash("abc", 7) == 1 && Index.Hash("", 5) == 0, "small hashes")
+    if failures != 0 { print("attrhash: % failures\n", failures); return 1 }
+    print("attrhash: Limbo indexes and lookups of every value passed\n")
+    return 0
+}

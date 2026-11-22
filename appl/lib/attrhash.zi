@@ -1,0 +1,110 @@
+// Hash indexes of attribute database files, in the format of the Limbo
+// Attrhash module and mkhash: the database's mtime and the table length,
+// then a table of 3-byte little-endian entry offsets, then the chains of
+// values whose hashes collide. All numbers are little endian.
+using Db :: #import "attrdb";
+
+NDBPLEN :: 3; // bytes in a file pointer
+NDBHLEN :: 8; // header: mtime[4] table length[4]
+NDBCHAIN :: 8388608; // pointer to a collision chain
+NDBNAP :: 8388609; // not a pointer
+
+// The table slot of value, as the Limbo module computed it with 32-bit
+// wrapping; a value with a byte of 128 or more is hashed again over all
+// its bytes, starting from the hash of its ASCII prefix.
+Hash :: (value: string, table: s64) -> s64 {
+    h: u32 = 0;
+    ascii := true;
+    for value {
+        if it >= 128 { ascii = false; break }
+        h = h * 13 + cast(u32)it - 97;
+    }
+    if !ascii { for value { h = h * 13 + cast(u32)it - 97 } }
+    return cast(s64)(h % cast(u32)table);
+}
+
+Get3 :: (bytes: []u8, at: s64) -> s64 {
+    return cast(s64)bytes[at] + cast(s64)bytes[at + 1] * 256 + cast(s64)bytes[at + 2] * 65536;
+}
+
+Put :: (bytes: []u8, at: s64, value: s64, count: s64) {
+    v := value;
+    for i: 0..count - 1 {
+        bytes[at + i] = cast(u8)(v % 256);
+        v /= 256;
+    }
+}
+
+// The number of lines of the entry that hold attr.
+LinesWith :: (entry: *Db.Dbentry, attr: string) -> s64 {
+    count: s64 = 0;
+    for l: 0..entry.lines.count - 1 { if Db.HasAttr(*entry.lines[l], attr) { count += 1 } }
+    return count;
+}
+
+ValuesOf :: (entry: *Db.Dbentry, attr: string) -> s64 {
+    count: s64 = 0;
+    for l: 0..entry.lines.count - 1 {
+        for p: 0..entry.lines[l].pairs.count - 1 { if TextView(entry.lines[l].pairs[p].attr) == attr { count += 1 } }
+    }
+    return count;
+}
+
+// Records that value occurs in the entry at offset; returns the new end of the chains.
+Enter :: (file: []u8, value: string, table: s64, chain: s64, offset: s64) -> s64 {
+    slot := NDBHLEN + Hash(value, table) * NDBPLEN;
+    p := Get3(file, slot);
+    while p != NDBNAP {
+        if (p & NDBCHAIN) == 0 {
+            Put(file, slot, chain | NDBCHAIN, NDBPLEN);
+            Put(file, NDBHLEN + chain, p, NDBPLEN);
+            Put(file, NDBHLEN + chain + NDBPLEN, offset, NDBPLEN);
+            return chain + 2 * NDBPLEN;
+        }
+        slot = NDBHLEN + (p & ~NDBCHAIN);
+        p = Get3(file, slot);
+    }
+    Put(file, slot, offset, NDBPLEN);
+    return chain;
+}
+
+// The index of attr over the database text. Entries are visited from each
+// search offset, and the values of a line are entered last first, as
+// Dbentry.find listed them for mkhash.
+Build :: (text: string, attr: string, mtime: s64) -> Vec(u8) {
+    entry: Db.Dbentry;
+    lines: s64 = 0;
+    values: s64 = 0;
+    offset: s64 = 0;
+    while true {
+        matched, next := Db.ReadEntry(text, offset, "", "", false, *entry);
+        if !matched { break }
+        lines += LinesWith(*entry, attr);
+        values += ValuesOf(*entry, attr);
+        offset = next;
+    }
+    table := 2 * lines + 1;
+    file: Vec(u8);
+    for 1..NDBHLEN { VecPush(file, 0) }
+    for 1..table { VecPush(file, 1); VecPush(file, 0); VecPush(file, 128) }
+    // The Limbo command sized the chains by the lines holding attr and
+    // overflowed when more values than that collided; this has room for all.
+    for 1..2 * NDBPLEN * (ifx values > lines then values else lines) { VecPush(file, 0) }
+    chain := table * NDBPLEN;
+    offset = 0;
+    while true {
+        matched, next := Db.ReadEntry(text, offset, "", "", false, *entry);
+        if !matched { break }
+        for l: 0..entry.lines.count - 1 {
+            for < p: 0..entry.lines[l].pairs.count - 1 {
+                if TextView(entry.lines[l].pairs[p].attr) != attr { continue }
+                chain = Enter(file[:], TextView(entry.lines[l].pairs[p].val), table, chain, offset);
+            }
+        }
+        offset = next;
+    }
+    Put(file[:], 0, mtime, 4);
+    Put(file[:], 4, table, 4);
+    unused VecResize(file, NDBHLEN + chain);
+    return file;
+}

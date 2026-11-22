@@ -1,0 +1,125 @@
+# header comment
+
+sys=host1 ip=10.0.0.1
+	dom=h1.example dns=10.9.0.1 dns=10.9.1.1
+sys=host2 ip=10.0.0.2
+	dom=h2.example dns=10.9.0.2 dns=10.9.1.2
+sys=host3 ip=10.0.0.3
+	dom=h3.example dns=10.9.0.3 dns=10.9.1.3
+sys=host4 ip=10.0.0.4
+	dom=h4.example dns=10.9.0.4 dns=10.9.1.4
+sys=host5 ip=10.0.0.5
+	dom=h5.example dns=10.9.0.0 dns=10.9.1.5
+sys=host6 ip=10.0.0.6
+	dom=h6.example dns=10.9.0.1 dns=10.9.1.6
+sys=host7 ip=10.0.1.7
+	dom=h7.example dns=10.9.0.2 dns=10.9.1.7
+sys=host8 ip=10.0.1.8
+	dom=h8.example dns=10.9.0.3 dns=10.9.1.8
+sys=host9 ip=10.0.1.9
+	dom=h9.example dns=10.9.0.4 dns=10.9.1.9
+sys=host10 ip=10.0.1.10
+	dom=h10.example dns=10.9.0.0 dns=10.9.1.10
+sys=host11 ip=10.0.1.11
+	dom=h11.example dns=10.9.0.1 dns=10.9.1.11
+sys=host12 ip=10.0.1.12
+	dom=h12.example dns=10.9.0.2 dns=10.9.1.12
+sys=host13 ip=10.0.1.13
+	dom=h13.example dns=10.9.0.3 dns=10.9.1.13
+sys=host14 ip=10.0.2.14
+	dom=h14.example dns=10.9.0.4 dns=10.9.1.14
+sys=host15 ip=10.0.2.15
+	dom=h15.example dns=10.9.0.0 dns=10.9.1.15
+sys=host16 ip=10.0.2.16
+	dom=h16.example dns=10.9.0.1 dns=10.9.1.16
+sys=host17 ip=10.0.2.17
+	dom=h17.example dns=10.9.0.2 dns=10.9.1.17
+sys=host18 ip=10.0.2.18
+	dom=h18.example dns=10.9.0.3 dns=10.9.1.18
+sys=host19 ip=10.0.2.19
+	dom=h19.example dns=10.9.0.4 dns=10.9.1.19
+sys=host20 ip=10.0.2.20
+	dom=h20.example dns=10.9.0.0 dns=10.9.1.20
+sys=host21 ip=10.0.3.21
+	dom=h21.example dns=10.9.0.1 dns=10.9.1.21
+sys=host22 ip=10.0.3.22
+	dom=h22.example dns=10.9.0.2 dns=10.9.1.22
+sys=host23 ip=10.0.3.23
+	dom=h23.example dns=10.9.0.3 dns=10.9.1.23
+sys=host24 ip=10.0.3.24
+	dom=h24.example dns=10.9.0.4 dns=10.9.1.24
+sys=host25 ip=10.0.3.25
+	dom=h25.example dns=10.9.0.0 dns=10.9.1.25
+sys=host26 ip=10.0.3.26
+	dom=h26.example dns=10.9.0.1 dns=10.9.1.26
+sys=host27 ip=10.0.3.27
+	dom=h27.example dns=10.9.0.2 dns=10.9.1.27
+sys=host28 ip=10.0.4.28
+	dom=h28.example dns=10.9.0.3 dns=10.9.1.28
+sys=host29 ip=10.0.4.29
+	dom=h29.example dns=10.9.0.4 dns=10.9.1.29
+sys=host30 ip=10.0.4.30
+	dom=h30.example dns=10.9.0.0 dns=10.9.1.30
+sys=host31 ip=10.0.4.31
+	dom=h31.example dns=10.9.0.1 dns=10.9.1.31
+sys=host32 ip=10.0.4.32
+	dom=h32.example dns=10.9.0.2 dns=10.9.1.32
+sys=host33 ip=10.0.4.33
+	dom=h33.example dns=10.9.0.3 dns=10.9.1.33
+sys=host34 ip=10.0.4.34
+	dom=h34.example dns=10.9.0.4 dns=10.9.1.34
+sys=host35 ip=10.0.5.35
+	dom=h35.example dns=10.9.0.0 dns=10.9.1.35
+sys=host36 ip=10.0.5.36
+	dom=h36.example dns=10.9.0.1 dns=10.9.1.36
+sys=host37 ip=10.0.5.37
+	dom=h37.example dns=10.9.0.2 dns=10.9.1.37
+sys=host38 ip=10.0.5.38
+	dom=h38.example dns=10.9.0.3 dns=10.9.1.38
+sys=host39 ip=10.0.5.39
+	dom=h39.example dns=10.9.0.4 dns=10.9.1.39
+sys=host40 ip=10.0.5.40
+	dom=h40.example dns=10.9.0.0 dns=10.9.1.40
+sys=host41 ip=10.0.5.41
+	dom=h41.example dns=10.9.0.1 dns=10.9.1.41
+sys=host42 ip=10.0.6.42
+	dom=h42.example dns=10.9.0.2 dns=10.9.1.42
+sys=host43 ip=10.0.6.43
+	dom=h43.example dns=10.9.0.3 dns=10.9.1.43
+sys=host44 ip=10.0.6.44
+	dom=h44.example dns=10.9.0.4 dns=10.9.1.44
+sys=host45 ip=10.0.6.45
+	dom=h45.example dns=10.9.0.0 dns=10.9.1.45
+sys=host46 ip=10.0.6.46
+	dom=h46.example dns=10.9.0.1 dns=10.9.1.46
+sys=host47 ip=10.0.6.47
+	dom=h47.example dns=10.9.0.2 dns=10.9.1.47
+sys=host48 ip=10.0.6.48
+	dom=h48.example dns=10.9.0.3 dns=10.9.1.48
+sys=host49 ip=10.0.7.49
+	dom=h49.example dns=10.9.0.4 dns=10.9.1.49
+sys=host50 ip=10.0.7.50
+	dom=h50.example dns=10.9.0.0 dns=10.9.1.50
+sys=host51 ip=10.0.7.51
+	dom=h51.example dns=10.9.0.1 dns=10.9.1.51
+sys=host52 ip=10.0.7.52
+	dom=h52.example dns=10.9.0.2 dns=10.9.1.52
+sys=host53 ip=10.0.7.53
+	dom=h53.example dns=10.9.0.3 dns=10.9.1.53
+sys=host54 ip=10.0.7.54
+	dom=h54.example dns=10.9.0.4 dns=10.9.1.54
+sys=host55 ip=10.0.7.55
+	dom=h55.example dns=10.9.0.0 dns=10.9.1.55
+sys=host56 ip=10.0.8.56
+	dom=h56.example dns=10.9.0.1 dns=10.9.1.56
+sys=host57 ip=10.0.8.57
+	dom=h57.example dns=10.9.0.2 dns=10.9.1.57
+sys=host58 ip=10.0.8.58
+	dom=h58.example dns=10.9.0.3 dns=10.9.1.58
+sys=host59 ip=10.0.8.59
+	dom=h59.example dns=10.9.0.4 dns=10.9.1.59
+sys=host60 ip=10.0.8.60
+	dom=h60.example dns=10.9.0.0 dns=10.9.1.60
+sys=ünï ip=10.8.0.1
+	dom=café.example
+sys=quoted ip='10.8.0.2'
