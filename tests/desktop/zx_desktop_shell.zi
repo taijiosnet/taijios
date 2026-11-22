@@ -1,0 +1,57 @@
+Desktop :: #import "taijios_desktop";
+WM :: #import "taijios_wm";
+Surface :: #import "zx_surface";
+Args :: #import "taijios_args";
+
+Fail :: (message: string) -> s32 {
+    unused Args.SetFailure(message);
+    return 1;
+}
+
+main :: () -> s32 {
+    if !Desktop.BindDesktop() { return Fail("desktop binding denied") }
+    if Desktop.UnixSeconds() <= 0 || Desktop.TimezoneOffsetSeconds() != 5400 { return Fail("guest clock timezone") }
+    state: [7]s32;
+    if Desktop.Capture(state[:]) != 0 || state[1] != 0 || state[3] <= 0 || state[4] <= 0 {
+        return Fail("initial desktop snapshot");
+    }
+    if !Surface.Open("ZX desktop probe", state[3], state[4]) { return Fail("open desktop surface") }
+    panel: [4]s32 = .{0, 0, state[3], 24};
+    if !Desktop.SetChromeRegions(panel[:]) { return Fail("reserve desktop panel") }
+    if WM.Launch("/missing.zx", "missing\0") != -1 || WM.Launch("/window37.zx", "probe\0café 猫\0\0") != 0 {
+        return Fail("launch application from desktop");
+    }
+    for i: 0 .. 40 {
+        if Desktop.Capture(state[:]) == 0 && state[1] == 1 { break }
+        unused Surface.Event(50);
+    }
+    if state[1] != 1 || state[2] <= 0 { return Fail("desktop did not see new window") }
+    window: [9]s32;
+    title: [128]u8;
+    app_id: [128]u8;
+    for i: 0 .. 40 {
+        if Desktop.Capture(state[:]) == 0 && Desktop.WindowAt(0, window[:], title[:], app_id[:]) && title[3] == #char "s" { break }
+        unused Surface.Event(50);
+    }
+    if window[0] != state[2] || window[2] < 24 || window[3] != 48 || window[4] != 32 ||
+       window[6] != 1 || title[3] != #char "s" || app_id[0] != #char "w" || app_id[8] != 0 {
+        return Fail("window title, app ID and work area snapshot");
+    }
+    id := window[0];
+    if !Desktop.WindowAction(id, "resize", 20, 34, 72, 48) || Desktop.Capture(state[:]) != 0 ||
+       !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[1] != 20 || window[2] != 34 ||
+       window[3] != 72 || window[4] != 48 { return Fail("window resize snapshot") }
+    if !Desktop.WindowAction(id, "minimize", 0, 0, 0, 0) || Desktop.Capture(state[:]) != 0 || state[2] != 0 ||
+       !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[7] != 1 ||
+       !Desktop.WindowAction(id, "restore", 0, 0, 0, 0) { return Fail("minimize and restore window") }
+    if !Desktop.DesktopAction("configure_workspaces", 5) || !Desktop.WindowAction(id, "move_to_workspace", 4, 0, 0, 0) ||
+       !Desktop.DesktopAction("switch_workspace", 4) || Desktop.Capture(state[:]) != 0 || state[5] != 5 || state[6] != 4 ||
+       !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[5] != 4 { return Fail("desktop workspace state") }
+    if !Desktop.WindowAction(id, "close", 0, 0, 0, 0) || Desktop.Capture(state[:]) != 0 || state[1] != 0 {
+        return Fail("close window from shell");
+    }
+    unused Surface.Event(100);
+    Surface.Close();
+    print("ZX_DESKTOP_PROTOCOL_OK\n");
+    return 0;
+}

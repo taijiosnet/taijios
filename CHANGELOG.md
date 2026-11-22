@@ -18,6 +18,7 @@
 - Launch and collect concurrent native ZX children while keeping guest device descriptors private.
 - Add Ziran workspace, focus, window stacking, and pointer capture for the native compositor.
 - Add an opt-in Ziran window manager that runs multiple existing ZX GUI apps directly on Linux without Dis.
+- Let Rill start under the Ziran window manager, launch ZX catalog entries, and control native windows and workspaces.
 - Lock TaijiOS Tcl and Tk to the canonical source packages so each ZX application can select the Tk features it uses.
 
 - Avoid redundant pointer-motion events on stationary ZX button presses and releases.

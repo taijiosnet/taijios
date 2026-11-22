@@ -186,7 +186,8 @@ def check_window_manager(emulator, root, env):
         source = root / 'zx_window_app.zi'
         source.write_text(fixture.replace('Color :: 37;', f'Color :: {red};'), encoding='utf-8')
         subprocess.run([
-            'ziran', 'bundle', '--root', root, '--module-path', surfaces, '--bind-host', 'zx_surface',
+            'ziran', 'bundle', '--root', root, '--module-path', surfaces, '--module-path', ROOT / 'appl/cmd',
+            '--bind-host', 'zx_surface', '--bind-host', 'taijios_args',
             '--entry', 'zx_window_app:main', '-o', root / f'window{red}.zx', source,
         ], env=env, check=True, timeout=60)
     assert not any(root.rglob('*.dis'))
@@ -245,6 +246,33 @@ def check_window_manager(emulator, root, env):
             stop(app)
             app.stdout.close()
     print('Native ZX WM placed, composited, switched and routed input to two real ZX windows')
+
+
+def check_desktop_shell(emulator, root, env):
+    from test_logwindow import private_display
+
+    source = Path(__file__).with_name('zx_desktop_shell.zi')
+    (root / 'locale').mkdir()
+    (root / 'locale/timezone').write_text('TST 5400 TST 5400\n', encoding='ascii')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
+        '--module-path', ROOT / 'appl/cmd/tcltk', '--bind-host', 'taijios_desktop',
+        '--bind-host', 'taijios_wm', '--bind-host', 'taijios_args', '--bind-host', 'zx_surface',
+        '--entry', 'zx_desktop_shell:main', '-o', root / 'shell.zx', source,
+    ], env=env, check=True, timeout=60)
+
+    with private_display() as display:
+        app = [emulator, '-v', '-r', root, '-g', '640x480', '/wm.zx']
+        private_env = env | {'DISPLAY': display['DISPLAY']}
+        ordinary = subprocess.run(app + ['/shell.zx'], env=private_env, stdin=subprocess.DEVNULL,
+                                  capture_output=True, text=True, start_new_session=True, timeout=10)
+        assert ordinary.returncode == 1 and 'ZX_DESKTOP_PROTOCOL_OK' not in ordinary.stdout, ordinary
+        shell = subprocess.run(app + ['--desktop', '/shell.zx'], env=private_env, stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, start_new_session=True, timeout=10)
+        assert shell.returncode == 0 and not shell.stderr and 'Initial Dis:' not in shell.stdout, shell
+        for marker in ('ZX_DESKTOP_PROTOCOL_OK', 'ZX_DESKTOP_CHILD_RESIZED', 'ZX_DESKTOP_CHILD_CLOSED'):
+            assert marker in shell.stdout, shell
+    print('Private ZX shell owned the desktop, launched a window, and controlled its workspace, size and lifecycle')
 
 
 def main():
@@ -340,6 +368,7 @@ def main():
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)
+            check_desktop_shell(emulator, root, env)
 
 
 if __name__ == '__main__':

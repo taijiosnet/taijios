@@ -39,6 +39,8 @@ New :: (desktop_keyboard: bool, desktop_pointer: bool) -> State {
              desktop_keyboard = desktop_keyboard, desktop_pointer = desktop_pointer};
 }
 
+At :: (state: *State, index: s64) -> Window { return state.windows[index] }
+
 // Only the first chrome region reserves work area. Popup regions can overlap
 // windows without affecting placement or maximized bounds.
 WorkArea :: (screen: Draw.Rect, chrome: []Compositor.Layer) -> Draw.Rect {

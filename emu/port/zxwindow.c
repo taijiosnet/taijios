@@ -10,12 +10,23 @@
 #include <pthread.h>
 #include <time.h>
 
-enum { NativeEvents = 64, NativeTitleBytes = 512 };
+enum { NativeEvents = 64, NativeTitleBytes = 512, NativeDesktopWindows = 32 };
 
 typedef struct ZxNativeEvent ZxNativeEvent;
 struct ZxNativeEvent {
 	int field[9]; /* kind, x, y, button, key, modifiers, width, height, text rune */
 	vlong millis;
+};
+
+typedef struct ZxNativeDesktop ZxNativeDesktop;
+struct ZxNativeDesktop {
+	int fields[ZxnSnapshotFields];
+	struct {
+		int fields[ZxnWindowFields];
+		char title[NativeTitleBytes + 1];
+		char appid[NativeTitleBytes + 1];
+	} windows[NativeDesktopWindows];
+	int bound;
 };
 
 struct ZxNativeWindow {
@@ -29,10 +40,11 @@ struct ZxNativeWindow {
 	HostField result[9];
 	uchar text[UTFmax];
 	vlong pointermillis;
+	ZxNativeDesktop *desktop;
 };
 
 ZxNativeWindow *
-zxwindownew(void)
+zxwindownew(int role)
 {
 	ZxNativeWindow *window;
 	pthread_condattr_t attr;
@@ -60,7 +72,20 @@ zxwindownew(void)
 		free(window);
 		return nil;
 	}
+	if(role == ZxnDesktop){
+		window->desktop = calloc(1, sizeof(*window->desktop));
+		if(window->desktop == nil){
+			zxwindowfree(window);
+			return nil;
+		}
+	}
 	return window;
+}
+
+int
+zxwindowdesktop(ZxNativeWindow *window)
+{
+	return window != nil && window->desktop != nil;
 }
 
 void
@@ -83,6 +108,7 @@ zxwindowfree(ZxNativeWindow *window)
 		return;
 	pthread_cond_destroy(&window->changed);
 	pthread_mutex_destroy(&window->lock);
+	free(window->desktop);
 	free(window);
 }
 
@@ -147,8 +173,8 @@ zxwindowinput(ZxNativeWindow *window, int *fields, vlong millis)
 }
 
 /* The blocked app keeps the borrowed payload alive until the manager replies. */
-static int
-submit(ZxNativeWindow *window, ZxNativeRequest request)
+int
+zxwindowsubmit(ZxNativeWindow *window, ZxNativeRequest request)
 {
 	int accepted;
 
@@ -172,6 +198,210 @@ static int
 integer(const HostValue *value)
 {
 	return value->kind == HOST_INTEGER && value->integer >= INT32_MIN && value->integer <= INT32_MAX;
+}
+
+static int
+slice(const HostValue *value, const char *type, size_t minimum)
+{
+	return value->kind == HOST_SLICE && value->type != nil && strcmp(value->type, type) == 0 &&
+		value->length >= minimum && (value->length == 0 || value->elements != nil);
+}
+
+static int
+desktopstring(const HostValue *value, size_t maximum)
+{
+	return value->kind == HOST_STRING && value->length <= maximum &&
+		(value->length == 0 || (value->data != nil && memchr(value->data, 0, value->length) == nil));
+}
+
+static void
+tobytes(const HostValue *out, char *text)
+{
+	char buffer[NativeTitleBytes + 1];
+	size_t i, limit = out->length < sizeof(buffer) ? out->length : sizeof(buffer);
+
+	utfecpy(buffer, buffer + limit, text);
+	for(i = 0; buffer[i] != 0; i++)
+		out->elements[i].bits = (uchar)buffer[i];
+	out->elements[i].bits = 0;
+}
+
+int
+zxwindowsnapshot(ZxNativeWindow *window, const HostValue *args)
+{
+	ZxNativeDesktop *desktop;
+	int i, j, count;
+	const HostValue *title, *appid, *fields;
+
+	if(!zxwindowdesktop(window) || !slice(args, "[]s32", ZxnSnapshotFields) ||
+	   !integer(args[0].elements+1))
+		return 0;
+	count = args[0].elements[1].integer;
+	if(count < 0 || count > NativeDesktopWindows || !slice(args+1, "[]s32", count*ZxnWindowFields) ||
+	   !slice(args+2, "[]string", 2*count))
+		return 0;
+	for(i = 0; i < 2*count; i++)
+		if(!desktopstring(args[2].elements+i, NativeTitleBytes))
+			return 0;
+	pthread_mutex_lock(&window->lock);
+	if(window->request.kind != ZxnCapture){
+		pthread_mutex_unlock(&window->lock);
+		return 0;
+	}
+	desktop = window->desktop;
+	for(i = 0; i < ZxnSnapshotFields; i++)
+		desktop->fields[i] = args[0].elements[i].integer;
+	for(i = 0; i < count; i++){
+		fields = args[1].elements + i*ZxnWindowFields;
+		for(j = 0; j < ZxnWindowFields; j++)
+			desktop->windows[i].fields[j] = fields[j].integer;
+		title = args[2].elements + 2*i;
+		appid = title + 1;
+		if(title->length != 0)
+			memmove(desktop->windows[i].title, title->data, title->length);
+		desktop->windows[i].title[title->length] = 0;
+		if(appid->length != 0)
+			memmove(desktop->windows[i].appid, appid->data, appid->length);
+		desktop->windows[i].appid[appid->length] = 0;
+	}
+	pthread_mutex_unlock(&window->lock);
+	return 1;
+}
+
+static int
+timezonefile(const char *path, char *text, int maximum)
+{
+	int fd, n;
+
+	fd = kopen((char*)path, OREAD);
+	if(fd < 0)
+		return 0;
+	n = kread(fd, text, maximum - 1);
+	kclose(fd);
+	if(n <= 0)
+		return 0;
+	text[n] = 0;
+	return n;
+}
+
+static int
+guesttimezone(vlong now)
+{
+	static const char spaces[] = " \t\r\n";
+	char text[2049], *save, *standard, *daylight, *start, *end;
+	long st, dt;
+	int n;
+
+	n = timezonefile("/env/timezone", text, sizeof(text));
+	if(n == 0)
+		n = timezonefile("/locale/timezone", text, sizeof(text));
+	if(n == 0)
+		return 0;
+	if(text[0] == '/' || text[0] == '#'){
+		if(text[n-1] == '\n')
+			text[n-1] = 0;
+		if(timezonefile(text, text, sizeof(text)) == 0)
+			return 0;
+	}
+	if(strtok_r(text, spaces, &save) == nil || (standard = strtok_r(nil, spaces, &save)) == nil ||
+	   strtok_r(nil, spaces, &save) == nil || (daylight = strtok_r(nil, spaces, &save)) == nil)
+		return 0;
+	st = strtol(standard, nil, 10);
+	dt = strtol(daylight, nil, 10);
+	if(st < -86400 || st > 86400 || dt < -86400 || dt > 86400)
+		return 0;
+	now += st;
+	while((start = strtok_r(nil, spaces, &save)) != nil && (end = strtok_r(nil, spaces, &save)) != nil)
+		if(now >= strtoll(start, nil, 10) && now < strtoll(end, nil, 10))
+			return dt;
+	return st;
+}
+
+int
+zxnativeshelldesktop(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	extern vlong timeoffset;
+	ZxNativeWindow *window = context;
+	ZxNativeDesktop *desktop = window->desktop;
+	ZxNativeRequest request = {0};
+	int regions[ZxnChromeFields], i, index, ok = 0;
+	const HostValue *action;
+	vlong now;
+
+	USED(module);
+	if(strcmp(function, "UnixSeconds") == 0 || strcmp(function, "TimezoneOffsetSeconds") == 0){
+		if(n != 0)
+			return 0;
+		now = (timeoffset + osusectime()) / 1000000;
+		if(strcmp(function, "UnixSeconds") == 0)
+			*result = (HostValue){.kind = HOST_INTEGER, .type = "s64", .integer = now};
+		else
+			*result = (HostValue){.kind = HOST_INTEGER, .type = "s32",
+				.integer = guesttimezone(now)};
+		return 1;
+	}
+	if(strcmp(function, "Capture") == 0){
+		if(n != 1 || !slice(args, "[]s32", ZxnSnapshotFields))
+			return 0;
+		ok = desktop->bound && zxwindowsubmit(window, (ZxNativeRequest){.kind = ZxnCapture});
+		if(ok)
+			for(i = 0; i < ZxnSnapshotFields; i++)
+				args[0].elements[i].integer = desktop->fields[i];
+		*result = (HostValue){.kind = HOST_INTEGER, .type = "s32", .integer = ok ? 0 : -1};
+		return 1;
+	}
+	if(strcmp(function, "BindDesktop") == 0){
+		if(n != 0)
+			return 0;
+		ok = !window->opened;
+		if(ok)
+			desktop->bound = 1;
+	}else if(strcmp(function, "WindowAt") == 0){
+		if(n != 4 || !integer(args) || !slice(args+1, "[]s32", ZxnWindowFields) ||
+		   !slice(args+2, "[]u8", 1) || !slice(args+3, "[]u8", 1))
+			return 0;
+		index = args[0].integer;
+		if(index >= 0 && index < desktop->fields[1]){
+			for(i = 0; i < ZxnWindowFields; i++)
+				args[1].elements[i].integer = desktop->windows[index].fields[i];
+			tobytes(args+2, desktop->windows[index].title);
+			tobytes(args+3, desktop->windows[index].appid);
+			ok = 1;
+		}
+	}else if(strcmp(function, "SetChromeRegions") == 0){
+		if(n != 1 || !slice(args, "[]s32", 0) || args->length > ZxnChromeFields || args->length % 4 != 0)
+			return 0;
+		for(i = 0; i < args->length; i++)
+			regions[i] = args[0].elements[i].integer;
+		request = (ZxNativeRequest){.kind = ZxnChrome, .regions = regions, .length = args->length};
+		ok = window->opened && zxwindowsubmit(window, request);
+	}else if(strcmp(function, "DesktopAction") == 0 || strcmp(function, "WindowAction") == 0){
+		if(strcmp(function, "DesktopAction") == 0){
+			if(n != 2 || !integer(args+1))
+				return 0;
+			request = (ZxNativeRequest){.kind = ZxnDesktopAction, .flag = args[1].integer};
+			action = args;
+		}else{
+			if(n != 6 || !integer(args) || !integer(args+2) || !integer(args+3) || !integer(args+4) || !integer(args+5))
+				return 0;
+			request = (ZxNativeRequest){.kind = ZxnWindowAction, .flag = args[0].integer,
+				.first = args[2].integer, .rows = args[3].integer, .width = args[4].integer, .height = args[5].integer};
+			action = args+1;
+		}
+		if(window->opened && desktopstring(action, 32) && action->length != 0){
+			request.data = action->data;
+			request.length = action->length;
+			ok = zxwindowsubmit(window, request);
+		}
+	}else if(strcmp(function, "Launch") == 0){
+		if(n != 1 || !integer(args))
+			return 0;
+	}else if(n != 5 || !integer(args) || !slice(args+1, "[]s32", 1) ||
+	   !slice(args+2, "[]u8", 1) || !slice(args+3, "[]u8", 1) || !slice(args+4, "[]u8", 1))
+		return 0;
+	*result = (HostValue){.kind = HOST_INTEGER, .type = "bool", .integer = ok};
+	return 1;
 }
 
 static int
@@ -223,13 +453,6 @@ dimensions(const HostValue *width, const HostValue *height)
 {
 	return integer(width) && integer(height) && width->integer > 0 && width->integer <= ZX_Maxside &&
 		height->integer > 0 && height->integer <= ZX_Maxside && width->integer * height->integer <= ZX_Maxpixels;
-}
-
-static int
-title(const HostValue *value)
-{
-	return value->kind == HOST_STRING && value->length <= NativeTitleBytes &&
-		(value->length == 0 || (value->data != nil && memchr(value->data, 0, value->length) == nil));
 }
 
 static int
@@ -296,7 +519,7 @@ frame(ZxNativeWindow *window, const char *function, const HostValue *args, int n
 		request.length = pixels->length;
 	}
 	window->nextrow = 0;
-	ok = submit(window, request);
+	ok = zxwindowsubmit(window, request);
 	free(rgba);
 	if(ok && (request.flag & ZxnPublish) == 0){
 		window->nextrow = request.first + request.rows;
@@ -324,23 +547,24 @@ zxnativesurface(void *context, const char *module, const char *function,
 		if(n != 0)
 			return 0;
 		if(window->opened)
-			submit(window, (ZxNativeRequest){.kind = ZxnClose});
+			zxwindowsubmit(window, (ZxNativeRequest){.kind = ZxnClose});
 		window->opened = 0;
 		window->nextrow = 0;
 		result->kind = HOST_VOID;
 		return 1;
 	}
 	if(strcmp(function, "Open") == 0){
-		ok = !window->opened && n == 3 && title(args) && dimensions(args+1, args+2) &&
-			submit(window, (ZxNativeRequest){.kind = ZxnOpen, .width = args[1].integer, .height = args[2].integer,
+		ok = !window->opened && (window->desktop == nil || window->desktop->bound) &&
+			n == 3 && desktopstring(args, NativeTitleBytes) && dimensions(args+1, args+2) &&
+			zxwindowsubmit(window, (ZxNativeRequest){.kind = ZxnOpen, .width = args[1].integer, .height = args[2].integer,
 				.data = args[0].data, .length = args[0].length});
 		if(ok)
 			window->opened = 1;
 	}else if(strcmp(function, "SetTitle") == 0){
-		ok = window->opened && n == 1 && title(args) && submit(window,
+		ok = window->opened && n == 1 && desktopstring(args, NativeTitleBytes) && zxwindowsubmit(window,
 			(ZxNativeRequest){.kind = ZxnTitle, .data = args[0].data, .length = args[0].length});
 	}else if(strcmp(function, "SetTasked") == 0){
-		ok = window->opened && n == 1 && integer(args) && submit(window,
+		ok = window->opened && n == 1 && integer(args) && zxwindowsubmit(window,
 			(ZxNativeRequest){.kind = ZxnTask, .flag = args[0].integer != 0});
 	}else
 		ok = window->opened && frame(window, function, args, n);

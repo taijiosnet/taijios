@@ -5,18 +5,27 @@ Frame :: 2;
 Close :: 3;
 SetTitle :: 4;
 SetTasked :: 5;
+Capture :: 6;
+Chrome :: 7;
+DesktopAction :: 8;
+WindowAction :: 9;
+Launch :: 10;
 Publish :: 1;
 Staged :: 2;
 
 StartWindow :: (path: string, operands: []string) -> s32 #foreign host_api;
+StartDesktop :: (path: string, operands: []string) -> s32 #foreign host_api;
 
 // Read one outstanding request from a child below before_id, or any child
 // when before_id is zero. Fields are kind, width, height, first row, rows,
 // flag, and payload byte length. Reply once after using its borrowed payload.
 Request :: (before_id: s32, fields: []s32) -> s32 #foreign host_api;
-Title :: (id: s32) -> string #foreign host_api;
+Text :: (id: s32) -> string #foreign host_api;
 Pixels :: (id: s32, offset: s32, bytes: []u8) -> s32 #foreign host_api;
 Reply :: (id: s32, accepted: bool) -> bool #foreign host_api;
+Snapshot :: (id: s32, desktop: []s32, windows: []s32, labels: []string) -> bool #reads #foreign host_api;
+ChromeRegions :: (id: s32, regions: []s32) -> s32 #foreign host_api;
+LaunchWindow :: (id: s32) -> s32 #foreign host_api;
 
 // Events use zx_surface.SurfaceEvent order. The last field is the text rune.
 Dispatch :: (id: s32, fields: []s32, pointer_millis: s64) -> bool #reads #foreign host_api;

@@ -49,6 +49,10 @@ To run an existing ZX GUI app under it with the current Linux build, use
 `emu/Linux/o.emu -r "$PWD" -g 960x600 /appl/wm/native_wm.zx /dis/wm/counter.zx`.
 Pass multiple app paths to open them concurrently. Switch workspaces with
 Ctrl+Alt+Left or Ctrl+Alt+Right. Hold Shift as well to move the focused window.
+With Rill installed, pass `--desktop /dis/wm/rill.zx` after the manager path
+to start Rill directly in ZX. Rill can launch ZX apps from its guest catalog
+and manage them through its task list. Its window actions, workspaces, and
+panel regions use the native manager.
 The default desktop continues to start Rill through the regular desktop runner.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including

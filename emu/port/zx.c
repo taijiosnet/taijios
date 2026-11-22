@@ -1214,7 +1214,7 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 		problem = "invalid ZX program path";
 	else if(!zxprocessargs(&process->command, args+1))
 		problem = "cannot copy ZX process arguments";
-	else if(windowed && (process->command.window = zxwindownew()) == nil)
+	else if(windowed != ZxnNoWindow && (process->command.window = zxwindownew(windowed)) == nil)
 		problem = "cannot create ZX window channel";
 	else if(!zxprocessadmit())
 		problem = "too many active ZX processes";
@@ -1773,6 +1773,64 @@ zxnativeready(void *arg)
 }
 
 static int
+zxnativelaunch(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	char path[ZxGuestPathBytes + 1];
+	char payload[ZxGuestPathBytes + 1 + ZxLaunchArgBytes];
+	const HostValue *argv = args+1;
+	int length;
+
+	USED(module);
+	USED(function);
+	if(n != 2 || args[0].kind != HOST_STRING || argv->kind != HOST_STRING)
+		return 0;
+	if(!zxiopath(args, path) || path[0] == 0 || argv->length == 0 || argv->length > ZxLaunchArgBytes ||
+	   argv->data == nil || argv->data[0] == 0 || argv->data[argv->length-1] != 0)
+		return zxs32(result, -1);
+	length = args[0].length + 1;
+	memmove(payload, path, length);
+	memmove(payload + length, argv->data, argv->length);
+	return zxs32(result, zxwindowsubmit(context, (ZxNativeRequest){.kind = ZxnLaunch, .data = (uchar*)payload,
+		.length = length + argv->length}) ? 0 : -1);
+}
+
+static int
+zxnativelaunchrequest(ZxCommand *command, ZxNativeRequest *request)
+{
+	HostValue argv[63], args[2];
+	const char *path, *word, *end, *next;
+	int length, argc = 0;
+	Dir *info;
+
+	path = (const char*)request->data;
+	end = path + request->length;
+	length = strlen(path);
+	if(length < 4 || strcmp(path+length-3, ".zx") != 0)
+		return 0;
+	info = kdirstat((char*)path);
+	if(info == nil)
+		return 0;
+	if(info->mode & DMDIR){
+		free(info);
+		return 0;
+	}
+	free(info);
+	word = path + length + 1;
+	word += strlen(word) + 1; /* Match the console ABI: omit argv[0]. */
+	for(; word < end; word = next + 1){
+		next = memchr(word, 0, end-word);
+		if(next == nil || argc == nelem(argv))
+			return 0;
+		argv[argc++] = (HostValue){.kind = HOST_STRING, .type = "string", .data = (const uchar*)word,
+			.length = next-word};
+	}
+	args[0] = (HostValue){.kind = HOST_STRING, .type = "string", .data = (const uchar*)path, .length = length};
+	args[1] = (HostValue){.kind = HOST_SLICE, .type = "[]string", .elements = argv, .length = argc};
+	return zxprocessregister(command, args, &command->outcome, ZxnApplication);
+}
+
+static int
 zxnativemanager(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
 {
@@ -1783,10 +1841,15 @@ zxnativemanager(void *context, const char *module, const char *function,
 	int i, kind, fields[9];
 
 	USED(module);
-	if(strcmp(function, "StartWindow") == 0){
+	if(strcmp(function, "StartWindow") == 0 || strcmp(function, "StartDesktop") == 0){
 		if(n != 2 || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE)
 			return 0;
-		return zxs32(result, zxprocessregister(command, args, &command->outcome, 1));
+		kind = strcmp(function, "StartDesktop") == 0 ? ZxnDesktop : ZxnApplication;
+		if(kind == ZxnDesktop)
+			for(process = command->children; process != nil; process = process->next)
+				if(zxwindowdesktop(process->command.window))
+					return zxs32(result, 0);
+		return zxs32(result, zxprocessregister(command, args, &command->outcome, kind));
 	}
 	if(strcmp(function, "WaitActivity") == 0){
 		if(n != 0)
@@ -1826,16 +1889,36 @@ zxnativemanager(void *context, const char *module, const char *function,
 	for(process = command->children; process != nil && process->id != args[0].integer; process = process->next)
 		;
 	window = process == nil ? nil : process->command.window;
-	if(strcmp(function, "Title") == 0){
+	if(strcmp(function, "Text") == 0){
 		*result = (HostValue){.kind = HOST_STRING, .type = "string"};
 		if(n != 1)
 			return 0;
 		kind = zxwindowrequest(window, &request);
-		if(kind == ZxnOpen || kind == ZxnTitle){
+		if(kind == ZxnOpen || kind == ZxnTitle || kind == ZxnWindowAction || kind == ZxnDesktopAction || kind == ZxnLaunch){
 			result->data = request.data;
 			result->length = request.length;
 		}
 		return 1;
+	}
+	if(strcmp(function, "Snapshot") == 0){
+		if(n != 4)
+			return 0;
+		zxbool(result, zxwindowsnapshot(window, args+1));
+		return 1;
+	}
+	if(strcmp(function, "ChromeRegions") == 0){
+		if(n != 2 || !zxtaskslice(args+1, "[]s32", ZxnChromeFields))
+			return 0;
+		if(zxwindowrequest(window, &request) != ZxnChrome || request.length > ZxnChromeFields)
+			return zxs32(result, -1);
+		for(i = 0; i < request.length; i++)
+			args[1].elements[i].integer = request.regions[i];
+		return zxs32(result, i);
+	}
+	if(strcmp(function, "LaunchWindow") == 0){
+		if(n != 1)
+			return 0;
+		return zxs32(result, zxwindowrequest(window, &request) == ZxnLaunch ? zxnativelaunchrequest(command, &request) : 0);
 	}
 	if(strcmp(function, "Pixels") == 0){
 		if(n != 3 || !zxisindex(args+1) || !zxioslice(args+2) || args[1].integer < 0)
@@ -2322,6 +2405,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error",
 		"StatPacked", "FstatPacked", "WstatPacked", "FdPath", "CreateNew", "Remove", "Cwd", "Home",
 		"Sync", "RenameSameDir"};
+	static const char *desktop[] = {"BindDesktop", "Capture", "LauncherAt", "WindowAt", "Launch", "WindowAction",
+		"DesktopAction", "UnixSeconds", "TimezoneOffsetSeconds", "SetChromeRegions"};
 	BundleCapabilityAbi abi;
 	size_t i, count = 0;
 	int j;
@@ -2375,12 +2460,26 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 		if(!usesdis() && command->depth == 0 && zxmodule(abi.module, "taijios_native_wm")){
-			if(strcmp(abi.function, "StartWindow") == 0 || strcmp(abi.function, "WaitActivity") == 0 ||
-			   strcmp(abi.function, "Request") == 0 || strcmp(abi.function, "Title") == 0 ||
+			if(strcmp(abi.function, "StartWindow") == 0 || strcmp(abi.function, "StartDesktop") == 0 ||
+			   strcmp(abi.function, "WaitActivity") == 0 || strcmp(abi.function, "LaunchWindow") == 0 ||
+			   strcmp(abi.function, "Request") == 0 || strcmp(abi.function, "Text") == 0 ||
+			   strcmp(abi.function, "Snapshot") == 0 || strcmp(abi.function, "ChromeRegions") == 0 ||
 			   strcmp(abi.function, "Pixels") == 0 ||
 			   strcmp(abi.function, "Reply") == 0 || strcmp(abi.function, "Disconnect") == 0 ||
 			   strcmp(abi.function, "Dispatch") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxnativemanager, command};
+			continue;
+		}
+		if(zxwindowdesktop(command->window) && zxmodule(abi.module, "taijios_desktop")){
+			for(j = 0; j < nelem(desktop); j++)
+				if(strcmp(abi.function, desktop[j]) == 0){
+					bindings[count++] = (HostBinding){abi.module, abi.function, zxnativeshelldesktop, command->window};
+					break;
+				}
+			continue;
+		}
+		if(command->window != nil && zxmodule(abi.module, "taijios_wm") && strcmp(abi.function, "Launch") == 0){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxnativelaunch, command->window};
 			continue;
 		}
 		if(command->window != nil && zxmodule(abi.module, "zx_surface")){
@@ -2408,12 +2507,11 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 		if(surface->win != H && surface->win->desktop != H && zxmodule(abi.module, "taijios_desktop")){
-			if(strcmp(abi.function, "BindDesktop") == 0 || strcmp(abi.function, "Capture") == 0 ||
-			   strcmp(abi.function, "LauncherAt") == 0 || strcmp(abi.function, "WindowAt") == 0 ||
-			   strcmp(abi.function, "Launch") == 0 || strcmp(abi.function, "WindowAction") == 0 ||
-			   strcmp(abi.function, "DesktopAction") == 0 || strcmp(abi.function, "UnixSeconds") == 0 ||
-			   strcmp(abi.function, "TimezoneOffsetSeconds") == 0 || strcmp(abi.function, "SetChromeRegions") == 0)
-				bindings[count++] = (HostBinding){abi.module, abi.function, zxdesktop, surface};
+			for(j = 0; j < nelem(desktop); j++)
+				if(strcmp(abi.function, desktop[j]) == 0){
+					bindings[count++] = (HostBinding){abi.module, abi.function, zxdesktop, surface};
+					break;
+				}
 			continue;
 		}
 		if(surface->win != H && zxmodule(abi.module, "taijios_wm")){

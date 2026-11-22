@@ -12,8 +12,10 @@ Windows :: #import "desktop_windows";
 main :: () -> s32 {
     count := Args.OperandCount();
     if count == 0 { return Fail("supply a guest ZX application path") }
+    desktop := Args.Operand(0) == "--desktop";
+    if desktop && count < 2 { return Fail("supply a guest ZX desktop path") }
     manager: Manager;
-    manager.windows = Windows.New(false, false);
+    manager.windows = Windows.New(desktop, desktop);
     if !Draw.Open(*manager.display) { return Fail("open Draw") }
     defer Draw.Close(*manager.display);
     manager.bounds = Draw.Screen(*manager.display).bounds;
@@ -24,9 +26,16 @@ main :: () -> s32 {
     defer Input.Close(input);
 
     noargs: [0]string;
-    for i: 0 .. count - 1 {
-        id := Link.StartWindow(Args.Operand(i), noargs[:]);
-        if id <= 0 || !VecPush(manager.apps, Application.{id = id}) { return Fail("start application") }
+    first: s32 = 0;
+    if desktop {
+        manager.shell = Link.StartDesktop(Args.Operand(1), noargs[:]);
+        if manager.shell <= 0 || !VecPush(manager.apps, Application.{id = manager.shell}) { return Fail("start desktop") }
+        first = 2;
+    }
+    for i: first .. count - 1 {
+        path := Args.Operand(i);
+        id := Link.StartWindow(path, noargs[:]);
+        if id <= 0 || !VecPush(manager.apps, Application.{id = id, app_id = AppID(path)}) { return Fail("start application") }
     }
     return Run(*manager, input);
 }
@@ -39,6 +48,9 @@ Application :: struct {
     image: Draw.Image;
     pending: Draw.Image;
     title: string;
+    app_id: string;
+    normal: Draw.Rect;
+    maximized: bool;
     open: bool;
 }
 
@@ -48,6 +60,10 @@ Manager :: struct {
     bounds: Draw.Rect;
     windows: Windows.State;
     apps: Vec(Application);
+    shell: s32;
+    chrome: [8]Draw.Rect;
+    chrome_count: s64;
+    generation: s32;
     buttons: s32;
     pointer_tick: u32;
     pointer_epoch: s64;
@@ -59,9 +75,218 @@ Fail :: (message: string) -> s32 {
     return 1;
 }
 
+AppID :: (path: string) -> string {
+    first: s64 = 0;
+    end := path.count;
+    for i: 0 .. path.count - 1 {
+        if path[i] == 0 { end = i; break }
+        if path[i] == #char "/" { first = i + 1 }
+    }
+    if end - first > 3 && path[end - 3:end] == ".zx" { end -= 3 }
+    if end - first > 512 { return "" }
+    return path[first:end];
+}
+
+ChromeLayers :: (manager: *Manager, layers: []Compositor.Layer) -> s64 {
+    index := Find(manager, manager.shell);
+    if index < 0 || !manager.apps[index].open { return 0 }
+    image := manager.apps[index].image;
+    for i: 0 .. manager.chrome_count - 1 {
+        region := manager.chrome[i];
+        layers[i] = .{image, region, manager.bounds.left + region.left, manager.bounds.top + region.top};
+    }
+    return manager.chrome_count;
+}
+
+WorkArea :: (manager: *Manager) -> Draw.Rect {
+    chrome: [8]Compositor.Layer;
+    count := ChromeLayers(manager, chrome[:]);
+    return Windows.WorkArea(manager.bounds, chrome[:count]);
+}
+
+DesktopChanged :: (manager: *Manager) {
+    manager.generation += 1;
+    manager.dirty = true;
+}
+
+Capture :: (manager: *Manager, id: s32) -> bool {
+    if id != manager.shell { return false }
+    area := manager.bounds;
+    focus := manager.windows.keyboard_focus;
+    fields: [7]s32 = .{manager.generation, 0, ifx focus > 0 then focus else 0,
+        area.right - area.left, area.bottom - area.top, manager.windows.workspace_count, manager.windows.workspace};
+    records: [32 * 9]s32;
+    names: [32 * 2]string;
+    count: s64 = 0;
+    for i: 0 .. manager.windows.windows.count - 1 {
+        window := Windows.At(*manager.windows, i);
+        index := Find(manager, window.id);
+        if index < 0 || count >= 32 { return false }
+        app := *manager.apps[index];
+        bounds := app.bounds;
+        start := count * 9;
+        records[start] = app.id;
+        records[start + 1] = bounds.left - area.left;
+        records[start + 2] = bounds.top - area.top;
+        records[start + 3] = bounds.right - bounds.left;
+        records[start + 4] = bounds.bottom - bounds.top;
+        records[start + 5] = window.workspace;
+        records[start + 6] = cast(s32)(window.id == focus);
+        records[start + 7] = cast(s32)window.minimized;
+        records[start + 8] = cast(s32)app.maximized;
+        names[2 * count] = app.title;
+        names[2 * count + 1] = app.app_id;
+        count += 1;
+    }
+    fields[1] = cast(s32)count;
+    return Link.Snapshot(id, fields[:], records[:count * 9], names[:count * 2]);
+}
+
+SetChrome :: (manager: *Manager, id: s32) -> bool {
+    if id != manager.shell { return false }
+    raw: [32]s32;
+    count := Link.ChromeRegions(id, raw[:]);
+    if count < 0 || count > raw.count || count % 4 != 0 { return false }
+    width := manager.bounds.right - manager.bounds.left;
+    height := manager.bounds.bottom - manager.bounds.top;
+    next: [8]Draw.Rect;
+    changed := count / 4 != manager.chrome_count;
+    for i: 0 .. count / 4 - 1 {
+        x := raw[4 * i]; y := raw[4 * i + 1];
+        w := raw[4 * i + 2]; h := raw[4 * i + 3];
+        if x < 0 || y < 0 || x >= width || y >= height || w <= 0 || h <= 0 || w > width - x || h > height - y {
+            return false;
+        }
+        next[i] = .{x, y, x + w, y + h};
+        before := manager.chrome[i];
+        changed = changed || before.left != x || before.top != y || before.right != x + w || before.bottom != y + h;
+    }
+    if changed {
+        manager.chrome = next;
+        manager.chrome_count = count / 4;
+        manager.dirty = true;
+    }
+    return true;
+}
+
+DesktopAction :: (manager: *Manager, action: string, value: s32) -> bool {
+    ok := false;
+    if action == "switch_workspace" { ok = Windows.SwitchWorkspace(*manager.windows, value) }
+    else if action == "configure_workspaces" { ok = Windows.ConfigureWorkspaces(*manager.windows, value) }
+    else if action == "show_desktop" {
+        for app: manager.apps[:] {
+            if app.id != manager.shell && app.open { unused TaskWindow(manager, *app, true) }
+        }
+        return true;
+    }
+    if ok { DesktopChanged(manager) }
+    return ok;
+}
+
+TaskWindow :: (manager: *Manager, app: *Application, task: bool) -> bool {
+    for i: 0 .. manager.windows.windows.count - 1 {
+        window := Windows.At(*manager.windows, i);
+        if window.id != app.id || window.workspace != manager.windows.workspace { continue }
+        was_tasked := window.minimized;
+        ok := false;
+        if task { ok = Windows.Minimize(*manager.windows, app.id) }
+        else { ok = Windows.Focus(*manager.windows, app.id) }
+        if ok {
+            DesktopChanged(manager);
+            if task != was_tasked {
+                bounds := app.bounds;
+                fields: [9]s32 = .{Surface.Visibility, 0, 0, cast(s32)task, 0, 0,
+                    bounds.right - bounds.left, bounds.bottom - bounds.top, 0};
+                if !Link.Dispatch(app.id, fields[:], -1) { Link.Disconnect(app.id) }
+            }
+        }
+        return ok;
+    }
+    return false;
+}
+
+FitBounds :: (bounds: Draw.Rect, area: Draw.Rect) -> Draw.Rect {
+    width := bounds.right - bounds.left;
+    height := bounds.bottom - bounds.top;
+    if width > area.right - area.left { width = area.right - area.left }
+    if height > area.bottom - area.top { height = area.bottom - area.top }
+    left := bounds.left;
+    top := bounds.top;
+    if left > area.right - width { left = area.right - width }
+    if top > area.bottom - height { top = area.bottom - height }
+    if left < area.left { left = area.left }
+    if top < area.top { top = area.top }
+    return .{left, top, left + width, top + height};
+}
+
+SetBounds :: (manager: *Manager, app: *Application, bounds: Draw.Rect) -> bool {
+    before := app.bounds;
+    width := bounds.right - bounds.left;
+    height := bounds.bottom - bounds.top;
+    app.bounds = bounds;
+    if !Windows.SetLayer(*manager.windows, app.id, Layer(app)) { return false }
+    DesktopChanged(manager);
+    if width == before.right - before.left && height == before.bottom - before.top { return true }
+    fields: [9]s32 = .{Surface.Resize, 0, 0, 0, 0, 0, width, height, 0};
+    if !Link.Dispatch(app.id, fields[:], -1) { Link.Disconnect(app.id) }
+    return true;
+}
+
+WindowAction :: (manager: *Manager, action: string, request: []s32) -> bool {
+    id := request[5];
+    index := Find(manager, id);
+    if index < 0 || id == manager.shell || !manager.apps[index].open { return false }
+    app := *manager.apps[index];
+    if action == "move_to_workspace" {
+        if !Windows.MoveToWorkspace(*manager.windows, id, request[3]) { return false }
+        DesktopChanged(manager);
+        return true;
+    }
+    for i: 0 .. manager.windows.windows.count - 1 {
+        window := Windows.At(*manager.windows, i);
+        if window.id != id || window.workspace != manager.windows.workspace { continue }
+        if action == "close" {
+            Link.Disconnect(id);
+            RemoveWindow(manager, app);
+            return true;
+        }
+        if action == "focus" || (action == "restore" && window.minimized) { return TaskWindow(manager, app, false) }
+        if action == "minimize" { return TaskWindow(manager, app, true) }
+        if window.minimized { return false }
+        area := WorkArea(manager);
+        if action == "maximize" {
+            if app.maximized { return true }
+            app.normal = app.bounds;
+            app.maximized = true;
+            return SetBounds(manager, app, area);
+        }
+        if action == "restore" {
+            if !app.maximized { return true }
+            app.maximized = false;
+            return SetBounds(manager, app, FitBounds(app.normal, area));
+        }
+        if (action != "move" && action != "resize") || app.maximized { return false }
+        screen := manager.bounds;
+        if request[3] < 0 || request[4] < 0 || request[3] >= screen.right - screen.left ||
+           request[4] >= screen.bottom - screen.top { return false }
+        x := screen.left + request[3];
+        y := screen.top + request[4];
+        width := app.bounds.right - app.bounds.left;
+        height := app.bounds.bottom - app.bounds.top;
+        if action == "resize" { width = request[1]; height = request[2] }
+        if width <= 0 || height <= 0 || width > area.right - area.left || height > area.bottom - area.top { return false }
+        return SetBounds(manager, app, FitBounds(.{x, y, x + width, y + height}, area));
+    }
+    return false;
+}
+
 Paint :: (manager: *Manager) -> bool {
-    chrome: [0]Compositor.Layer;
-    return Windows.Repaint(*manager.windows, *manager.display, manager.background, chrome[:], manager.bounds);
+    chrome: [8]Compositor.Layer;
+    count := ChromeLayers(manager, chrome[:]);
+    background := manager.background;
+    index := Find(manager, manager.shell);
+    if index >= 0 && manager.apps[index].open { background = manager.apps[index].image }
+    return Windows.Repaint(*manager.windows, *manager.display, background, chrome[:count], manager.bounds);
 }
 
 Run :: (manager: *Manager, input: s32) -> s32 {
@@ -96,6 +321,7 @@ Run :: (manager: *Manager, input: s32) -> s32 {
                 if outcome.error != "" { unused Args.SetFailure(outcome.error) }
             }
             if app.open { RemoveWindow(manager, app) }
+            if app.id == manager.shell { return status }
             manager.apps[i] = manager.apps[manager.apps.count - 1];
             unused VecResize(manager.apps, manager.apps.count - 1);
         }
@@ -117,10 +343,12 @@ Find :: (manager: *Manager, id: s32) -> s64 {
 }
 
 Layer :: (app: *Application) -> Compositor.Layer {
-    return .{app.image, app.image.bounds, app.bounds.left, app.bounds.top};
+    local: Draw.Rect = .{0, 0, app.bounds.right - app.bounds.left, app.bounds.bottom - app.bounds.top};
+    return .{app.image, Compositor.Intersect(app.image.bounds, local), app.bounds.left, app.bounds.top};
 }
 
 Service :: (manager: *Manager, app: *Application, request: []s32) -> bool {
+    if request[0] == Link.Capture { return Capture(manager, app.id) }
     if request[0] == Link.Open { return OpenWindow(manager, app, request[1], request[2]) }
     if !app.open { return false }
     if request[0] == Link.Frame { return PaintFrame(manager, app, request) }
@@ -129,40 +357,55 @@ Service :: (manager: *Manager, app: *Application, request: []s32) -> bool {
         return true;
     }
     if request[0] == Link.SetTitle {
-        app.title = Link.Title(app.id);
+        app.title = Link.Text(app.id);
+        manager.generation += 1;
         return true;
     }
     if request[0] == Link.SetTasked {
-        ok := false;
-        if request[5] != 0 {
-            ok = Windows.Minimize(*manager.windows, app.id);
-        } else {
-            ok = Windows.Focus(*manager.windows, app.id);
-        }
-        if ok { manager.dirty = true }
-        return ok;
+        return TaskWindow(manager, app, request[5] != 0);
+    }
+    if request[0] == Link.Chrome { return SetChrome(manager, app.id) }
+    if request[0] == Link.DesktopAction { return DesktopAction(manager, Link.Text(app.id), request[5]) }
+    if request[0] == Link.WindowAction { return WindowAction(manager, Link.Text(app.id), request) }
+    if request[0] == Link.Launch {
+        app_id := AppID(Link.Text(app.id));
+        id := Link.LaunchWindow(app.id);
+        if id <= 0 { return false }
+        if VecPush(manager.apps, Application.{id = id, app_id = app_id}) { return true }
+        Link.Disconnect(id);
     }
     return false;
 }
 
 OpenWindow :: (manager: *Manager, app: *Application, width: s32, height: s32) -> bool {
     if app.open { return false }
-    app.bounds = Windows.Place(*manager.windows, manager.bounds, width, height);
+    shell := app.id == manager.shell;
+    if shell {
+        if width != manager.bounds.right - manager.bounds.left || height != manager.bounds.bottom - manager.bounds.top { return false }
+        app.bounds = manager.bounds;
+    } else {
+        app.bounds = Windows.Place(*manager.windows, WorkArea(manager), width, height);
+    }
     if app.bounds.right <= app.bounds.left { return false }
     app.image = Draw.Buffer(*manager.display, .{0, 0, width, height}, 0x000000ff);
     if app.image.id == 0 { return false }
-    if !Windows.Add(*manager.windows, app.id, Layer(app), true, true) {
+    if !shell && !Windows.Add(*manager.windows, app.id, Layer(app), true, true) {
         unused Draw.Release(*manager.display, *app.image);
         return false;
     }
-    app.title = Link.Title(app.id);
+    app.title = Link.Text(app.id);
     app.open = true;
     manager.dirty = true;
+    if !shell { manager.generation += 1 }
     return true;
 }
 
 RemoveWindow :: (manager: *Manager, app: *Application) {
-    unused Windows.Remove(*manager.windows, app.id);
+    if app.id == manager.shell { manager.chrome_count = 0 }
+    else {
+        unused Windows.Remove(*manager.windows, app.id);
+        manager.generation += 1;
+    }
     unused Draw.Release(*manager.display, *app.pending);
     unused Draw.Release(*manager.display, *app.image);
     app.open = false;
@@ -177,6 +420,8 @@ PaintFrame :: (manager: *Manager, app: *Application, request: []s32) -> bool {
     publish := (request[5] & Link.Publish) != 0;
     staged := (request[5] & Link.Staged) != 0;
     if request[6] != width * rows * 4 { return false }
+    if app.id == manager.shell && (width != manager.bounds.right - manager.bounds.left ||
+                                   height != manager.bounds.bottom - manager.bounds.top) { return false }
     image := app.image;
     if staged && first != 0 {
         image = app.pending;
@@ -196,6 +441,9 @@ PaintFrame :: (manager: *Manager, app: *Application, request: []s32) -> bool {
         unused Draw.Release(*manager.display, *app.image);
         app.image = image;
         app.pending = .{};
+        if app.bounds.right - app.bounds.left != width || app.bounds.bottom - app.bounds.top != height {
+            manager.generation += 1;
+        }
         app.bounds.right = app.bounds.left + width;
         app.bounds.bottom = app.bounds.top + height;
         unused Windows.SetLayer(*manager.windows, app.id, Layer(app));
@@ -232,14 +480,18 @@ UploadPixels :: (display: *Draw.Display, image: Draw.Image, id: s32,
 HandleInput :: (manager: *Manager, event: Input.Event) {
     workspace := manager.windows.workspace;
     if Windows.WorkspaceKey(*manager.windows, event) {
-        if manager.windows.workspace != workspace { manager.dirty = true }
+        if manager.windows.workspace != workspace { DesktopChanged(manager) }
         return;
     }
     if event.kind == Input.Pointer {
-        chrome: [0]Compositor.Layer;
-        id := Windows.PointerTarget(*manager.windows, chrome[:], event);
+        chrome: [8]Compositor.Layer;
+        count := ChromeLayers(manager, chrome[:]);
+        focus := manager.windows.keyboard_focus;
+        target := Windows.PointerTarget(*manager.windows, chrome[:count], event);
+        id := ifx target == Windows.Desktop then manager.shell else target;
         changed := manager.buttons ^ event.buttons;
-        if manager.buttons == 0 && event.buttons != 0 && id > 0 { manager.dirty = true }
+        if manager.buttons == 0 && event.buttons != 0 && id > 0 && id != manager.shell { manager.dirty = true }
+        if focus != manager.windows.keyboard_focus { manager.generation += 1 }
         manager.buttons = event.buttons;
         if event.millis < manager.pointer_tick && manager.pointer_tick - event.millis > 0x80000000 {
             manager.pointer_epoch += 4294967296;
@@ -267,7 +519,8 @@ HandleInput :: (manager: *Manager, event: Input.Event) {
         }
         return;
     }
-    id := manager.windows.keyboard_focus;
+    target := manager.windows.keyboard_focus;
+    id := ifx target == Windows.Desktop then manager.shell else target;
     if id <= 0 { return }
     if event.kind == Input.Text {
         Send(id, Surface.TextEvent, 0, 0, 0, 0, 0, event.code, -1);
