@@ -53,6 +53,9 @@ With Rill installed, pass `--desktop /dis/wm/rill.zx` after the manager path
 to start Rill directly in ZX. Rill can launch ZX apps from its guest catalog
 and manage them through its task list. Its window actions, workspaces, and
 panel regions use the native manager.
+Under a desktop, each ZX window gets a native title bar drawn in Ziran with
+Kryon's window chrome and the Rill theme's control sprites. Drag it to move the
+window, and use its Hide, Maximize and Close controls.
 The default desktop continues to start Rill through the regular desktop runner.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including

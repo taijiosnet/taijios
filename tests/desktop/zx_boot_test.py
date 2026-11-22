@@ -175,12 +175,12 @@ def check_window_manager(emulator, root, env):
     wm = ROOT / 'appl/wm'
     surfaces = ROOT / 'appl/cmd/tcltk'
     subprocess.run([
-        'ziran', 'bundle', '--root', wm, '--module-path', ROOT / 'appl/cmd',
+        'ziran', 'bundle', '--project', '--module-path', ROOT / 'appl/cmd',
         '--module-path', ROOT / 'appl/lib', '--module-path', surfaces,
         '--bind-host', 'taijios_args', '--bind-host', 'taijios_io',
         '--bind-host', 'taijios_process', '--bind-host', 'taijios_native_wm',
         '--entry', 'native_wm:main', '-o', root / 'wm.zx', wm / 'native_wm.zi',
-    ], env=env, check=True, timeout=60)
+    ], cwd=wm, env=env, check=True, timeout=60)
     fixture = Path(__file__).with_name('zx_window_app.zi').read_text(encoding='utf-8')
     for red in (37, 108):
         source = root / 'zx_window_app.zi'
@@ -250,7 +250,9 @@ def check_window_manager(emulator, root, env):
 
 
 def check_desktop_shell(emulator, root, env):
+    from PIL import Image
     from test_logwindow import private_display
+    from test_tcltk import launch, stop, until
 
     source = Path(__file__).with_name('zx_desktop_shell.zi')
     (root / 'locale').mkdir()
@@ -268,12 +270,69 @@ def check_desktop_shell(emulator, root, env):
         ordinary = subprocess.run(app + ['/shell.zx'], env=private_env, stdin=subprocess.DEVNULL,
                                   capture_output=True, text=True, start_new_session=True, timeout=10)
         assert ordinary.returncode == 1 and 'ZX_DESKTOP_PROTOCOL_OK' not in ordinary.stdout, ordinary
-        shell = subprocess.run(app + ['--desktop', '/shell.zx'], env=private_env, stdin=subprocess.DEVNULL,
-                               capture_output=True, text=True, start_new_session=True, timeout=10)
-        assert shell.returncode == 0 and not shell.stderr and 'Initial Dis:' not in shell.stdout, shell
-        for marker in ('ZX_DESKTOP_PROTOCOL_OK', 'ZX_DESKTOP_CHILD_RESIZED', 'ZX_DESKTOP_CHILD_CLOSED'):
-            assert marker in shell.stdout, shell
-    print('Private ZX shell owned the desktop, launched a window, and controlled its workspace, size and lifecycle')
+        shell = launch(private_env, *app, '--desktop', '/shell.zx', stdin=subprocess.DEVNULL,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        transcript = bytearray()
+
+        def desktop(*args, check=True):
+            return subprocess.run(args, env=private_env, capture_output=True, check=check, timeout=5).stdout
+
+        def marker(label):
+            def received():
+                if select.select([shell.stdout], [], [], 0)[0]:
+                    transcript.extend(shell.stdout.read1(1024))
+                assert len(transcript) <= 8192, 'unexpected desktop output'
+                return label.encode() + b'\n' in transcript
+
+            until(received, label, timeout=8)
+
+        try:
+            marker('ZX_TITLE_READY')
+            window = until(lambda: desktop('xdotool', 'search', '--onlyvisible', '--name',
+                                           '^inferno$', check=False).decode().strip(), 'ZX desktop window missing')
+
+            def title_visible(x, y):
+                frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
+                caption = frame.crop((x + 34, y - 32, x + 146, y))
+                colors = caption.getcolors(caption.width * caption.height)
+                return sum(count for count, rgb in colors if min(rgb) > 80) > 18
+
+            def move(x, y):
+                return ('mousemove', '--window', window, str(x), str(y))
+
+            def drag(x, y, end_x, end_y):
+                desktop('xdotool', *move(x, y), 'mousedown', '1', 'sleep', '.10',
+                        *move(end_x, end_y), 'sleep', '.10', 'mouseup', '1')
+
+            def click(x, y, label):
+                desktop('xdotool', *move(x, y), 'click', '1')
+                marker(label)
+
+            until(lambda: title_visible(100, 110), 'ZX title glyphs were missing')
+            drag(145, 94, 195, 134)
+            marker('ZX_TITLE_MOVED')
+            until(lambda: title_visible(150, 150), 'ZX title did not move with its window')
+            drag(352, 134, 392, 154)
+            marker('ZX_TITLE_RESIZED')
+            click(392, 134, 'ZX_TITLE_MAXIMIZED')
+            until(lambda: title_visible(246, 56), 'maximized title missing')
+            click(592, 40, 'ZX_TITLE_RESTORED')
+            click(360, 134, 'ZX_TITLE_MINIMIZED')
+            until(lambda: title_visible(150, 150), 'restored title bar did not return')
+            click(424, 134, 'ZX_DESKTOP_PROTOCOL_OK')
+            assert shell.wait(timeout=8) == 0 and not shell.stderr.read(1024)
+            assert b'Initial Dis:' not in transcript
+            assert transcript.count(b'ZX_DESKTOP_CHILD_CLOSED\n') == 2
+            assert b'ZX_DESKTOP_CHILD_RESIZED\n' in transcript
+        except (AssertionError, subprocess.SubprocessError) as error:
+            stop(shell)
+            transcript.extend(shell.stdout.read(1024))
+            raise AssertionError((str(error), transcript, shell.stderr.read(1024))) from error
+        finally:
+            stop(shell)
+            shell.stdout.close()
+            shell.stderr.close()
+    print('Private ZX desktop launched windows and used native title bars to move, resize, maximize, restore, minimize and close')
 
 
 def main():

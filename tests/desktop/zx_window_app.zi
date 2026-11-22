@@ -39,6 +39,7 @@ main :: () -> s32 {
     up := false;
     key := false;
     text := false;
+    requested_resize := false;
     while !(up && key && text) {
         event := Surface.Event(1000);
         if event.kind == Surface.Closed {
@@ -46,9 +47,13 @@ main :: () -> s32 {
             return 6;
         }
         if desktop_probe && event.kind == Surface.Resize && event.width == 72 && event.height == 48 {
+            requested_resize = true;
             print("ZX_DESKTOP_CHILD_RESIZED\n");
         }
-        if desktop_probe && event.kind == Surface.Visibility && event.button == 0 {
+        if desktop_probe && event.kind == Surface.Resize && event.width == 250 && event.height == 100 {
+            if !Surface.PresentOpaqueRows(Width, Height, 0, TextView(pixels[:])) { return 15 }
+        }
+        if requested_resize && event.kind == Surface.Visibility && event.button == 0 {
             if !WM.Resize(56, 40) { return 10 }
         }
         if event.kind == Surface.Down && event.x == 16 && event.y == 17 && event.button == 1 {

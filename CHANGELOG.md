@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Draw native title bars for ZX windows under the Rill desktop, with move, maximize, restore, hide and close, and keep windows below the panel when it changes size.
+
 - Give each game and demo a distinct transparent icon, classify Brutus as an editor, and remove the repeated TaijiOS prefix from catalog descriptions.
 
 - Start the installed Rill desktop by default and give the emulator a 128 MiB main memory pool so multiple guest apps can run together.

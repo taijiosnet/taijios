@@ -33,14 +33,20 @@ main :: () -> s32 {
         if Desktop.Capture(state[:]) == 0 && Desktop.WindowAt(0, window[:], title[:], app_id[:]) && title[3] == #char "s" { break }
         unused Surface.Event(50);
     }
-    if window[0] != state[2] || window[2] < 24 || window[3] != 48 || window[4] != 32 ||
+    if window[0] != state[2] || window[2] < 56 || window[3] != 48 || window[4] != 32 ||
        window[6] != 1 || title[3] != #char "s" || app_id[0] != #char "w" || app_id[8] != 0 {
         return Fail("window title, app ID and work area snapshot");
     }
     id := window[0];
-    if !Desktop.WindowAction(id, "resize", 20, 34, 72, 48) || Desktop.Capture(state[:]) != 0 ||
-       !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[1] != 20 || window[2] != 34 ||
+    if !Desktop.WindowAction(id, "resize", 20, 64, 72, 48) || Desktop.Capture(state[:]) != 0 ||
+       !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[1] != 20 || window[2] != 64 ||
        window[3] != 72 || window[4] != 48 { return Fail("window resize snapshot") }
+    // A taller panel must move the window record itself below the panel and
+    // its title bar, not only the composited layer.
+    tall: [4]s32 = .{0, 0, state[3], 100};
+    if !Desktop.SetChromeRegions(tall[:]) || Desktop.Capture(state[:]) != 0 ||
+       !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[1] != 20 || window[2] != 132 ||
+       !Desktop.SetChromeRegions(panel[:]) { return Fail("panel change refits open window") }
     if !Desktop.WindowAction(id, "minimize", 0, 0, 0, 0) || Desktop.Capture(state[:]) != 0 || state[2] != 0 ||
        !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[7] != 1 ||
        !Desktop.WindowAction(id, "restore", 0, 0, 0, 0) { return Fail("minimize and restore window") }
@@ -55,8 +61,50 @@ main :: () -> s32 {
     if !Desktop.WindowAction(id, "close", 0, 0, 0, 0) || Desktop.Capture(state[:]) != 0 || state[1] != 0 {
         return Fail("close window from shell");
     }
+    if !Desktop.DesktopAction("switch_workspace", 0) ||
+       WM.Launch("/window37.zx", "probe\0café 猫\0\0") != 0 { return Fail("start title bar probe") }
+    for i: 0 .. 40 {
+        if Desktop.Capture(state[:]) == 0 && state[1] == 1 { break }
+        unused Surface.Event(50);
+    }
+    if state[1] != 1 || state[2] <= 0 || !Desktop.WindowAction(state[2], "resize", 100, 110, 250, 100) {
+        return Fail("place title bar probe")
+    }
+    id = state[2];
+    print("ZX_TITLE_READY\n");
+    if !ExpectWindow(150, 150, 250, 100, false, false) { return Fail("title bar drag") }
+    print("ZX_TITLE_MOVED\n");
+    if !ExpectWindow(150, 150, 290, 120, false, false) { return Fail("title bar resize drag") }
+    print("ZX_TITLE_RESIZED\n");
+    if !ExpectWindow(0, 56, state[3], state[4] - 56, true, false) { return Fail("title bar maximize") }
+    print("ZX_TITLE_MAXIMIZED\n");
+    if !ExpectWindow(150, 150, 290, 120, false, false) { return Fail("title bar restore") }
+    print("ZX_TITLE_RESTORED\n");
+    if !ExpectWindow(150, 150, 290, 120, false, true) || !Desktop.WindowAction(id, "restore", 0, 0, 0, 0) {
+        return Fail("title bar minimize")
+    }
+    print("ZX_TITLE_MINIMIZED\n");
+    for i: 0 .. 180 {
+        if Desktop.Capture(state[:]) == 0 && state[1] == 0 { break }
+        unused Surface.Event(50);
+    }
+    if state[1] != 0 { return Fail("title bar close") }
     unused Surface.Event(100);
     Surface.Close();
     print("ZX_DESKTOP_PROTOCOL_OK\n");
     return 0;
+}
+
+ExpectWindow :: (x: s32, y: s32, width: s32, height: s32, maximized: bool, minimized: bool) -> bool {
+    state: [7]s32;
+    window: [9]s32;
+    title: [128]u8;
+    app_id: [128]u8;
+    for i: 0 .. 180 {
+        if Desktop.Capture(state[:]) == 0 && state[1] == 1 && Desktop.WindowAt(0, window[:], title[:], app_id[:]) &&
+           window[1] == x && window[2] == y && window[3] == width && window[4] == height &&
+           window[7] == cast(s32)minimized && window[8] == cast(s32)maximized { return true }
+        unused Surface.Event(50);
+    }
+    return false;
 }

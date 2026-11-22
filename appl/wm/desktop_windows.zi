@@ -12,6 +12,7 @@ Window :: struct {
     id: s32;
     workspace: s32;
     layer: Compositor.Layer;
+    caption: Compositor.Layer;
     keyboard: bool;
     pointer: bool;
     minimized: bool;
@@ -72,6 +73,7 @@ Place :: (state: *State, area: Draw.Rect, width: s32, height: s32) -> Draw.Rect 
     for window: state.windows[:] {
         if !Visible(state, window) { continue }
         bounds := LayerBounds(window.layer);
+        if window.caption.image.id != 0 { bounds.top = window.caption.y }
         if bounds.right <= bounds.left || bounds.bottom <= bounds.top { continue }
         rect := Compositor.Intersect(bounds, area);
         if rect.right <= rect.left || rect.bottom <= rect.top { continue }
@@ -88,7 +90,8 @@ Place :: (state: *State, area: Draw.Rect, width: s32, height: s32) -> Draw.Rect 
 // The caller owns Draw images and keeps them alive while attached to a window.
 Add :: (state: *State, id: s32, layer: Compositor.Layer, keyboard: bool, pointer: bool) -> bool {
     if id <= 0 || Find(state, id) >= 0 { return false }
-    if !VecPush(state.windows, Window.{id, state.workspace, layer, keyboard, pointer, false}) { return false }
+    if !VecPush(state.windows, Window.{.id = id, .workspace = state.workspace, .layer = layer,
+                                     .keyboard = keyboard, .pointer = pointer}) { return false }
     if keyboard { SetFocus(state, state.windows.count - 1) }
     return true;
 }
@@ -97,6 +100,23 @@ SetLayer :: (state: *State, id: s32, layer: Compositor.Layer) -> bool {
     index := Find(state, id);
     if index < 0 { return false }
     state.windows[index].layer = layer;
+    return true;
+}
+
+SetCaption :: (state: *State, index: s64, caption: Compositor.Layer) {
+    state.windows[index].caption = caption;
+}
+
+Lower :: (state: *State, id: s32) -> bool {
+    index := Find(state, id);
+    if index < 0 || !Visible(state, state.windows[index]) { return false }
+    window := state.windows[index];
+    for i: 0 .. index - 1 { state.windows[index - i] = state.windows[index - i - 1] }
+    state.windows[0] = window;
+    if state.keyboard_focus == id {
+        Forget(state, id);
+        RestoreFocus(state);
+    }
     return true;
 }
 
@@ -164,7 +184,9 @@ Repaint :: (state: *State, display: *Draw.Display, background: Draw.Image,
             chrome: []Compositor.Layer, damage: Draw.Rect) -> bool {
     VecClear(state.layers);
     for window: state.windows[:] {
-        if Visible(state, window) && !VecPush(state.layers, window.layer) { return false }
+        if !Visible(state, window) { continue }
+        if !VecPush(state.layers, window.layer) { return false }
+        if window.caption.image.id != 0 && !VecPush(state.layers, window.caption) { return false }
     }
     for layer: chrome {
         if !VecPush(state.layers, layer) { return false }
@@ -179,7 +201,8 @@ Hit :: (state: *State, chrome: []Compositor.Layer, x: s32, y: s32) -> s32 {
     count := state.windows.count;
     for i: 0 .. count - 1 {
         window := state.windows[count - 1 - i];
-        if Visible(state, window) && Compositor.Contains(window.layer, x, y) { return window.id }
+        if Visible(state, window) && (Compositor.Contains(window.layer, x, y) ||
+           Compositor.Contains(window.caption, x, y)) { return window.id }
     }
     return Desktop;
 }

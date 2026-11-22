@@ -7,6 +7,8 @@ Draw :: #import "guest_draw";
 Compositor :: #import "compositor";
 Input :: #import "guest_input";
 Windows :: #import "desktop_windows";
+Titlebar :: #import "native_titlebar";
+TitlePolicy :: #import "kryon/window_chrome";
 
 #program_export
 main :: () -> s32 {
@@ -19,6 +21,7 @@ main :: () -> s32 {
     if !Draw.Open(*manager.display) { return Fail("open Draw") }
     defer Draw.Close(*manager.display);
     manager.bounds = Draw.Screen(*manager.display).bounds;
+    if desktop { Titlebar.LoadAtlas(*manager.title_painter, *manager.display) }
     manager.background = Draw.Solid(*manager.display, 0x183858ff);
     if !Paint(*manager) { return Fail("paint desktop") }
     input := Input.OpenPoll();
@@ -52,6 +55,8 @@ Application :: struct {
     normal: Draw.Rect;
     cursor: [272]u8;
     cursor_size: s64;
+    caption: Titlebar.Caption;
+    click: TitlePolicy.State;
     maximized: bool;
     open: bool;
 }
@@ -66,6 +71,13 @@ Manager :: struct {
     shell: s32;
     chrome: [8]Draw.Rect;
     chrome_count: s64;
+    title_painter: Titlebar.Painter;
+    title_target: s32;
+    title_press: TitlePolicy.Action;
+    title_origin: Draw.Rect;
+    title_x: s32;
+    title_y: s32;
+    title_moved: bool;
     generation: s32;
     buttons: s32;
     pointer_tick: u32;
@@ -109,10 +121,20 @@ ChromeLayers :: (manager: *Manager, layers: []Compositor.Layer) -> s64 {
     return manager.chrome_count;
 }
 
-WorkArea :: (manager: *Manager) -> Draw.Rect {
+FrameArea :: (manager: *Manager) -> Draw.Rect {
     chrome: [8]Compositor.Layer;
     count := ChromeLayers(manager, chrome[:]);
     return Windows.WorkArea(manager.bounds, chrome[:count]);
+}
+
+TitleHeight :: (manager: *Manager, area: Draw.Rect) -> s32 {
+    return ifx manager.shell != 0 && area.bottom - area.top > Titlebar.Height then Titlebar.Height else 0;
+}
+
+WorkArea :: (manager: *Manager) -> Draw.Rect {
+    area := FrameArea(manager);
+    area.top += TitleHeight(manager, area);
+    return area;
 }
 
 DesktopChanged :: (manager: *Manager) {
@@ -141,6 +163,8 @@ RefreshCursor :: (manager: *Manager, chrome: []Compositor.Layer) {
     if !manager.pointer_known { return }
     hover := Windows.Hit(*manager.windows, chrome, manager.pointer_x, manager.pointer_y);
     if hover == Windows.Desktop { hover = manager.shell }
+    index := Find(manager, hover);
+    if index >= 0 && InTitle(manager, *manager.apps[index], manager.pointer_x, manager.pointer_y) { hover = 0 }
     if hover != manager.cursor_target {
         manager.cursor_target = hover;
         unused ApplyCursor(manager, hover);
@@ -214,6 +238,12 @@ SetChrome :: (manager: *Manager, id: s32) -> bool {
     if changed {
         manager.chrome = next;
         manager.chrome_count = count / 4;
+        area := WorkArea(manager);
+        for *app: manager.apps[:] {
+            if !app.open || app.id == manager.shell { continue }
+            bounds := ifx app.maximized then area else FitBounds(app.bounds, area);
+            unused SetBounds(manager, app, bounds);
+        }
         manager.dirty = true;
     }
     return true;
@@ -224,8 +254,8 @@ DesktopAction :: (manager: *Manager, action: string, value: s32) -> bool {
     if action == "switch_workspace" { ok = Windows.SwitchWorkspace(*manager.windows, value) }
     else if action == "configure_workspaces" { ok = Windows.ConfigureWorkspaces(*manager.windows, value) }
     else if action == "show_desktop" {
-        for app: manager.apps[:] {
-            if app.id != manager.shell && app.open { unused TaskWindow(manager, *app, true) }
+        for *app: manager.apps[:] {
+            if app.id != manager.shell && app.open { unused TaskWindow(manager, app, true) }
         }
         return true;
     }
@@ -271,15 +301,33 @@ FitBounds :: (bounds: Draw.Rect, area: Draw.Rect) -> Draw.Rect {
 
 SetBounds :: (manager: *Manager, app: *Application, bounds: Draw.Rect) -> bool {
     before := app.bounds;
+    if bounds.left == before.left && bounds.top == before.top &&
+       bounds.right == before.right && bounds.bottom == before.bottom { return true }
     width := bounds.right - bounds.left;
     height := bounds.bottom - bounds.top;
     app.bounds = bounds;
     if !Windows.SetLayer(*manager.windows, app.id, Layer(app)) { return false }
     DesktopChanged(manager);
-    if width == before.right - before.left && height == before.bottom - before.top { return true }
+    if width != before.right - before.left || height != before.bottom - before.top { NotifyResize(app, width, height) }
+    return true;
+}
+
+NotifyResize :: (app: *Application, width: s32, height: s32) {
     fields: [9]s32 = .{Surface.Resize, 0, 0, 0, 0, 0, width, height, 0};
     if !Link.Dispatch(app.id, fields[:], -1) { Link.Disconnect(app.id) }
-    return true;
+}
+
+CloseWindow :: (manager: *Manager, app: *Application) {
+    Link.Disconnect(app.id);
+    RemoveWindow(manager, app);
+}
+
+Maximize :: (manager: *Manager, app: *Application, maximize: bool) -> bool {
+    if maximize == app.maximized { return true }
+    area := WorkArea(manager);
+    if maximize { app.normal = app.bounds }
+    app.maximized = maximize;
+    return SetBounds(manager, app, ifx maximize then area else FitBounds(app.normal, area));
 }
 
 WindowAction :: (manager: *Manager, action: string, request: []s32) -> bool {
@@ -296,26 +344,15 @@ WindowAction :: (manager: *Manager, action: string, request: []s32) -> bool {
         window := Windows.At(*manager.windows, i);
         if window.id != id || window.workspace != manager.windows.workspace { continue }
         if action == "close" {
-            Link.Disconnect(id);
-            RemoveWindow(manager, app);
+            CloseWindow(manager, app);
             return true;
         }
         if action == "focus" || (action == "restore" && window.minimized) { return TaskWindow(manager, app, false) }
         if action == "minimize" { return TaskWindow(manager, app, true) }
         if window.minimized { return false }
-        area := WorkArea(manager);
-        if action == "maximize" {
-            if app.maximized { return true }
-            app.normal = app.bounds;
-            app.maximized = true;
-            return SetBounds(manager, app, area);
-        }
-        if action == "restore" {
-            if !app.maximized { return true }
-            app.maximized = false;
-            return SetBounds(manager, app, FitBounds(app.normal, area));
-        }
+        if action == "maximize" || action == "restore" { return Maximize(manager, app, action == "maximize") }
         if (action != "move" && action != "resize") || app.maximized { return false }
+        area := WorkArea(manager);
         screen := manager.bounds;
         if request[3] < 0 || request[4] < 0 || request[3] >= screen.right - screen.left ||
            request[4] >= screen.bottom - screen.top { return false }
@@ -333,11 +370,31 @@ WindowAction :: (manager: *Manager, action: string, request: []s32) -> bool {
 Paint :: (manager: *Manager) -> bool {
     chrome: [8]Compositor.Layer;
     count := ChromeLayers(manager, chrome[:]);
+    if !RefreshCaptions(manager) { return false }
     RefreshCursor(manager, chrome[:count]);
     background := manager.background;
     index := Find(manager, manager.shell);
     if index >= 0 && manager.apps[index].open { background = manager.apps[index].image }
     return Windows.Repaint(*manager.windows, *manager.display, background, chrome[:count], manager.bounds);
+}
+
+RefreshCaptions :: (manager: *Manager) -> bool {
+    height := TitleHeight(manager, FrameArea(manager));
+    for i: 0 .. manager.windows.windows.count - 1 {
+        window := Windows.At(*manager.windows, i);
+        if window.workspace != manager.windows.workspace || window.minimized { continue }
+        if height == 0 { Windows.SetCaption(*manager.windows, i, .{}); continue }
+        index := Find(manager, window.id);
+        if index < 0 { return false }
+        app := *manager.apps[index];
+        bounds := app.bounds;
+        pressed: TitlePolicy.Action = ifx app.id == manager.title_target then manager.title_press else .None;
+        if !Titlebar.Paint(*manager.title_painter, *manager.display, *app.caption, bounds.right - bounds.left,
+                           app.title, app.id == manager.windows.keyboard_focus, pressed) { return false }
+        image := app.caption.image;
+        Windows.SetCaption(*manager.windows, i, .{image, image.bounds, bounds.left, bounds.top - Titlebar.Height});
+    }
+    return true;
 }
 
 Run :: (manager: *Manager, input: s32) -> s32 {
@@ -413,7 +470,8 @@ Service :: (manager: *Manager, app: *Application, request: []s32) -> bool {
     }
     if request[0] == Link.SetTitle {
         app.title = Link.Text(app.id);
-        manager.generation += 1;
+        app.caption.valid = false;
+        DesktopChanged(manager);
         return true;
     }
     if request[0] == Link.SetTasked {
@@ -451,7 +509,10 @@ OpenWindow :: (manager: *Manager, app: *Application, width: s32, height: s32) ->
         if width != manager.bounds.right - manager.bounds.left || height != manager.bounds.bottom - manager.bounds.top { return false }
         app.bounds = manager.bounds;
     } else {
-        app.bounds = Windows.Place(*manager.windows, WorkArea(manager), width, height);
+        area := FrameArea(manager);
+        title_height := TitleHeight(manager, area);
+        app.bounds = Windows.Place(*manager.windows, area, width, height + title_height);
+        app.bounds.top += title_height;
     }
     if app.bounds.right <= app.bounds.left { return false }
     app.image = Draw.Buffer(*manager.display, .{0, 0, width, height}, 0x000000ff);
@@ -464,6 +525,9 @@ OpenWindow :: (manager: *Manager, app: *Application, width: s32, height: s32) ->
     app.open = true;
     manager.dirty = true;
     if !shell { manager.generation += 1 }
+    actual_width := app.bounds.right - app.bounds.left;
+    actual_height := app.bounds.bottom - app.bounds.top;
+    if actual_width != width || actual_height != height { NotifyResize(app, actual_width, actual_height) }
     return true;
 }
 
@@ -475,6 +539,8 @@ RemoveWindow :: (manager: *Manager, app: *Application) {
     }
     unused Draw.Release(*manager.display, *app.pending);
     unused Draw.Release(*manager.display, *app.image);
+    if app.caption.image.id != 0 { unused Draw.Release(*manager.display, *app.caption.image) }
+    app.caption = .{};
     app.open = false;
     if app.id == manager.sample_owner { manager.sample_owner = 0 }
     if app.id == manager.cursor_target {
@@ -492,8 +558,12 @@ PaintFrame :: (manager: *Manager, app: *Application, request: []s32) -> bool {
     publish := (request[5] & Link.Publish) != 0;
     staged := (request[5] & Link.Staged) != 0;
     if request[6] != width * rows * 4 { return false }
-    if app.id == manager.shell && (width != manager.bounds.right - manager.bounds.left ||
-                                   height != manager.bounds.bottom - manager.bounds.top) { return false }
+    // A frame rendered against the old size can arrive after a resize. Keep
+    // the current window geometry and let the client handle its Resize event.
+    if width != app.bounds.right - app.bounds.left || height != app.bounds.bottom - app.bounds.top {
+        if app.pending.id != 0 { unused Draw.Release(*manager.display, *app.pending) }
+        return app.id != manager.shell;
+    }
     image := app.image;
     if staged && first != 0 {
         image = app.pending;
@@ -513,11 +583,6 @@ PaintFrame :: (manager: *Manager, app: *Application, request: []s32) -> bool {
         unused Draw.Release(*manager.display, *app.image);
         app.image = image;
         app.pending = .{};
-        if app.bounds.right - app.bounds.left != width || app.bounds.bottom - app.bounds.top != height {
-            manager.generation += 1;
-        }
-        app.bounds.right = app.bounds.left + width;
-        app.bounds.bottom = app.bounds.top + height;
         unused Windows.SetLayer(*manager.windows, app.id, Layer(app));
     }
     if publish { manager.dirty = true }
@@ -549,6 +614,74 @@ UploadPixels :: (display: *Draw.Display, image: Draw.Image, id: s32,
     return true;
 }
 
+InTitle :: (manager: *Manager, app: *Application, x: s32, y: s32) -> bool {
+    return app.caption.image.id != 0 && x >= app.bounds.left && x < app.bounds.right && y < app.bounds.top &&
+           y >= app.bounds.top - TitleHeight(manager, FrameArea(manager));
+}
+
+DragTitle :: (manager: *Manager, app: *Application, x: s32, y: s32) {
+    action := manager.title_press;
+    if app.maximized || (action != .Drag && action != .Resize) { return }
+    origin := manager.title_origin;
+    dx := x - manager.title_x;
+    dy := y - manager.title_y;
+    if !manager.title_moved && dx == 0 && dy == 0 { return }
+    manager.title_moved = true;
+    TitlePolicy.CancelClick(*app.click);
+    area := WorkArea(manager);
+    bounds := origin;
+    if action == .Drag {
+        bounds = .{origin.left + dx, origin.top + dy, origin.right + dx, origin.bottom + dy};
+    } else {
+        bounds.right += dx;
+        bounds.bottom += dy;
+        if bounds.right <= bounds.left { bounds.right = bounds.left + 1 }
+        if bounds.bottom <= bounds.top { bounds.bottom = bounds.top + 1 }
+        if bounds.right > area.right { bounds.right = area.right }
+        if bounds.bottom > area.bottom { bounds.bottom = area.bottom }
+    }
+    unused SetBounds(manager, app, FitBounds(bounds, area));
+}
+
+TitleInput :: (manager: *Manager, target: s32, event: Input.Event, changed: s32, millis: s64) -> bool {
+    index := Find(manager, target);
+    if manager.title_target == 0 {
+        if index < 0 || target == manager.shell { return false }
+        app := *manager.apps[index];
+        if manager.buttons != 0 || !InTitle(manager, app, event.x, event.y) { return false }
+        if event.buttons == 0 { return true }
+        manager.title_target = target;
+        manager.title_origin = app.bounds;
+        manager.title_x = event.x;
+        manager.title_y = event.y;
+        manager.title_moved = false;
+        if (event.buttons & 1) != 0 {
+            manager.title_press = Titlebar.Press(*app.click, app.bounds.right - app.bounds.left,
+                event.x - app.bounds.left, event.y - app.bounds.top + Titlebar.Height, millis);
+            if manager.title_press == .Lower && Windows.Lower(*manager.windows, target) { DesktopChanged(manager) }
+        }
+        manager.dirty = true;
+        return true;
+    }
+    if index >= 0 && target == manager.title_target {
+        app := *manager.apps[index];
+        if (manager.buttons & 1) != 0 { DragTitle(manager, app, event.x, event.y) }
+        if (changed & manager.buttons & 1) != 0 && !manager.title_moved && InTitle(manager, app, event.x, event.y) {
+            action := manager.title_press;
+            hit := Titlebar.Hit(app.bounds.right - app.bounds.left, event.x - app.bounds.left,
+                                event.y - app.bounds.top + Titlebar.Height);
+            if hit == action {
+                if action == .Close { CloseWindow(manager, app) }
+                else if action == .Hide { unused TaskWindow(manager, app, true) }
+                else if action == .Resize { unused Maximize(manager, app, !app.maximized) }
+            }
+        }
+    }
+    if (changed & manager.buttons & 1) != 0 { manager.title_press = .None; manager.dirty = true }
+    if event.buttons == 0 { manager.title_target = 0 }
+    return true;
+}
+
 HandleInput :: (manager: *Manager, event: Input.Event) {
     workspace := manager.windows.workspace;
     if Windows.WorkspaceKey(*manager.windows, event) {
@@ -566,6 +699,17 @@ HandleInput :: (manager: *Manager, event: Input.Event) {
         manager.pointer_known = true;
         RefreshCursor(manager, chrome[:count]);
         changed := manager.buttons ^ event.buttons;
+        if event.millis < manager.pointer_tick && manager.pointer_tick - event.millis > 0x80000000 {
+            manager.pointer_epoch += 4294967296;
+        }
+        manager.pointer_tick = event.millis;
+        millis := manager.pointer_epoch + cast(s64)event.millis;
+        if TitleInput(manager, id, event, changed, millis) {
+            if focus != manager.windows.keyboard_focus { DesktopChanged(manager) }
+            manager.buttons = event.buttons;
+            if (changed & event.buttons & 1) != 0 { manager.sample_owner = 0 }
+            return;
+        }
         if (changed & event.buttons & 1) != 0 {
             manager.sample_owner = ifx id != manager.shell then id else 0;
             manager.sample_release = false;
@@ -581,16 +725,11 @@ HandleInput :: (manager: *Manager, event: Input.Event) {
         if manager.buttons == 0 && event.buttons != 0 && id > 0 && id != manager.shell { manager.dirty = true }
         if focus != manager.windows.keyboard_focus { manager.generation += 1 }
         manager.buttons = event.buttons;
-        if event.millis < manager.pointer_tick && manager.pointer_tick - event.millis > 0x80000000 {
-            manager.pointer_epoch += 4294967296;
-        }
-        manager.pointer_tick = event.millis;
         index := Find(manager, id);
         if index < 0 { return }
         bounds := manager.apps[index].bounds;
         x := event.x - bounds.left;
         y := event.y - bounds.top;
-        millis := manager.pointer_epoch + cast(s64)event.millis;
         if changed == 0 {
             Send(id, Surface.Move, x, y, 0, 0, 0, 0, millis);
             return;

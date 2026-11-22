@@ -1,0 +1,155 @@
+Policy :: #import "kryon/window_chrome";
+Raster :: #import "kryon/pixmap";
+Graphics :: #import "kryon/drawing_props";
+Grapheme :: #import "std/grapheme";
+Draw :: #import "guest_draw";
+Io :: #import "taijios_io";
+#import "kryon/geometry";
+#import "std/vec";
+
+Height :: 32;
+
+Caption :: struct {
+    image: Draw.Image;
+    valid: bool;
+    focused: bool;
+    pressed: Policy.Action;
+}
+
+Painter :: struct {
+    atlas: Draw.Image;
+    pixels: Vec(u32);
+    rgba: Vec(u8);
+}
+
+LoadAtlas :: (self: *Painter, display: *Draw.Display) {
+    file := Io.OpenFile("/lib/rill/themes/Sweet-Dark/chrome.rgba", 0);
+    if file < 0 { return }
+    defer { unused Io.CloseFile(file) }
+    pixels: [84 * 84 * 4]u8;
+    if !ReadAtlas(file, pixels[:]) { return }
+    // The theme atlas is in Draw RGBA32 order, low byte first. The guest
+    // transport uses ABGR32 so native RGBA uploads need the reverse order.
+    for i: 0 .. 84 * 84 - 1 {
+        start := 4 * i;
+        a := pixels[start];
+        b := pixels[start + 1];
+        pixels[start] = pixels[start + 3];
+        pixels[start + 1] = pixels[start + 2];
+        pixels[start + 2] = b;
+        pixels[start + 3] = a;
+    }
+    bounds: Draw.Rect = .{0, 0, 84, 84};
+    self.atlas = Draw.Buffer(display, bounds, 0);
+    if self.atlas.id != 0 && !Draw.Upload(display, self.atlas, bounds, pixels[:]) {
+        unused Draw.Release(display, *self.atlas);
+    }
+}
+
+Paint :: (self: *Painter, display: *Draw.Display, bar: *Caption, width: s32, title: string, focused: bool, pressed: Policy.Action) -> bool {
+    if bar.valid && bar.image.bounds.right == width &&
+       bar.focused == focused && bar.pressed == pressed { return true }
+    if width <= 0 { return false }
+    bounds: Draw.Rect = .{0, 0, width, Height};
+    image := bar.image;
+    if image.id == 0 || image.bounds.right != width {
+        image = Draw.Buffer(display, bounds, 0);
+        if image.id == 0 { return false }
+    }
+    if !PaintCaption(self, display, image, Props(width, title, focused), pressed) {
+        if image.id != bar.image.id { unused Draw.Release(display, *image) }
+        return false;
+    }
+    if image.id != bar.image.id && bar.image.id != 0 { unused Draw.Release(display, *bar.image) }
+    bar.* = .{image, true, focused, pressed};
+    return true;
+}
+
+Press :: (click: *Policy.State, width: s32, x: s32, y: s32, millis: s64) -> Policy.Action {
+    return Policy.PointerPress(click, Props(width, "", true), Point(x, y), millis)
+}
+
+Hit :: (width: s32, x: s32, y: s32) -> Policy.Action {
+    return Policy.Hit(Policy.LayoutFor(Props(width, "", true)), Point(x, y))
+}
+
+#scope_file
+
+ReadAtlas :: (file: s32, bytes: []u8) -> bool {
+    read: s32 = 0;
+    while read < bytes.count {
+        end := read + 8192;
+        if end > bytes.count { end = cast(s32)bytes.count }
+        count := Io.ReadBytes(file, bytes[read:end]);
+        if count <= 0 { return false }
+        read += count;
+    }
+    return true;
+}
+
+Props :: (width: s32, title: string, focused: bool) -> Policy.Props {
+    return .{.bounds = .{0.0, 0.0, cast(float32)width, cast(float32)Height},
+        .title = title, .focused = focused, .sweet_dark = true,
+        .controls = Policy.ControlClose | Policy.ControlResize | Policy.ControlHide};
+}
+
+Point :: (x: s32, y: s32) -> Vector2 { return .{cast(float32)x, cast(float32)y} }
+
+PaintCaption :: (self: *Painter, display: *Draw.Display, image: Draw.Image, props: Policy.Props, pressed: Policy.Action) -> bool {
+    width := image.bounds.right;
+    count := cast(s64)width * Height;
+    if !VecResize(self.pixels, count) || !VecResize(self.rgba, count * 4) ||
+       !Raster.PixmapBeginInto(Policy.CaptionBackground(props) >> 8, width, Height, self.pixels[:]) { return false }
+    layout := Policy.LayoutFor(props);
+    PaintText(props, Policy.CaptionTextBounds(layout));
+    controls: [3]Rectangle = .{layout.close, layout.resize, layout.hide};
+    actions: [3]Policy.Action = .{.Close, .Resize, .Hide};
+    if self.atlas.id == 0 {
+        for i: 0 .. controls.count - 1 {
+            cell := controls[i];
+            if cell.width < 14.0 { continue }
+            dot: Rectangle = .{cell.x + (cell.width - 14.0) / 2.0, cell.y + (cell.height - 14.0) / 2.0, 14.0, 14.0};
+            Raster.RasterRoundedRectangle(dot, 7.0, 0, Graphics.ColorFromPacked(Policy.ControlColor(props, actions[i], actions[i] == pressed)));
+        }
+    }
+    Raster.PixmapEndInto();
+    for i: 0 .. count - 1 {
+        rgb := self.pixels[i];
+        self.rgba[4 * i] = cast(u8)(rgb >> 16);
+        self.rgba[4 * i + 1] = cast(u8)(rgb >> 8);
+        self.rgba[4 * i + 2] = cast(u8)rgb;
+        self.rgba[4 * i + 3] = 255;
+    }
+    if !Draw.Upload(display, image, image.bounds, self.rgba[:]) { return false }
+    if self.atlas.id == 0 { return true }
+    for i: 0 .. controls.count - 1 {
+        cell := controls[i];
+        if cell.width < 28.0 { continue }
+        sprite := Policy.ControlSprite(props, actions[i], actions[i] == pressed);
+        x := cast(s32)(cell.x + (cell.width - 28.0) / 2.0);
+        y := cast(s32)(cell.y + (cell.height - 28.0) / 2.0);
+        if !Draw.Composite(display, image, self.atlas, .{x, y, x + 28, y + 28}, sprite % 3 * 28, sprite / 3 * 28) {
+            return false;
+        }
+    }
+    return true;
+}
+
+PaintText :: (props: Policy.Props, bounds: Rectangle) {
+    if props.title == "" || bounds.width <= 0.0 { return }
+    font := Policy.CaptionFont(props);
+    title := props.title;
+    text_width := Raster.MeasureGlyphWidth(title, font, "");
+    truncated := text_width > cast(s32)bounds.width;
+    dots := ifx truncated then Raster.MeasureGlyphWidth("…", font, "") else 0;
+    if dots > cast(s32)bounds.width { return }
+    while text_width + dots > cast(s32)bounds.width && title.count > 0 {
+        title = title[:Grapheme.Previous(title, cast(s32)title.count)];
+        text_width = Raster.MeasureGlyphWidth(title, font, "");
+    }
+    x := cast(s32)bounds.x + (cast(s32)bounds.width - text_width - dots) / 2;
+    y := (Height - Raster.MeasureGlyphLineHeight(font, "")) / 2;
+    ink := Graphics.ColorFromPacked(Policy.CaptionForegroundFor(props));
+    Raster.RasterTextClipped(title, x, y, font, ink, bounds);
+    if truncated { Raster.RasterTextClipped("…", x + text_width, y, font, ink, bounds) }
+}
