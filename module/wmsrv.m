@@ -30,6 +30,7 @@ Wmsrv: module{
 		fid:		int;
 		token:	int;
 		wmctxt:	ref Draw->Wmcontext;
+		resizemin:	Draw->Point;
 
 		window:	fn(c: self ref Client, tag: string): ref Window;
 		contains:	fn(c: self ref Client, p: Draw->Point): int;

@@ -5,6 +5,7 @@
 #include	"kernel.h"
 #include	"draw.h"
 #include	"version.h"
+#include	<limits.h>
 
 int		rebootargc = 0;
 char**		rebootargv;
@@ -35,7 +36,7 @@ usage(void)
 		"\t-d file.dis\n"
 		"\t-s\n"
 		"\t-v\n"
-		"\t-p<poolname>=maxsize\n"
+		"\t-p<poolname>=maxsize[K|M] (main defaults to 128M)\n"
 		"\t-f<fontpath>\n"
 		"\t-r<rootpath>\n"
 		"\t-7\n"
@@ -83,33 +84,44 @@ geom(char *val)
 	return 1;
 }
 
-static void
+static int
 poolopt(char *str)
 {
-	char *var;
-	int n;
-	ulong x;
+	char *eq, *p;
+	int digit, ok;
+	ulong size, scale;
 
-	var = str;
-	while(*str && *str != '=')
-		str++;
-	if(*str != '=' || str[1] == '\0')
-		usage();
-	*str++ = '\0';
-	n = strlen(str);
-	x = atoi(str);
-	switch(str[n - 1]){
+	eq = strchr(str, '=');
+	if(eq == nil || eq == str || eq[1] < '0' || eq[1] > '9')
+		return 0;
+	size = 0;
+	for(p = eq + 1; *p >= '0' && *p <= '9'; p++){
+		digit = *p - '0';
+		if(size > (ulong)(INT_MAX - digit) / 10)
+			return 0;
+		size = size * 10 + digit;
+	}
+	scale = 1;
+	switch(*p){
+	case '\0':
+		break;
 	case 'k':
 	case 'K':
-		x *= 1024;
+		scale = 1024;
 		break;
 	case 'm':
 	case 'M':
-		x *= 1024*1024;
+		scale = 1024*1024;
 		break;
+	default:
+		return 0;
 	}
-	if(poolsetsize(var, x) == 0)
-		usage();
+	if((*p != '\0' && p[1] != '\0') || size > INT_MAX / scale)
+		return 0;
+	*eq = '\0';
+	ok = poolsetsize(str, size * scale);
+	*eq = '=';
+	return ok;
 }
 
 static void
@@ -156,7 +168,8 @@ option(int argc, char *argv[], void (*badusage)(void))
 			usage();
 		break;
 	case 'p':		/* pool option */
-		poolopt(EARGF(badusage()));
+		if(!poolopt(EARGF(badusage())))
+			badusage();
 		break;
 	case 'f':		/* Set font path */
 		tkfont = EARGF(badusage());

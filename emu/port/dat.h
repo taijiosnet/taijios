@@ -415,6 +415,7 @@ struct Proc
 	Proc	*kid;
 	void	*kidsp;
 	void	*os;		/* host os specific data */
+	void*	cpuprog;	/* Prog with a CPU measurement in progress */
 };
 
 #define poperror()	up->nerr--

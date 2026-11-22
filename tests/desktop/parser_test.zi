@@ -1,0 +1,105 @@
+D :: #import "desktop_entry";
+T :: #import "icon_theme";
+
+Fixture :: #string END
+[Desktop Entry]
+Type=Application
+Name=Default
+Name[sr]=Language
+Name[sr_RS]=Country
+Name[sr@latin]=Modifier
+Name[sr_RS@latin]=Full
+Exec=/dis/probe.dis %F
+GenericName=Tool
+Comment=Some\swords\nnext
+Icon=taiji-test
+Categories=Development;Utility;
+MimeType=text/plain;image/png;
+Keywords=one;two\;parts;
+Actions=New;Inspect;
+[Desktop Action New]
+Name=New window
+Exec=/dis/probe.dis --new %u
+[Desktop Action Inspect]
+Name=Inspect
+Exec=/dis/probe.dis --inspect
+END;
+
+Copy :: (text: string, output: []u8) -> s64 {
+    used: s64
+    if !D.Put(output, *used, text) { return -1 }; return used
+}
+Read :: (path: string, output: []u8) -> s64 {
+    if path == "/icons/custom/index.theme" {
+        return Copy("[Icon Theme]\nDirectories=16/apps,scalable/apps,threshold/apps\nInherits=parent,cycle\n[16/apps]\nSize=16\nType=Fixed\n[scalable/apps]\nSize=48\nType=Scalable\nMinSize=32\nMaxSize=64\n[threshold/apps]\nSize=24\nType=Threshold\nThreshold=2\n", output)
+    }
+    if path == "/icons/parent/index.theme" {
+        return Copy("[Icon Theme]\nDirectories=32/apps\n[32/apps]\nSize=32\nType=Fixed\n", output)
+    }
+    if path == "/icons/cycle/index.theme" { return Copy("[Icon Theme]\nInherits=custom\n", output) }
+    if path == "/icons/hicolor/index.theme" {
+        return Copy("[Icon Theme]\nDirectories=48/apps\n[48/apps]\nSize=48\nType=Fixed\n", output)
+    }
+    return -1
+}
+Exists :: (path: string) -> bool {
+    return path == "/icons/custom/16/apps/probe.png" || path == "/icons/custom/scalable/apps/probe.svg" ||
+        path == "/icons/custom/threshold/apps/probe.png" || path == "/icons/parent/32/apps/inherited.png" ||
+        path == "/icons/hicolor/48/apps/fallback.png" || path == "/icons/loose.png" || path == "/absolute/icon.png"
+}
+CheckIcon :: (name: string, size: s32, expected: string) -> bool {
+    roots: [1]string = .["/icons"]; output: [1024]u8
+    found := T.Lookup(roots[:], "custom", name, size, Read, Exists, output[:])
+    if expected == "" { return !found }
+    n: s64; while n < output.count && output[n] != 0 { n += 1 }
+    return found && TextView(output[:n]) == expected
+}
+main :: () -> s32 {
+    if D.Localized(Fixture, "Desktop Entry", "Name", "sr_RS.UTF-8@latin") != "Full" { return 1 }
+    if D.Localized(Fixture, "Desktop Entry", "Name", "sr_RS.UTF-8") != "Country" { return 2 }
+    if D.Localized(Fixture, "Desktop Entry", "Name", "sr_ME@latin") != "Modifier" { return 3 }
+    if D.Localized(Fixture, "Desktop Entry", "Name", "sr_ME") != "Language" { return 4 }
+    if D.Localized(Fixture, "Desktop Entry", "Name", "en_US") != "Default" { return 5 }
+    if !D.Visible(Fixture, "TaijiOS:Rill") || D.Visible("[Desktop Entry]\nType=Link\nName=A\nExec=a\n", "Rill") { return 6 }
+    hidden := "[Desktop Entry]\nType=Application\nName=A\nExec=a\nHidden=true\n"
+    nodisplay := "[Desktop Entry]\nType=Application\nName=A\nExec=a\nNoDisplay=true\n"
+    if D.Visible(hidden, "Rill") || D.Visible(nodisplay, "Rill") { return 7 }
+    only := "[Desktop Entry]\nType=Application\nName=A\nExec=a\nOnlyShowIn=TaijiOS;\n"
+    excluded := "[Desktop Entry]\nType=Application\nName=A\nExec=a\nNotShowIn=Rill;\n"
+    if !D.Visible(only, "TaijiOS:Rill") || D.Visible(only, "KDE") || D.Visible(excluded, "TaijiOS:Rill") { return 8 }
+    bytes: [8192]u8
+    n := D.Decode(D.Value(Fixture, "Desktop Entry", "Comment"), bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "Some words\nnext" { return 9 }
+    if !D.ListHas(D.Value(Fixture, "Desktop Entry", "Keywords"), "two;parts") || D.ListHas("two;parts;", "two;parts") { return 10 }
+    files: [2]string = .["a b.txt", "file:///c"]
+    n = D.ExpandExec("/dis/p.dis %F %i %c %k %%", "Display name", "my-icon", "/lib/apps/p.desktop", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0file:///c\0--icon\0my-icon\0Display name\0/lib/apps/p.desktop\0%\0" { return 11 }
+    n = D.ExpandExec("/dis/p.dis %f", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0" { return 12 }
+    n = D.ExpandExec("/dis/p.dis %u", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0" { return 13 }
+    n = D.ExpandExec("/dis/p.dis %U", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0file:///c\0" { return 14 }
+    empty: [0]string
+    n = D.ExpandExec("\"/dis/space name.dis\" \"two words\" %F %i", "", "", "", empty[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/dis/space name.dis\0two words\0" { return 15 }
+    invalid: [8]string = .["p %Z", "p %", "p %F %f", "p x%U", "p \"%f\"", "p \"unclosed", "p a;b", "p %iX"]
+    for value: invalid { if D.ExpandExec(value, "", "", "", empty[:], bytes[:]) >= 0 { return 16 } }
+    if D.ActionExec(Fixture, "New") != "/dis/probe.dis --new %u" || D.ActionExec(Fixture, "Missing") != "" { return 17 }
+    if !CheckIcon("probe", 16, "/icons/custom/16/apps/probe.png") { return 18 }
+    if !CheckIcon("probe", 48, "/icons/custom/scalable/apps/probe.svg") { return 19 }
+    if !CheckIcon("probe", 25, "/icons/custom/threshold/apps/probe.png") { return 20 }
+    if !CheckIcon("probe", 96, "/icons/custom/scalable/apps/probe.svg") { return 21 }
+    if !CheckIcon("inherited", 32, "/icons/parent/32/apps/inherited.png") { return 22 }
+    if !CheckIcon("fallback", 48, "/icons/hicolor/48/apps/fallback.png") { return 23 }
+    if !CheckIcon("loose", 32, "/icons/loose.png") { return 24 }
+    if !CheckIcon("/absolute/icon.png", 32, "/absolute/icon.png") { return 25 }
+    if !CheckIcon("probe.png", 16, "/icons/custom/16/apps/probe.png") { return 30 }
+    if !CheckIcon("missing", 32, "") || !CheckIcon("../escape", 32, "") { return 26 }
+    if T.Distance("[x]\nType=Fixed\nSize=16\nScale=2\n", "x", 16, 2) != 0 { return 27 }
+    if D.Decode("bad\\q", bytes[:]) >= 0 || D.ExpandExec("p", "", "", "", empty[:], bytes[:1]) >= 0 { return 28 }
+    n = D.ExpandExec("p --file=%f", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "p\0--file=a b.txt\0" { return 29 }
+    print("DESKTOP_ENTRY_ICON_THEME_OK\n")
+    return 0
+}

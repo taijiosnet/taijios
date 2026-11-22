@@ -48,7 +48,7 @@ struct
 } table = {
 	3,
 	{
-		{ "main",  0, 	32*1024*1024, 31,  512*1024, 0, 31*1024*1024 },
+		{ "main",  0,  128*1024*1024, 31,  512*1024, 0, 127*1024*1024 },
 		{ "heap",  1, 	32*1024*1024, 31,  512*1024, 0, 31*1024*1024 },
 		{ "image", 2,   64*1024*1024+256, 31, 4*1024*1024, 1, 63*1024*1024 },
 	}
@@ -110,12 +110,12 @@ poolsetsize(char *s, int size)
 {
 	int i;
 
+	if(size < RESERVED)
+		return 0;
 	for(i = 0; i < table.n; i++) {
 		if(strcmp(table.pool[i].name, s) == 0) {
 			table.pool[i].maxsize = size;
 			table.pool[i].ressize = size-RESERVED;
-			if(size < RESERVED)
-				panic("not enough memory");
 			return 1;
 		}
 	}
@@ -492,9 +492,9 @@ poolfree(Pool *p, void *v)
 void *
 poolrealloc(Pool *p, void *v, ulong size)
 {
-	Bhdr *b;
+	Bhdr *b, *next;
 	void *nv;
-	int osize;
+	ulong osize, total, spare, before;
 
 	if(size >= 1024*1024*1024)	/* for sanity and to avoid overflow */
 		return nil;
@@ -502,14 +502,42 @@ poolrealloc(Pool *p, void *v, ulong size)
 		poolfree(p, v);
 		return nil;
 	}
-	SET(osize);
+	osize = 0;
 	if(v != nil){
 		lock(&p->l);
 		D2B(b, v);
 		osize = b->size - BHDRSIZE;
-		unlock(&p->l);
-		if(osize >= size)
+		if(osize >= size){
+			unlock(&p->l);
 			return v;
+		}
+		/* Grow main-pool allocations into the following free block when possible.
+		 * The Dis heap has its own sweep cursor and stays on the copy path. */
+		total = (size + BHDRSIZE + p->quanta) & ~(ulong)p->quanta;
+		next = B2NB(b);
+		if(p == mainmem && !p->monitor && p->cursize <= p->ressize && b->magic == MAGIC_A &&
+		   next->magic == MAGIC_F && next->size >= total - b->size){
+			before = b->size;
+			spare = next->size - (total - before);
+			pooldel(p, next);
+			next->magic = 0;
+			b->size = total;
+			if(spare < sizeof(Bhdr) + sizeof(Btail)){
+				b->size += spare;
+			}else{
+				next = B2NB(b);
+				next->size = spare;
+				B2T(next)->hdr = next;
+				pooladd(p, next);
+			}
+			B2T(b)->hdr = b;
+			p->cursize += b->size - before;
+			if(p->cursize > p->hw)
+				p->hw = p->cursize;
+			unlock(&p->l);
+			return v;
+		}
+		unlock(&p->l);
 	}
 	nv = poolalloc(p, size);
 	if(nv != nil && v != nil){
@@ -565,6 +593,19 @@ poolmaxsize(void)
 	for(i = 0; i < nelem(table.pool); i++)
 		total += table.pool[i].maxsize;
 	return total;
+}
+
+/* Take a consistent reading of one guest pool. */
+void
+poolusage(int index, uvlong *usage)
+{
+	Pool *p = &table.pool[index];
+
+	lock(&p->l);
+	usage[0] = p->cursize;
+	usage[1] = p->maxsize;
+	usage[2] = p->hw;
+	unlock(&p->l);
 }
 
 int
@@ -720,6 +761,41 @@ realloc(void *v, size_t size)
 	} else 
 		print("realloc failed from %lux\n", getcallerpc(&v));
 	return nv;
+}
+
+/* Return an allocation's spare tail to the main pool without moving it. */
+void*
+mallocshrink(void *v, size_t size)
+{
+	Pool *p = mainmem;
+	Bhdr *block, *tail;
+	void *raw;
+	ulong keep, spare;
+
+	if(v == nil || size == 0 || size >= 1024*1024*1024)
+		return nil;
+	keep = (size + Npadlong*sizeof(ulong) + BHDRSIZE + p->quanta) & ~(ulong)p->quanta;
+	raw = (ulong*)v-Npadlong;
+	lock(&p->l);
+	D2B(block, raw);
+	if(block->magic != MAGIC_A || keep > block->size){
+		unlock(&p->l);
+		return nil;
+	}
+	spare = block->size - keep;
+	if(spare < sizeof(Bhdr) + sizeof(Btail)){
+		unlock(&p->l);
+		return v;
+	}
+	block->size = keep;
+	B2T(block)->hdr = block;
+	tail = B2NB(block);
+	tail->magic = MAGIC_A;
+	tail->size = spare;
+	B2T(tail)->hdr = tail;
+	unlock(&p->l);
+	poolfree(p, B2D(tail));
+	return v;
 }
 
 void

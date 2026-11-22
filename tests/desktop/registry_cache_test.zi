@@ -1,0 +1,184 @@
+Catalog :: #import "app_registry";
+D :: #import "desktop_entry";
+Stat :: #import "taijios_stat";
+IO :: #import "taijios_io";
+Clock :: #import "taijios_clock";
+Args :: #import "taijios_args";
+#import "std/vec"
+
+Reference :: struct { id: [256]u8; source: Vec(u8); visible: bool }
+references: [512]Reference;
+reference_count: s32;
+name_parses: s64;
+id_comparisons: s64;
+
+ReferenceLoad :: (directory: string) {
+    fd := IO.Open(directory, 0); if fd < 0 { return }
+    defer { unused IO.Close(fd) }
+    bytes: [8192]u8
+    while reference_count < references.count {
+        count := IO.Read(fd, bytes[:]); if count <= 0 { return }
+        offset: s64
+        while offset < count && reference_count < references.count {
+            info := Stat.Decode(bytes[offset:count]); if info.size == 0 { return }; offset += info.size
+            name := info.name
+            if name.count < 9 || name.count >= 256 || name[name.count-8:] != ".desktop" || (info.mode & cast(u32)Stat.Directory) != cast(u32)0 { continue }
+            duplicate: bool
+            for i: cast(s32)0..reference_count-1 {
+                id_comparisons += 1
+                if Catalog.ZText(references[i].id[:]) == name { duplicate = true }
+            }
+            if duplicate { continue }
+            record := *references[reference_count]
+            path: [1024]u8; used: s64
+            if !D.Put(path[:], *used, directory) || !D.Put(path[:], *used, "/") || !D.Put(path[:], *used, name) || used >= path.count { continue }
+            unused VecResize(record.source, 8192)
+            count := Catalog.ReadFile(TextView(path[:used]), record.source[:])
+            if count < 0 { VecFree(record.source); continue }
+            unused VecResize(record.source, count)
+            record.id = .{}; used = 0; unused D.Put(record.id[:], *used, name)
+            source := TextView(record.source[:])
+            argv: [8192]u8; files: [0]string
+            record.visible = D.Visible(source, "TaijiOS:Rill") && Catalog.Executable(D.Value(source, "Desktop Entry", "TryExec")) && D.ExpandExec(D.Value(source, "Desktop Entry", "Exec"), "", "", "", files[:], argv[:]) > 0
+            reference_count += 1
+        }
+    }
+}
+ReferenceReload :: () {
+    for i: cast(s32)0..reference_count-1 { VecFree(references[i].source) }
+    reference_count = 0; id_comparisons = 0
+    path: Vec(u8); defer VecFree(path)
+    BuilderAppend(path, IO.Home()); BuilderAppend(path, "/lib/apps")
+    ReferenceLoad(TextView(path[:]))
+    ReferenceLoad("/lib/apps")
+}
+ReferenceMenu :: (label: string) -> bool {
+    for i: cast(s32)0..reference_count-1 {
+        record := *references[i]
+        source := TextView(record.source[:])
+        name_parses += 1
+        if D.Value(source, "Desktop Entry", "Name") == label { return true }
+        name_parses += 1
+        if D.Value(source, "Desktop Entry", "X-Taiji-MenuName") == label { return true }
+    }
+    return false
+}
+Snapshot :: () -> bool {
+    ReferenceReload()
+    visible: s32
+    keys: [6]string = .["Name", "Icon", "Exec", "GenericName", "Comment", "Categories"]
+    for i: cast(s32)0..reference_count-1 {
+        reference := *references[i]
+        source := TextView(reference.source[:])
+        if Catalog.MatchesMenu(D.Value(source, "Desktop Entry", "Name")) != ReferenceMenu(D.Value(source, "Desktop Entry", "Name")) { return false }
+        if Catalog.MatchesMenu(D.Value(source, "Desktop Entry", "X-Taiji-MenuName")) != ReferenceMenu(D.Value(source, "Desktop Entry", "X-Taiji-MenuName")) { return false }
+        if !reference.visible { continue }
+        record := Catalog.At(visible)
+        if record == null || Catalog.ZText(record.id[:]) != Catalog.ZText(reference.id[:]) { return false }
+        for key: keys {
+            actual: [8192]u8; expected: [8192]u8
+            raw := D.Localized(source, "Desktop Entry", key, Catalog.Locale())
+            n := D.Decode(raw, expected[:expected.count-1])
+            valid := Catalog.Field(record, key, actual[:])
+            if valid != (n >= 0) { return false }
+            if valid && Catalog.ZText(actual[:]) != TextView(expected[:n]) { return false }
+        }
+        visible += 1
+    }
+    return Catalog.Count() == visible && Catalog.At(-1) == null && Catalog.At(visible) == null && !Catalog.MatchesMenu("absent registry label")
+}
+Write :: (path: string, text: string) -> bool {
+    fd := IO.Create(path, 1, 420); if fd < 0 { return false }
+    count := IO.Write(fd, text); closed := IO.Close(fd)
+    return count == text.count && closed == 0
+}
+NameIs :: (id: string, expected: string) -> bool {
+    for i: cast(s32)0..Catalog.Count()-1 {
+        record := Catalog.At(i)
+        if Catalog.ZText(record.id[:]) == id { return record.localized_name == expected }
+    }
+    return false
+}
+Localized :: (all: string, messages: string, lang: string, expected: string) -> bool {
+    if !Write("/env/LC_ALL", all) || !Write("/env/LC_MESSAGES", messages) || !Write("/env/LANG", lang) { return false }
+    Catalog.Reload()
+    return NameIs("b.desktop", expected) && Snapshot()
+}
+FixtureCases :: () -> s32 {
+    Catalog.Reload()
+    if Catalog.Count() != 5 { print("fixture count %\n", Catalog.Count()); return 1 }
+    if !Snapshot() { print("initial snapshot failed\n"); return 1 }
+    if !NameIs("b.desktop", "Full") { print("locale %\n", Catalog.Locale()); return 1 }
+    if !Catalog.MatchesMenu("Hidden override") || Catalog.MatchesMenu("System masked") || !Catalog.MatchesMenu("") || Catalog.MatchesMenu("Full") { return 2 }
+    output: [1024]u8
+    if !Catalog.DefaultApplication("image/png", output[:]) || Catalog.ZText(output[:]) != "/lib/apps/liquid.desktop" { return 3 }
+    if !Localized("sr_ME.UTF-8@latin", "", "", "Modifier") { return 4 }
+    if !Localized("sr_RS.UTF-8", "", "", "Country") { return 5 }
+    if !Localized("", "sr_ME", "fr", "Language") { return 6 }
+    if !Localized("", "", "fr", "Default") { return 7 }
+    bytes: [1]u8
+    record := Catalog.At(1)
+    if Catalog.Field(record, "Name", bytes[:]) { return 8 }
+    changed := "[Desktop Entry]\nType=Application\nName=Changed\\suser\nName[sr]=Izmenjeno\nX-Taiji-MenuName=New alias\nExec=p\n"
+    path: Vec(u8); defer VecFree(path)
+    BuilderAppend(path, IO.Home()); BuilderAppend(path, "/lib/apps/z.desktop")
+    if !Write(TextView(path[:]), changed) { return 9 }
+    if Catalog.MatchesMenu("New alias") || !Catalog.MatchesMenu("Old alias") || !NameIs("z.desktop", "User") { return 10 }
+    Catalog.Reload()
+    if !Snapshot() || !Catalog.MatchesMenu("New alias") || Catalog.MatchesMenu("Old alias") || !NameIs("z.desktop", "Changed\\suser") { return 11 }
+    record = Catalog.At(0)
+    name: [256]u8
+    if !Catalog.Field(record, "Name", name[:]) || Catalog.ZText(name[:]) != "Changed user" { return 12 }
+    masked_path: Vec(u8); defer VecFree(masked_path)
+    BuilderAppend(masked_path, IO.Home()); BuilderAppend(masked_path, "/lib/apps/a.desktop")
+    if IO.Remove(TextView(masked_path[:])) != 0 { return 13 }
+    Catalog.Reload()
+    if Catalog.Count() != 6 || !Snapshot() || !Catalog.MatchesMenu("System masked") || Catalog.MatchesMenu("Hidden override") { return 14 }
+    if !Write("/build/desktop-registry/cache-home/probe.dis", "probe") { return 15 }
+    Catalog.Reload()
+    if Catalog.Count() != 7 || !Snapshot() { return 16 }
+    for i: cast(s32)0..4 { Catalog.Reload(); if !Snapshot() { return 17 } }
+    if IO.Remove("/lib/apps/liquid.desktop") != 0 { return 18 }
+    Catalog.Reload()
+    if Catalog.Count() != 6 || !Snapshot() || Catalog.MatchesMenu("liquid") || !Catalog.MatchesMenu("costarring") { return 19 }
+    if !Catalog.DefaultApplication("image/png", output[:]) || Catalog.ZText(output[:]) != "/lib/apps/costarring.desktop" { return 20 }
+    long_name: Vec(u8); defer VecFree(long_name)
+    long_entry: Vec(u8); defer VecFree(long_entry)
+    for i: cast(s32)0..1023 { VecPush(long_name, cast(u8)65) }
+    BuilderAppend(long_entry, "[Desktop Entry]\nType=Application\nExec=p\nName=")
+    BuilderAppend(long_entry, TextView(long_name[:])); BuilderAppend(long_entry, "\n")
+    if !Write(TextView(path[:]), TextView(long_entry[:])) { return 21 }
+    Catalog.Reload()
+    if !Snapshot() || !Catalog.MatchesMenu(TextView(long_name[:])) || Catalog.Field(Catalog.At(0), "Name", name[:]) { return 22 }
+    print("REGISTRY_CACHE_RELOAD_PARITY_OK\n")
+    return 0
+}
+Benchmark :: () -> s32 {
+    Catalog.Reload(); ReferenceReload()
+    if reference_count != 364 || Catalog.Count() != 50 { print("unexpected catalog %/%\n", reference_count, Catalog.Count()); return 1 }
+    count: s32 = 30
+    name_parses = 0
+    start := Clock.Millis()
+    for i: cast(s32)0..count-1 {
+        byte: [1]u8
+        unused Catalog.ReadFile("/env/REGISTRY_TICK", byte[:])
+        if ReferenceMenu("absent registry label") { return 2 }
+    }
+    legacy := Clock.Millis()-start
+    cached_count: s32 = 3000
+    start = Clock.Millis()
+    for i: cast(s32)0..cached_count-1 {
+        byte: [1]u8
+        unused Catalog.ReadFile("/env/REGISTRY_TICK", byte[:])
+        if Catalog.MatchesMenu("absent registry label") { return 3 }
+    }
+    cached := Clock.Millis()-start
+    print("REGISTRY_CACHE_BENCH records=% visible=% legacy_queries=% legacy_ms=% cached_queries=% cached_ms=% legacy_name_parses=% legacy_id_comparisons=%\n", reference_count, Catalog.Count(), count, legacy, cached_count, cached, name_parses, id_comparisons)
+    return 0
+}
+main :: () -> s32 {
+    if Args.Count() > 0 { return Benchmark() }
+    code := FixtureCases()
+    if code != 0 { print("registry cache case % failed\n", code) }
+    return code
+}

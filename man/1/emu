@@ -144,12 +144,17 @@ not Inferno applications.)
 .TP
 .BI \-p pool = maxsize
 Specify the maximum size in bytes of the named memory allocation pool.
+Append
+.B K
+or
+.B M
+for KiB or MiB.
 The pools
 are:
 .RS
 .TP \w'imagexxx'u
 .B main
-the general malloc arena
+the general malloc arena, which defaults to 128 MiB
 .TP
 .B heap
 the Dis virtual machine heap

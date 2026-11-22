@@ -1,5 +1,6 @@
 #import "std/vec"
 using Surface :: #import "zx_surface"
+Clock :: #import "taijios_clock";
 
 WIDTH :: 300;
 ROWS :: 32;
@@ -21,6 +22,7 @@ Fill :: (pixels: []u8, rgb: [3]u8, alpha: u8 = 255) {
 }
 
 main :: () -> s32 {
+    if Clock.UnixMillis() < 1000000000000 || Clock.MonotonicMillis() < 0 { return 19 }
     frame: Vec(u8);
     if !VecResize(frame, WIDTH*HEIGHT*4) { return 1 }
     pixels := VecSlice(frame, 0, frame.count);
@@ -48,5 +50,24 @@ main :: () -> s32 {
     if !Surface.PresentOpaqueRows(WIDTH, HEIGHT, 2*ROWS, TextView(strip)) { return 14 }
     print("complete\n");
     if !WaitClick() { return 15 }
+    words: [WIDTH*ROWS]u32
+    for *word: words[:] { word.* = cast(u32)0x7e112233 }
+    // Packed strips ignore the high byte and preserve rows on either side.
+    if Surface.PresentRGBStrip(WIDTH, HEIGHT, -1, words[:]) ||
+        Surface.PresentRGBStrip(WIDTH, HEIGHT, HEIGHT, words[:]) ||
+        Surface.PresentRGBStrip(0, HEIGHT, 0, words[:]) ||
+        Surface.PresentRGBStrip(WIDTH, HEIGHT, ROWS, words[:0]) ||
+        Surface.PresentRGBStrip(WIDTH, HEIGHT, ROWS, words[:words.count-1]) ||
+        Surface.PresentRGBStrip(WIDTH, HEIGHT, HEIGHT-1, words[:]) { return 16 }
+    if Surface.PresentRGBStrip(WIDTH, HEIGHT, ROWS, words[:]) { return 17 }
+    initial: [3]u32 = .[cast(u32)0x005a3214, cast(u32)0x00145a32, cast(u32)0x0032145a]
+    for row: cast(s32)0..2 {
+        for *word: words[:] { word.* = initial[row] }
+        if !Surface.PresentRGBStrip(WIDTH, HEIGHT, row*ROWS, words[:]) { return 18 }
+    }
+    for *word: words[:] { word.* = cast(u32)0x7e112233 }
+    if !Surface.PresentRGBStrip(WIDTH, HEIGHT, ROWS, words[:]) { return 19 }
+    print("rgb\n")
+    if !WaitClick() { return 20 }
     return 0;
 }

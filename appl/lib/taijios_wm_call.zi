@@ -1,0 +1,6 @@
+// Typed request/reply transport for in-process guest window manager modules.
+// The host supplies only the current request. Layout and policy stay in ZX.
+host_api :: #system_library "host_api";
+
+Read :: (offset: s32, fields: []s32) -> bool #foreign host_api;
+Reply :: (offset: s32, fields: []s32) -> bool #foreign host_api;

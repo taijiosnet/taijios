@@ -1,0 +1,127 @@
+D :: #import "desktop_entry";
+ReadFile :: #type (path: string, output: []u8) -> s64;
+Exists :: #type (path: string) -> bool;
+Join :: (parts: []string, output: []u8) -> s64 {
+    n: s64
+    for part: parts { if !D.Put(output, *n, part) { return -1 } }
+    return n
+}
+Number :: (s: string, fallback: s32) -> s32 {
+    if s == "" { return fallback }
+    result: s32
+    for c: s { if c < 48 || c > 57 || result > 100000 { return fallback }; result = result * 10 + cast(s32)(c-48) }
+    return result
+}
+Distance :: (index: string, directory: string, size: s32, scale: s32 = 1) -> s32 {
+    nominal := Number(D.Value(index, directory, "Size"), 0)
+    factor := Number(D.Value(index, directory, "Scale"), 1)
+    if nominal < 1 || factor < 1 { return 2147483647 }
+    lower := nominal; upper := nominal
+    kind := D.Value(index, directory, "Type")
+    if kind == "Scalable" {
+        lower = Number(D.Value(index, directory, "MinSize"), nominal)
+        upper = Number(D.Value(index, directory, "MaxSize"), nominal)
+    } else if kind == "Threshold" || kind == "" {
+        threshold := Number(D.Value(index, directory, "Threshold"), 2)
+        lower -= threshold; upper += threshold
+    }
+    wanted := size * scale
+    if wanted < lower * factor { return lower * factor - wanted }
+    if wanted > upper * factor { return wanted - upper * factor }
+    return 0
+}
+SafeName :: (name: string) -> bool {
+    if name == "" || name == "." || name == ".." { return false }
+    for c: name { if c == 47 || c == 92 || c == 0 { return false } }
+    return true
+}
+TryPath :: (base: string, name: string, exists: Exists, output: []u8) -> bool {
+    extensions: [3]string = .[".png", ".svg", ".xpm"]
+    for extension: extensions {
+        parts: [3]string = .[base, name, extension]
+        n := Join(parts[:], output)
+        if n >= 0 && exists(TextView(output[:n])) {
+            if n >= output.count { return false }; output[n] = 0; return true
+        }
+    }
+    return false
+}
+FindTheme :: (roots: []string, theme: string, name: string, size: s32,
+    read: ReadFile, exists: Exists, output: []u8, visited: []string, scale: s32) -> bool {
+    if !SafeName(theme) || visited.count >= 16 { return false }
+    for old: visited { if old == theme { return false } }
+    chain: [16]string
+    for i: cast(s64)0..visited.count-1 { chain[i] = visited[i] }
+    chain[visited.count] = theme
+    closest: [2048]u8; best: s32 = 2147483647
+    for root: roots {
+        if root == "" { continue }
+        path: [2048]u8; parts: [4]string = .[root, "/", theme, "/index.theme"]
+        n := Join(parts[:], path[:]); if n < 0 { continue }
+        bytes: [16384]u8; length := read(TextView(path[:n]), bytes[:])
+        if length < 0 { continue }
+        index := TextView(bytes[:length])
+        lists: [2]string = .[D.Value(index, "Icon Theme", "Directories"), D.Value(index, "Icon Theme", "ScaledDirectories")]
+        for directories: lists {
+            start: s64
+            for i: cast(s64)0..directories.count {
+                if i < directories.count && directories[i] != 44 { continue }
+                directory := D.Trim(directories[start:i]); start = i + 1
+                if directory == "" { continue }
+                distance := Distance(index, directory, size, scale)
+                if distance == 0 && Number(D.Value(index, directory, "Scale"), 1) == scale { distance = -1 }
+                if distance >= best { continue }
+                base: [2048]u8; segments: [6]string = .[root, "/", theme, "/", directory, "/"]
+                used := Join(segments[:], base[:]); if used < 0 { continue }
+                candidate: [2048]u8
+                if TryPath(TextView(base[:used]), name, exists, candidate[:]) {
+                    closest = candidate; best = distance
+                }
+            }
+        }
+    }
+    if best < 2147483647 {
+        used: s64
+        while used < closest.count && closest[used] != 0 { used += 1 }
+        if used >= output.count { return false }
+        for i: cast(s64)0..used { output[i] = closest[i] }
+        return true
+    }
+    for root: roots {
+        if root == "" { continue }
+        path: [2048]u8; parts: [4]string = .[root, "/", theme, "/index.theme"]
+        n := Join(parts[:], path[:]); if n < 0 { continue }
+        bytes: [16384]u8; length := read(TextView(path[:n]), bytes[:]); if length < 0 { continue }
+        inherits := D.Value(TextView(bytes[:length]), "Icon Theme", "Inherits"); start: s64
+        for i: cast(s64)0..inherits.count {
+            if i < inherits.count && inherits[i] != 44 { continue }
+            parent := D.Trim(inherits[start:i]); start = i + 1
+            if FindTheme(roots, parent, name, size, read, exists, output, chain[:visited.count+1], scale) { return true }
+        }
+    }
+    return false
+}
+Lookup :: (roots: []string, theme: string, name: string, size: s32,
+    read: ReadFile, exists: Exists, output: []u8, scale: s32 = 1) -> bool {
+    if name == "" || size < 1 || size > 4096 || scale < 1 || scale > 16 { return false }
+    if name[0] == 47 {
+        used: s64
+        if !exists(name) || !D.Put(output, *used, name) || used >= output.count { return false }
+        output[used] = 0; return true
+    }
+    if name.count > 4 {
+        extension := name[name.count-4:]
+        if extension == ".png" || extension == ".svg" || extension == ".xpm" { name = name[:name.count-4] }
+    }
+    if !SafeName(name) { return false }
+    empty: [0]string
+    if FindTheme(roots, theme, name, size, read, exists, output, empty[:], scale) { return true }
+    if theme != "hicolor" && FindTheme(roots, "hicolor", name, size, read, exists, output, empty[:], scale) { return true }
+    for root: roots {
+        if root == "" { continue }
+        base: [2048]u8; parts: [2]string = .[root, "/"]
+        n := Join(parts[:], base[:])
+        if n >= 0 && TryPath(TextView(base[:n]), name, exists, output) { return true }
+    }
+    return TryPath("/lib/pixmaps/", name, exists, output)
+}

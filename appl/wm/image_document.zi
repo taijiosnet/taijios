@@ -1,0 +1,117 @@
+PNG :: #import "std/png_linux";
+JPEG :: #import "std/jpeg";
+CRC :: #import "std/zip";
+#import "std/image"
+
+MaximumBytes :: 8388608;
+MaximumPixels :: 2097152;
+MaximumDimension :: 4096;
+
+Document :: struct {
+    image: Image
+    error: string
+    format: string
+}
+
+Big32 :: (bytes: []u8, at: s64) -> s64 {
+    value: s64
+    for i: cast(s64)0..3 { value = value * 256 + bytes[at+i] }
+    return value
+}
+
+Admit :: (width: s64, height: s64) -> bool {
+    return width > 0 && height > 0 && width <= MaximumDimension && height <= MaximumDimension && width * height <= MaximumPixels
+}
+
+PngAdmission :: (bytes: []u8, progress: ImageProgress) -> string {
+    if bytes.count < 33 || Big32(bytes, 8) != 13 || TextView(bytes[12:16]) != "IHDR" { return "Malformed PNG header" }
+    if !Admit(Big32(bytes, 16), Big32(bytes, 20)) { return "Image exceeds the 4096-pixel side or 2-megapixel limit" }
+    at: s64 = 8; header: bool; data: bool
+    while at < bytes.count {
+        if bytes.count-at < 12 { return "Truncated PNG chunk" }
+        length := Big32(bytes, at)
+        if length > bytes.count-at-12 { return "Truncated PNG chunk" }
+        kind := TextView(bytes[at+4:at+8])
+        if kind == "IHDR" { if header { return "Duplicate PNG header" }; header = true }
+        if kind == "IDAT" { data = true }
+        crc := cast(u32)0xffffffff
+        start := at+4
+        while start < at+8+length {
+            end := start+16384
+            if end > at+8+length { end = at+8+length }
+            crc = CRC.ZipCRC32Update(crc, bytes[start:end])
+            if progress != null && !progress(end-start) { return "Image decoding interrupted" }
+            start = end
+        }
+        if (crc ^ cast(u32)0xffffffff) != cast(u32)Big32(bytes, at+8+length) { return "PNG checksum mismatch" }
+        if kind == "IEND" {
+            if length != 0 || !data { return "Malformed PNG end" }
+            return ""
+        }
+        at += length+12
+    }
+    return "Truncated PNG image"
+}
+
+JpegAdmission :: (bytes: []u8) -> string {
+    if bytes.count < 4 || bytes[bytes.count-2] != 255 || bytes[bytes.count-1] != 217 { return "Truncated JPEG image" }
+    at: s64 = 2
+    while at < bytes.count {
+        if bytes[at] != 255 { return "Malformed JPEG marker" }
+        while at < bytes.count && bytes[at] == 255 { at += 1 }
+        if at >= bytes.count { break }
+        marker := bytes[at]; at += 1
+        if marker == 216 || (marker >= 208 && marker <= 215) { continue }
+        if marker == 217 || marker == 218 { break }
+        if bytes.count-at < 2 { return "Truncated JPEG header" }
+        length := cast(s64)bytes[at]*256 + bytes[at+1]
+        if length < 2 || length > bytes.count-at { return "Truncated JPEG header" }
+        if marker == 192 || marker == 193 || marker == 194 {
+            if length < 8 { return "Malformed JPEG dimensions" }
+            height := cast(s64)bytes[at+3]*256 + bytes[at+4]
+            width := cast(s64)bytes[at+5]*256 + bytes[at+6]
+            if !Admit(width, height) { return "Image exceeds the 4096-pixel side or 2-megapixel limit" }
+            return ""
+        }
+        if marker >= 195 && marker <= 207 && marker != 196 && marker != 200 && marker != 204 { return "Unsupported JPEG encoding" }
+        at += length
+    }
+    return "Missing JPEG dimensions"
+}
+
+Uninterrupted :: (work: s64) -> bool { unused work; return true }
+
+Decode :: (bytes: []u8) -> Document {
+    return DecodeWithProgress(bytes, Uninterrupted)
+}
+
+DecodeWithProgress :: (bytes: []u8, progress: ImageProgress) -> Document {
+    result: Document
+    if bytes.count == 0 { result.error = "Empty image file" }
+    else if bytes.count > MaximumBytes { result.error = "Image file exceeds the 8 MiB limit" }
+    else if bytes.count >= 8 && bytes[0] == 137 && TextView(bytes[1:4]) == "PNG" &&
+        bytes[4] == 13 && bytes[5] == 10 && bytes[6] == 26 && bytes[7] == 10 {
+        result.format = "PNG"
+        result.error = PngAdmission(bytes, progress)
+        if result.error == "" { result.image = PNG.ReadPNGWithProgress(bytes, progress) }
+    } else if bytes.count >= 2 && bytes[0] == 255 && bytes[1] == 216 {
+        result.format = "JPEG"
+        result.error = JpegAdmission(bytes)
+        if result.error == "" { result.image = JPEG.ReadJPEGWithProgress(bytes, progress) }
+    } else { result.error = "Unsupported image format; open a PNG or JPEG file" }
+    if result.error == "" && !ImageValid(*result.image) { result.error = "Malformed or unsupported image data" }
+    return result
+}
+
+DisplaySize :: (width: s32, height: s32, available_width: s32, available_height: s32, percent: s32) -> (width: s32, height: s32) {
+    if width <= 0 || height <= 0 || available_width <= 0 || available_height <= 0 { return 0, 0 }
+    w: s64; h: s64
+    if percent > 0 { w = cast(s64)width*percent/100; h = cast(s64)height*percent/100 }
+    else {
+        w = available_width; h = cast(s64)height*w/width
+        if h > available_height { h = available_height; w = cast(s64)width*h/height }
+    }
+    if w < 1 { w = 1 }; if h < 1 { h = 1 }
+    if w > 65536 { w = 65536 }; if h > 65536 { h = 65536 }
+    return cast(s32)w, cast(s32)h
+}

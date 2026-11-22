@@ -101,9 +101,16 @@ DISBIN=$ROOT/dis/wm
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
 
+wm.dis: $MODDIR/zx.m $MODDIR/toolbar.m
+toolbar.dis: $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/toolbar.m
+
+desktop_panel.zx: desktop_panel.zi ../cmd/taijios_panel.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_panel --entry desktop_panel:main -o $target desktop_panel.zi
+
+install-desktop-zx:V: $DISBIN/toolbar.dis $DISBIN/desktop_panel.zx
+
 clock.zx: clock.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
-	kryon_id=$(python3 -c 'import json; print(json.load(open("ziran.lock"))["root"]["dependencies"]["kryon"])') &&
-	ziran bundle --project --module-path ../cmd --bind-host "${kryon_id}_pixmap" --bind-host taijios_files --entry clock:main -o $target clock.zi
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry clock:main -o $target clock.zi
 
 install-clock-zx:V: $DISBIN/clock.zx
 
@@ -111,3 +118,77 @@ $DISBIN/clock.zx: clock.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 clock.zx "$staged" && mv "$staged" "$target"
+
+stopwatch.zx: stopwatch.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --entry stopwatch:main -o $target stopwatch.zi
+
+counter.zx: counter.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --bind-host kryon/pixmap --entry counter:main -o $target counter.zi
+
+install-stopwatch-zx:V: $DISBIN/stopwatch.zx
+
+install-kryon-zx:V: $DISBIN/clock.zx $DISBIN/stopwatch.zx $DISBIN/counter.zx $DISBIN/view.zx
+
+TASKMGR_ZX=
+install-taskmgr-zx:V:
+	if ! test -s "$TASKMGR_ZX"; then echo 'Set TASKMGR_ZX to the canonical Task Manager guest bundle' >&2; exit 1; fi
+	staged=$(mktemp "$DISBIN/taskmgr.zx.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 "$TASKMGR_ZX" "$staged" && mv "$staged" "$DISBIN/taskmgr.zx"
+
+EXPLORER_ZX=
+install-explorer-zx:V:
+	if ! test -s "$EXPLORER_ZX"; then echo 'Set EXPLORER_ZX to the canonical Explorer guest bundle' >&2; exit 1; fi
+	staged=$(mktemp "$DISBIN/explorer.zx.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 "$EXPLORER_ZX" "$staged" && mv "$staged" "$DISBIN/explorer.zx"
+
+RILL_ZX=
+RILL_ICON_ATLAS=
+RILL_SWEET_THEME=
+RILL_THEME=$ROOT/lib/rill/themes/Sweet-Dark
+RILL_ICONS=$ROOT/lib/rill/icons
+install-rill-zx:V:
+	if ! test -s "$RILL_ZX"; then echo 'Set RILL_ZX to the canonical Rill guest bundle' >&2; exit 1; fi
+	if ! test -s "$RILL_ICON_ATLAS" || test "$(wc -c < "$RILL_ICON_ATLAS")" -ne 1048576; then
+		echo 'Set RILL_ICON_ATLAS to the canonical 512×512 RGBA Rill atlas' >&2; exit 1
+	fi
+	if ! test -s "$RILL_SWEET_THEME/chrome.rgba" || test "$(wc -c < "$RILL_SWEET_THEME/chrome.rgba")" -ne 28224; then
+		echo 'Set RILL_SWEET_THEME to the canonical Sweet-Dark resource directory' >&2; exit 1
+	fi
+	if ! test -s "$RILL_SWEET_THEME/LICENSE" || ! test -s "$RILL_SWEET_THEME/themerc"; then exit 1; fi
+	python3 "$ROOT/tools/generate-app-catalog.py" --guest-assets &&
+	mkdir -p "$RILL_ICONS" "$RILL_THEME" &&
+	staged=$(mktemp "$DISBIN/rill.zx.XXXXXX") &&
+	trap 'rm -f "$staged" "$atlas" "$chrome"' EXIT &&
+	atlas=$(mktemp "$RILL_ICONS/ui.rgba.XXXXXX") &&
+	chrome=$(mktemp "$RILL_THEME/chrome.rgba.XXXXXX") &&
+	install -m 0644 "$RILL_SWEET_THEME/chrome.rgba" "$chrome" &&
+	install -m 0644 "$RILL_SWEET_THEME/LICENSE" "$RILL_THEME/LICENSE" &&
+	install -m 0644 "$RILL_SWEET_THEME/themerc" "$RILL_THEME/themerc" &&
+	install -m 0644 "$RILL_ICON_ATLAS" "$atlas" &&
+	install -m 0644 "$RILL_ZX" "$staged" &&
+	mv "$chrome" "$RILL_THEME/chrome.rgba" &&
+	mv "$atlas" "$RILL_ICONS/ui.rgba" && mv "$staged" "$DISBIN/rill.zx"
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 "$stem.zx" "$staged" && mv "$staged" "$target"
+
+
+window_chrome.zx: window_chrome_service.zi ../lib/taijios_wm_call.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../lib --bind-host taijios_wm_call --entry window_chrome_service:main -o $target window_chrome_service.zi
+
+install-window-chrome-zx:V: $DISBIN/wm.dis $DISBIN/toolbar.dis $ROOT/dis/lib/window_chrome.zx
+	cd ../lib && mk titlebar.install tkclient.install wmclient.install install-wm-policy-zx
+
+$ROOT/dis/lib/window_chrome.zx: window_chrome.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 window_chrome.zx "$staged" && mv "$staged" "$target"
+
+view.zx: view.zi image_document.zi image_guest.zi ../cmd/taijios_image.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_image --bind-host taijios_io --bind-host taijios_args --entry view:main -o $target view.zi
+
+install-view-zx:V: $DISBIN/view.zx

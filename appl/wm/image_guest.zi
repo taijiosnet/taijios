@@ -1,0 +1,28 @@
+D :: #import "image_document";
+Budget :: #import "taijios_image";
+#import "std/vec"
+
+completed: s64;
+failure: s32;
+
+Progress :: (work: s64) -> bool {
+    if work <= 0 || work > 262144 { failure = -1; return false }
+    completed += work
+    failure = Budget.Step(completed)
+    return failure == 1
+}
+
+Decode :: (bytes: []u8) -> D.Document {
+    completed = 0; failure = 1
+    if bytes.count == 0 || bytes.count > D.MaximumBytes { return D.Decode(bytes) }
+    if Budget.Begin(bytes.count) != 1 {
+        problem: D.Document
+        problem.error = "Cannot start bounded image decoding"
+        return problem
+    }
+    result := D.DecodeWithProgress(bytes, Progress)
+    unused Budget.End()
+    if failure == 0 { result.error = "Image decoding cancelled" }
+    else if failure < 0 { result.error = "Image decoding exceeded its work or time limit" }
+    return result
+}

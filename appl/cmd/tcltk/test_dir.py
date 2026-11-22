@@ -20,6 +20,8 @@ BLACK = (0, 0, 0)
 SELECTED = (0, 0, 204)
 RED = (255, 0, 0)
 TITLE = (28, 3, 345, 20)
+SWEET_TITLE_BACKGROUND = (12, 14, 20)
+SWEET_TITLE_INK = ((146, 155, 168), (119, 128, 133))
 FILES = ("alpha", "café", "omega.dis", "preview.gif", "zulu.GIF")
 BY_NAME = ("..", *FILES[:4], "travel", "vanish", FILES[4])
 ORDERS = (FILES, ("preview.gif", "alpha", "zulu.GIF", "omega.dis", "café"),
@@ -84,22 +86,18 @@ class Browser:
         self.stock = stock
         self.window = inferno_window(env)
         self.output = bytearray()
-        self.open_x = 31
-        self.open_y = 32
-        self.menu_x = 31
-        self.menu_y = 42
         if stock:
             until(lambda: self.capture().getpixel((10, 75)) != (119, 119, 119), "stock Directory Browser did not map")
         else:
             until(lambda: color_bounds(self.capture(), BACKGROUND), "Directory Browser .zx did not map")
-            button = color_bounds(self.capture().crop((1, 23, 180, 64)), BORDER)
-            assert button, "Options menubutton did not draw"
-            left, top, right, bottom = button
-            self.open_x = 1 + (left + right) // 2
-            self.open_y = 23 + (top + bottom) // 2
-            self.menu_x = 1 + left + 14
-            self.menu_y = 23 + bottom
         self.canvas = until(self.canvas_origin, "Directory Browser Canvas did not draw at its stock width")
+        left, top = self.canvas
+        # The window manager adds title and frame padding above the application's
+        # menubar. Anchor pointer targets to the live canvas under that bar.
+        self.open_x = left + 28
+        self.open_y = top - 17 if not stock else top - 11
+        self.menu_x = left + (28 if stock else 14)
+        self.menu_y = top - 2
 
     def canvas_origin(self):
         image = self.capture()
@@ -156,8 +154,8 @@ class Browser:
         self.double_at(125, self.first + 15 * index + 6)
 
     def double_at(self, x, y):
-        self.pointer(x, y, "sleep", "0.34", "mousedown", "1", "sleep", "0.065",
-                     "mouseup", "1", "sleep", "0.08", "mousedown", "1", "sleep", "0.065", "mouseup", "1")
+        self.pointer(x, y, "sleep", "0.34", "mousedown", "1", "sleep", "0.12",
+                     "mouseup", "1", "sleep", "0.12", "mousedown", "1", "sleep", "0.12", "mouseup", "1")
 
     def choose(self, y):
         menu = (2, self.menu_y, 103, self.menu_y + 5)
@@ -172,15 +170,15 @@ class Browser:
         self.pointer(self.open_x, self.open_y, "mousedown", "1")
         until(posted, "Options did not post")
         self.pointer(self.menu_x, y, "sleep", "0.12", "mouseup", "1")
-        self.click(345, 32)
+        self.click(345, self.canvas[1] + 24)
         until(lambda: not posted(), "Options stayed posted")
 
     def sort(self, index):
-        self.choose((53, 75, 96, 117)[index] if self.stock else self.menu_y + 12 + 22 * index)
+        self.choose(self.menu_y + (11, 33, 54, 75)[index] if self.stock else self.menu_y + 12 + 22 * index)
 
     def mode(self, icons):
         if self.stock:
-            y = 155 if icons else 177
+            y = self.menu_y + (113 if icons else 135)
         else:
             y = self.menu_y + 12 + 22 * (4 if icons else 5) + 6
         self.choose(y)
@@ -188,15 +186,19 @@ class Browser:
             self.first = self.first_row()
 
     def walk(self):
-        self.choose(198 if self.stock else self.menu_y + 12 + 22 * 6 + 12)
+        self.choose(self.menu_y + 156 if self.stock else self.menu_y + 12 + 22 * 6 + 12)
 
     def rows(self, image=None, count=len(BY_NAME)):
         image = image if image is not None else self.capture()
         return [row_mask(image, self.first + 15 * i) for i in range(count)]
 
     def title(self):
-        # WM title updates can move the glyph origin by a pixel.
-        return glyphs(self.capture().crop(TITLE), (255, 255, 255))
+        image = self.capture()
+        if image.getpixel((24, 8)) == SWEET_TITLE_BACKGROUND:
+            right = next((x for x in range(24, image.width)
+                          if image.getpixel((x, 8)) != SWEET_TITLE_BACKGROUND), image.width)
+            return glyphs(image.crop((27, 8, right - 25, 28)), *SWEET_TITLE_INK)
+        return glyphs(image.crop(TITLE), (255, 255, 255))
 
 
 def exercise_icons(browser):
@@ -295,7 +297,8 @@ def main():
     image = (ROOT / "dis/wm" if args.installed else BUILD) / "dir.zx"
     if not args.installed:
         compile_image("dir_app", image, *FLAGS)
-    with TemporaryDirectory(prefix="d", dir=BUILD) as folder, private_display() as env:
+    # Keep the fixture caption short enough to fit both window widths.
+    with TemporaryDirectory(prefix="d", dir=BUILD.parent) as folder, private_display() as env:
         root = Path(folder)
         fixture(root)
         with desktop(env, args.emulator, f"wm/dir {guest(root)}") as app:

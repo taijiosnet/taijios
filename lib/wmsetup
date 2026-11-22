@@ -28,25 +28,37 @@ fn cd {
 }
 
 plumber >/chan/wmstdout >[2=1]
-menu Shell			{wmrun wm/sh}
-menu Acme			{wmrun acme}
-menu Edit				{wmrun wm/edit}
-menu Charon			{wmrun charon}
-menu Manual			{wmrun wm/man}
-menu Files			{if {ftest -d $home} {wmrun wm/ftree $home} {wmrun wm/ftree /}}
-menu ''	''
-menu System			'Debugger'		{wmrun wm/deb}
-menu System			'Module manager'	{wmrun wm/rt}
-menu System			'Task manager'		{wmrun wm/task}
-menu System			'Memory monitor'	{wmrun wm/memory}
-menu System			'About'			{wmrun wm/about}
-menu Misc			'Coffee'			{wmrun wm/coffee}
-menu Misc			'Colours'			{wmrun wm/colors}
-#menu Misc			'Winctl'			{wmrun wm/winctl}
-menu Misc			'Clock'			{wmrun wm/date}
-menu Games			'Tetris'			{wmrun wm/tetris}
-menu Games			'Bounce'			{wmrun wm/bounce}
-#menu Games			'Game client'		{wmrun games/gameclient >/dev/null >[2=1]}
-#menu Games			'Game client (local)'	{wmrun games/gameclient -l > /dev/null >[2=1]}
+if {ftest -f /dis/wm/explorer.zx} {
+	menu Files              {wmrun zxrun -w /dis/wm/explorer.zx}
+} {
+	menu Files              {if {ftest -d $home} {wmrun wm/ftree $home} {wmrun wm/ftree /}}
+}
+menu 'Web Browser'          {wmrun charon}
+menu ''                     ''
+menu Development Acme       {wmrun acme}
+menu Development Edit       {wmrun wm/edit}
+menu Development Debugger   {wmrun wm/deb}
+menu System Shell           {wmrun wm/sh}
+menu System 'Module Manager' {wmrun wm/rt}
+if {ftest -f /dis/wm/taskmgr.zx} {
+	menu System 'Task Manager' {wmrun zxrun -w /dis/wm/taskmgr.zx}
+} {
+	menu System 'Task Manager' {wmrun wm/task}
+}
+menu System 'Memory Monitor' {wmrun wm/memory}
+menu System About           {wmrun wm/about}
+menu Utilities Manual       {wmrun wm/man}
+menu Utilities Coffee       {wmrun wm/coffee}
+menu Utilities Colours      {wmrun wm/colors}
+menu Utilities 'Date and Time' {wmrun wm/date}
+if {ftest -f /dis/wm/clock.zx} {
+	menu Utilities Clock    {wmrun zxrun -w /dis/wm/clock.zx}
+} {
+	menu Utilities Clock    {wmrun wm/clock}
+}
+menu Utilities Stopwatch    {wmrun wm/stopwatch -zx}
+menu Utilities Counter      {wmrun zxrun -w /dis/wm/counter.zx}
+menu Games Tetris            {wmrun wm/tetris}
+menu Games Bounce            {wmrun wm/bounce}
 
 if {ftest -f $home/lib/wmsetup} {run $home/lib/wmsetup} {}

@@ -52,9 +52,14 @@ $O.$CONF:	$OBJ $CONF.c $CONF.root.h $LIBNAMES $ZX_LIB
 	$LD $LDFLAGS $ZX_LDFLAGS -o $target $OBJ $CONF.$O $LIBFILES $ZX_LIB $SYSLIBS
 
 install:V: $O.$CONF
-	cp $O.$CONF $INSTALLDIR/$CONF
+	staged=$(mktemp "$INSTALLDIR/$CONF.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 $O.$CONF "$staged" && mv "$staged" "$INSTALLDIR/$CONF"
 
 <../port/portmkfile
+
+win-x11a.$O:	../port/win-x11a.c ../port/taijios-icon.h
+	$CC $CFLAGS -I. ../port/win-x11a.c
 
 zx.$O:	../port/zx.c $ROOT/mkconfig $ZX_LIB $ROOT/include/drawif.h zxrunt.h zxmod.h
 	$CC $CFLAGS $ZX_CFLAGS ../port/zx.c

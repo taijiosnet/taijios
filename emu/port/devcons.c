@@ -124,13 +124,21 @@ kbdslave(void *a)
 	/* pexit("kbdslave", 0); */	/* not reached */
 }
 
+static int collecting;
+
+void
+gkbdcancelcompose(void)
+{
+	collecting = 0;
+}
+
 void
 gkbdputc(Queue *q, int ch)
 {
 	int n;
 	Rune r;
 	static uchar kc[5*UTFmax];
-	static int nk, collecting = 0;
+	static int nk;
 	char buf[UTFmax];
 
 	r = ch;
@@ -165,16 +173,16 @@ gkeyinit(void)
 	gkeyq = qopen(32*1024, Qmsg, nil, nil);
 }
 
-void
+int
 gkeyevent(int kind, int key, int modifiers)
 {
 	char message[40];
 	int n;
 
 	if(gkeyq == nil || gkeyreader.ref == 0)
-		return;
+		return 0;
 	n = snprint(message, sizeof message, "keyevent %c %d %d", kind, key, modifiers);
-	qproduce(gkeyq, message, n);
+	return qproduce(gkeyq, message, n) == n;
 }
 
 void

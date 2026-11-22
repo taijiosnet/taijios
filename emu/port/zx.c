@@ -12,12 +12,14 @@
 #include <fenv.h>
 #endif
 #include "draw.h"
+#include "tk.h"
 #include "zxrunt.h"
 #include "drawif.h"
 #include "zxmod.h"
 
 enum {
 	ZxMaxImage = 32 * 1024 * 1024,
+	ZxStreamMinImage = 256 * 1024,
 	ZxSteps = 16000000,
 	ZxTitleBytes = 512,
 	ZxGuestPathBytes = 1024,
@@ -25,6 +27,13 @@ enum {
 	ZxCursorSide = 32,
 	ZxIoBytes = 8192,
 	ZxInitialFiles = 32,
+	ZxTaskLimit = 1024,
+	ZxTaskNameBytes = 64,
+	ZxPanelLabelBytes = 160,
+	ZxImageBytes = 8 * 1024 * 1024,
+	ZxImagePixels = 2 * 1024 * 1024,
+	ZxImageWorkChunk = 262144,
+	ZxImageMillis = 60000,
 };
 
 static int
@@ -52,31 +61,32 @@ zxfree(void *context, const uchar *data, size_t size)
 	free((void *)data);
 }
 
-static ZxModuleResolveResult
-zxread(void *context, const char *path, ZxModuleImage *image)
+static vlong
+zximagesize(int fd)
 {
-	char *err = context;
-	uchar *bytes, *grown, extra;
 	Dir *dir;
-	int fd, length, capacity, initial;
-	long count;
+	vlong length = 0;
 
-	err[0] = '\0';
-	fd = kopen((char *)path, OREAD);
-	if(fd < 0){
-		kgerrstr(err, ERRMAX);
-		if(strstr(err, "does not exist") != nil || strstr(err, "No such file") != nil)
-			return ZX_MODULE_IMAGE_MISSING;
-		return ZX_MODULE_IMAGE_ERROR;
-	}
-	initial = ZxIoBytes;
 	dir = kdirfstat(fd);
 	if(dir != nil){
-		/* Leave room to read EOF without growing the buffer for a regular image. */
-		if(dir->length > 0 && dir->length < ZxMaxImage && (dir->mode & DMDIR) == 0)
-			initial = dir->length + 1;
+		if((dir->mode & DMDIR) == 0)
+			length = dir->length;
 		free(dir);
 	}
+	return length;
+}
+
+static ZxModuleResolveResult
+zxreadfd(int fd, vlong advertised, char *err, ZxModuleImage *image)
+{
+	uchar *bytes, *grown, extra;
+	int length, capacity, initial;
+	long count;
+
+	initial = ZxIoBytes;
+	/* Leave room to read EOF without growing the buffer for a regular image. */
+	if(advertised > 0 && advertised < ZxMaxImage)
+		initial = advertised + 1;
 	bytes = nil;
 	length = capacity = 0;
 	for(;;){
@@ -108,7 +118,6 @@ zxread(void *context, const char *path, ZxModuleImage *image)
 	}
 	if(count < 0 && err[0] == '\0')
 		kgerrstr(err, ERRMAX);
-	kclose(fd);
 	if(count == 0){
 		*image = (ZxModuleImage){bytes, length, zxfree};
 		return ZX_MODULE_IMAGE_FOUND;
@@ -117,13 +126,113 @@ zxread(void *context, const char *path, ZxModuleImage *image)
 	return ZX_MODULE_IMAGE_ERROR;
 }
 
+static ZxModuleResolveResult
+zxread(void *context, const char *path, ZxModuleImage *image)
+{
+	char *err = context;
+	int fd;
+	ZxModuleResolveResult result;
+
+	err[0] = '\0';
+	fd = kopen((char *)path, OREAD);
+	if(fd < 0){
+		kgerrstr(err, ERRMAX);
+		if(strstr(err, "does not exist") != nil || strstr(err, "No such file") != nil)
+			return ZX_MODULE_IMAGE_MISSING;
+		return ZX_MODULE_IMAGE_ERROR;
+	}
+	result = zxreadfd(fd, zximagesize(fd), err, image);
+	kclose(fd);
+	return result;
+}
+
+#ifdef ZIRAN_HOST_HAS_BUNDLE_READ_AT
+typedef struct ZxImageReader ZxImageReader;
+struct ZxImageReader {
+	int fd;
+	char *error;
+};
+
+static size_t
+zximageat(void *context, uint64_t offset, void *output, size_t size)
+{
+	ZxImageReader *reader = context;
+	uchar *bytes = output;
+	size_t read = 0;
+	long count;
+
+	while(read < size){
+		count = kpread(reader->fd, bytes+read, size-read, offset+read);
+		if(count < 0){
+			kgerrstr(reader->error, ERRMAX);
+			return 0;
+		}
+		if(count == 0){
+			strecpy(reader->error, reader->error+ERRMAX, "short read loading ZX image");
+			return 0;
+		}
+		read += count;
+	}
+	return read;
+}
+#endif
+
 static Bundle*
 zxopen(const char *path, char *err)
 {
 	Bundle *bundle;
 	ZxModuleImage image;
+	ZxModuleResolveResult result;
+	int fd;
+	vlong length;
 
-	if(zxread(err, path, &image) != ZX_MODULE_IMAGE_FOUND)
+	err[0] = '\0';
+	fd = kopen((char *)path, OREAD);
+	if(fd < 0){
+		kgerrstr(err, ERRMAX);
+		return nil;
+	}
+	length = zximagesize(fd);
+#ifdef ZIRAN_HOST_HAS_BUNDLE_READ_AT
+	if(length >= ZxStreamMinImage && length <= ZxMaxImage && kseek(fd, 0, 0) == 0){
+		ZxImageReader reader = {fd, err};
+		int unsupported;
+		uchar extra;
+		long count;
+
+#ifdef ZIRAN_HOST_HAS_BUNDLE_ENGINE_READ_AT
+		bundle = BundleOpenEngineReadAt(length, zximageat, &reader, &unsupported, mallocshrink);
+#else
+		bundle = BundleOpenReadAt(length, zximageat, &reader, &unsupported);
+#endif
+		if(bundle != nil){
+			/* An appended tail would otherwise be outside the verified image. */
+			count = kpread(fd, &extra, 1, length);
+			if(count < 0)
+				kgerrstr(err, ERRMAX);
+			else if(count > 0)
+				strecpy(err, err+ERRMAX, "ZX image grew while loading");
+			kclose(fd);
+			if(count == 0)
+				return bundle;
+			BundleClose(bundle);
+			return nil;
+		}
+		if(!unsupported || err[0] != '\0' || kseek(fd, 0, 0) != 0){
+			if(err[0] == '\0'){
+				if(unsupported)
+					kgerrstr(err, ERRMAX);
+				else
+					strecpy(err, err+ERRMAX, "invalid ZX image");
+			}
+			kclose(fd);
+			return nil;
+		}
+	}
+#endif
+	result = zxreadfd(fd, length, err, &image);
+	kclose(fd);
+	if(result != ZX_MODULE_IMAGE_FOUND)
 		return nil;
 	bundle = BundleOpenOwnedBytes(image.data, image.size, image.release, err);
 	if(bundle == nil)
@@ -140,6 +249,8 @@ struct ZxSurface {
 	int nextrow, framewidth, frameheight;
 	vlong pointermillis, pointerepoch;
 	uint pointertick;
+	int opened, imageactive, imagecancelled, imagepermit, pendingresize, resizewidth, resizeheight;
+	vlong imagework, imagelimit, imagestart, imagepoll;
 };
 
 /* Requests use scalar channels. Keep Limbo references on the managed Window. */
@@ -175,7 +286,12 @@ zxevent(ZxSurface *surface, const HostValue *args, int n, HostValue *result)
 	if(n != 1 || args[0].kind != HOST_INTEGER || args[0].integer > INT32_MAX)
 		return 0;
 	win->wait = args[0].integer < 0 ? 0 : args[0].integer;
-	if(!zxrequest(win, ZX_Event))
+	if(surface->pendingresize){
+		surface->pendingresize = 0;
+		destroy(win->input.text);
+		win->input = (ZX_Input){.kind = ZX_Resize, .width = surface->resizewidth,
+			.height = surface->resizeheight, .text = H};
+	}else if(!zxrequest(win, ZX_Event))
 		return 0;
 	input = &win->input;
 	if(input->kind != ZX_Closed && (win->wait > 0 || input->kind != ZX_Idle))
@@ -295,12 +411,12 @@ zxopaque(const uchar *data, size_t size)
 }
 
 static int
-zxuploadopaque(Image *image, const uchar *data, int width, int first, int height)
+zxuploadopaque(Image *image, const uchar *data, int width, int first, int height, const HostValue *words, const uchar *borrowed)
 {
 	enum { Chunk = 8192 / 3 };
 	uchar packed[Chunk*3];
 	const uchar *source;
-	int maxpixels, x, y, i, columns, rows, count;
+	int maxpixels, x, y, i, columns, rows, count, offset;
 
 	/* BGR24's bytes are ordered R, G, B in Draw. */
 	maxpixels = (image->display->bufsize - 64) / 3;
@@ -316,11 +432,27 @@ zxuploadopaque(Image *image, const uchar *data, int width, int first, int height
 		for(x = 0; x < width; x += columns){
 			columns = width-x < maxpixels ? width-x : maxpixels;
 			count = columns * rows;
-			source = data + (y*width + x)*4;
-			for(i = 0; i < count; i++){
-				packed[3*i] = source[4*i];
-				packed[3*i+1] = source[4*i+1];
-				packed[3*i+2] = source[4*i+2];
+			offset = y*width + x;
+			if(words != nil){
+				for(i = 0; i < count; i++){
+					packed[3*i] = words[offset+i].bits >> 16;
+					packed[3*i+1] = words[offset+i].bits >> 8;
+					packed[3*i+2] = words[offset+i].bits;
+				}
+			}else if(borrowed != nil){
+				source = borrowed + offset*4;
+				for(i = 0; i < count; i++){
+					packed[3*i] = source[4*i+2];
+					packed[3*i+1] = source[4*i+1];
+					packed[3*i+2] = source[4*i];
+				}
+			}else{
+				source = data + offset*4;
+				for(i = 0; i < count; i++){
+					packed[3*i] = source[4*i];
+					packed[3*i+1] = source[4*i+1];
+					packed[3*i+2] = source[4*i+2];
+				}
 			}
 			if(loadimage(image, Rect(x, first+y, x+columns, first+y+rows), packed, count*3) != count*3)
 				return 0;
@@ -358,7 +490,7 @@ zxpresent(ZX_Window *win, const HostValue *args, int n, HostValue *result)
 		else if(prepared == 1 && (image = lookupimage(win->image)) != nil){
 			locked = lockdisplay(image->display);
 			if(opaque)
-				ok = zxuploadopaque(image, pixels->data, win->width, 0, win->height);
+				ok = zxuploadopaque(image, pixels->data, win->width, 0, win->height, nil, nil);
 			else
 				ok = zxupload(image, pixels->data, win->width, win->height);
 			if(locked)
@@ -372,46 +504,68 @@ zxpresent(ZX_Window *win, const HostValue *args, int n, HostValue *result)
 }
 
 static int
-zxpresentrows(ZxSurface *surface, const HostValue *args, int n)
+zxpresentrows(ZxSurface *surface, const HostValue *args, int n, int strip, int packed)
 {
 	ZX_Window *win = surface->win;
 	const HostValue *pixels;
 	Image *image;
 	int first, width, height, rows, stride, prepared, locked, ok;
+	size_t i;
 	int next = surface->nextrow;
 
-	surface->nextrow = 0;
+	if(!strip)
+		surface->nextrow = 0;
 	if(n != 4 || !zxsize(args) || args[2].kind != HOST_INTEGER ||
 	   args[2].integer < 0 || args[2].integer >= args[1].integer)
 		return 0;
 	width = args[0].integer;
 	height = args[1].integer;
 	first = args[2].integer;
-	if(first != 0 && (first != next || width != surface->framewidth || height != surface->frameheight))
+	if(!strip && first != 0 && (first != next || width != surface->framewidth || height != surface->frameheight))
 		return 0;
 	pixels = args + 3;
-	stride = width*4;
-	if(pixels->kind != HOST_STRING || pixels->data == nil || pixels->length == 0 ||
-	   pixels->length > (size_t)(height-first)*stride || pixels->length % stride != 0 ||
-	   !zxopaque(pixels->data, pixels->length))
+	stride = width;
+	if(packed){
+		if((pixels->kind != HOST_SLICE && pixels->kind != HOST_BORROWED_SLICE) ||
+		   pixels->type == nil || strcmp(pixels->type, "[]u32") != 0 ||
+		   (pixels->kind == HOST_SLICE ? pixels->elements == nil : pixels->data == nil))
+			return 0;
+	}else{
+		stride *= 4;
+		if(pixels->kind != HOST_STRING || pixels->data == nil)
+			return 0;
+	}
+	if(pixels->length == 0 || pixels->length > (size_t)(height-first)*stride || pixels->length % stride != 0)
 		return 0;
+	if(!packed && !zxopaque(pixels->data, pixels->length))
+		return 0;
+	if(packed && pixels->kind == HOST_SLICE)
+		for(i = 0; i < pixels->length; i++)
+			if(pixels->elements[i].kind != HOST_UNSIGNED || pixels->elements[i].bits > UINT32_MAX)
+				return 0;
 	rows = pixels->length / stride;
 	win->width = width;
 	win->height = height;
-	prepared = zxrequest(win, ZX_OpaqueBuffer);
+	if(strip){
+		win->input.y = first;
+		win->input.height = rows;
+	}
+	prepared = zxrequest(win, strip ? ZX_StripBuffer : ZX_OpaqueBuffer);
 	if(prepared == 2)
 		ok = 1; /* Close is queued. */
 	else if(prepared != 1 || (image = lookupimage(win->image)) == nil)
 		return 0;
 	else{
 		locked = lockdisplay(image->display);
-		ok = zxuploadopaque(image, pixels->data, width, first, rows);
+		ok = zxuploadopaque(image, pixels->data, width, first, rows,
+			packed && pixels->kind == HOST_SLICE ? pixels->elements : nil,
+			packed && pixels->kind == HOST_BORROWED_SLICE ? pixels->data : nil);
 		if(locked)
 			unlockdisplay(image->display);
-		if(ok && first+rows == height)
-			ok = zxrequest(win, ZX_Present);
+		if(ok && (strip || first+rows == height))
+			ok = zxrequest(win, strip ? ZX_PresentStrip : ZX_Present);
 	}
-	if(ok && first+rows < height){
+	if(ok && !strip && first+rows < height){
 		surface->nextrow = first + rows;
 		surface->framewidth = width;
 		surface->frameheight = height;
@@ -432,9 +586,10 @@ zxsurface(void *context, const char *module, const char *function,
 		release();
 		return 0;
 	}
-	if(strcmp(function, "Open") == 0)
+	if(strcmp(function, "Open") == 0){
 		ok = zxopenwindow(surface->win, args, n, result);
-	else if(strcmp(function, "Event") == 0)
+		surface->opened = ok && result->integer != 0;
+	}else if(strcmp(function, "Event") == 0)
 		ok = zxevent(surface, args, n, result);
 	else if(strcmp(function, "PointerMillis") == 0){
 		ok = n == 0;
@@ -445,7 +600,13 @@ zxsurface(void *context, const char *module, const char *function,
 		surface->nextrow = 0;
 		ok = zxpresent(surface->win, args, n, result);
 	}else if(strcmp(function, "PresentOpaqueRows") == 0){
-		zxbool(result, zxpresentrows(surface, args, n));
+		zxbool(result, zxpresentrows(surface, args, n, 0, 0));
+		ok = 1;
+	}else if(strcmp(function, "PresentOpaqueStrip") == 0){
+		zxbool(result, zxpresentrows(surface, args, n, 1, 0));
+		ok = 1;
+	}else if(strcmp(function, "PresentRGBStrip") == 0){
+		zxbool(result, zxpresentrows(surface, args, n, 1, 1));
 		ok = 1;
 	}else if(strcmp(function, "SetTitle") == 0){
 		zxbool(result, n == 1 && zxtitle(surface->win, args) && zxrequest(surface->win, ZX_SetTitle));
@@ -643,13 +804,19 @@ zxclock(void *context, const char *module, const char *function,
 
 	USED(context);
 	USED(module);
-	USED(function);
 	USED(args);
-	if(n != 0 || clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+	if(n != 0)
 		return 0;
 	result->kind = HOST_INTEGER;
 	result->type = "s64";
-	result->integer = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+	if(strcmp(function, "UnixMillis") == 0){
+		extern vlong timeoffset;
+		result->integer = (timeoffset + osusectime()) / 1000;
+	}else{
+		if(clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+			return 0;
+		result->integer = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+	}
 	return 1;
 }
 
@@ -704,8 +871,20 @@ zxfilereadat(void *context, const char *module, const char *function,
 	return 1;
 }
 
+typedef struct ZxTask ZxTask;
+struct ZxTask {
+	int pid;
+	int group;
+	int state;
+	int kib;
+	vlong cpunanos;
+	char module[ZxTaskNameBytes];
+	char user[ZxTaskNameBytes];
+};
+
 typedef struct ZxCommand ZxCommand;
 struct ZxCommand {
+	ZxSurface *surface;
 	HostValue *args;
 	int argc;
 	int *fd;
@@ -713,6 +892,13 @@ struct ZxCommand {
 	char *fdpath;
 	char err[ERRMAX];
 	char failure[ERRMAX];
+	ZxTask *tasks;
+	int ntask;
+	int taskcap;
+	int tasksvalid;
+	vlong tasksample;
+	vlong taskskew;
+	uvlong pools[3][3];
 };
 
 static int
@@ -863,7 +1049,7 @@ zxioslot(ZxCommand *command)
 }
 
 static int
-zxioopen(ZxCommand *command, const HostValue *args, int n, int create, HostValue *result)
+zxioopen(ZxCommand *command, const HostValue *args, int n, int create, int flags, HostValue *result)
 {
 	static const int modes[] = {OREAD, OWRITE, ORDWR};
 	char path[ZxGuestPathBytes + 1];
@@ -875,12 +1061,16 @@ zxioopen(ZxCommand *command, const HostValue *args, int n, int create, HostValue
 	if(!zxiopath(args, path))
 		return zxioerror(command, result, "invalid file name");
 	mode = args[1].integer;
+	if(create && flags == OEXCL && (mode & ORCLOSE) != 0){
+		flags |= ORCLOSE;
+		mode &= ~ORCLOSE;
+	}
 	if(mode < 0 || mode >= nelem(modes))
 		return zxioerror(command, result, "invalid open mode");
 	slot = zxioslot(command);
 	if(slot < 0)
 		return zxioerror(command, result, "too many open ZX files");
-	fd = create ? kcreate(path, modes[mode], (uint32_t)args[2].integer) : kopen(path, modes[mode]);
+	fd = create ? kcreate(path, modes[mode] | flags, (uint32_t)args[2].integer) : kopen(path, modes[mode]);
 	if(fd < 0)
 		return zxioerror(command, result, nil);
 	command->fd[slot] = fd;
@@ -968,6 +1158,42 @@ zxioseek(ZxCommand *command, int fd, const HostValue *args, int n, HostValue *re
 }
 
 static int
+zxiolocation(ZxCommand *command, int home, HostValue *result)
+{
+	char path[ZxGuestPathBytes + 1];
+	int fd, count;
+
+	free(command->fdpath);
+	command->fdpath = nil;
+	fd = kopen(home ? "#e/home" : ".", OREAD);
+	if(fd < 0)
+		zxioerrstr(command, nil);
+	else{
+		if(home){
+			count = kread(fd, path, sizeof(path));
+			if(count < 0)
+				zxioerrstr(command, nil);
+			else if(count > 0 && count < sizeof(path) && path[0] == '/' &&
+			    memchr(path, 0, count) == nil){
+				path[count] = 0;
+				command->fdpath = strdup(path);
+				if(command->fdpath == nil)
+					zxioerrstr(command, "out of memory copying guest home");
+			}else
+				zxioerrstr(command, "invalid guest home path");
+		}else{
+			command->fdpath = kfd2path(fd);
+			if(command->fdpath == nil)
+				zxioerrstr(command, nil);
+		}
+		kclose(fd);
+	}
+	*result = (HostValue){.kind = HOST_STRING, .type = "string", .data = (uchar *)command->fdpath,
+		.length = command->fdpath == nil ? 0 : strlen(command->fdpath)};
+	return 1;
+}
+
+static int
 zxio(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
 {
@@ -987,9 +1213,25 @@ zxio(void *context, const char *module, const char *function,
 		return 1;
 	}
 	if(strcmp(function, "Open") == 0)
-		return zxioopen(command, args, n, 0, result);
+		return zxioopen(command, args, n, 0, 0, result);
 	if(strcmp(function, "Create") == 0)
-		return zxioopen(command, args, n, 1, result);
+		return zxioopen(command, args, n, 1, 0, result);
+	if(strcmp(function, "CreateNew") == 0)
+		return zxioopen(command, args, n, 1, OEXCL, result);
+	if(strcmp(function, "Remove") == 0){
+		char path[ZxGuestPathBytes + 1];
+
+		if(n != 1 || args[0].kind != HOST_STRING)
+			return 0;
+		if(!zxiopath(args, path) || path[0] == 0)
+			return zxioerror(command, result, "invalid file name");
+		return kremove(path) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
+	}
+	if(strcmp(function, "Cwd") == 0 || strcmp(function, "Home") == 0){
+		if(n != 0)
+			return 0;
+		return zxiolocation(command, strcmp(function, "Home") == 0, result);
+	}
 	if(strcmp(function, "Stat") == 0)
 		return zxiostat(command, args, n, nil, result);
 	if(strcmp(function, "StatPacked") == 0)
@@ -1025,6 +1267,27 @@ zxio(void *context, const char *module, const char *function,
 		command->fd[handle - 3] = -1;
 		return kclose(fd) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
 	}
+	if(strcmp(function, "Sync") == 0 || strcmp(function, "RenameSameDir") == 0){
+		int renamefile = strcmp(function, "RenameSameDir") == 0;
+		char name[ZxGuestPathBytes + 1];
+		Dir dir;
+
+		if(n != (renamefile ? 2 : 1))
+			return 0;
+		if(handle < 3)
+			return zxioerror(command, result, "cannot update a standard stream");
+		nulldir(&dir);
+		if(renamefile){
+			if(!zxiopath(args+1, name) || name[0] == 0 || strchr(name, '/') != nil ||
+			   strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+				return zxioerror(command, result, "rename needs a basename");
+			dir.name = name;
+		}
+		count = convD2M(&dir, bytes, sizeof(bytes));
+		if(count < STATFIXLEN || kfwstat(fd, bytes, count) < 0)
+			return zxioerror(command, result, nil);
+		return zxs32(result, 0);
+	}
 	if(n != 2)
 		return 0;
 	buffer = args + 1;
@@ -1045,8 +1308,11 @@ zxio(void *context, const char *module, const char *function,
 		if(!zxioslice(buffer))
 			return 0;
 		count = length == 0 ? 0 : kread(fd, bytes, length);
-		if(count > 0)
+		if(count > 0){
 			BundleHostRenewSteps();
+			if(command->surface != nil && !command->surface->imageactive)
+				command->surface->imagepermit = 1;
+		}
 		for(i = 0; i < count; i++)
 			buffer->elements[i].bits = bytes[i];
 	}else{
@@ -1055,6 +1321,418 @@ zxio(void *context, const char *module, const char *function,
 		count = length == 0 ? 0 : kwrite(fd, (void *)buffer->data, length);
 	}
 	return count < 0 ? zxioerror(command, result, nil) : zxs32(result, count);
+}
+
+static vlong
+zxmonotonicnanos(void)
+{
+	struct timespec now;
+
+	if(clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+		return -1;
+	return (vlong)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+static int
+zxtaskcapture(ZxCommand *command)
+{
+	ZxTask *row, *rows;
+	Prog *p;
+	Frame *frame;
+	char *name;
+	int count, index;
+	vlong before, after;
+
+	command->tasksvalid = 0;
+	if(!progdevbound())
+		return -1;
+	acquire();
+	count = nprog();
+	if(count > ZxTaskLimit){
+		release();
+		return -2;
+	}
+	if(count > command->taskcap){
+		rows = realloc(command->tasks, count * sizeof(*rows));
+		if(rows == nil){
+			release();
+			return -1;
+		}
+		command->tasks = rows;
+		command->taskcap = count;
+	}
+	before = zxmonotonicnanos();
+	for(index = 0, p = progn(0); p != nil; index++, p = p->next)
+		command->tasks[index].cpunanos = progcpunanos(p);
+	after = zxmonotonicnanos();
+	command->tasksample = -1;
+	command->taskskew = -1;
+	if(before >= 0 && after >= before){
+		command->tasksample = before + (after - before)/2;
+		command->taskskew = after - command->tasksample;
+	}
+	for(index = 0, p = progn(0); p != nil; index++, p = p->next){
+		row = &command->tasks[index];
+		row->pid = p->pid;
+		row->state = p->state;
+		row->group = p->group == nil ? 0 : p->group->id;
+		row->kib = -1;
+		name = "";
+		if(p->state != Pexiting && p->R.M != H){
+			name = p->R.M->m->name;
+			frame = (Frame*)p->R.FP;
+			if(name[0] == '$' && frame != nil && frame->mr != nil)
+				name = frame->mr->m->name;
+			row->kib = progsize(p);
+		}
+		utfecpy(row->module, row->module+sizeof(row->module), name);
+		utfecpy(row->user, row->user+sizeof(row->user), ((Osenv*)p->osenv)->user);
+	}
+	for(index = 0; index < nelem(command->pools); index++)
+		poolusage(index, command->pools[index]);
+	release();
+	command->ntask = count;
+	command->tasksvalid = 1;
+	return count;
+}
+
+static int
+zxtaskslice(const HostValue *value, const char *type, size_t count)
+{
+	return value->kind == HOST_SLICE && value->type != nil &&
+		strcmp(value->type, type) == 0 && value->length >= count && value->elements != nil;
+}
+
+static void
+zxtaskname(const HostValue *value, const char *name)
+{
+	int i;
+
+	for(i = 0; name[i] != 0; i++)
+		value->elements[i].bits = (uchar)name[i];
+	value->elements[i].bits = 0;
+}
+
+static int
+zxpanel(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxSurface *surface = context;
+	ZX_Window *win = surface->win;
+	ZX_Panel *panel;
+	ZX_PanelEntry *entry;
+	char group[ZxPanelLabelBytes], label[ZxPanelLabelBytes];
+	int i, width, index, ok, snapshot, row, popup, paint, flush;
+
+	USED(module);
+	snapshot = strcmp(function, "Snapshot") == 0;
+	row = strcmp(function, "Row") == 0;
+	popup = strcmp(function, "Popup") == 0;
+	paint = strcmp(function, "Paint") == 0;
+	flush = strcmp(function, "Flush") == 0;
+	if(snapshot){
+		if(n != 1 || !zxtaskslice(args, "[]s32", 4))
+			return 0;
+	}else if(row){
+		if(n != 4 || !zxisindex(args) || !zxtaskslice(args+1, "[]s32", 2) ||
+		   !zxtaskslice(args+2, "[]u8", ZxPanelLabelBytes) ||
+		   !zxtaskslice(args+3, "[]u8", ZxPanelLabelBytes))
+			return 0;
+	}else if(paint){
+		if(n != 6 || args[5].kind != HOST_STRING || args[5].length >= ZxPanelLabelBytes)
+			return 0;
+		for(i = 0; i < 5; i++)
+			if(!zxisindex(args+i))
+				return 0;
+	}else if(flush){
+		if(n != 0)
+			return 0;
+	}else if(n != 2 || !zxisindex(args) || !zxisindex(args+1))
+		return 0;
+
+	acquire();
+	if(waserror()){
+		release();
+		return 0;
+	}
+	panel = win->panel;
+	width = 0;
+	ok = 0;
+	if(panel != H){
+		if(snapshot){
+			args->elements[0].integer = panel->generation;
+			args->elements[1].integer = panel->count;
+			args->elements[2].integer = panel->focused;
+			args->elements[3].integer = panel->height;
+			width = panel->width;
+		}else if(row){
+			index = args[0].integer;
+			if(index >= 0 && index < panel->count){
+				entry = (ZX_PanelEntry*)panel->rows->data + index;
+				utfecpy(group, group+sizeof(group), string2c(entry->group));
+				utfecpy(label, label+sizeof(label), string2c(entry->label));
+				args[1].elements[0].integer = entry->kind;
+				args[1].elements[1].integer = entry->id;
+				zxtaskname(args+2, group);
+				zxtaskname(args+3, label);
+				ok = 1;
+			}
+		}else if(flush){
+			ok = zxrequest(win, ZX_PanelFlush);
+		}else if(paint){
+			win->input.x = args[0].integer;
+			win->input.y = args[1].integer;
+			win->input.width = args[2].integer;
+			win->input.height = args[3].integer;
+			win->input.key = args[4].integer;
+			if(args[5].length == 0)
+				ok = zxrequest(win, ZX_PanelPaint);
+			else
+				ok = zxtextrequest(win, ZX_PanelPaint, args[5].data, args[5].length);
+		}else{
+			win->input.x = args[0].integer;
+			win->input.y = args[1].integer;
+			ok = zxrequest(win, popup ? ZX_PanelPopup : ZX_PanelChoose);
+		}
+	}
+	poperror();
+	release();
+	if(snapshot)
+		return zxs32(result, width);
+	zxbool(result, ok);
+	return 1;
+}
+
+static void
+zxdesktopname(const HostValue *value, String *text)
+{
+	char buffer[ZxPanelLabelBytes];
+	size_t limit = value->length < sizeof(buffer) ? value->length : sizeof(buffer);
+
+	utfecpy(buffer, buffer+limit, string2c(text));
+	zxtaskname(value, buffer);
+}
+
+static int
+zxdesktoprow(ZX_Desktop *desktop, const HostValue *args, int launcher)
+{
+	int index = args[0].integer;
+	ZX_PanelEntry *entry;
+	ZX_DesktopWindow *window;
+	Array *rows = launcher ? desktop->launchers : desktop->windows;
+
+	if(rows == H || index < 0 || index >= rows->len)
+		return 0;
+	if(launcher){
+		entry = (ZX_PanelEntry*)rows->data + index;
+		args[1].elements[0].integer = entry->id;
+		zxdesktopname(args+2, entry->label);
+		zxdesktopname(args+3, entry->group);
+		zxdesktopname(args+4, H);
+	}else{
+		window = (ZX_DesktopWindow*)rows->data + index;
+		args[1].elements[0].integer = window->id;
+		args[1].elements[1].integer = window->x;
+		args[1].elements[2].integer = window->y;
+		args[1].elements[3].integer = window->width;
+		args[1].elements[4].integer = window->height;
+		args[1].elements[5].integer = window->workspace;
+		args[1].elements[6].integer = window->focused;
+		args[1].elements[7].integer = window->minimized;
+		args[1].elements[8].integer = window->maximized;
+		zxdesktopname(args+2, window->title);
+		zxdesktopname(args+3, window->appid);
+	}
+	return 1;
+}
+
+static int
+zxdesktop(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxSurface *surface = context;
+	ZX_Window *win = surface->win;
+	ZX_Desktop *desktop;
+	const HostValue *action = nil;
+	int op, count, ok, i;
+
+	USED(module);
+	if(strcmp(function, "UnixSeconds") == 0){
+		extern vlong timeoffset;
+		if(n != 0)
+			return 0;
+		result->kind = HOST_INTEGER;
+		result->type = "s64";
+		result->integer = (timeoffset + osusectime()) / 1000000;
+		return 1;
+	}
+	if(strcmp(function, "BindDesktop") == 0 || strcmp(function, "TimezoneOffsetSeconds") == 0){
+		if(n != 0)
+			return 0;
+		op = strcmp(function, "BindDesktop") == 0 ? ZX_DesktopBind : ZX_DesktopTimezone;
+	}else if(strcmp(function, "Capture") == 0){
+		if(n != 1 || !zxtaskslice(args, "[]s32", 7))
+			return 0;
+		op = ZX_DesktopCapture;
+	}else if(strcmp(function, "LauncherAt") == 0 || strcmp(function, "WindowAt") == 0){
+		op = strcmp(function, "LauncherAt") == 0 ? -1 : -2;
+		if(n != (op == -1 ? 5 : 4) || !zxisindex(args) ||
+		   !zxtaskslice(args+1, "[]s32", op == -1 ? 1 : 9))
+			return 0;
+		for(i = 2; i < n; i++)
+			if(!zxtaskslice(args+i, "[]u8", 1))
+				return 0;
+	}else if(strcmp(function, "SetChromeRegions") == 0){
+		if(n != 1 || args[0].kind != HOST_SLICE || args[0].type == nil ||
+		   strcmp(args[0].type, "[]s32") != 0 || args[0].length > 32 ||
+		   args[0].length % 4 != 0 || (args[0].length > 0 && args[0].elements == nil))
+			return 0;
+		op = ZX_DesktopChrome;
+	}else if(strcmp(function, "Launch") == 0){
+		if(n != 1 || !zxisindex(args))
+			return 0;
+		op = ZX_DesktopLaunch;
+	}else if(strcmp(function, "WindowAction") == 0){
+		if(n != 6 || !zxisindex(args))
+			return 0;
+		for(i = 2; i < n; i++)
+			if(!zxisindex(args+i))
+				return 0;
+		action = args+1;
+		op = ZX_DesktopWindowAction;
+	}else{
+		if(n != 2 || !zxisindex(args+1))
+			return 0;
+		action = args;
+		op = ZX_DesktopAction;
+	}
+	if(action != nil && (action->kind != HOST_STRING || action->length == 0 ||
+	   action->length > 32 || action->data == nil || memchr(action->data, 0, action->length) != nil)){
+		zxbool(result, 0);
+		return 1;
+	}
+
+	acquire();
+	if(waserror()){
+		release();
+		return 0;
+	}
+	desktop = win->desktop;
+	count = -1;
+	ok = 0;
+	if(desktop != H){
+		if(op < 0)
+			ok = zxdesktoprow(desktop, args, op == -1);
+		else if(op == ZX_DesktopCapture){
+			if(zxrequest(win, op)){
+				args[0].elements[0].integer = desktop->generation;
+				args[0].elements[1].integer = desktop->windows == H ? 0 : desktop->windows->len;
+				args[0].elements[2].integer = desktop->focused;
+				args[0].elements[3].integer = desktop->width;
+				args[0].elements[4].integer = desktop->height;
+				args[0].elements[5].integer = desktop->workspacecount;
+				args[0].elements[6].integer = desktop->currentworkspace;
+				count = desktop->launchers == H ? 0 : desktop->launchers->len;
+			}
+		}else if(op == ZX_DesktopChrome){
+			if(desktop->regions != H && args[0].length <= desktop->regions->len){
+				desktop->regioncount = args[0].length;
+				for(i = 0; i < desktop->regioncount; i++)
+					((int*)desktop->regions->data)[i] = args[0].elements[i].integer;
+				ok = zxrequest(win, op);
+			}
+		}else if(action == nil){
+			if(op == ZX_DesktopLaunch)
+				win->input.button = args[0].integer;
+			ok = zxrequest(win, op);
+			if(op == ZX_DesktopTimezone)
+				count = ok ? win->input.key : 0;
+		}else{
+			if(op == ZX_DesktopWindowAction){
+				win->input.button = args[0].integer;
+				win->input.x = args[2].integer;
+				win->input.y = args[3].integer;
+				win->input.width = args[4].integer;
+				win->input.height = args[5].integer;
+			}else
+				win->input.button = args[1].integer;
+			ok = zxtextrequest(win, op, action->data, action->length);
+		}
+	}
+	poperror();
+	release();
+	if(op == ZX_DesktopCapture || op == ZX_DesktopTimezone)
+		return zxs32(result, count);
+	zxbool(result, ok);
+	return 1;
+}
+
+static int
+zxtaskterminate(ZxCommand *command, int pid)
+{
+	int i;
+
+	Prog *self = up->iprog;
+
+	if(pid <= 0 || (self != nil && self->pid == pid))
+		return -1;
+	for(i = 0; i < command->ntask; i++)
+		if(command->tasks[i].pid == pid)
+			return progdevkill(pid);
+	return -1;
+}
+
+static int
+zxtasks(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	const ZxTask *row;
+	int index, i;
+
+	USED(module);
+	if(strcmp(function, "Capture") == 0)
+		return n == 0 && zxs32(result, zxtaskcapture(command));
+	if(strcmp(function, "SampleNanos") == 0){
+		if(n != 0)
+			return 0;
+		result->kind = HOST_INTEGER;
+		result->type = "s64";
+		result->integer = command->tasksvalid ? command->tasksample : -1;
+		return 1;
+	}
+	if(n < 1 || !zxisindex(args))
+		return 0;
+	index = args[0].integer;
+	if(!command->tasksvalid || index < 0)
+		return zxs32(result, -1);
+	if(strcmp(function, "Terminate") == 0)
+		return n == 1 && zxs32(result, zxtaskterminate(command, index));
+	if(strcmp(function, "PoolAt") == 0){
+		if(n != 2 || index >= nelem(command->pools) || !zxtaskslice(args+1, "[]s64", 3))
+			return zxs32(result, -1);
+		for(i = 0; i < 3; i++)
+			args[1].elements[i].integer = command->pools[index][i];
+		return zxs32(result, 0);
+	}
+	if(n != 4 || index >= command->ntask || !zxtaskslice(args+1, "[]s64", 4) ||
+	   !zxtaskslice(args+2, "[]u8", ZxTaskNameBytes) || !zxtaskslice(args+3, "[]u8", ZxTaskNameBytes))
+		return zxs32(result, -1);
+	row = &command->tasks[index];
+	args[1].elements[0].integer = row->pid;
+	args[1].elements[1].integer = row->group;
+	args[1].elements[2].integer = row->state;
+	args[1].elements[3].integer = row->kib;
+	if(args[1].length >= 6){
+		args[1].elements[4].integer = row->cpunanos;
+		/* newprog never recycles a PID within an emulator instance. */
+		args[1].elements[5].integer = row->pid;
+	}
+	if(args[1].length >= 7)
+		args[1].elements[6].integer = command->taskskew;
+	zxtaskname(args+2, row->module);
+	zxtaskname(args+3, row->user);
+	return zxs32(result, 0);
 }
 
 /* Package builds prefix the module leaf with p and 16 hexadecimal digits. */
@@ -1073,13 +1751,104 @@ zxmodule(const char *actual, const char *leaf)
 	return actual[17] == '_' && strcmp(actual + 18, leaf) == 0;
 }
 
+static int
+zximagepoll(ZxSurface *surface)
+{
+	ZX_Window *win = surface->win;
+	int i, cancelled = 0;
+
+	if(win == H || !surface->opened)
+		return 1;
+	acquire();
+	if(waserror()){
+		release();
+		return 0;
+	}
+	for(i = 0; i < 16; i++){
+		win->wait = 0;
+		if(!zxrequest(win, ZX_Event) || win->input.kind == ZX_Closed ||
+		   (win->input.kind == ZX_Key && win->input.key == 256)){
+			cancelled = 1;
+			break;
+		}
+		if(win->input.kind == ZX_Idle)
+			break;
+		if(win->input.kind == ZX_Resize){
+			surface->pendingresize = 1;
+			surface->resizewidth = win->input.width;
+			surface->resizeheight = win->input.height;
+		}
+	}
+	poperror();
+	release();
+	return !cancelled;
+}
+
+static int
+zximage(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxSurface *surface = context;
+	vlong now = zxmonotonicnanos();
+	int status = -2;
+
+	USED(module);
+	if(strcmp(function, "Begin") == 0){
+		if(n != 1 || args[0].kind != HOST_INTEGER || args[0].type == nil ||
+		   strcmp(args[0].type, "s64") != 0)
+			return 0;
+		if(!surface->imageactive && surface->imagepermit && args[0].integer > 0 && args[0].integer <= ZxImageBytes && now >= 0){
+			surface->imageactive = 1;
+			surface->imagepermit = 0;
+			surface->imagecancelled = 0;
+			surface->imagework = 0;
+			surface->imagelimit = (vlong)ZxImagePixels*64 + args[0].integer*4;
+			surface->imagestart = surface->imagepoll = now;
+			status = 1;
+		}
+	}else if(strcmp(function, "End") == 0 || strcmp(function, "Cancel") == 0){
+		if(n != 0)
+			return 0;
+		surface->imageactive = 0;
+		surface->imagecancelled = strcmp(function, "Cancel") == 0;
+		status = 1;
+	}else{
+		if(n != 1 || args[0].kind != HOST_INTEGER || args[0].type == nil ||
+		   strcmp(args[0].type, "s64") != 0)
+			return 0;
+		if(surface->imagecancelled)
+			status = 0;
+		else if(surface->imageactive){
+			if(args[0].integer <= surface->imagework ||
+			   args[0].integer - surface->imagework > ZxImageWorkChunk ||
+			   args[0].integer > surface->imagelimit || now < surface->imagestart ||
+			   now - surface->imagestart > (vlong)ZxImageMillis*1000000){
+				surface->imageactive = 0;
+				status = -1;
+			}else{
+				surface->imagework = args[0].integer;
+				if(now-surface->imagepoll >= 16000000){
+					surface->imagepoll = now;
+					if(!zximagepoll(surface)){
+						surface->imageactive = 0;
+						surface->imagecancelled = 1;
+					}
+				}
+				status = surface->imagecancelled ? 0 : BundleHostRenewSteps();
+			}
+		}
+	}
+	return zxs32(result, status);
+}
+
 static size_t
 zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *bindings)
 {
 	static const char *names[] = {"Open", "Event", "Present", "Close", "SetTasked", "SetTitle",
-		"PresentOpaqueRows", "PointerMillis"};
+		"PresentOpaqueRows", "PresentOpaqueStrip", "PresentRGBStrip", "PointerMillis"};
 	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error",
-		"StatPacked", "FstatPacked", "WstatPacked", "FdPath"};
+		"StatPacked", "FstatPacked", "WstatPacked", "FdPath", "CreateNew", "Remove", "Cwd", "Home",
+		"Sync", "RenameSameDir"};
 	BundleCapabilityAbi abi;
 	size_t i, count = 0;
 	int j;
@@ -1096,7 +1865,22 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxfilereadat, nil};
 			continue;
 		}
-		if(zxmodule(abi.module, "taijios_clock") && strcmp(abi.function, "MonotonicMillis") == 0){
+		if(zxmodule(abi.module, "taijios_image")){
+			if(strcmp(abi.function, "Begin") == 0 || strcmp(abi.function, "Step") == 0 ||
+			   strcmp(abi.function, "End") == 0 || strcmp(abi.function, "Cancel") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zximage, surface};
+			continue;
+		}
+		if(zxmodule(abi.module, "taijios_tasks")){
+			if(strcmp(abi.function, "Capture") == 0 || strcmp(abi.function, "TaskAt") == 0 ||
+			   strcmp(abi.function, "PoolAt") == 0 || strcmp(abi.function, "Terminate") == 0 ||
+		   strcmp(abi.function, "SampleNanos") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxtasks, command};
+			continue;
+		}
+		if((zxmodule(abi.module, "taijios_clock") &&
+		   (strcmp(abi.function, "MonotonicMillis") == 0 || strcmp(abi.function, "UnixMillis") == 0)) ||
+		   (zxmodule(abi.module, "clock") && strcmp(abi.function, "ClockMillisecondsHost") == 0)){
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxclock, nil};
 			continue;
 		}
@@ -1112,6 +1896,22 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 					bindings[count++] = (HostBinding){abi.module, abi.function, zxio, command};
 					break;
 				}
+			continue;
+		}
+		if(surface->win != H && surface->win->panel != H && zxmodule(abi.module, "taijios_panel")){
+			if(strcmp(abi.function, "Snapshot") == 0 || strcmp(abi.function, "Row") == 0 ||
+			   strcmp(abi.function, "Popup") == 0 || strcmp(abi.function, "Choose") == 0 ||
+			   strcmp(abi.function, "Paint") == 0 || strcmp(abi.function, "Flush") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxpanel, surface};
+			continue;
+		}
+		if(surface->win != H && surface->win->desktop != H && zxmodule(abi.module, "taijios_desktop")){
+			if(strcmp(abi.function, "BindDesktop") == 0 || strcmp(abi.function, "Capture") == 0 ||
+			   strcmp(abi.function, "LauncherAt") == 0 || strcmp(abi.function, "WindowAt") == 0 ||
+			   strcmp(abi.function, "Launch") == 0 || strcmp(abi.function, "WindowAction") == 0 ||
+			   strcmp(abi.function, "DesktopAction") == 0 || strcmp(abi.function, "UnixSeconds") == 0 ||
+			   strcmp(abi.function, "TimezoneOffsetSeconds") == 0 || strcmp(abi.function, "SetChromeRegions") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxdesktop, surface};
 			continue;
 		}
 		if(surface->win != H && zxmodule(abi.module, "taijios_wm")){
@@ -1160,6 +1960,160 @@ zxfpbegin(fenv_t *saved)
 }
 #endif
 
+/* Pure shell helpers share one engine instance per bundle. Calls run while
+ * the interpreter is acquired and never enter the draw, channel or file APIs.
+ * Bundle loading alone releases the interpreter because it reads guest files.
+ */
+typedef struct ZxWmPolicy ZxWmPolicy;
+struct ZxWmPolicy {
+	const char *path;
+	Bundle *bundle;
+	BundleInstance *engine;
+	const int *request;
+	int *reply;
+	size_t nrequest, nreply;
+	int opening;
+};
+
+static ZxWmPolicy zxwmpolicies[] = {
+	{.path = "/dis/lib/window_chrome.zx"},
+	{.path = "/dis/lib/winplace.zx"},
+	{.path = "/dis/lib/wm_policy.zx"},
+};
+
+static int
+zxwmbuffer(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxWmPolicy *policy = context;
+	const HostValue *slice;
+	size_t offset, len, i, capacity;
+	int input;
+
+	USED(module);
+	if(n != 2 || !zxisindex(args) || args[0].integer < 0 ||
+	   args[1].kind != HOST_SLICE || args[1].type == nil ||
+	   strcmp(args[1].type, "[]s32") != 0)
+		return 0;
+	slice = args + 1;
+	len = slice->length;
+	if(len != 0 && slice->elements == nil)
+		return 0;
+	input = strcmp(function, "Read") == 0;
+	offset = args[0].integer;
+	capacity = input ? policy->nrequest : policy->nreply;
+	if(offset > capacity || len > capacity - offset){
+		zxbool(result, 0);
+		return 1;
+	}
+	for(i = 0; i < len; i++){
+		if(input)
+			slice->elements[i].integer = policy->request[offset+i];
+		else
+			policy->reply[offset+i] = slice->elements[i].integer;
+	}
+	zxbool(result, 1);
+	return 1;
+}
+
+static int
+zxwmpolicyopen(ZxWmPolicy *policy)
+{
+	BundleInstanceOptions options = {.backend = BUNDLE_BACKEND_ENGINE, .max_steps = ZxSteps};
+	BundleCapabilityAbi abi;
+	HostBinding bindings[2];
+	Bundle *bundle;
+	char err[ERRMAX];
+	size_t count, i;
+
+	if(policy->engine != nil)
+		return 1;
+	if(policy->opening)
+		return 0;
+	policy->opening = 1;
+	release();
+	bundle = zxopen(policy->path, err);
+	acquire();
+	policy->opening = 0;
+	if(bundle == nil)
+		return 0;
+	count = BundleCapabilityCount(bundle);
+	if(count > nelem(bindings))
+		goto Fail;
+	for(i = 0; i < count; i++){
+		if(!BundleCapabilityAbiAt(bundle, i, &abi) ||
+		   !zxmodule(abi.module, "taijios_wm_call") ||
+		   (strcmp(abi.function, "Read") != 0 && strcmp(abi.function, "Reply") != 0))
+			goto Fail;
+		bindings[i] = (HostBinding){abi.module, abi.function, zxwmbuffer, policy};
+	}
+	policy->engine = BundleInstantiateWithOptions(bundle, bindings, count, &options);
+	if(policy->engine == nil)
+		goto Fail;
+	policy->bundle = bundle;
+	return 1;
+Fail:
+	BundleClose(bundle);
+	return 0;
+}
+
+static int
+zxwmpolicycall(int service, const int *request, size_t nrequest, int *reply, size_t nreply)
+{
+	ZxWmPolicy *policy;
+	long long value;
+	int has_result, ran;
+#if defined(__linux__) && defined(__i386__)
+	fenv_t saved;
+#endif
+
+	if(service < 0 || service >= nelem(zxwmpolicies))
+		return 0;
+	policy = zxwmpolicies + service;
+	if(!zxwmpolicyopen(policy))
+		return 0;
+#if defined(__linux__) && defined(__i386__)
+	if(!zxfpbegin(&saved))
+		return 0;
+#endif
+	policy->request = request;
+	policy->nrequest = nrequest;
+	policy->reply = reply;
+	policy->nreply = nreply;
+	ran = BundleInstanceRun(policy->engine, &value, &has_result);
+	policy->request = nil;
+	policy->nrequest = 0;
+	policy->reply = nil;
+	policy->nreply = 0;
+#if defined(__linux__) && defined(__i386__)
+	fesetenv(&saved);
+#endif
+	return ran && has_result && value == 0;
+}
+
+static int
+zxwmchrome(int *request, size_t nrequest, int *reply, size_t nreply)
+{
+	if(nrequest != 15)
+		return 0;
+	request[7] = (int)osmillisec();
+	return zxwmpolicycall(0, request, nrequest, reply, nreply);
+}
+
+void
+ZX_wmcall(void *fp)
+{
+	F_ZX_wmcall *f = fp;
+	Array *request = f->request, *reply = f->reply;
+
+	*f->ret = 0;
+	if(f->service != ZX_PlacePolicy && f->service != ZX_WindowPolicy)
+		return;
+	if(request != H && reply != H)
+		*f->ret = zxwmpolicycall(f->service, (int*)request->data, request->len,
+		    (int*)reply->data, reply->len);
+}
+
 static ZxResult
 zxrun(String *s, List *args, ZX_Window *win)
 {
@@ -1193,6 +2147,7 @@ zxrun(String *s, List *args, ZX_Window *win)
 		error("out of memory copying ZX arguments");
 	}
 	surface.win = win;
+	command.surface = &surface;
 	release();
 	bundle = zxopen(path, result.problem);
 	free(path);
@@ -1223,8 +2178,12 @@ zxrun(String *s, List *args, ZX_Window *win)
 						if(strcmp(bindings[i].function, "Present") == 0)
 							ZxModuleProgramBorrowHostString(program, bindings[i].module,
 								    bindings[i].function, 2);
-						else if(strcmp(bindings[i].function, "PresentOpaqueRows") == 0)
+						else if(strcmp(bindings[i].function, "PresentOpaqueRows") == 0 ||
+						    strcmp(bindings[i].function, "PresentOpaqueStrip") == 0)
 							ZxModuleProgramBorrowHostString(program, bindings[i].module,
+							    bindings[i].function, 3);
+						else if(strcmp(bindings[i].function, "PresentRGBStrip") == 0)
+							ZxModuleProgramBorrowHostSlice(program, bindings[i].module,
 							    bindings[i].function, 3);
 					}
 					ran = ZxModuleProgramRun(program, &result.value, &result.status);
@@ -1260,6 +2219,7 @@ zxrun(String *s, List *args, ZX_Window *win)
 			kclose(command.fd[i]);
 	free(command.fd);
 	free(command.fdpath);
+	free(command.tasks);
 	zxfreeargs(&command);
 	acquire();
 	return result;
@@ -1320,5 +2280,6 @@ zxmodinit(void)
 {
 #ifdef TAIJI_ZX
 	builtinmod("$ZX", ZXmodtab, ZXmodlen);
+	tkwmchromecall = zxwmchrome;
 #endif
 }

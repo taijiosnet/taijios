@@ -6,6 +6,11 @@
 #include	"error.h"
 #include	"raise.h"
 
+#ifdef __linux__
+#include <pthread.h>
+#include <time.h>
+#endif
+
 struct
 {
 	Lock	l;
@@ -47,6 +52,68 @@ pidlook(int pid)
 		;
 	return l;
 }
+
+#ifdef __linux__
+static vlong
+threadcpunanos(clockid_t clock)
+{
+	struct timespec now;
+
+	if(clock_gettime(clock, &now) < 0)
+		return -1;
+	return (vlong)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+#endif
+
+/* The interpreter lock protects the active dispatch and its accumulator.
+ * The thread clock charges native ZX and excludes time spent blocked. */
+vlong
+progcpunanos(Prog *p)
+{
+#ifdef __linux__
+	vlong now;
+
+	if(p->cpuowner == nil || p->cpunanos < 0)
+		return p->cpunanos;
+	now = threadcpunanos(p->cpuclock);
+	if(now < p->cpustart)
+		return -1;
+	return p->cpunanos + (now - p->cpustart);
+#else
+	USED(p);
+	return -1;
+#endif
+}
+
+#ifdef __linux__
+static void
+progcpustart(Prog *p, clockid_t clock)
+{
+	if(p->cpunanos < 0)
+		return;
+	p->cpustart = threadcpunanos(clock);
+	if(p->cpustart < 0){
+		p->cpunanos = -1;
+		return;
+	}
+	p->cpuclock = clock;
+	p->cpuowner = up;
+	up->cpuprog = p;
+}
+
+static void
+progcpustop(Prog *p)
+{
+	Proc *owner;
+
+	if(p == nil || p->cpuowner == nil)
+		return;
+	owner = p->cpuowner;
+	p->cpunanos = progcpunanos(p);
+	owner->cpuprog = nil;
+	p->cpuowner = nil;
+}
+#endif
 
 int
 tready(void *a)
@@ -135,6 +202,8 @@ newprog(Prog *p, Modlink *m)
 	}
 
 	n->pid = ++pidnum;
+	n->cpunanos = 0;
+	n->cpuowner = nil;
 	if(n->pid <= 0)
 		panic("no pids");
 	n->group = nil;
@@ -204,6 +273,9 @@ delprog(Prog *p, char *msg)
 	Osenv *o;
 	Prog **ph;
 
+#ifdef __linux__
+	progcpustop(p);
+#endif
 	tellsomeone(p, msg);	/* call before being removed from prog list */
 
 	o = p->osenv;
@@ -1019,6 +1091,10 @@ vmachine(void *a)
 	Osenv *o;
 	int cycles;
 	static int gccounter;
+#ifdef __linux__
+	clockid_t cpuclock;
+	int hascpuclock = pthread_getcpuclockid(pthread_self(), &cpuclock) == 0;
+#endif
 
 	USED(a);
 
@@ -1027,6 +1103,9 @@ vmachine(void *a)
 	while(waserror()) {
 		if(up->iprog != nil)
 			acquire();
+#ifdef __linux__
+		progcpustop(up->cpuprog);
+#endif
 		if(handler(up->env->errstr) == 0) {
 			propex(currun(), up->env->errstr);
 			progexit();
@@ -1054,7 +1133,16 @@ vmachine(void *a)
 			up->env = o;
 
 			FPrestore(&o->fpu);
+#ifdef __linux__
+			if(hascpuclock)
+				progcpustart(r, cpuclock);
+			else
+				r->cpunanos = -1;
+#endif
 			r->xec(r);
+#ifdef __linux__
+			progcpustop(up->cpuprog);
+#endif
 			FPsave(&o->fpu);
 
 			if(isched.runhd != nil)

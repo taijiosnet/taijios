@@ -1,0 +1,116 @@
+#import "std/vec"
+Call :: #import "taijios_wm_call";
+
+Hit :: 0
+Raise :: 1
+Lower :: 2
+Remove :: 3
+PanelLookup :: 4
+PanelRetain :: 5
+Fit :: 6
+
+HitWindow :: () -> bool {
+    header: [4]s32
+    if !Call.Read(0, header[:]) { return false }
+    count := header[1]
+    if count < 0 || count > (2147483647 - 4) / 5 { return false }
+    result: [1]s32 = .{-1}
+    window: [5]s32
+    for i: 0 .. count - 1 {
+        if !Call.Read(4 + 5 * i, window[:]) { return false }
+        if header[2] >= window[1] && header[2] < window[3] &&
+           header[3] >= window[2] && header[3] < window[4] {
+            result[0] = window[0]
+            break
+        }
+    }
+    return Call.Reply(0, result[:])
+}
+
+Reorder :: (op: s32) -> bool {
+    header: [3]s32
+    if !Call.Read(0, header[:]) { return false }
+    count := header[1]
+    target := header[2]
+    if count <= 0 || target < 0 || target >= count { return false }
+    order: Vec(s32)
+    size := count
+    if op == Remove { size -= 1 }
+    if !VecResize(order, cast(s64)size) { return false }
+    at := 0
+    if op == Raise {
+        order[at] = target
+        at += 1
+    }
+    for i: 0 .. count - 1 {
+        if i != target {
+            order[at] = i
+            at += 1
+        }
+    }
+    if op == Lower { order[at] = target }
+    return Call.Reply(0, order[:])
+}
+
+PanelRows :: (op: s32) -> bool {
+    header: [4]s32
+    if !Call.Read(0, header[:]) { return false }
+    count := header[1]
+    if count < 0 || count > (2147483647 - 4) / 2 { return false }
+    match: [1]s32 = .{-1}
+    row: [2]s32
+    for i: 0 .. count - 1 {
+        if !Call.Read(4 + 2 * i, row[:]) { return false }
+        same_kind := row[0] == header[2]
+        if op == PanelLookup && same_kind && row[1] == header[3] {
+            match[0] = i
+            break
+        }
+        if op == PanelRetain {
+            keep: [1]s32 = .{1}
+            if same_kind && (header[3] == 0 || row[1] == header[3]) { keep[0] = 0 }
+            if !Call.Reply(i, keep[:]) { return false }
+        }
+    }
+    if op == PanelLookup { return Call.Reply(0, match[:]) }
+    return true
+}
+
+// Preserve the existing Dis screen-edge placement rules, including oversized windows.
+FitAxis :: (lo: s32, hi: s32, screen_lo: s32, screen_hi: s32) -> s32, s32 {
+    start := lo
+    end := hi
+    span := screen_hi - screen_lo
+    if end - start > span { end = start + span }
+    size := end - start
+    if end > screen_hi {
+        start = screen_lo - size
+        end = screen_hi - size
+    }
+    if start < screen_lo {
+        start = screen_lo
+        end = screen_lo + size
+    }
+    return start, end
+}
+
+FitWindow :: () -> bool {
+    request: [9]s32
+    if !Call.Read(0, request[:]) { return false }
+    left, right := FitAxis(request[1], request[3], request[5], request[7])
+    top, bottom := FitAxis(request[2], request[4], request[6], request[8])
+    result: [4]s32 = .{left, top, right, bottom}
+    return Call.Reply(0, result[:])
+}
+
+main :: () -> s32 {
+    operation: [1]s32
+    if !Call.Read(0, operation[:]) { return 1 }
+    op := operation[0]
+    ok := false
+    if op == Hit { ok = HitWindow() }
+    else if op == Raise || op == Lower || op == Remove { ok = Reorder(op) }
+    else if op == PanelLookup || op == PanelRetain { ok = PanelRows(op) }
+    else if op == Fit { ok = FitWindow() }
+    return ifx ok then 0 else 1
+}

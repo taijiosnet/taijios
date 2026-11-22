@@ -5,9 +5,19 @@ import sys
 root = Path.cwd()
 emu = root / (sys.argv[1] if len(sys.argv) > 1 else 'emu/Linux/o.emu')
 files = root / 'build/zx-smoke'
+overlay = ''
+if '--guest-overlay' in sys.argv[2:]:
+    index = sys.argv.index('--guest-overlay', 2)
+    if index + 1 == len(sys.argv):
+        sys.exit('--guest-overlay requires a directory under the TaijiOS root')
+    path = Path(sys.argv[index + 1]).resolve()
+    if not path.is_dir() or not path.is_relative_to(root) or path == root:
+        sys.exit('--guest-overlay requires a directory under the TaijiOS root')
+    mount = "'/" + path.relative_to(root).as_posix().replace("'", "''") + "'"
+    overlay = f'bind -b {mount} /dis; bind -b {mount} /dis/wm; bind -b {mount} /dis/lib; '
 
 def run(command):
-    proc = subprocess.run([emu, '-r', root, '/dis/sh.dis', '-c', command],
+    proc = subprocess.run([emu, '-r', root, '/dis/sh.dis', '-c', overlay + command],
                           start_new_session=True, capture_output=True, text=True, timeout=25)
     print(repr(proc.stdout), repr(proc.stderr), proc.returncode)
     assert proc.returncode in (0, -9)
@@ -25,6 +35,97 @@ assert pipe.stdout == 'Hello from ZX 42\n4294967338\nPIPE_OK\n' and pipe.stderr 
 missing = run('zxrun /build/zx-smoke/absent.zx >[2] /build/zx-smoke/missing.stderr; echo $status')
 assert missing.stdout == 'zx\n' and missing.stderr == ''
 assert 'absent.zx' in (files / 'missing.stderr').read_text()
+
+if '--wm-policy' in sys.argv[2:]:
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory(dir=files, prefix='wm-policy-') as folder:
+        scratch = Path(folder)
+        source = scratch / 'policy.b'
+        source.write_text(r"""implement Policy;
+include "sys.m";
+include "draw.m";
+include "zx.m";
+Policy: module { init: fn(nil: ref Draw->Context, nil: list of string); };
+zx: ZX;
+
+check(op: int, req, want: array of int)
+{
+    reply := array[len want] of int;
+    if(!zx->wmcall(ZX->WindowPolicy, req, reply))
+        raise "fail:wmcall " + string op;
+    for(i := 0; i < len want; i++)
+        if(reply[i] != want[i])
+            raise "fail:wrong reply for op " + string op;
+}
+
+init(nil: ref Draw->Context, nil: list of string)
+{
+    sys := load Sys Sys->PATH;
+    zx = load ZX ZX->PATH;
+    check(ZX->WmHit, array[] of {ZX->WmHit, 2, 10, 10,
+        0, 0, 0, 10, 12, 1, 4, 4, 14, 14}, array[] of {1});
+    check(ZX->WmHit, array[] of {ZX->WmHit, 2, 9, 10,
+        0, 0, 0, 10, 12, 1, 4, 4, 14, 14}, array[] of {0});
+    check(ZX->WmHit, array[] of {ZX->WmHit, 1, 14, 14,
+        1, 4, 4, 14, 14}, array[] of {-1});
+    check(ZX->WmRaise, array[] of {ZX->WmRaise, 4, 2}, array[] of {2, 0, 1, 3});
+    check(ZX->WmLower, array[] of {ZX->WmLower, 4, 1}, array[] of {0, 2, 3, 1});
+    check(ZX->WmRemove, array[] of {ZX->WmRemove, 3, 0}, array[] of {1, 2});
+    check(ZX->WmPanelLookup, array[] of {ZX->WmPanelLookup, 3, 2, 4, 1, 4, 2, 4, 2, 5}, array[] of {1});
+    check(ZX->WmPanelRetain, array[] of {ZX->WmPanelRetain, 3, 2, 0, 1, 4, 2, 4, 2, 5}, array[] of {1, 0, 0});
+    check(ZX->WmFit, array[] of {ZX->WmFit, 79, -40, 130, 20, 3, 8, 90, 50}, array[] of {3, 8, 54, 50});
+    request := array[] of {0, 5, 10, 800, 600, 0, 0, 0, 0, 150, 120};
+    reply := array[4] of int;
+    if(!zx->wmcall(ZX->PlacePolicy, request, reply))
+        raise "fail:place service";
+    if(reply[0] != 5 || reply[1] != 10 || reply[2] != 155 || reply[3] != 130)
+        raise "fail:place result";
+    sys->print("ZX_WM_POLICY_OK\n");
+}
+""")
+        dis = scratch / 'policy.dis'
+        subprocess.run([root / 'Linux/386/bin/limbo', '-I', root / 'module',
+                        '-o', dis, source], check=True, timeout=30)
+        policy = run('/' + dis.relative_to(root).as_posix())
+        assert policy.stdout == 'ZX_WM_POLICY_OK\n' and policy.stderr == ''
+
+if '--read-at' in sys.argv[2:]:
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory(dir=files, prefix='read-at-') as folder:
+        scratch = Path(folder)
+        guest = '/' + str(scratch.relative_to(root))
+        payload = (b'0123456789abcdef' * 64 + b'\n') * 320
+        fixture = scratch / 'main.zi'
+        fixture.write_bytes(b'Payload :: #string END\n' + payload + b'END;\n'
+                            b'main :: () -> s32 { print("%", Payload); return 17; }\n')
+
+        def bundle(name, *options):
+            target = scratch / name
+            subprocess.run(['zi2zx', '--root', scratch, '--entry', 'main:main',
+                            *options, '-o', target, fixture], check=True)
+            assert target.stat().st_size >= 256 * 1024
+            return target
+
+        plain = bundle('plain.zx')
+        asset = scratch / 'asset.dat'
+        asset.write_bytes(payload)
+        fixture.write_text('main :: () -> s32 { print("with assets\\n"); return 18; }\n')
+        bundle('assets.zx', '--asset-dir', f'assets={asset}')
+
+        result = run(f'zxrun {guest}/plain.zx > {guest}/payload.out; '
+                     f'zxrun {guest}/assets.zx')
+        assert result.stdout == 'with assets\n18\n' and not result.stderr
+        assert (scratch / 'payload.out').read_bytes() == payload + b'17\n'
+
+        encoded = plain.read_bytes()
+        for name, malformed in [('truncated', encoded[:-1]), ('extra-tail', encoded + b'x')]:
+            (scratch / f'{name}.zx').write_bytes(malformed)
+            failed = run(f'zxrun {guest}/{name}.zx >[2] {guest}/problem; echo $status')
+            assert failed.stdout == 'zx\n'
+            assert 'invalid ZX image' in (scratch / 'problem').read_text()
+    print('ZX loader: large app and asset fallback ran, truncated and extended images rejected')
 
 if '--precision' in sys.argv[2:]:
     precision = run('zxrun /build/zx-smoke/float64.zx; echo $status')
@@ -458,16 +559,17 @@ if '--guest-io' in sys.argv[2:]:
         directory = Path(directory)
         guest = '/' + str(directory.relative_to(root))
         (directory / 'lifecycle.txt').write_bytes(b'long file to truncate')
-        result = run(f'bind -c {guest} /chan; cd /chan; '
+        result = run(f'bind -c {guest} /chan; cd /chan; home=/usr; '
                      'zxrun -c /build/zx-smoke/filesystem.zx > io.out >[2] io.err; '
                      'echo $status; echo GUEST_IO_DONE')
-        assert result.stdout == '7\nGUEST_IO_DONE\n' and not result.stderr
+        assert result.stdout == '7\nGUEST_IO_DONE\n' and not result.stderr, (directory / 'io.out').read_bytes()
         assert (directory / 'lifecycle.txt').read_bytes() == b'alpha'
+        assert not (directory / 'guest ü.txt').exists()
         assert (directory / 'new lifecycle.txt').read_bytes() == b'new'
         assert (directory / 'new lifecycle.txt').stat().st_mode & 0o777 == 0o600
         assert (directory / 'io.out').read_bytes() == b'guest stdout\n'
         assert (directory / 'io.err').read_bytes() == b'guest stderr\n'
-        print('ZX guest I/O: create, truncate, stat, s64 seek, independent handles, streams and status')
+        print('ZX guest I/O: create, exclusive create, remove, cwd, home, stat, s64 seek, handles, streams and status')
 
 
 def graphics():
@@ -482,8 +584,8 @@ def graphics():
     from PIL import Image, ImageChops
 
     env = {k: v for k, v in os.environ.items() if k not in (
-        'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
-        'XDG_RUNTIME_DIR', 'SESSION_MANAGER')}
+        'DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
+        'XDG_RUNTIME_DIR', 'XDG_SESSION_ID', 'SESSION_MANAGER', 'HARMONY_GUEST_DISPLAY')}
     env['HARMONY_DESKTOP_RECOVERY'] = '0'
     reader, writer = os.pipe()
     xvfb = subprocess.Popen(['Xvfb', '-displayfd', str(writer), '-screen', '0',
@@ -505,8 +607,11 @@ def graphics():
 
     def launch(app, *args, arena='256M'):
         pool = ['-p', f'main={arena}'] if arena else []
-        return subprocess.Popen([emu, *pool, '-r', root, '-g', '800x600',
-                                 'wm/wm', app, *args], env=env,
+        guest = ['wm/wm', app, *args]
+        if overlay:
+            command = ' '.join("'" + str(arg).replace("'", "''") + "'" for arg in guest)
+            guest = ['/dis/sh.dis', '-c', overlay + command]
+        return subprocess.Popen([emu, *pool, '-r', root, '-g', '800x600', *guest], env=env,
                                 start_new_session=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
 
@@ -577,7 +682,7 @@ def graphics():
                 f"{{cat {guest}/input | {{zxrun -c -p -w /build/zx-smoke/windowio.zx "
                 "mode 'café marker'; echo WINDOWIO_STATUS $status; ps; echo WINDOWIO_DONE}} &\n")
             proc = subprocess.Popen([emu, '-r', root, '-g', '800x600', '/dis/sh.dis', '-c',
-                                     f'bind -b {guest} /lib; wm/wm'], env=env,
+                                     f'{overlay}bind -b {guest} /lib; wm/wm'], env=env,
                                     stdin=subprocess.DEVNULL, start_new_session=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             transcript = bytearray()

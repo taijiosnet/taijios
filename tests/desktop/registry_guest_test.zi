@@ -1,0 +1,45 @@
+Catalog :: #import "app_registry";
+D :: #import "desktop_entry";
+#import "icon_png_taiji"
+IO :: #import "taijios_io";
+
+main :: () -> s32 {
+    count := Catalog.Count()
+    if count < 40 { print("catalog count: %\n", count); return 1 }
+    found: bool
+    for i: cast(s32)0..count-1 {
+        record := Catalog.At(i)
+        if record == null { return 2 }
+        name: [256]u8; icon: [256]u8; exec: [1024]u8
+        if !Catalog.Field(record, "Name", name[:]) || Catalog.ZText(name[:]) == "" ||
+            !Catalog.Field(record, "Icon", icon[:]) || !Catalog.Field(record, "Exec", exec[:]) { return 3 }
+        path: [2048]u8
+        if !Catalog.IconPath(Catalog.ZText(icon[:]), 30, path[:]) { print("missing icon: %\n", Catalog.ZText(icon[:])); return 4 }
+        if Catalog.ZText(record.id[:]) == "org.taijiosnet.wm-clock.desktop" {
+            found = true
+            if Catalog.ZText(exec[:]) != "/dis/wm/clock.zx" || Catalog.ZText(name[:]) != "Clock" { return 5 }
+        }
+        for j: cast(s32)0..i-1 {
+            previous := Catalog.At(j)
+            if previous == null || Catalog.ZText(previous.id[:]) == Catalog.ZText(record.id[:]) { return 6 }
+        }
+    }
+    if !found || Catalog.At(-1) != null || Catalog.At(count) != null { return 7 }
+    pixels: [4096]u8; expected: [4096]u8
+    if !TaijiPngIconPixels("/lib/icons/hicolor/32x32/apps/taiji-clock.png", 32, pixels[:]) { return 8 }
+    fd := IO.Open("/lib/icons/hicolor/32x32/apps/taiji-clock.rgba", 0)
+    if fd < 0 { return 9 }
+    used: s64
+    while used < expected.count {
+        n := IO.Read(fd, expected[used:]); if n <= 0 { unused IO.Close(fd); return 10 }; used += n
+    }
+    if IO.Close(fd) != 0 { return 11 }
+    for i: cast(s64)0..pixels.count-1 { if pixels[i] != expected[i] { print("PNG mismatch at %: % != %\n", i, pixels[i], expected[i]); return 12 } }
+    stock: [5]string = .["user-home", "drive-harddisk", "user-trash", "edit-paste", "audio-volume-high"]
+    for name: stock {
+        path: [2048]u8
+        if !Catalog.IconPath(name, 32, path[:]) || !TaijiPngIconPixels(Catalog.ZText(path[:]), 32, pixels[:]) { return 13 }
+    }
+    print("TAIJI_DESKTOP_REGISTRY_PNG_OK %\n", count)
+    return 0
+}

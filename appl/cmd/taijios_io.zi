@@ -3,6 +3,13 @@ host_api :: #system_library "host_api";
 #scope_export
 Open :: (path: string, mode: s32) -> s32 #foreign host_api;
 Create :: (path: string, mode: s32, permissions: s32) -> s32 #foreign host_api;
+// Create exclusively in the guest namespace, failing if the name exists.
+// Add 64 (ORCLOSE) to the mode for an exclusive lock removed on Close.
+CreateNew :: (path: string, mode: s32, permissions: s32) -> s32 #foreign host_api;
+Remove :: (path: string) -> s32 #foreign host_api;
+// An empty path means unavailable. Home reads the guest's `home` variable.
+Cwd :: () -> string #foreign host_api;
+Home :: () -> string #foreign host_api;
 Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 Write :: (handle: s32, data: string) -> s32 #foreign host_api;
 Seek :: (handle: s32, offset: s64, origin: s32) -> s64 #foreign host_api;
@@ -10,6 +17,11 @@ Stat :: (path: string, metadata: []u8) -> s32 #foreign host_api;
 StatPacked :: (path: string, buffer: []u8) -> s32 #foreign host_api;
 FstatPacked :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 WstatPacked :: (handle: s32, record: string) -> s32 #foreign host_api;
+// Flush a guest file through a null stat update, returning 0 or -1.
+Sync :: (handle: s32) -> s32 #foreign host_api;
+// Rename the open file to a basename in the same directory, returning 0 or -1.
+// Whether an existing destination can be replaced is decided by the guest filesystem.
+RenameSameDir :: (handle: s32, name: string) -> s32 #reads #foreign host_api;
 // Inspect an inherited guest descriptor number without opening or closing it.
 FdPath :: (descriptor: s32) -> string #foreign host_api;
 Close :: (handle: s32) -> s32 #foreign host_api;

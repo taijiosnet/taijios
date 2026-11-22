@@ -23,6 +23,7 @@ Up :: 6;
 Key :: 7;
 TextEvent :: 9;
 Visibility :: 10; // button is 1 when tasked, 0 when restored
+PointerWheel :: 11; // button is signed milli-detents, positive up
 EnterKey :: 257;
 BackspaceKey :: 259;
 DeleteKey :: 261;
@@ -43,6 +44,12 @@ PointerMillis :: () -> s64 #foreign host_api;
 Present :: (width: s32, height: s32, rgba: string) -> bool #reads #foreign host_api;
 // Submit contiguous, opaque RGBA8 rows starting at row zero. The final rows publish the frame.
 PresentOpaqueRows :: (width: s32, height: s32, first: s32, rgba: string) -> bool #reads #foreign host_api;
+// Initialize each size with contiguous opaque RGBA8 rows, then update any row range.
+// The host consumes rgba synchronously and preserves rows outside the strip.
+PresentOpaqueStrip :: (width: s32, height: s32, first: s32, rgba: string) -> bool #reads #foreign host_api;
+// Initialize each size with contiguous rows, then update any row range.
+// Synchronous opaque strip of packed 0xRRGGBB words; ignore the high byte.
+PresentRGBStrip :: (width: s32, height: s32, first: s32, pixels: []u32) -> bool #reads #foreign host_api;
 SetTasked :: (tasked: bool) -> bool #foreign host_api;
 SetTitle :: (title: string) -> bool #reads #foreign host_api;
 Close :: () #foreign host_api;

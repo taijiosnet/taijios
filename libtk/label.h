@@ -1,4 +1,16 @@
 typedef struct TkLabel TkLabel;
+typedef struct TkChrome TkChrome;
+
+enum { ChromeRequest = 15, ChromeScene = 60 };
+
+struct TkChrome {
+	int flags, width, height;
+	int state[5];
+	Point press;
+	int scenevalid;
+	int paint[ChromeRequest];
+	int scene[ChromeScene];
+};
 
 /*
  * widgets that use the label code:
@@ -22,6 +34,8 @@ struct TkLabel
 	int		w;
 	int		h;
 	int		textheight;
+
+	TkChrome*	chrome;
 
 	/* button fields */
 	char*		command;	/* Command to execute at invoke */
@@ -72,3 +86,5 @@ extern	void		tkfreebutton(Tk*);
 /* support for menus */
 extern	int		tklabelmargin(Tk*);
 extern	int		tkbuttonmargin(Tk*);
+
+extern int tkdrawchrome(Tk*, Image*, Point);

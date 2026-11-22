@@ -623,6 +623,8 @@ extern	char*	tktext(TkTop*, char*, char**);
 extern	char*	tkupdatecmd(TkTop*, char*, char**);
 extern	char*	tkvariable(TkTop*, char*, char**);
 extern	char*	tkwinfo(TkTop*, char*, char**);
+extern	char*	tkwmchrome(TkTop*, char*, char**);
+extern	int	(*tkwmchromecall)(int*, size_t, int*, size_t);
 
 extern	TkMethod	*tkmethod[];
 

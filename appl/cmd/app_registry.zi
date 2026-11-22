@@ -1,0 +1,334 @@
+D :: #import "desktop_entry";
+Theme :: #import "icon_theme";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+WM :: #import "taijios_wm";
+#import "std/vec"
+
+Record :: struct {
+    id: [256]u8
+    path: [1024]u8
+    source: Vec(u8)
+    visible: bool
+    id_hash: u32
+    id_next: s32
+    localized_name: string
+}
+#scope_file
+MenuName :: struct { text: string; hash: u32; next: s32 }
+records: [512]Record;
+record_count: s32;
+visible_records: [512]s32;
+visible_count: s32;
+id_heads: [512]s32;
+menu_heads: [512]s32;
+menu_names: [1024]MenuName;
+menu_count: s32;
+loaded: bool;
+locale_bytes: [128]u8;
+locale_length: s64;
+theme_bytes: [128]u8;
+theme_length: s64;
+
+#scope_export
+Locale :: () -> string { return TextView(locale_bytes[:locale_length]) }
+ZText :: (bytes: []u8) -> string {
+    n: s64
+    while n < bytes.count && bytes[n] != 0 { n += 1 }
+    return TextView(bytes[:n])
+}
+ReadFile :: (path: string, output: []u8) -> s64 {
+    fd := IO.Open(path, 0); if fd < 0 { return -1 }
+    defer { unused IO.Close(fd) }
+    used: s64
+    while used < output.count {
+        n := IO.Read(fd, output[used:])
+        if n < 0 || cast(s64)n > output.count-used { return -1 }
+        if n == 0 { return used }
+        used += n
+    }
+    extra: [1]u8
+    if IO.Read(fd, extra[:]) != 0 { return -1 }
+    return used
+}
+Exists :: (path: string) -> bool {
+    metadata: [12]u8
+    return IO.Stat(path, metadata[:]) == 0 && (metadata[11] & cast(u8)128) == cast(u8)0
+}
+ResolveProgram :: (name: string, output: []u8) -> bool {
+    if name == "" { return false }
+    if name[0] == 47 {
+        n: s64
+        if !Exists(name) || !D.Put(output, *n, name) || n >= output.count { return false }
+        output[n] = 0; return true
+    }
+    prefixes: [3]string = .["/dis/", "/dis/wm/", "/dis/math/"]
+    suffixes: [3]string = .["", ".dis", ".zx"]
+    for prefix: prefixes { for suffix: suffixes {
+        n: s64
+        if D.Put(output, *n, prefix) && D.Put(output, *n, name) && D.Put(output, *n, suffix) && n < output.count {
+            output[n] = 0
+            if Exists(TextView(output[:n])) { return true }
+        }
+    } }
+    return false
+}
+Executable :: (name: string) -> bool {
+    if name == "" { return true }
+    decoded: [1024]u8; path: [1024]u8
+    n := D.Decode(name, decoded[:])
+    return n > 0 && ResolveProgram(TextView(decoded[:n]), path[:])
+}
+#scope_file
+NameHash :: (name: string) -> u32 {
+    hash: u32 = 2166136261
+    for c: name { hash = (hash ^ cast(u32)c) * cast(u32)16777619 }
+    return hash
+}
+FindId :: (name: string, hash: u32) -> s32 {
+    index := id_heads[cast(s64)(hash % cast(u32)id_heads.count)]
+    while index >= 0 {
+        record := *records[index]
+        if record.id_hash == hash && ZText(record.id[:]) == name { return index }
+        index = record.id_next
+    }
+    return -1
+}
+CacheMenuName :: (name: string) {
+    hash := NameHash(name)
+    bucket := cast(s64)(hash % cast(u32)menu_heads.count)
+    index := menu_heads[bucket]
+    while index >= 0 {
+        previous := menu_names[index]
+        if previous.hash == hash && previous.text == name { return }
+        index = previous.next
+    }
+    menu_names[menu_count] = .{name, hash, menu_heads[bucket]}
+    menu_heads[bucket] = menu_count; menu_count += 1
+}
+LoadDirectory :: (directory: string) {
+    fd := IO.Open(directory, 0); if fd < 0 { return }
+    defer { unused IO.Close(fd) }
+    bytes: [8192]u8
+    while record_count < 512 {
+        n := IO.Read(fd, bytes[:]); if n <= 0 || n > 8192 { return }
+        offset: s64
+        while offset < n && record_count < 512 {
+            info := Stat.Decode(bytes[offset:n]); if info.size == 0 { return }; offset += info.size
+            name := info.name
+            if name.count < 9 || name.count >= 256 || name[name.count-8:] != ".desktop" ||
+                (info.mode & cast(u32)Stat.Directory) != cast(u32)0 { continue }
+            hash := NameHash(name)
+            if FindId(name, hash) >= 0 { continue }
+            record := *records[record_count]; record.id = .{}; record.path = .{}; record.visible = false
+            used: s64
+            if !D.Put(record.path[:], *used, directory) || !D.Put(record.path[:], *used, "/") ||
+                !D.Put(record.path[:], *used, name) || used >= 1024 { continue }
+            if !VecResizeBounded(record.source, 8192, 8192) { return }
+            length := ReadFile(ZText(record.path[:]), record.source[:])
+            if length < 0 { VecFree(record.source); continue }
+            unused VecResizeBounded(record.source, length, 8192)
+            used = 0; unused D.Put(record.id[:], *used, name)
+            bucket := cast(s64)(hash % cast(u32)id_heads.count)
+            record.id_hash = hash; record.id_next = id_heads[bucket]; id_heads[bucket] = record_count
+            source := TextView(record.source[:])
+            record.localized_name = D.Localized(source, "Desktop Entry", "Name", TextView(locale_bytes[:locale_length]))
+            CacheMenuName(D.Value(source, "Desktop Entry", "Name"))
+            CacheMenuName(D.Value(source, "Desktop Entry", "X-Taiji-MenuName"))
+            record.visible = Ready(record)
+            if record.visible { visible_records[visible_count] = record_count; visible_count += 1 }
+            record_count += 1
+        }
+    }
+}
+Ready :: (record: *Record) -> bool {
+    source := TextView(record.source[:])
+    if !D.Visible(source, "TaijiOS:Rill") || !Executable(D.Value(source, "Desktop Entry", "TryExec")) { return false }
+    argv: [8192]u8; files: [0]string
+    return D.ExpandExec(D.Value(source, "Desktop Entry", "Exec"), "", "", "", files[:], argv[:]) > 0
+}
+#scope_export
+Reload :: () {
+    for i: cast(s32)0..menu_count-1 { menu_names[i] = .{} }
+    for i: cast(s32)0..record_count-1 { record := *records[i]; record.localized_name = ""; VecFree(record.source); record.visible = false }
+    record_count = 0; loaded = true
+    visible_count = 0; menu_count = 0
+    for i: cast(s64)0..id_heads.count-1 { id_heads[i] = -1; menu_heads[i] = -1 }
+    theme_length = ReadFile("/env/TAIJI_ICON_THEME", theme_bytes[:])
+    if theme_length < 0 { theme_length = 0 }
+    for i: cast(s64)0..theme_length-1 { if theme_bytes[i] == 0 || theme_bytes[i] == 10 { theme_length = i; break } }
+    locale_length = ReadFile("/env/LC_ALL", locale_bytes[:])
+    if locale_length <= 0 { locale_length = ReadFile("/env/LC_MESSAGES", locale_bytes[:]) }
+    if locale_length <= 0 { locale_length = ReadFile("/env/LANG", locale_bytes[:]) }
+    if locale_length < 0 { locale_length = 0 }
+    for i: cast(s64)0..locale_length-1 { if locale_bytes[i] == 0 || locale_bytes[i] == 10 { locale_length = i; break } }
+    home := IO.Home()
+    if home != "" {
+        path: [1024]u8; n: s64
+        if D.Put(path[:], *n, home) && D.Put(path[:], *n, "/lib/apps") { LoadDirectory(TextView(path[:n])) }
+    }
+    LoadDirectory("/lib/apps")
+}
+Count :: () -> s32 {
+    if !loaded { Reload() }
+    return visible_count
+}
+At :: (index: s32) -> *Record {
+    if !loaded { Reload() }
+    if index < 0 || index >= visible_count { return null }
+    return *records[visible_records[index]]
+}
+Field :: (record: *Record, key: string, output: []u8) -> bool {
+    if record == null || output.count < 1 { return false }
+    source := TextView(record.source[:])
+    raw := record.localized_name
+    if key != "Name" || raw == "" { raw = D.Localized(source, "Desktop Entry", key, TextView(locale_bytes[:locale_length])) }
+    n := D.Decode(raw, output[:output.count-1])
+    if n < 0 { return false }; output[n] = 0; return true
+}
+MatchesMenu :: (label: string) -> bool {
+    if !loaded { Reload() }
+    hash := NameHash(label)
+    index := menu_heads[cast(s64)(hash % cast(u32)menu_heads.count)]
+    while index >= 0 {
+        name := menu_names[index]
+        if name.hash == hash && name.text == label { return true }
+        index = name.next
+    }
+    return false
+}
+IconPath :: (name: string, size: s32, output: []u8) -> bool {
+    if !loaded { Reload() }
+    theme := "hicolor"
+    if theme_length > 0 { theme = TextView(theme_bytes[:theme_length]) }
+    home := IO.Home()
+    private_icons: [1024]u8; legacy_icons: [1024]u8; a: s64; b: s64
+    if home != "" {
+        unused D.Put(private_icons[:], *a, home); unused D.Put(private_icons[:], *a, "/lib/icons")
+        unused D.Put(legacy_icons[:], *b, home); unused D.Put(legacy_icons[:], *b, "/.icons")
+    }
+    roots: [3]string = .[TextView(private_icons[:a]), TextView(legacy_icons[:b]), "/lib/icons"]
+    return Theme.Lookup(roots[:], theme, name, size, ReadFile, Exists, output)
+}
+Quote :: (text: string, output: []u8, n: *s64) -> bool {
+    if !D.Put(output, n, "'") { return false }
+    for c: text {
+        if c == 39 { if !D.Put(output, n, "''") { return false } }
+        else { if n.* >= output.count || c == 0 { return false }; output[n.*] = c; n.* += 1 }
+    }
+    return D.Put(output, n, "'")
+}
+LaunchEntry :: (path: string, action: string, files: []string) -> bool {
+    bytes: [8192]u8; length := ReadFile(path, bytes[:]); if length <= 0 { return false }
+    source := TextView(bytes[:length])
+    if D.Value(source, "Desktop Entry", "Hidden") == "true" || !Executable(D.Value(source, "Desktop Entry", "TryExec")) { return false }
+    command := D.Value(source, "Desktop Entry", "Exec")
+    if action != "" { command = D.ActionExec(source, action) }
+    name_bytes: [256]u8; icon_bytes: [1024]u8
+    a := D.Decode(D.Localized(source, "Desktop Entry", "Name", TextView(locale_bytes[:locale_length])), name_bytes[:])
+    b := D.Decode(D.Value(source, "Desktop Entry", "Icon"), icon_bytes[:])
+    if a < 0 || b < 0 { return false }
+    argv: [8192]u8
+    n := D.ExpandExec(command, TextView(name_bytes[:a]), TextView(icon_bytes[:b]), path, files, argv[:])
+    if n <= 0 { return false }
+    directory_bytes: [1024]u8
+    directory_length := D.Decode(D.Value(source, "Desktop Entry", "Path"), directory_bytes[:])
+    if directory_length < 0 { return false }
+    if directory_length == 0 && D.Value(source, "Desktop Entry", "Terminal") != "true" {
+        program: [1024]u8
+        if !ResolveProgram(ZText(argv[:n]), program[:]) { return false }
+        return WM.Launch(ZText(program[:]), TextView(argv[:n])) == 0
+    }
+    script: [8192]u8; used: s64
+    if directory_length > 0 {
+        metadata: [12]u8
+        if IO.Stat(TextView(directory_bytes[:directory_length]), metadata[:]) != 0 ||
+            (metadata[11] & cast(u8)128) == cast(u8)0 { return false }
+        if !D.Put(script[:], *used, "cd ") || !Quote(TextView(directory_bytes[:directory_length]), script[:], *used) || !D.Put(script[:], *used, "; ") { return false }
+    }
+    if D.Value(source, "Desktop Entry", "Terminal") == "true" { if !D.Put(script[:], *used, "wm/sh -c ") { return false } }
+    words: [8192]u8; count: s64; start: s64
+    for i: cast(s64)0..n-1 {
+        if argv[i] != 0 { continue }
+        if !Quote(TextView(argv[start:i]), words[:], *count) || !D.Put(words[:], *count, " ") { return false }
+        start = i + 1
+    }
+    if D.Value(source, "Desktop Entry", "Terminal") == "true" {
+        if !Quote(TextView(words[:count]), script[:], *used) { return false }
+    } else { if !D.Put(script[:], *used, TextView(words[:count])) { return false } }
+    payload: [8192]u8; total: s64
+    if !D.Put(payload[:], *total, "sh\0-c\0") || !D.Put(payload[:], *total, TextView(script[:used])) || !D.Put(payload[:], *total, "\0") { return false }
+    return WM.Launch("/dis/sh.dis", TextView(payload[:total])) == 0
+}
+
+MimeType :: (path: string) -> string {
+    if path.count >= 4 {
+        suffix: [5]u8
+        count: s64 = 4
+        if path.count >= 5 && path[path.count-5] == 46 { count = 5 }
+        for i: cast(s64)0..count-1 {
+            c := path[path.count-count+i]
+            if c >= 65 && c <= 90 { c += 32 }
+            suffix[i] = c
+        }
+        extension := TextView(suffix[:count])
+        if extension == ".png" { return "image/png" }
+        if extension == ".jpg" || extension == ".jpeg" || extension == ".jpe" { return "image/jpeg" }
+    }
+    header: [8]u8
+    fd := IO.Open(path, 0)
+    if fd >= 0 {
+        n := IO.Read(fd, header[:]); unused IO.Close(fd)
+        if n >= 8 && header[0] == 137 && TextView(header[1:4]) == "PNG" && header[4] == 13 && header[5] == 10 && header[6] == 26 && header[7] == 10 { return "image/png" }
+        if n >= 2 && header[0] == 255 && header[1] == 216 { return "image/jpeg" }
+    }
+    return "application/octet-stream"
+}
+MimeRecord :: (record: *Record, mime: string) -> bool {
+    source := TextView(record.source[:])
+    return D.Value(source, "Desktop Entry", "Type") == "Application" &&
+        D.Value(source, "Desktop Entry", "Hidden") != "true" &&
+        D.ListHas(D.Value(source, "Desktop Entry", "MimeType"), mime) &&
+        Executable(D.Value(source, "Desktop Entry", "TryExec"))
+}
+DefaultApplication :: (mime: string, output: []u8) -> bool {
+    if !loaded { Reload() }
+    user_path: [1024]u8; n: s64
+    home := IO.Home()
+    if home != "" { unused D.Put(user_path[:], *n, home); unused D.Put(user_path[:], *n, "/lib/mimeapps.list") }
+    paths: [2]string = .[TextView(user_path[:n]), "/lib/mimeapps.list"]
+    for path: paths {
+        if path == "" { continue }
+        data: [8192]u8; length := ReadFile(path, data[:])
+        if length <= 0 { continue }
+        preferred := D.Value(TextView(data[:length]), "Default Applications", mime)
+        start: s64
+        for i: cast(s64)0..preferred.count {
+            if i == preferred.count || preferred[i] == 59 {
+                id := D.Trim(preferred[start:i]); start = i+1
+                index := FindId(id, NameHash(id))
+                if index >= 0 {
+                    record := *records[index]
+                    if ZText(record.id[:]) == id && MimeRecord(record, mime) {
+                        used: s64
+                        if D.Put(output, *used, ZText(record.path[:])) && used < output.count { output[used] = 0; return true }
+                    }
+                }
+            }
+        }
+    }
+    for i: cast(s32)0..record_count-1 {
+        record := *records[i]
+        if MimeRecord(record, mime) {
+            used: s64
+            if D.Put(output, *used, ZText(record.path[:])) && used < output.count { output[used] = 0; return true }
+        }
+    }
+    return false
+}
+OpenFile :: (path: string) -> bool {
+    entry: [1024]u8
+    if !DefaultApplication(MimeType(path), entry[:]) { return false }
+    files: [1]string = .[path]
+    return LaunchEntry(ZText(entry[:]), "", files[:])
+}

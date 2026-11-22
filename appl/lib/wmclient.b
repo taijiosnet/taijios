@@ -96,8 +96,14 @@ window(ctxt: ref Draw->Context, title: string, buts: int): ref Window
 
 	w.ctl = titlebar->new(top, buts);
 	titlebar->settitle(top, title);
+	if(w.ctxt.connfd != nil)
+		w.wmctl(sys->sprint("title %q", title));
 	sizetb(w);
 	w.wmctl("fixedorigin");
+	if(buts & Resize){
+		minsz := titlebar->minsize(top);
+		w.wmctl(sys->sprint("resizable %d %d", minsz.x+2*w.bd, minsz.y+2*w.bd));
+	}
 	return w;
 }
 
@@ -322,6 +328,8 @@ Window.settitle(w: self ref Window, title: string): string
 		return nil;
 	oldr := w.imager(w.r);
 	old := titlebar->settitle(w.titlebar, title);
+	if(w.ctxt.connfd != nil)
+		w.wmctl(sys->sprint("title %q", title));
 	sizetb(w);
 	if(w.tbsize.x < w.r.dx())
 		tk->putimage(w.titlebar, ".", w.titlebar.image, nil);	# unsuspend the window

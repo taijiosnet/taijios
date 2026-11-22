@@ -1,0 +1,267 @@
+// Placement policy from Inferno's appl/lib/winplace.b.
+// Copyright © 2003 Vita Nuova Holdings Limited
+#import "std/vec"
+
+Rect :: struct {
+    min_x: s32
+    min_y: s32
+    max_x: s32
+    max_y: s32
+}
+
+// wins is borrowed in Dis list order. The returned Vec owns its rows and
+// drops on scope exit. Use VecFree to release it early, or borrow rows[:]
+// while the Vec is live. Both sweeps' rows, including duplicates, are kept.
+// As in Dis, a closing endpoint without a matching open endpoint traps.
+Find :: (wins: []Rect, screen: Rect) -> Vec(Rect) {
+    if wins.count > 0x7fffffffffffffff / 2 - 4 { unreachable; }
+    edges: Vec(Rect)
+    if !VecResize(edges, wins.count + 4) { unreachable; }
+    left := Sub(screen.min_x, 1)
+    top := Sub(screen.min_y, 1)
+    right := Add(screen.max_x, 1)
+    bottom := Add(screen.max_y, 1)
+    edges[0] = .{screen.max_x, top, right, bottom}
+    edges[1] = .{screen.min_x, screen.max_y, screen.max_x, bottom}
+    edges[2] = .{left, top, screen.min_x, bottom}
+    edges[3] = .{screen.min_x, top, screen.max_x, screen.min_y}
+    for i: 0..wins.count - 1 { edges[edges.count - 1 - i] = wins[i] }
+
+    x := Events(edges[:], false)
+    y := Events(edges[:], true)
+    found: Rows
+    Sweep(x[:], y[:], false, *found)
+    Sweep(y[:], x[:], true, *found)
+    Reverse(found.items[:]) // Dis prepends each finished rectangle to its list.
+    return found.items
+}
+
+// Borrow wins without mutation. All scratch storage is released on return.
+Place :: (wins: []Rect, screen: Rect, last: Rect, width: s32, height: s32) -> Rect {
+    found := Find(wins, screen)
+    w := width
+    h := height
+    if found.count != 0 {
+        fit := FindFit(found[:], w, h)
+        if fit.valid {
+            if w == 0 { return fit.rect }
+            return Sized(fit.rect.min_x, fit.rect.min_y, w, h)
+        }
+        if w == 0 {
+            w = Width(screen) / 2
+            h = Height(screen) / 2
+        }
+    }
+
+    bars: Vec(Rect)
+    if !VecResize(bars, wins.count) { unreachable; }
+    for i: 0..wins.count - 1 {
+        r := wins[i]
+        x := Sub(r.max_x, 100)
+        y := Add(r.min_y, 20)
+        if x < r.min_x { x = r.min_x }
+        if y > r.max_y { y = r.max_y }
+        bars[wins.count - 1 - i] = .{x, r.min_y, r.max_x, y}
+    }
+    gaps := Find(bars[:], screen)
+    fit := FindFit(gaps[:], w, h)
+    if fit.valid { return Sized(fit.rect.min_x, fit.rect.min_y, w, h) }
+
+    if found.count == 0 {
+        cascade := Sized(Add(last.min_x, 20), Add(last.min_y, 20), w, h)
+        if cascade.max_x > screen.max_x || cascade.max_y > screen.max_y {
+            return Sized(screen.min_x, screen.min_y, w, h)
+        }
+        return cascade
+    }
+
+    best := found[0]
+    area := FitArea(best, w, h)
+    for i: 1..found.count - 1 {
+        r := found[i]
+        candidate := FitArea(r, w, h)
+        if candidate > area || (candidate == area && Better(r, best)) {
+            best = r
+            area = candidate
+        }
+    }
+    best = Sized(best.min_x, best.min_y, w, h)
+    min_x, max_x := FitAxis(best.min_x, best.max_x, screen.min_x, screen.max_x)
+    min_y, max_y := FitAxis(best.min_y, best.max_y, screen.min_y, screen.max_y)
+    return .{min_x, min_y, max_x, max_y}
+}
+
+#scope_file
+
+Rows :: struct { items: Vec(Rect); }
+
+Delta :: struct {
+    window: s64
+    coord: s32
+    entering: bool
+}
+
+// Widen first so native arithmetic keeps the same signed word results as Dis.
+Add :: (a: s32, b: s32) -> s32 { return cast(s32)(cast(s64)a + cast(s64)b) }
+Sub :: (a: s32, b: s32) -> s32 { return cast(s32)(cast(s64)a - cast(s64)b) }
+Width :: (r: Rect) -> s32 { return Sub(r.max_x, r.min_x) }
+Height :: (r: Rect) -> s32 { return Sub(r.max_y, r.min_y) }
+
+Sized :: (x: s32, y: s32, w: s32, h: s32) -> Rect {
+    return .{x, y, Add(x, w), Add(y, h)}
+}
+
+FitAxis :: (low: s32, high: s32, screen_low: s32, screen_high: s32) -> s32, s32 {
+    a := low
+    b := high
+    if b > screen_high {
+        shift := Sub(b, screen_high)
+        a = Sub(a, shift)
+        b = Sub(b, shift)
+    }
+    shift := Sub(a, screen_low)
+    if shift < 0 { return Sub(a, shift), Sub(b, shift) }
+    return a, b
+}
+
+FitArea :: (r: Rect, w: s32, h: s32) -> s32 {
+    x := Width(r)
+    y := Height(r)
+    if x > w { x = w }
+    if y > h { y = h }
+    return cast(s32)(cast(s64)x * cast(s64)y)
+}
+
+Better :: (a: Rect, b: Rect) -> bool {
+    return a.min_y < b.min_y || (a.min_y == b.min_y && a.min_x < b.min_x)
+}
+
+Fit :: struct { valid: bool; rect: Rect; }
+
+FindFit :: (rows: []Rect, w: s32, h: s32) -> Fit {
+    best: Fit
+    for r: rows {
+        if Width(r) >= w && Height(r) >= h && (!best.valid || Better(r, best.rect)) {
+            best = .{true, r}
+        }
+    }
+    return best
+}
+
+Events :: (edges: []Rect, transpose: bool) -> Vec(Delta) {
+    events: Vec(Delta)
+    if !VecResize(events, edges.count * 2) { unreachable; }
+    for i: 0..edges.count - 1 {
+        r := edges[i]
+        low := r.min_x
+        high := r.max_x
+        if transpose { low = r.min_y; high = r.max_y }
+        events[2 * i] = .{i, low, true}
+        events[2 * i + 1] = .{i, high, false}
+    }
+    SortCoords(events[:])
+    return events
+}
+
+// Keep the stock Shell sort and pass direction. Another sort may change
+// which rectangle closes first when major-axis coordinates coincide.
+SortCoords :: (events: []Delta) {
+    gap := events.count
+    while gap > 1 {
+        if gap < 5 { gap = 1 }
+        // (5*gap - 1)/11 without multiplying the full index.
+        else { gap = (gap / 11) * 5 + ((gap % 11) * 5 + 10) / 11 - 1 }
+        i := events.count - gap - 1
+        while i >= 0 {
+            held := events[i]
+            j := i + gap
+            while j < events.count && held.coord > events[j].coord {
+                events[j - gap] = events[j]
+                j += gap
+            }
+            events[j - gap] = held
+            i -= 1
+        }
+    }
+}
+
+Reverse :: (rows: []Rect) {
+    for i: 0..rows.count / 2 - 1 {
+        j := rows.count - 1 - i
+        r := rows[i]
+        rows[i] = rows[j]
+        rows[j] = r
+    }
+}
+
+Emit :: (found: *Rows, r: Rect, transpose: bool) {
+    if Width(r) < 1 || Height(r) < 1 { return }
+    row := r
+    if transpose { row = .{r.min_y, r.min_x, r.max_y, r.max_x} }
+    if !VecPush(found.items, row) { unreachable; }
+}
+
+// Viable rectangles are in the sweep's coordinates, in the order in which
+// Dis would traverse its active list. Each open band consumes a prefix.
+KeepBand :: (current: []Rect, next: *Vec(Rect), found: *Rows,
+             at: s32, low: s32, high: s32, transpose: bool) -> s64 {
+    made := false
+    consumed: s64
+    first := found.items.count
+    for r: current {
+        if r.min_y >= high { break }
+        clipped := r
+        clipped.max_x = at
+        if r.min_y == low && r.max_y == high {
+            made = true
+        } else {
+            if !made && r.min_y > low {
+                if !VecPush(<<next, Rect.{at, low, at, high}) { unreachable; }
+                made = true
+            }
+            if r.min_y < low || r.max_y > high {
+                Emit(found, clipped, transpose)
+                if r.min_y < low { clipped.min_y = low }
+                if r.max_y > high { clipped.max_y = high }
+            }
+        }
+        if clipped.min_y < clipped.max_y && !VecPush(<<next, clipped) { unreachable; }
+        consumed += 1
+    }
+    if !made && !VecPush(<<next, Rect.{at, low, at, high}) { unreachable; }
+    Reverse(found.items[first:]) // select() also prepends its finished rows.
+    return consumed
+}
+
+Sweep :: (major: []Delta, minor: []Delta, transpose: bool, found: *Rows) {
+    active: Vec(bool)
+    if !VecResize(active, major.count / 2) { unreachable; }
+    current: Vec(Rect)
+    next: Vec(Rect)
+    for event: major {
+        if active[event.window] == event.entering { unreachable; }
+        active[event.window] = event.entering
+        offset: s64
+        covered: s64
+        previous: s32
+        seen := false
+        for edge: minor {
+            if !active[edge.window] { continue }
+            // Minor endpoints tied at one coordinate only matter in sum.
+            if seen && previous < edge.coord && covered == 0 {
+                offset += KeepBand(current[offset:], *next, found, event.coord, previous, edge.coord, transpose)
+            }
+            if edge.entering { covered += 1 }
+            else { covered -= 1 }
+            previous = edge.coord
+            seen = true
+        }
+        for i: offset..current.count - 1 {
+            r := current[i]
+            r.max_x = event.coord
+            Emit(found, r, transpose)
+        }
+        VecSwap(current, next)
+        VecClear(next)
+    }
+}

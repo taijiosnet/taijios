@@ -41,6 +41,17 @@ new(top: ref Tk->Toplevel, buts: int): chan of string
 
 	if(buts & Plain)
 		return ctl;
+	if(tk->cmd(top, "wmchrome available") == "1"){
+		cmd(top, "frame .Wm_t -bg #0c0e14 -borderwidth 0; label .Wm_t.title -bg #0c0e14 -borderwidth 0 -anchor center");
+		cmd(top, "wmchrome setup .Wm_t.title " + string buts);
+		cmd(top, "bind .Wm_t.title <Button-1> {wmchrome press .Wm_t.title %x %y %X %Y}");
+		cmd(top, "bind .Wm_t.title <ButtonRelease-1> {wmchrome release .Wm_t.title %x %y %X %Y}");
+		cmd(top, "bind .Wm_t.title <Motion-Button-1> {}; bind .Wm_t.title <Motion> {}");
+		cmd(top, "bind . <FocusIn> {wmchrome focus .Wm_t.title; update}");
+		cmd(top, "bind . <FocusOut> {wmchrome focus .Wm_t.title; update}");
+		cmd(top, "pack .Wm_t.title -fill x; pack .Wm_t -fill x");
+		return ctl;
+	}
 
 	for(i := 0; i < len title_cfg; i++)
 		cmd(top, title_cfg[i]);
@@ -89,6 +100,12 @@ sendctl(top: ref Tk->Toplevel, c: string)
 
 minsize(top: ref Tk->Toplevel): Point
 {
+	s := tk->cmd(top, "wmchrome minsize .Wm_t.title");
+	if(s != nil && s[0] != '!'){
+		(n, fields) := sys->tokenize(s, " ");
+		if(n == 2)
+			return (int hd fields, int hd tl fields);
+	}
 	buts := array[] of {"e", "ok", "top", "m", "h"};
 	r := tk->rect(top, ".", Tk->Border);
 	r.min.x = r.max.x;

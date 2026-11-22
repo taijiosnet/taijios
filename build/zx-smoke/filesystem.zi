@@ -24,6 +24,13 @@ main :: () -> s32 {
     if Io.StatFile("lifecycle.txt", metadata[:]) != 0 || metadata[0] != 5 ||
         metadata[7] != 0 || (metadata[11] & 0x80) != 0 || metadata[12] != 0x7f { return 13 }
 
+    if Io.Cwd() != "/chan" { print("unexpected guest cwd: %\n", Io.Cwd()); return 16 }
+    if Io.Home() != "/usr" { print("unexpected guest home: %\n", Io.Home()); return 17 }
+    if Io.CreateNew("lifecycle.txt", 1, 0x180) != -1 || Io.LastError() == "" { return 18 }
+    fd = Io.CreateNew("guest ü.txt", 2, 0x180);
+    if fd != 3 || Io.WriteBytes(fd, "new") != 3 || Io.CloseFile(fd) != 0 { return 19 }
+    if Io.Remove("guest ü.txt") != 0 || Io.StatFile("guest ü.txt", metadata[:]) != -1 { return 20 }
+
     fd = Io.CreateFile("new lifecycle.txt", 1, 0x180);
     if fd != 3 || Io.WriteBytes(fd, "new") != 3 { return 14 }
     if Io.Write(1, "guest stdout\n") != 13 || Io.Write(2, "guest stderr\n") != 13 { return 15 }

@@ -60,6 +60,12 @@ toplevel(ctxt: ref Draw->Context, topconfig: string, title: string, buts: int): 
 	readscreenrect(top);
 	c := titlebar->new(top, buts);
 	titlebar->settitle(top, title);
+	if(wm.connfd != nil)
+		wmctl(top, sys->sprint("title %q", title));
+	if((buts & (Plain|Resize)) == Resize && wm.connfd != nil){
+		minsz := titlebar->minsize(top);
+		wmctl(top, sys->sprint("resizable %d %d", minsz.x+2, minsz.y+2));
+	}
 	return (top, c);
 }
 
@@ -208,6 +214,8 @@ recvimage(top: ref Tk->Toplevel, name, reqid: string)
 
 settitle(top: ref Tk->Toplevel, name: string): string
 {
+	if(top.ctxt != nil && top.ctxt.connfd != nil)
+		wmctl(top, sys->sprint("title %q", name));
 	return titlebar->settitle(top, name);
 }
 

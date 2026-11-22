@@ -48,6 +48,18 @@ def face_center(image):
     return None
 
 
+def close_point(image, center):
+    x, y = center
+    caption_y = y - 73
+    background = (12, 14, 20)
+    if caption_y >= 0 and image.getpixel((x, caption_y)) == background:
+        # The chrome can be wider than Clock's 100-pixel face.
+        right = next((col for col in range(x, image.width)
+                      if image.getpixel((col, caption_y)) != background), image.width)
+        return right - 16, caption_y + 9
+    return x + 43, y - 60
+
+
 def hand_at(image, center, radius, step, blue):
     angle = step * math.tau / 60
     x = round(center[0] + radius * math.sin(angle))
@@ -100,7 +112,8 @@ def check_clock(env, zx):
                     and ImageChops.difference(before, image.crop(interior)).getbbox())
 
         wait_for(updated, f'{name} Clock never reached 05:45 while idle', seconds=34)
-        subprocess.run(['xdotool', 'mousemove', '--sync', '--window', window, str(x + 43), str(y - 60),
+        close_x, close_y = close_point(capture(), center)
+        subprocess.run(['xdotool', 'mousemove', '--sync', '--window', window, str(close_x), str(close_y),
                         'mousedown', '1', 'sleep', '0.15', 'mouseup', '1'],
                        env=env, check=True, timeout=4)
         wait_for(lambda: face_center(capture()) is None, f'{name} clock did not close')

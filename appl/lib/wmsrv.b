@@ -6,6 +6,8 @@ include "draw.m";
 	draw: Draw;
 	Display, Image, Point, Rect, Screen, Pointer, Context, Wmcontext: import draw;
 include "wmsrv.m";
+include "zx.m";
+	zx: ZX;
 
 zorder: ref Client;		# top of z-order list, linked by znext.
 
@@ -44,6 +46,7 @@ init(): 	(chan of (string, chan of (string, ref Wmcontext)),
 {
 	sys = load Sys Sys->PATH;
 	draw = load Draw Draw->PATH;
+	zx = load ZX ZX->PATH;
 
 	sys->bind("#s", "/chan", Sys->MBEFORE);
 
@@ -111,7 +114,8 @@ wm(ctlio: ref Sys->FileIO,
 				-1,
 				fid,
 				fid,			# token; XXX could be random integer + fid
-				newwmcontext()
+				newwmcontext(),
+				(0, 0)
 			);
 			clients = addclient(clients, c);
 		}
@@ -391,13 +395,55 @@ clientimages(c: ref Client): array of ref Image
 	return a[0:i];
 }
 
+# File and Draw handles stay with the Dis server. ZX returns the order of the
+# existing clients so callers using the Wmsrv ADT still see the linked list.
+reorder(c: ref Client, op: int): int
+{
+	if(zx == nil)
+		return 0;
+	n := 0;
+	target := -1;
+	for(z := zorder; z != nil; z = z.znext){
+		if(z == c)
+			target = n;
+		n++;
+	}
+	if(target < 0){
+		if(op != ZX->WmRaise)
+			return op == ZX->WmRemove;
+		target = n++;
+	}
+	clients := array[n] of ref Client;
+	i := 0;
+	for(z = zorder; z != nil; z = z.znext)
+		clients[i++] = z;
+	if(i < n)
+		clients[i] = c;
+	if(op == ZX->WmRemove && n == 1){
+		zorder = nil;
+		return 1;
+	}
+	request := array[] of {op, n, target};
+	reply := array[n - (op == ZX->WmRemove)] of int;
+	if(!zx->wmcall(ZX->WindowPolicy, request, reply))
+		return 0;
+	for(i = 0; i < len reply; i++)
+		if(reply[i] < 0 || reply[i] >= n)
+			return 0;
+	zorder = clients[reply[0]];
+	for(i = 1; i < len reply; i++)
+		clients[reply[i-1]].znext = clients[reply[i]];
+	clients[reply[i-1]].znext = nil;
+	return 1;
+}
+
 Client.top(c: self ref Client)
 {
 	imgs := clientimages(c);
 	if(len imgs > 0)
 		imgs[0].screen.top(imgs);
 
-	if(zorder == c)
+	if(zorder == c || reorder(c, ZX->WmRaise))
 		return;
 
 	prev: ref Client;
@@ -417,6 +463,8 @@ Client.bottom(c: self ref Client)
 	imgs := clientimages(c);
 	if(len imgs > 0)
 		imgs[0].screen.bottom(imgs);
+	if(reorder(c, ZX->WmLower))
+		return;
 	prev: ref Client;
 	for(z := zorder; z != nil; (prev, z) = (z, z.znext))
 		if(z == c)
@@ -445,6 +493,8 @@ Client.unhide(nil: self ref Client)
 
 Client.remove(c: self ref Client)
 {
+	if(reorder(c, ZX->WmRemove))
+		return;
 	prev: ref Client;
 	for(z := zorder; z != nil; (prev, z) = (z, z.znext))
 		if(z == c)
@@ -459,6 +509,38 @@ Client.remove(c: self ref Client)
 
 find(p: Draw->Point): ref Client
 {
+	if(zx != nil){
+		n := 0;
+		nwins := 0;
+		for(z := zorder; z != nil; z = z.znext){
+			n++;
+			nwins += len z.wins;
+		}
+		if(nwins == 0)
+			return nil;
+		clients := array[n] of ref Client;
+		request := array[4+5*nwins] of int;
+		request[0:] = array[] of {ZX->WmHit, nwins, p.x, p.y};
+		i := 0;
+		j := 4;
+		for(z = zorder; z != nil; z = z.znext){
+			clients[i] = z;
+			for(w := z.wins; w != nil; w = tl w){
+				r := (hd w).r;
+				(request[j], request[j+1], request[j+2], request[j+3], request[j+4]) =
+					(i, r.min.x, r.min.y, r.max.x, r.max.y);
+				j += 5;
+			}
+			i++;
+		}
+		reply := array[1] of int;
+		if(zx->wmcall(ZX->WindowPolicy, request, reply)){
+			if(reply[0] == -1)
+				return nil;
+			if(reply[0] >= 0 && reply[0] < n)
+				return clients[reply[0]];
+		}
+	}
 	for(z := zorder; z != nil; z = z.znext)
 		if(z.contains(p))
 			return z;

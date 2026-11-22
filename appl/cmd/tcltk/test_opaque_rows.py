@@ -16,7 +16,12 @@ def exercise(x, y, click, _keys, _text, capture, transcript):
     for index, color in enumerate(((90, 50, 20), (20, 90, 50), (50, 20, 90))):
         assert shown.crop((0, 32*index, 300, 32*(index+1))).getcolors() == [(300*32, color)]
     click(x+20, y+10)
-    return ['partial', 'complete']
+    tk.until(lambda: b'rgb' in transcript(), 'packed RGB strip was not acknowledged')
+    shown = capture().crop(box)
+    for index, color in enumerate(((90, 50, 20), (17, 34, 51), (50, 20, 90))):
+        assert shown.crop((0, 32*index, 300, 32*(index+1))).getcolors() == [(300*32, color)]
+    click(x+20, y+10)
+    return ['partial', 'complete', 'rgb']
 
 
 def main():
@@ -25,10 +30,10 @@ def main():
     tk.EMU = args.parse_args().emulator.resolve()
     tk.BUILD.mkdir(parents=True, exist_ok=True)
     image = tk.BUILD / 'opaque_rows_test.zx'
-    tk.compile_image('opaque_rows_test', image, '--bind-host', 'zx_surface')
+    tk.compile_image('opaque_rows_test', image, '--bind-host', 'zx_surface', '--bind-host', 'taijios_clock')
     with private_display() as display:
         tk.interaction(display, image, None, exercise, size=(300, 96))
-    print('ZX row uploads rejected gaps and transparency and published all 28,800 pixels together')
+    print('ZX row uploads rejected malformed rows; RGBA and packed RGB pixels match, including untouched rows')
 
 
 if __name__ == '__main__':

@@ -1,0 +1,25 @@
+// TaijiOS guest program and allocator capabilities.
+host_api :: #system_library "host_api";
+
+#scope_export
+// Replace the current instance's snapshot in guest PID order. A result of -1
+// means unavailable and -2 means more than 1024 tasks. Either invalidates it.
+Capture :: () -> s32 #foreign host_api;
+// Monotonic nanoseconds captured with the current snapshot, or -1 if unavailable.
+SampleNanos :: () -> s64 #foreign host_api;
+// Fields 0 through 3 are PID, Dis group (0 if unavailable), scheduler state,
+// and the Dis stack/module estimate in KiB (-1 if unavailable). State is 0 alt,
+// 1 send, 2 recv, 3 debug, 4 ready, 5 release, 6 exiting, or 7 broken.
+// With room for six numbers, fields 4 and 5 are cumulative task CPU nanoseconds
+// (-1 if unavailable) and a positive task incarnation. CPU includes execution
+// on the task's interpreter thread, including ZX, and excludes blocked time.
+// With room for seven numbers, field 6 bounds the snapshot timestamp error in
+// nanoseconds (-1 if the timestamp is unavailable).
+// Names are NUL-terminated UTF-8. Supply at least 4 numbers and 64 bytes per name.
+TaskAt :: (index: s32, fields: []s64, module_name: []u8, user_name: []u8) -> s32 #foreign host_api;
+// Read the captured main (0), heap (1), or image (2) pool. The first three
+// fields are allocated bytes, configured limit bytes, and high-water bytes.
+PoolAt :: (index: s32, fields: []s64) -> s32 #foreign host_api;
+// Request the native Dis "kill" operation for a PID in the current snapshot.
+// 0 means accepted, -1 invalid selection, -2 exited, -3 rejected by /prog.
+Terminate :: (pid: s32) -> s32 #foreign host_api;

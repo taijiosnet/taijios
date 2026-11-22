@@ -263,6 +263,10 @@ struct Prog
 	void		(*xec)(Prog*);
 
 	void*		osenv;
+	vlong		cpunanos;	/* CPU charged by completed interpreter dispatches */
+	vlong		cpustart;	/* thread CPU when the current dispatch started */
+	long		cpuclock;	/* host thread clock for the current dispatch */
+	void*		cpuowner;	/* interpreter Proc running the current dispatch */
 };
 
 struct Module
@@ -484,6 +488,10 @@ extern	Module*		parsedmod(char*, int, ulong, Qid);
 extern	void		prefabmodinit(void);
 extern	Prog*		progn(int);
 extern	Prog*		progpid(int);
+extern	vlong		progcpunanos(Prog*);
+extern	int		progdevbound(void);
+extern	int		progdevkill(int);
+extern	int		progsize(Prog*);
 extern	void		ptradd(Heap*);
 extern	void		ptrdel(Heap*);
 extern	void		pushrun(Prog*);

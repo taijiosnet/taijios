@@ -1,0 +1,134 @@
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Label :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+ImageWidget :: #import "kryon/image";
+Scroll :: #import "kryon/scroll";
+D :: #import "image_document";
+Decoder :: #import "image_guest";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+#import "kryon/bitmap_image"
+#import "kryon/geometry"
+#import "kryon/session"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "kryon/key_input"
+#import "kryon/drawing_props"
+#import "std/vec"
+
+path_bytes: [1024]u8;
+path_field: Field.State;
+document: D.Document;
+texture: Texture2D;
+zoom: s32;
+scroll_x: s32;
+scroll_y: s32;
+load_pending: bool;
+first_frame: bool = true;
+
+Load :: (session: Session) {
+    if texture.id != cast(u32)0 { BitmapImageRelease(session, texture); texture = .{} }
+    VecFree(document.image.pixels)
+    document.image.width = 0; document.image.height = 0; document.format = ""; document.error = ""
+    scroll_x = 0; scroll_y = 0; zoom = 0
+    path := TextView(path_bytes[:path_field.length])
+    if path == "" { document.error = "Choose a PNG or JPEG file"; return }
+    metadata: [12]u8
+    if IO.Stat(path, metadata[:]) != 0 { document.error = "Cannot read this file"; return }
+    length: s64
+    for i: cast(s32)0..7 { length |= cast(s64)metadata[i] << cast(s64)(i*8) }
+    if length < 0 || length > D.MaximumBytes { document.error = "Image file exceeds the 8 MiB limit"; return }
+    if (metadata[11] & cast(u8)128) != cast(u8)0 { document.error = "Choose an image file, not a folder"; return }
+    bytes: Vec(u8); defer VecFree(bytes)
+    if !VecResizeBounded(bytes, length, D.MaximumBytes) { document.error = "Not enough memory to open this image"; return }
+    fd := IO.Open(path, 0)
+    if fd < 0 { document.error = "Cannot open this file"; return }
+    defer { unused IO.Close(fd) }
+    used: s64
+    while used < length {
+        count := IO.Read(fd, bytes[used:])
+        if count <= 0 || cast(s64)count > length-used { document.error = "The image file was truncated while reading"; return }
+        used += count
+    }
+    extra: [1]u8
+    if IO.Read(fd, extra[:]) != 0 { document.error = "The image file changed while reading"; return }
+    document = Decoder.Decode(bytes[:])
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    if load_pending && !first_frame { load_pending = false; Load(session) }
+    first_frame = false
+    bounds := TreeRootBounds(session)
+    Box.Draw(session, .{.key = 1, .bounds = bounds, .fill = .{248, 250, 252, 255}})
+    typed: [256]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    edit := Field.Draw(session, Field.StateProps(path_field, .{.key = 2, .focus_id = 2,
+        .bounds = .{bounds.x+8.0, bounds.y+8.0, bounds.width-100.0, 32.0},
+        .placeholder = "Path to a PNG or JPEG image", .max_bytes = 1023,
+        .input = TextFieldInputFor(key, KeyboardModifiers(session), text)}))
+    unused Field.StateApplyResult(*path_field, edit)
+    open := Button.Draw(session, .{.key = 3, .bounds = .{bounds.x+bounds.width-84.0, bounds.y+8.0, 76.0, 32.0}, .label = "Open"}) > 0
+    if open || edit.committed { Load(session) }
+    labels: [4]string = .["Fit", "100%", "-", "+"]
+    for index: cast(s32)0..3 {
+        if Button.Draw(session, .{.key = cast(u64)(4+index), .bounds = .{bounds.x+8.0+cast(float32)index*68.0,
+            bounds.y+46.0, 62.0, 30.0}, .label = labels[index]}) > 0 {
+            if index == 0 { zoom = 0 }
+            if index == 1 { zoom = 100 }
+            if index == 2 { if zoom == 0 { zoom = 100 }; zoom = zoom*4/5; if zoom < 10 { zoom = 10 } }
+            if index == 3 { if zoom == 0 { zoom = 100 }; zoom = zoom*5/4; if zoom > 800 { zoom = 800 } }
+            scroll_x = 0; scroll_y = 0
+        }
+    }
+    status: Vec(u8); defer VecFree(status)
+    if document.error != "" { BuilderAppend(status, document.error) }
+    else if document.image.width > 0 {
+        BuilderPrint(*status, "% x % %", document.image.width, document.image.height, document.format)
+        if zoom == 0 { BuilderAppend(status, "  Fit to window") } else { BuilderPrint(*status, "  %", zoom); BuilderAppend(status, "%") }
+    } else if load_pending { BuilderAppend(status, "Loading image; Escape cancels") }
+    else { BuilderAppend(status, "Open PNG and JPEG images") }
+    Label.Draw(session, .{.key = 8, .bounds = .{bounds.x+8.0, bounds.y+bounds.height-30.0, bounds.width-16.0, 24.0}, .text = TextView(status[:]), .size = 14})
+    area: Rectangle = .{bounds.x+8.0, bounds.y+84.0, bounds.width-16.0, bounds.height-120.0}
+    if area.width < 16.0 || area.height < 16.0 { return }
+    Box.Draw(session, .{.key = 9, .bounds = area, .fill = .{80, 86, 90, 255}})
+    if document.image.width < 1 { return }
+    if texture.id == cast(u32)0 {
+        texture = BitmapImageCreate(session, document.image.width, document.image.height, document.image.pixels[:])
+        if texture.id == cast(u32)0 { document.error = "Not enough memory to display this image"; return }
+    }
+    width, height := D.DisplaySize(document.image.width, document.image.height, cast(s32)area.width-12, cast(s32)area.height-12, zoom)
+    vertical := Scroll.Draw(session, .{.key = 10, .bounds = area, .content_height = height+12,
+        .scroll_offset = scroll_y, .immediate_wheel = true, .manual_scroll = true})
+    scroll_y = vertical.scroll_offset
+    horizontal := Scroll.Draw(session, .{.key = 11, .bounds = .{vertical.viewport.x, vertical.viewport.y,
+        vertical.viewport.width-12.0, vertical.viewport.height-12.0}, .horizontal = true,
+        .content_width = width, .scroll_offset = scroll_x, .immediate_wheel = true, .manual_scroll = true})
+    scroll_x = horizontal.scroll_offset
+    left := horizontal.content.x; top := vertical.content.y
+    if horizontal.viewport.width > cast(float32)width { left += (horizontal.viewport.width-cast(float32)width)/2.0 }
+    if horizontal.viewport.height > cast(float32)height { top += (horizontal.viewport.height-cast(float32)height)/2.0 }
+    ImageWidget.Draw(session, .{.key = 12, .texture = texture, .bounds = .{left, top, cast(float32)width, cast(float32)height},
+        .alt_text = "Opened image", .tint = cast(u32)4294967295, .smooth = true})
+    if horizontal.opened { End(session) }
+    if vertical.opened { End(session) }
+}
+
+#program_export
+main :: () -> s32 {
+    path_field.bytes = path_bytes[:]
+    if Args.Count() > 0 {
+        argument := Args.Operand(0)
+        if argument.count < path_bytes.count {
+            for i: cast(s64)0..argument.count-1 { path_bytes[i] = argument[i] }
+            path_field.length = cast(s32)argument.count; path_field.cursor = path_field.length; path_field.anchor = path_field.length
+            load_pending = true
+        } else { document.error = "Image path is too long" }
+    }
+    result := Surface.RunRetained(.{.title = "Image Viewer", .width = 720, .height = 520}, Draw, 0)
+    VecFree(document.image.pixels)
+    return result
+}

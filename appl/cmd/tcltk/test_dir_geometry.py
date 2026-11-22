@@ -51,13 +51,13 @@ def startup(env, emulator, launch):
 def walk(env, emulator, launch, label):
     with desktop(env, emulator, launch) as process:
         browser = Browser(env, process, stock=False)
-        original = browser.title()
+        original = until(browser.title, "Directory Browser did not draw its title")
         browser.walk()
         browser.double_at(*browser.tile_center(1))
         left, top, actual = until(lambda: wide_grid(browser.capture), "Walk did not widen the open window")
         assert actual == label, "Walk clipped or changed the long label"
         assert (left, top) == browser.canvas, "Walk moved the window"
-        assert browser.title() != original, "Walk did not change the current directory"
+        until(lambda: browser.title() not in (None, original), "Walk did not change the current directory")
         browser.double_at(left + (len(LONG_NAME) + 2) * 4, top + 20)
         until(lambda: browser.title() == original, "Walk did not return through '..'")
 

@@ -1,0 +1,22 @@
+// The desktop broker owns launch commands. The panel receives display labels
+// and sends selection IDs for the broker to validate.
+host_api :: #system_library "host_api";
+
+MenuEntry :: 1
+WindowTask :: 2
+LabelBytes :: 160
+
+// Write [generation, count, focused, desktop height] and return the desktop width.
+Snapshot :: (fields: []s32) -> s32 #foreign host_api;
+
+// Copy a row's [kind, id], group and label. Strings are nul-terminated UTF-8.
+Row :: (index: s32, fields: []s32, group: []u8, label: []u8) -> bool #foreign host_api;
+
+// Reserve a popup above the panel. Zero dimensions dismiss it.
+Popup :: (width: s32, height: s32) -> bool #foreign host_api;
+Choose :: (kind: s32, id: s32) -> bool #foreign host_api;
+
+// Paint an RGBA rectangle or clipped guest-font text in surface coordinates.
+// An empty label fills the rectangle. Flush commits the frame to the display.
+Paint :: (x: s32, y: s32, width: s32, height: s32, rgba: s32, label: string) -> bool #reads #foreign host_api;
+Flush :: () -> bool #foreign host_api;

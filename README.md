@@ -15,6 +15,13 @@ output and error descriptors, including shell redirections and pipes. A scalar
 entry result is printed as a signed Limbo `big`. Dis commands can run alongside
 ZX programs.
 
+The emulator defaults to a 128 MiB `main` pool for native allocations, including
+the ZX runtime. Use `-p main=64M` or `-p main=32M` before the guest command to set
+a smaller limit. The full Rill desktop uses the 128 MiB default. `/dev/memory`
+reports the applied limit in the second column of the `main` row.
+Run `python3 tests/desktop/emulator_pools_test.py` from the TaijiOS root to
+verify the default and overrides against the built Linux/386 emulator.
+
 Build a ZX application with the Ziran toolchain, then run it from the TaijiOS
 shell using its guest pathname.
 
@@ -22,13 +29,11 @@ shell using its guest pathname.
 zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
-For the Linux/386 emulator, build the hosted runtime from the Ziran revision
-`86827bb4cd3bce7030e941829b353b832e6ed94b`. It includes binary64 fixes for Tcl's
-fixed-point formatter, compact execution plans, decoded instructions and value
-locations, and smaller growth steps for large heap and address tables. The
-loader releases the guest image buffer after decoding and before execution
-planning. The GUI package dependencies are pinned separately in
-`appl/wm/ziran.lock`.
+For the Linux/386 emulator, use Ziran revision
+`920c86a10d87d8fdab07df94dade7ab935d4915d` for the hosted runtime. It provides
+the borrowed-slice interface used to upload packed Rill pixel rows and the
+packed instruction engine used to execute ZX. The GUI package dependencies
+are pinned separately in `appl/wm/ziran.lock`.
 Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
 Use a host-built `zi2c` for code generation and keep the target objects in
 their own build directory.
@@ -40,12 +45,19 @@ make BUILD_DIR=build/linux-386-engine NATIVE_HOST_ENABLED=0 CC='gcc -m32' \
     build/linux-386-engine/libziran.a
 ```
 
-Set `ZX_INC` and `ZX_LIB` in TaijiOS's `mkconfig` to the absolute paths to that
-checkout's `include` directory and the new archive. Set `ZX_LDFLAGS=-no-pie`
+Set `ZX_INC` and `ZX_LIB` in TaijiOS's `mkconfig` to the absolute paths to the
+headers and archive built from that same revision. Set `ZX_LDFLAGS=-no-pie`
 for the archive built above, then build and install from `emu/Linux`. Build
 and install the shell command with `mk zxrun.install` from `appl/cmd`.
 
 The ZX runner accepts application and library images up to 32 MiB each.
+When the linked Ziran runtime provides `BundleOpenReadAt`, the runner verifies
+seekable application images of at least 256 KiB with bounded positional reads.
+With `BundleOpenEngineReadAt`, the runner also compacts the decoded instruction
+table and returns its unused space to the guest's main memory pool.
+Images with assets or module links use the owned-image loader, as do small
+images and files without a known seekable length. An I/O or verification error
+ends the launch and reports an error to the guest shell.
 Use `zi2zx --library` to build a shared ZX module and place its image at
 `/dis/lib/<logical-name>.zx` in the application's guest namespace. The runner
 honors guest `bind` mounts at `/dis/lib`. Declare module requirements and imports
@@ -84,15 +96,12 @@ From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
 (cd appl/cmd && mk zxrun.install)
 (
     cd appl/wm
-    mk wm.install stopwatch.install
-    kryon_id=$(python3 -c 'import json; print(json.load(open("ziran.lock"))["root"]["dependencies"]["kryon"])')
-    ziran bundle --project --bind-host "${kryon_id}_pixmap" \
-        --entry stopwatch:main -o ../../dis/wm/stopwatch.zx stopwatch.zi
+    mk wm.install stopwatch.install install-stopwatch-zx
 )
 Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
 ```
 
-The hosted ZX Stopwatch runs in the default 32 MiB main pool when built with
+The hosted ZX Stopwatch runs with `-p main=32M` when built with
 the runtime settings above. `wm/stopwatch` without `-zx` runs the original Dis
 app. To launch any compatible bundle in a TaijiOS window manager context, use
 `zxrun -w /path/to/app.zx`.
@@ -104,6 +113,9 @@ image for frames with transparency. The runtime borrows the RGBA bytes
 during the synchronous upload, so it can pass the frame without a temporary
 frame copy. `PresentOpaqueRows` lets opaque renderers submit a frame in
 contiguous rows, starting at row zero. The last upload displays the frame.
+`PresentOpaqueStrip` initializes the backing image the same way and then lets
+retained renderers update any full-width row range without replacing the other
+pixels. The caller can reuse the strip buffer as soon as the call returns.
 The Taiji `SetTitle` binding updates the UTF-8 title of an open window and
 accepts up to 512 bytes without embedded NULs. `PointerMillis` returns the
 original timestamp of the latest pointer event, or `-1` when unavailable.
@@ -148,6 +160,177 @@ python3 -u appl/wm/clock_zx_test.py
 Clock draws through Kryon's hosted surface and reads `/dev/time`,
 `/env/timezone`, and `/locale/timezone` through `taijios_files.ReadAt`.
 The original Clock remains available as `/dis/wm/clock.dis`.
+
+### Build and run the ZX desktop panel
+
+The Start menu, keyboard navigation, and minimized window buttons run in
+`/dis/wm/desktop_panel.zx`. The Ziran panel uses Kryon's palette and geometry.
+The `kryon/host/surface` binding supplies guest pointer and keyboard events.
+The typed `taijios_panel` binding supplies menu and task labels, manages the
+popup surface, and draws rectangles and text through the guest Draw service.
+It also sends validated menu and task IDs to the window manager. Drawing uses
+the guest font and keeps the panel small enough to run with Task Manager in the
+32 MiB main pool.
+
+Build and install from the TaijiOS root with the same compiler and Linux/386
+configuration used for the other ZX applications.
+
+```sh
+(cd emu/Linux && mk install)
+(cd appl/cmd && mk zxrun.install)
+(cd appl/wm && mk install-desktop-zx)
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm
+```
+
+`lib/wmsetup` registers the menu commands with the Dis toolbar broker. The
+broker also provides the guest console, clipboard, and compatibility with
+existing Dis clients and per-user menu scripts. With Rill installed, pass
+`wm/wm wm/toolbar` to select the original ZX panel or `wm/wm wm/toolbar -l` to
+select the Dis panel. The toolbar uses the Dis panel when its ZX bundle is absent.
+
+### Build and run the Rill guest desktop
+
+Rill runs its desktop, panel, menus, and window controls in a ZX bundle. The
+window manager grants the root desktop access to `taijios_desktop` for launcher
+and window snapshots, launch and window actions, and panel hit regions.
+`kryon/host/surface` and `kryon/pixmap` supply guest Draw and input.
+`taijios_clock` supplies monotonic time and `taijios_io` accesses files in the
+guest namespace. The installer copies the icon atlas to `/lib/rill/icons/ui.rgba`
+and the Sweet-Dark window resources to `/lib/rill/themes/Sweet-Dark`.
+Application windows keep their existing Dis or ZX interfaces.
+
+The Rill installer generates missing stock launchers and hicolor icons under
+`/lib` using Python 3, ImageMagick (`magick`), and DejaVu Sans. It uses the
+installed guest bundles in `dis/` to choose between ZX and Dis launch commands,
+so install the guest applications before running `install-rill-zx`. Existing
+catalog records, icon files, and MIME defaults are preserved.
+
+The X11 window icon header ships with the source for native builds. Run
+`python3 tools/generate-app-catalog.py --host-icons` after changing the logo
+or before using `tools/install-desktop.sh` in a fresh checkout.
+
+From the TaijiOS root, set `RILL_ROOT` to the canonical Rill checkout and use
+the current Ziran compiler and Linux/386 runtime. Build and install the host
+and guest modules from the same tree because they share the `ZX->Window` ABI.
+
+```sh
+TAIJIOS_MODULES="$PWD/appl/cmd" "$RILL_ROOT/scripts/package-taiji.sh"
+(cd emu/Linux && mk install)
+(cd appl/cmd && mk zxrun.install)
+(cd appl/wm && mk install-window-chrome-zx install-rill-zx \
+    RILL_ZX="$RILL_ROOT/build/rill.zx" RILL_ICON_ATLAS="$RILL_ROOT/assets/icons/ui.rgba" \
+    RILL_SWEET_THEME="$RILL_ROOT/assets/themes/Sweet-Dark")
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm
+```
+
+`wm/wm` starts Rill when `/dis/wm/rill.zx` is installed. Use the default
+128 MiB main pool to run Rill and multiple applications together. For a
+32 MiB guest, start `wm/wm wm/toolbar` to use the smaller toolbar. Pass
+`wm/wm -rill` with an alternate guest bundle path to test another build.
+
+### Build and run ZX window chrome and placement
+
+The shared title bar for ZX Draw windows and legacy Dis Tk windows uses Kryon's
+`window_chrome` module for layout, caption colors, control glyphs, hit testing,
+and click state. TaijiOS Draw paints the resulting rectangles and text using the
+guest font. The window manager uses separate ZX bundles for window placement,
+stacking, window hit testing, and toolbar row lookup and removal. Existing Dis
+window clients use the same channels and window-control messages.
+
+The GUI lock under `appl/wm` pins the Kryon window chrome dependency. From the
+TaijiOS root:
+
+```sh
+(cd appl/wm && mk install-window-chrome-zx)
+(cd emu/Linux && mk install)
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm
+```
+
+The target installs `window_chrome.zx`, `winplace.zx`, and `wm_policy.zx` in
+`/dis/lib` with their callers. The typed `taijios_wm_call.Read` and `Reply`
+bindings pass the current request and its result as bounded `[]s32` slices.
+The emulator keeps one instance of each service and caches each caption's paint
+commands until its dimensions, focus, or controls change. The Dis title bar and
+placement remain available on guests without the service bundles.
+
+Drag the lower-right corner of a resizable window to change its size. The
+guest window manager keeps the top-left corner fixed and sends the new bounds
+to the app through the same resize messages used for ZX and Dis windows.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/appl/cmd/tcltk" \
+    python3 -u appl/wm/kryon_apps_test.py --require-window-chrome --require-window-resize
+python3 -u appl/lib/winplace_test.py
+```
+
+### Open Kryon apps from the guest desktop
+
+Build and install the three apps with `(cd appl/wm && mk install-kryon-zx)`.
+Start TaijiOS with `Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm` and choose
+**Clock**, **Stopwatch**, or **Counter** under **Utilities** in the toolbar menu.
+Counter uses the Kryon buttons and text widgets for decreasing, resetting, and
+increasing its value. Its image is `/dis/wm/counter.zx` and can also be launched
+with `zxrun -w /dis/wm/counter.zx` from a guest shell.
+
+The menu smoke test runs the installed Linux/386 emulator with a 32 MiB guest
+heap in a private Xvfb display.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/appl/cmd/tcltk" python3 -u appl/wm/kryon_apps_test.py
+```
+
+### Build and run ZX Task Manager
+
+Build the guest target in the canonical Task Manager repository and install its
+bundle alongside the other Kryon apps. Run these commands from the TaijiOS root
+with that checkout beside it under `Projects/kryonlabs/taskmgr`.
+
+```sh
+TAIJI_ROOT="$PWD"
+TASKMGR_ROOT="$(cd ../../kryonlabs/taskmgr && pwd)"
+make -C "$TASKMGR_ROOT" taiji TAIJIOS_TASK_MODULES="$TAIJI_ROOT/appl/cmd"
+(cd appl/wm && mk install-taskmgr-zx TASKMGR_ZX="$TASKMGR_ROOT/build/taskmgr.zx")
+Linux/386/bin/emu -r "$TAIJI_ROOT" -g 800x600 wm/wm
+```
+
+Choose **System → Task Manager** or run `zxrun -w /dis/wm/taskmgr.zx` from a guest
+shell. The app shares its Ziran UI with the other Task Manager builds and uses
+Kryon's hosted surface for guest window drawing and input. `taijios_tasks`
+reads guest tasks and the three TaijiOS memory pools. Process memory is a Dis
+stack and module estimate. On hosted Linux the guest scheduler measures each
+task's cumulative CPU time with the worker thread's CPU clock, which excludes
+time spent waiting for I/O or input. Task Manager compares consecutive samples
+using monotonic timestamps and a task incarnation ID. CPU percentages use one
+core as 100%. Ending a task uses the guest `/prog` device's permissions and
+native kill operation. The menu falls back to `wm/task` when the ZX bundle
+is absent.
+
+The integration test uses Xvfb, `xdotool`, ImageMagick, Pillow, and Tesseract
+to read and interact with the private guest display.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/appl/cmd/tcltk" python3 -u appl/wm/taskmgr_zx_test.py --cpu --gui --require-window-resize
+```
+
+### Build and run ZX Explorer
+
+Build Explorer's guest target from its canonical checkout and install the
+bundle in TaijiOS. Use a Linux/386 emulator and guest modules built from the
+same TaijiOS tree. Run these commands from the TaijiOS root.
+
+```sh
+TAIJI_ROOT="$PWD"
+EXPLORER_ROOT="$(cd ../../kryonlabs/explorer && pwd)"
+make -C "$EXPLORER_ROOT" taiji TAIJIOS_MODULES="$TAIJI_ROOT/appl/cmd"
+(cd appl/wm && mk install-explorer-zx EXPLORER_ZX="$EXPLORER_ROOT/build/explorer.zx")
+Linux/386/bin/emu -r "$TAIJI_ROOT" -g 800x600 wm/wm
+```
+
+Choose **Files** in Start or run `zxrun -w /dis/wm/explorer.zx` from a guest
+shell. Explorer streams Kryon drawing in bounded row groups through
+`zx_surface.PresentOpaqueRows` and reads guest input through the same surface.
+The typed `taijios_io` binding handles filesystem operations in the current
+guest namespace. The Files menu opens `wm/ftree` when the ZX bundle is absent.
 
 ### Read guest standard input
 
@@ -202,8 +385,15 @@ and [Tk](https://git.waozi.xyz/ziranlang/tk) packages selected by the root
 `ziran pkg path tcl` or `ziran pkg path tk` to see the selected source.
 For development, add local package paths to the ignored root `ziran.local.toml`
 under `[overrides]`. Source edits use these paths with the existing lock.
-Run `ziran lock` when dependency declarations change. Use the checked-in
-lock for production.
+Use the checked-in lock for production. It selects Tcl and Tk source commits
+so each application can compile the Tk features it needs, such as bitmap
+labels or banded Canvas rendering. When changing the dependency revisions,
+regenerate the source lock using the canonical Git object stores:
+
+```sh
+ZIRAN_LOCK_GIT_OBJECTS=/path/to/tcl:/path/to/tk:/path/to/ziran ziran lock
+```
+
 The Kryon applications use the separate manifest and lock under `appl/wm`.
 
 Build and install the guest Tcl shell and Tk applications with
@@ -250,6 +440,10 @@ ZX commands use two typed capabilities declared in `appl/cmd`.
   standard packed Inferno directory record and its byte count. `WstatPacked`
   applies a packed update using guest permissions. `FdPath(fd)` resolves a
   descriptor number from the calling guest process, as used by `test -t`.
+- `CreateNew(path, mode, permissions)` fails if the guest path already exists.
+  `Remove(path)` removes a file or empty directory using guest permissions.
+  `Cwd()` returns the working directory and `Home()` reads the guest `home`
+  variable. Both return an empty string if the path is unavailable.
 
 Test the command against its Dis counterpart with
 `python3 -u build/zx-smoke/run.py Linux/386/bin/emu --cat`.

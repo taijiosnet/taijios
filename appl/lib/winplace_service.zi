@@ -1,0 +1,23 @@
+#import "std/vec"
+Place :: #import "winplace";
+Call :: #import "taijios_wm_call";
+
+main :: () -> s32 {
+    header: [11]s32
+    if !Call.Read(0, header[:]) { return 1 }
+    count := header[0]
+    if count < 0 || count > (2147483647 - 11) / 4 { return 1 }
+    screen: Place.Rect = .{header[1], header[2], header[3], header[4]}
+    last: Place.Rect = .{header[5], header[6], header[7], header[8]}
+    wins: Vec(Place.Rect)
+    if !VecResize(wins, cast(s64)count) { return 1 }
+    fields: [4]s32
+    for i: 0 .. count - 1 {
+        if !Call.Read(11 + 4 * i, fields[:]) { return 1 }
+        wins[i] = .{fields[0], fields[1], fields[2], fields[3]}
+    }
+    placed := Place.Place(wins[:], screen, last, header[9], header[10])
+    fields = .{placed.min_x, placed.min_y, placed.max_x, placed.max_y}
+    if !Call.Reply(0, fields[:]) { return 1 }
+    return 0
+}

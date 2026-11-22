@@ -1,0 +1,115 @@
+D :: #import "image_document";
+Decoder :: #import "image_guest";
+Apps :: #import "app_registry";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Budget :: #import "taijios_image";
+#import "std/vec"
+
+CheckImage :: (name: string, width: s32, height: s32, alpha: u8) -> s32 {
+    path: Vec(u8); defer VecFree(path)
+    BuilderAppend(path, "/build/desktop-registry/images/"); BuilderAppend(path, name)
+    fd := IO.Open(TextView(path[:]), 0)
+    if fd < 0 { return 1 }
+    defer { unused IO.Close(fd) }
+    bytes: Vec(u8); defer VecFree(bytes)
+    block: [4096]u8
+    while true {
+        n := IO.Read(fd, block[:])
+        if n == 0 { break }
+        if n < 0 || bytes.count+n > D.MaximumBytes { return 2 }
+        BuilderAppend(bytes, TextView(block[:n]))
+    }
+    result := Decoder.Decode(bytes[:]); defer VecFree(result.image.pixels)
+    if result.error != "" { print("%: %\n", name, result.error); return 3 }
+    if result.image.width != width || result.image.height != height || result.image.pixels.count != cast(s64)width*height*4 { return 4 }
+    if result.image.pixels[3] != 255 { return 5 }
+    if width == 64 {
+        at := (8*width+48)*4
+        if result.image.pixels[at+3] != alpha { return 6 }
+        if result.image.pixels[at] > 30 || result.image.pixels[at+1] < 200 || result.image.pixels[at+2] > 80 { return 7 }
+    } else if result.image.pixels[2] != 200 { return 8 }
+    return 0
+}
+
+Permit :: () -> bool {
+    fd := IO.Open("/build/desktop-registry/images/reference.png", 0)
+    if fd < 0 { return false }
+    defer { unused IO.Close(fd) }
+    byte: [1]u8
+    return IO.Read(fd, byte[:]) == 1
+}
+
+BudgetCases :: () -> s32 {
+    if Budget.Step(1) != -2 || Budget.Begin(1) != -2 { return 1 }
+    if !Permit() || Budget.Begin(8388609) != -2 || Budget.Begin(1) != 1 { return 2 }
+    if Budget.Begin(1) != -2 || Budget.Step(1) != 1 || Budget.Step(1) != -1 || Budget.Step(2) != -2 { return 3 }
+    unused Budget.End()
+    if Budget.Begin(1) != -2 { return 4 }
+    if !Permit() || Budget.Begin(1) != 1 || Budget.Step(262145) != -1 { return 5 }
+    unused Budget.End()
+    if !Permit() || Budget.Begin(1) != 1 { return 6 }
+    for i: cast(s64)1..512 { if Budget.Step(i*262144) != 1 { return 7 } }
+    if Budget.Step(134217733) != -1 { return 8 }
+    unused Budget.End()
+    if !Permit() || Budget.Begin(1) != 1 || Budget.Cancel() != 1 || Budget.Step(1) != 0 { return 9 }
+    unused Budget.End()
+    return 0
+}
+
+ErrorCases :: () -> s32 {
+    fd := IO.Open("/build/desktop-registry/images/reference.png", 0)
+    if fd < 0 { return 1 }
+    defer { unused IO.Close(fd) }
+    bytes: [4096]u8
+    count := IO.Read(fd, bytes[:])
+    if count < 33 { return 2 }
+    bytes[29] ^= cast(u8)1
+    broken := Decoder.Decode(bytes[:count]); defer VecFree(broken.image.pixels)
+    if broken.error != "PNG checksum mismatch" || broken.image.pixels.count != 0 { return 3 }
+    bytes[29] ^= cast(u8)1; bytes[16] = 127
+    if !Permit() { return 4 }
+    large := Decoder.Decode(bytes[:count]); defer VecFree(large.image.pixels)
+    if large.error == "" || large.image.pixels.count != 0 { return 5 }
+    if !Permit() { return 6 }
+    truncated := Decoder.Decode(bytes[:20]); defer VecFree(truncated.image.pixels)
+    if truncated.error == "" || truncated.image.pixels.count != 0 { return 7 }
+    return 0
+}
+
+Spin :: () -> s32 {
+    if !Permit() || Budget.Begin(1) != 1 { return 1 }
+    print("TAIJI_IMAGE_SPIN_BEGIN\n")
+    if Budget.Step(1) != 1 { return 2 }
+    sum: s64
+    for i: cast(s64)0..17000000 { sum += i & 7 }
+    print("TAIJI_IMAGE_SPIN_UNBOUNDED %\n", sum)
+    return 0
+}
+
+main :: () -> s32 {
+    if Args.Count() > 0 && Args.Operand(0) == "spin" { return Spin() }
+    code := BudgetCases()
+    if code != 0 { print("image budget case failed %\n", code); return 30+code }
+    print("TAIJI_IMAGE_BUDGET_OK\n")
+    errors := ErrorCases()
+    if errors != 0 { print("image error case failed %\n", errors); return 50+errors }
+    print("TAIJI_IMAGE_ERRORS_OK\n")
+    names: [4]string = .["reference.png", "reference.jpg", "progressive.jpg", "large.png"]
+    limit: s32 = 3
+    if Args.Count() > 0 { limit = 4 }
+    for i: cast(s32)0..limit-1 {
+        print("IMAGE_BEGIN %\n", names[i])
+        large := i == 3
+        code := CheckImage(names[i], ifx large then 2048 else 64, ifx large then 1024 else 32, ifx i == 0 then cast(u8)128 else cast(u8)255)
+        print("IMAGE_END % %\n", names[i], code)
+        if code != 0 { print("image % failed %\n", i, code); return 10+i }
+    }
+    if Apps.MimeType("UPPER.PNG") != "image/png" || Apps.MimeType("photo.JPEG") != "image/jpeg" { return 20 }
+    if Apps.MimeType("/build/desktop-registry/images/no-extension") != "image/png" { return 21 }
+    entry: [1024]u8
+    if !Apps.DefaultApplication("image/png", entry[:]) || Apps.ZText(entry[:]) != "/lib/apps/org.taijiosnet.wm-view.desktop" { return 22 }
+    if !Apps.DefaultApplication("image/jpeg", entry[:]) || Apps.ZText(entry[:]) != "/lib/apps/org.taijiosnet.wm-view.desktop" { return 23 }
+    print("TAIJI_IMAGE_GUEST_OK\n")
+    return 0
+}

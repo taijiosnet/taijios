@@ -4,21 +4,18 @@ include "sys.m";
 	sys: Sys;
 include "draw.m";
 	draw: Draw;
-	Display, Image, Point, Rect: import draw;
+	Display, Font, Image, Point, Rect: import draw;
 include "tk.m";
+include "wmlib.m";
+	wmlib: Wmlib;
 include "wmclient.m";
 	wm: Wmclient;
 	Window: import wm;
-include "timers.m";
-	timers: Timers;
-	Timer: import timers;
 include "keyboard.m";
 include "zx.m";
 
-Zxrun: module
-{
-	init:	fn(ctxt: ref Draw->Context, args: list of string);
-};
+include "zxrun.m";
+include "daytime.m";
 
 Wm: module
 {
@@ -26,15 +23,21 @@ Wm: module
 };
 
 Zxresult: type (big, int, string);
+Deadline: adt {
+	pid: int;
+};
 Stdin: type (int, array of byte);
 QueueSize: con 64;
+PanelHeight: con 32;
 KeyCount: con 350;
+WheelUp: con 8;
+WheelDown: con 16;
 RGBAbytes: con Draw->Chans(16r48281808);
 RGBbytes: con Draw->Chans(16r281808);
 
 Events: adt {
 	ring: array of ZX->Input;
-	head, count: int;
+	head, count, redraw: int;
 	push: fn(q: self ref Events, e: ZX->Input);
 	pop: fn(q: self ref Events): ZX->Input;
 };
@@ -79,7 +82,7 @@ init(ctxt: ref Draw->Context, args: list of string)
 	status: int;
 	problem: string;
 	if(window)
-		(value, status, problem) = runwindow(zx, ctxt, path, args);
+		(value, status, problem) = runwindow(zx, ctxt, path, args, nil, nil);
 	else if(command || args != nil)
 		(value, status, problem) = zx->runargs(path, args);
 	else
@@ -102,34 +105,53 @@ init(ctxt: ref Draw->Context, args: list of string)
 	}
 }
 
-runwindow(zx: ZX, ctxt: ref Draw->Context, path: string, args: list of string): Zxresult
+panel(ctxt: ref Draw->Context, path: string, state: ref ZX->Panel): Zxresult
+{
+	return desktop(ctxt, path, state, nil);
+}
+
+desktop(ctxt: ref Draw->Context, path: string, state: ref ZX->Panel, desk: ref ZX->Desktop): Zxresult
+{
+	sys = load Sys Sys->PATH;
+	zx := load ZX ZX->PATH;
+	if(zx == nil)
+		return (big 0, -1, "ZX runtime unavailable");
+	wmlib = load Wmlib Wmlib->PATH;
+	if(wmlib == nil)
+		return (big 0, -1, "window manager library unavailable");
+	wmlib->init();
+	return runwindow(zx, ctxt, path, nil, state, desk);
+}
+
+runwindow(zx: ZX, ctxt: ref Draw->Context, path: string, args: list of string, state: ref ZX->Panel, desk: ref ZX->Desktop): Zxresult
 {
 	if(ctxt == nil || ctxt.wm == nil)
 		return (big 0, -1, "graphical ZX needs a window manager context");
 	draw = load Draw Draw->PATH;
 	wm = load Wmclient Wmclient->PATH;
-	timers = load Timers Timers->PATH;
-	if(draw == nil || wm == nil || timers == nil)
+	if(draw == nil || wm == nil)
 		return (big 0, -1, "cannot load graphical ZX support");
 	wm->init();
-	timers->init(10);
 	bridge := ref ZX->Window;
+	bridge.panel = state;
+	bridge.desktop = desk;
 	bridge.request = chan[1] of int;
 	bridge.reply = chan[1] of int;
 	pid := chan of int;
 	done := chan[1] of Zxresult;
 	spawn engine(zx, path, args, bridge, pid, done);
 	worker := <-pid;
+	deadline := ref Deadline(0);
 	{
-		result := serve(ctxt, bridge, done);
+		result := serve(ctxt, bridge, done, deadline);
 		stopreader(bridge);
-		timers->shutdown();
+		kill(deadline.pid);
 		return result;
 	} exception e {
 	"*" =>
 		kill(worker);
 		stopreader(bridge);
-		timers->shutdown();
+		kill(deadline.pid);
 		return (big 0, -1, e);
 	}
 }
@@ -177,10 +199,30 @@ readstdin(out: chan of Stdin, pid: chan of int)
 	}
 }
 
-serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): Zxresult
+waitdeadline(delay: int, timeout, pid: chan of int)
+{
+	pid <-= sys->pctl(0, nil);
+	sys->sleep(delay);
+	timeout <-= 1;
+}
+
+serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, deadline: ref Deadline): Zxresult
 {
 	w: ref Wmclient->Window;
-	presented: ref Draw->Image;
+	presented, popup, stripimage: ref Draw->Image;
+	stripnext := 0;
+	panelstate := bridge.panel;
+	desk := bridge.desktop;
+	bound := 0;
+	deskreply := chan of int;
+	daytime: Daytime;
+	if(desk != nil)
+		daytime = load Daytime Daytime->PATH;
+	panelfont: ref Font;
+	panelready := 0;
+	changed := chan of int;
+	if(panelstate != nil)
+		changed = panelstate.changed;
 	nokbd := chan of int;
 	noptr := chan of ref Draw->Pointer;
 	noctl := chan of string;
@@ -197,10 +239,11 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 	ctl := noctl;
 	title := notitle;
 	timeout := notimeout;
-	timer: ref Timers->Timer;
-	queue := ref Events(array[QueueSize] of ZX->Input, 0, 0);
+	queue := ref Events(array[QueueSize] of ZX->Input, 0, 0, 0);
 	bounds: Draw->Rect;
 	buttons := 0;
+	pointerpos := Point(0, 0);
+	pointerknown := 0;
 	waiting := 0;
 	closed := 0;
 	tasked := 0;
@@ -210,9 +253,8 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 
 	for(;;){
 		if(waiting && (queue.count != 0 || closed)){
-			if(timer != nil)
-				timer.stop();
-			timer = nil;
+			kill(deadline.pid);
+			deadline.pid = 0;
 			timeout = notimeout;
 			if(closed)
 				bridge.input = event(ZX->Closed, bounds);
@@ -223,28 +265,100 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 		}
 		alt {
 		r := <-done =>
-			forget(w);
+			forget(w, popup, panelstate != nil);
 			return r;
+		<-changed =>
+			queue.push(event(ZX->Redraw, bounds));
 		op := <-bridge.request =>
 			ok := !closed;
 			case op {
+			ZX->DesktopBind =>
+				ok = desk != nil && w == nil && !closed;
+				bound = ok;
+			ZX->DesktopCapture =>
+				ok = bound && !closed;
+				if(ok){
+					desk.request <-= (bridge, op, deskreply);
+					ok = <-deskreply;
+					if(ok)
+						capturelaunchers(desk, panelstate);
+				}
+			ZX->DesktopLaunch =>
+				id := bridge.input.button;
+				ok = bound && w != nil && !closed && hasentry(panelstate, ZX->PanelMenu, id);
+				if(ok)
+					alt { panelstate.action <-= (ZX->PanelMenu, id) =>; * => ok = 0; }
+			ZX->DesktopChrome =>
+				ok = bound && w != nil && !closed;
+				if(ok){
+					desk.request <-= (bridge, op, deskreply);
+					layers := <-deskreply;
+					ok = layers != 0;
+					if(layers == 2 && presented != nil){
+						paintchrome(desk, bounds, bounds, presented);
+						w.image.flush(Draw->Flushnow);
+					}
+				}
+			ZX->DesktopWindowAction or ZX->DesktopAction =>
+				ok = bound && w != nil && !closed;
+				if(ok){
+					desk.request <-= (bridge, op, deskreply);
+					ok = <-deskreply;
+				}
+				bridge.input.text = nil;
+			ZX->DesktopTimezone =>
+				bridge.input.key = 0;
+				if(daytime != nil)
+					bridge.input.key = daytime->local(daytime->now()).tzoff;
 			ZX->Open =>
-				ok = w == nil && !closed;
+				ok = w == nil && !closed && (desk == nil || bound);
 				if(ok){
 					# New engines request timestamps using the unused input key at Open.
 					timedpointer = bridge.input.key != 0;
 					controls := Wmclient->Resize;
 					if(bridge.hide)
 						controls |= Wmclient->Hide;
+					if(panelstate != nil)
+						controls = Wmclient->Plain;
 					w = wm->window(ctxt, bridge.title, controls);
-					w.reshape(((0, 0), (bridge.width, bridge.height)));
-					bounds = ((0, 0), (bridge.width, bridge.height));
+					if(panelstate == nil){
+						w.reshape(((0, 0), (bridge.width, bridge.height)));
+						bounds = ((0, 0), (bridge.width, bridge.height));
+					}else{
+						r := w.displayr;
+						if(desk == nil)
+							r = panelrect(r);
+						w.reshape(r);
+						panelstate.width = w.displayr.dx();
+						panelstate.height = w.displayr.dy();
+						ok = w.wmctl("start control") == nil;
+						if(ok && desk != nil)
+							ok = w.wmctl("desktop layer") == nil;
+						if(ok){
+							w.onscreen("exact");
+							if(desk == nil)
+								panelfont = Font.open(w.display, "*default*");
+							ok = w.image != nil && (desk != nil || panelfont != nil);
+							if(ok){
+								w.startinput("kbd" :: "ptr" :: nil);
+								rawkeys = w.wmctl("start keyevent") == nil;
+								kbd = w.ctxt.kbd;
+								ptr = w.ctxt.ptr;
+								bounds = w.image.r;
+								queue.push(event(ZX->Resize, bounds));
+							}
+						}
+					}
 					ctl = w.ctxt.ctl;
 					title = w.ctl;
 				}
 			ZX->Buffer or ZX->OpaqueBuffer =>
 				ok = w != nil && !closed;
 				if(ok){
+					if(stripimage != nil){
+						stripimage = bridge.image = nil;
+						stripnext = 0;
+					}
 					size := Draw->Point(bridge.width, bridge.height);
 					format := RGBAbytes;
 					if(op == ZX->OpaqueBuffer)
@@ -254,7 +368,23 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 					ok = bridge.image != nil;
 				}else if(closed)
 					ok = 2;
-			ZX->Present =>
+			ZX->StripBuffer =>
+				ok = w != nil && !closed;
+				if(ok){
+					size := Draw->Point(bridge.width, bridge.height);
+					if(stripimage == nil || !stripimage.r.size().eq(size)){
+						stripnext = 0;
+						if(bridge.input.y == 0)
+							stripimage = w.display.newimage(((0, 0), size), RGBbytes, 0, Draw->Nofill);
+						else
+							stripimage = nil;
+					}
+					ok = stripimage != nil && (presented == stripimage || bridge.input.y == stripnext || bridge.input.y == 0);
+					if(ok)
+						bridge.image = stripimage;
+				}else if(closed)
+					ok = 2;
+			ZX->Present or ZX->PresentStrip =>
 				ok = w != nil && !closed;
 				if(ok && w.image == nil){
 					w.onscreen(nil);
@@ -270,10 +400,29 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 						queue.push(event(kind, bounds));
 					}
 				}
+				if(ok && op == ZX->PresentStrip && presented != stripimage){
+					stripnext = bridge.input.y + bridge.input.height;
+					if(stripnext < bridge.height){
+						bridge.reply <-= 1;
+						continue;
+					}
+				}
 				if(ok && w.image != nil && bounds.size().eq(bridge.image.r.size())){
-					ok = paint(w, bridge.image);
-					if(ok)
+					region := bounds;
+					if(op == ZX->PresentStrip && presented == stripimage){
+						region.min.y += bridge.input.y;
+						region.max.y = region.min.y + bridge.input.height;
+					}
+					if(desk != nil)
+						paintchrome(desk, bounds, region, bridge.image);
+					ok = paintregion(w, bridge.image, region);
+					if(ok){
 						(presented, bridge.image) = (bridge.image, nil);
+						if(desk != nil && !panelready){
+							panelready = 1;
+							panelstate.ready <-= 1;
+						}
+					}
 				}
 				else if(closed)
 					ok = 1; # deliver close on the next Event
@@ -283,8 +432,10 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				if(queue.count || closed || bridge.wait > 0){
 					waiting = 1;
 					if(!queue.count && !closed){
-						timer = timers->Timer.start(bridge.wait);
-						timeout = timer.timeout;
+						timeout = chan[1] of int;
+						pid := chan of int;
+						spawn waitdeadline(bridge.wait, timeout, pid);
+						deadline.pid = <-pid;
 					}
 					continue;
 				}
@@ -348,14 +499,76 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				spec := bridge.input.text;
 				bridge.input.text = nil;
 				ok = !closed && w != nil && w.image != nil && w.wmctl(spec) == nil;
+			ZX->PanelPopup =>
+				ok = !closed && panelstate != nil && w != nil && w.image != nil;
+				if(ok){
+					dx := bridge.input.x;
+					dy := bridge.input.y;
+					r := w.image.r;
+					if(dx == 0 && dy == 0){
+						if(popup != nil)
+							w.wmctl("delete shell-popup");
+						popup = nil;
+					}else if(dx > 0 && dy > 0 && dx <= r.dx() && dy <= r.min.y - w.displayr.min.y){
+						q := ((r.min.x, r.min.y - dy), (r.min.x + dx, r.min.y));
+						if(popup == nil || !popup.r.eq(q))
+							popup = wmlib->reshape(w.ctxt, "shell-popup", q, popup, "exact");
+						ok = popup != nil && popup.r.eq(q);
+					}else
+						ok = 0;
+					if(popup != nil)
+						r.min.y = popup.r.min.y;
+					if(!r.eq(bounds)){
+						bounds = r;
+						queue.push(event(ZX->Resize, bounds));
+					}
+				}
+			ZX->PanelPaint =>
+				label := bridge.input.text;
+				bridge.input.text = nil;
+				ok = !closed && panelstate != nil && w != nil && w.image != nil;
+				if(ok){
+					p := bounds.min.add((bridge.input.x, bridge.input.y));
+					r := Rect(p, p.add((bridge.input.width, bridge.input.height)));
+					color := w.display.color(bridge.input.key);
+					ok = color != nil;
+					if(ok){
+						paintpanel(w.image, panelfont, color, r, label);
+						if(popup != nil)
+							paintpanel(popup, panelfont, color, r, label);
+					}
+				}
+			ZX->PanelFlush =>
+				ok = !closed && panelstate != nil && w != nil && w.image != nil;
+				if(ok){
+					w.image.flush(Draw->Flushnow);
+					if(!panelready){
+						panelready = 1;
+						panelstate.ready <-= 1;
+					}
+				}
+			ZX->PanelChoose =>
+				ok = !closed && panelstate != nil && w != nil;
+				if(ok){
+					kind := bridge.input.x;
+					id := bridge.input.y;
+					ok = hasentry(panelstate, kind, id);
+					if(ok && kind == ZX->PanelTask){
+						ok = w.wmctl(sys->sprint("ctl %d untask", id)) == nil;
+						if(ok)
+							w.wmctl(sys->sprint("ctl %d kbdfocus 1", id));
+					}else if(ok)
+						panelstate.action <-= (kind, id);
+				}
 			ZX->Close =>
-				forget(w);
+				forget(w, popup, panelstate != nil);
+				popup = nil;
 				w = nil;
 				kbd = nokbd;
 				ptr = noptr;
 				ctl = noctl;
 				title = notitle;
-				presented = bridge.image = nil;
+				presented = stripimage = bridge.image = nil;
 				stdin = nostdin;
 				stopreader(bridge);
 				closed = 1;
@@ -367,7 +580,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			if(readcount <= 0)
 				bridge.reader = 0;
 		<-timeout =>
-			timer = nil;
+			deadline.pid = 0;
 			timeout = notimeout;
 			waiting = 0;
 			bridge.input = event(ZX->Idle, bounds);
@@ -380,7 +593,8 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 			if(rawkeys && c == "haskbdfocus 0")
 				releasekeys(queue, held, bounds);
 			if(c == "exit"){
-				forget(w);
+				forget(w, popup, panelstate != nil);
+				popup = nil;
 				w = nil;
 				kbd = nokbd;
 				ptr = noptr;
@@ -391,7 +605,42 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				closed = 1;
 				continue;
 			}
+			if(panelstate != nil){
+				(n, fields) := sys->tokenize(c, " ");
+				if(n == 0)
+					continue;
+				case hd fields {
+				"request" or "delclient" =>
+					panelstate.control <-= c;
+					continue;
+				"newclient" =>
+					continue;
+				"rect" =>
+					w.wmctl(c);
+					if(popup != nil)
+						w.wmctl("delete shell-popup");
+					popup = nil;
+					w.reshape(panelrect(w.displayr));
+					if(w.image != nil){
+						bounds = w.image.r;
+						panelstate.width = bounds.dx();
+					panelstate.height = w.displayr.dy();
+						panelstate.generation++;
+						queue.push(event(ZX->Resize, bounds));
+					}
+					continue;
+				"haskbdfocus" =>
+					panelstate.focused = n == 2 && hd tl fields == "1";
+					queue.push(event(ZX->Redraw, bounds));
+					continue;
+				}
+			}
 			w.wmctl(c);
+			if(panelstate != nil){
+				if(desk != nil && w.image != nil && c != nil && c[0] == '!')
+					bounds = reshapeevent(w, presented, queue, bounds);
+				continue;
+			}
 			if(c == "task" && !tasked)
 				tasked = visibility(queue, bounds, 1);
 			else if(c == "untask" && tasked)
@@ -405,7 +654,23 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 				e.y = p.xy.y - bounds.min.y;
 				if(timedpointer)
 					e.key = p.msec;
-				queue.push(e);
+				wheel := p.buttons & ~buttons & (WheelUp | WheelDown);
+				if((!pointerknown || p.xy.x != pointerpos.x || p.xy.y != pointerpos.y) &&
+				   ((p.buttons ^ buttons) & (WheelUp | WheelDown)) == 0)
+					queue.push(e);
+				if(wheel != 0){
+					scroll := e;
+					scroll.kind = ZX->Wheel;
+					scroll.key = 0;
+					if(wheel & WheelUp){
+						scroll.button = 1000;
+						queue.push(scroll);
+					}
+					if(wheel & WheelDown){
+						scroll.button = -1000;
+						queue.push(scroll);
+					}
+				}
 				for(i := 0; i < 3; i++){
 					bit := 1 << i;
 					if((p.buttons ^ buttons) & bit){
@@ -417,6 +682,8 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult): 
 					}
 				}
 				buttons = p.buttons;
+				pointerpos = p.xy;
+				pointerknown = 1;
 			}
 		k := <-kbd =>
 			e := event(ZX->Key, bounds);
@@ -506,17 +773,92 @@ visibility(queue: ref Events, bounds: Draw->Rect, tasked: int): int
 	return tasked;
 }
 
-forget(w: ref Wmclient->Window)
+panelrect(screen: Draw->Rect): Draw->Rect
 {
+	screen.min.y = screen.max.y - PanelHeight;
+	return screen;
+}
+
+capturelaunchers(desk: ref ZX->Desktop, panelstate: ref ZX->Panel)
+{
+	count := 0;
+	rows := panelstate.rows[:panelstate.count];
+	for(i := 0; i < len rows; i++)
+		if(rows[i].kind == ZX->PanelMenu && rows[i].label != nil)
+			count++;
+	catalog := array[count] of ZX->PanelEntry;
+	j := 0;
+	for(i = 0; i < len rows; i++)
+		if(rows[i].kind == ZX->PanelMenu && rows[i].label != nil)
+			catalog[j++] = rows[i];
+	desk.launchers = catalog;
+	desk.generation += panelstate.generation;
+}
+
+hasentry(panelstate: ref ZX->Panel, kind, id: int): int
+{
+	if(id <= 0 || (kind != ZX->PanelMenu && kind != ZX->PanelTask))
+		return 0;
+	for(i := 0; i < panelstate.count; i++){
+		e := panelstate.rows[i];
+		if(e.kind == kind && e.id == id)
+			return 1;
+	}
+	return 0;
+}
+
+forget(w: ref Wmclient->Window, popup: ref Draw->Image, controller: int)
+{
+	if(w != nil && controller)
+		w.wmctl("endcontrol");
+	if(w != nil && popup != nil)
+		w.wmctl("delete shell-popup");
 	if(w != nil && w.image != nil)
 		w.wmctl("delete .");
+}
+
+paintpanel(dst: ref Image, font: ref Font, color: ref Image, r: Rect, label: string)
+{
+	(clip, visible) := r.clip(dst.r);
+	if(!visible)
+		return;
+	if(label == nil){
+		dst.draw(clip, color, nil, (0, 0));
+		return;
+	}
+	if(!r.min.in(clip))
+		return;
+	for(n := len label; n > 0; n--){
+		if(font.width(label[:n]) <= clip.dx()){
+			p := r.min.add((0, (r.dy() - font.height) / 2));
+			dst.text(p, color, (0, 0), font, label[:n]);
+			return;
+		}
+	}
+}
+
+paintchrome(desk: ref ZX->Desktop, bounds, region: Draw->Rect, source: ref Draw->Image)
+{
+	for(i := 0; i < len desk.chrome; i++){
+		img := desk.chrome[i];
+		if(img != nil){
+			(clip, visible) := img.r.clip(region);
+			if(visible)
+				img.draw(clip, source, nil, source.r.min.add(clip.min.sub(bounds.min)));
+		}
+	}
 }
 
 paint(w: ref Wmclient->Window, source: ref Draw->Image): int
 {
 	if(w.image == nil || source == nil)
 		return 0;
-	w.image.draw(w.image.r, source, nil, source.r.min);
+	return paintregion(w, source, w.image.r);
+}
+
+paintregion(w: ref Wmclient->Window, source: ref Draw->Image, region: Draw->Rect): int
+{
+	w.image.draw(region, source, nil, source.r.min.add(region.min.sub(w.image.r.min)));
 	w.image.flush(Draw->Flushnow);
 	return 1;
 }
@@ -578,6 +920,10 @@ releasekeys(queue: ref Events, held: array of int, bounds: Draw->Rect)
 
 Events.push(q: self ref Events, e: ZX->Input)
 {
+	# Redraw uses the latest shell state. Keep a burst of invalidations from
+	# delaying pointer and keyboard events behind repeated full repaints.
+	if(e.kind == ZX->Redraw && q.redraw)
+		return;
 	if(e.kind == ZX->Move && q.count != 0){
 		last := (q.head + q.count - 1) % QueueSize;
 		if(q.ring[last].kind == ZX->Move){
@@ -589,6 +935,8 @@ Events.push(q: self ref Events, e: ZX->Input)
 		q.pop();
 	q.ring[(q.head+q.count) % QueueSize] = e;
 	q.count++;
+	if(e.kind == ZX->Redraw)
+		q.redraw = 1;
 }
 
 Events.pop(q: self ref Events): ZX->Input
@@ -596,6 +944,8 @@ Events.pop(q: self ref Events): ZX->Input
 	e := q.ring[q.head];
 	q.head = (q.head+1) % QueueSize;
 	q.count--;
+	if(e.kind == ZX->Redraw)
+		q.redraw = 0;
 	return e;
 }
 

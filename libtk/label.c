@@ -135,6 +135,10 @@ tksizelabel(Tk *tk)
 		tkl->textheight = p.y;
 	}
 
+	if(tkl->chrome != nil){
+		w += tkl->chrome->width;
+		h = tkl->chrome->height;
+	}
 	if(tk->type == TKcascade) {
 		w += CheckButton + 2*CheckButtonBW;
 		if(h < CheckButton)
@@ -257,6 +261,8 @@ tkdrawlabel(Tk *tk, Point orig)
 	relief = tk->relief;
 
 	tkl = TKobj(TkLabel, tk);
+	if(tkl->chrome != nil && tkdrawchrome(tk, dst, addpt(orig, Pt(tk->act.x, tk->act.y))))
+		return nil;
 
 	fgnd = TkCforegnd;
 	bgnd = TkCbackgnd;

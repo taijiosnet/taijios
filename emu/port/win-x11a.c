@@ -41,6 +41,7 @@
 #include <X11/extensions/XShm.h>
 
 #include "keysym2ucs.h"
+#include "taijios-icon.h"
 
 #undef Colormap
 #undef Cursor
@@ -538,7 +539,7 @@ setpointer(int x, int y)
 	drawqunlock();
 }
 
-static void
+static int
 xkeyevent(XDisplay *xd, XEvent *event, uchar *held, unsigned int altmask)
 {
 	XEvent next;
@@ -549,18 +550,18 @@ xkeyevent(XDisplay *xd, XEvent *event, uchar *held, unsigned int altmask)
 	if(event->type == FocusOut){
 		memset(held, 0, 256);
 		gkeyevent('r', 0, 0);
-		return;
+		return 0;
 	}
 	if((event->type != KeyPress && event->type != KeyRelease) || gkscanq != nil)
-		return;
+		return 0;
 	down = event->type == KeyPress;
 	code = event->xkey.keycode;
 	if(code >= 256)
-		return;
+		return 0;
 	if(!down && XEventsQueued(xd, QueuedAfterReading) != 0){
 		XPeekEvent(xd, &next);
 		if(next.type == KeyPress && next.xkey.time == event->xkey.time && next.xkey.keycode == code)
-			return;
+			return 0;
 	}
 	sym = XkbKeycodeToKeysym(xd, code, 0, 0);
 	bit = 0;
@@ -591,7 +592,7 @@ xkeyevent(XDisplay *xd, XEvent *event, uchar *held, unsigned int altmask)
 	case XK_Shift_R: bit = 1; key = 344; break;
 	case XK_Control_R: bit = 2; key = 345; break;
 	case XK_Alt_R: bit = 4; key = 346; break;
-	default: return;
+	default: return 0;
 	}
 	state = event->xkey.state;
 	modifiers = (state & ShiftMask ? 1 : 0) |
@@ -602,7 +603,20 @@ xkeyevent(XDisplay *xd, XEvent *event, uchar *held, unsigned int altmask)
 		for(i = 0; i < 256; i++)
 			modifiers |= held[i] & bit;
 	}
-	gkeyevent(down ? 'd' : 'u', key, modifiers);
+	if(!gkeyevent(down ? 'd' : 'u', key, modifiers))
+		return 0;
+	if((modifiers & 6) != 6)
+		return 0;
+	/* The legacy keyboard maps Ctrl+Alt to Ctrl+O and Ctrl+arrow to
+	 * Ctrl+T/U. Keep those out of the guest WM's raw workspace chord. */
+	if(sym == XK_Alt_L || sym == XK_Alt_R)
+		return 1;
+	if(sym == XK_Left || sym == XK_Right){
+		if(down)
+			gkbdcancelcompose();
+		return 1;
+	}
+	return 0;
 }
 
 static unsigned int
@@ -632,8 +646,8 @@ xkbdproc(void *arg)
 			XRefreshKeyboardMapping(&event.xmapping);
 			altmask = xaltmask(xd);
 		}
-		xkeyevent(xd, &event, held, altmask);
-		xkeyboard(&event);
+		if(!xkeyevent(xd, &event, held, altmask))
+			xkeyboard(&event);
 		xsetcursor(&event);
 	}
 }
@@ -1038,6 +1052,9 @@ xinitscreen(int xsize, int ysize, ulong reqchan, ulong *chan, int *d)
 		&hints,			/* XA_WM_HINTS */
 		&classhints);		/* XA_WM_CLASS */
 
+	XChangeProperty(xdisplay, xdrawable, XInternAtom(xdisplay, "_NET_WM_ICON", False),
+		XA_CARDINAL, 32, PropModeReplace, (unsigned char*)taijios_window_icon,
+		sizeof(taijios_window_icon)/sizeof(taijios_window_icon[0]));
 	XMapWindow(xdisplay, xdrawable);
 	XFlush(xdisplay);
 

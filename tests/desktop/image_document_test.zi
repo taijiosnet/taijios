@@ -1,0 +1,67 @@
+D :: #import "image_document";
+PNG :: #import "std/png_linux";
+JPEG :: #import "std/jpeg";
+#import "std/image"
+#import "std/file"
+
+#program_export
+main :: () -> s32 {
+    unused CreateDirectory("build/desktop-registry/images")
+    picture := NewImage(64, 32, 240, 32, 16, 255)
+    defer VecFree(picture.pixels)
+    for y: cast(s32)0..31 { for x: cast(s32)32..63 {
+        at := (y*64+x)*4
+        picture.pixels[at] = 16; picture.pixels[at+1] = 220; picture.pixels[at+2] = 64
+        picture.pixels[at+3] = ifx y < 16 then cast(u8)128 else cast(u8)0
+    } }
+    png: Vec(u8); defer VecFree(png)
+    if !PNG.WritePNG(*picture, *png) { return 1 }
+    if !WriteEntireFile("build/desktop-registry/images/reference.png", TextView(png[:])) { return 2 }
+    decoded := D.Decode(png[:]); defer VecFree(decoded.image.pixels)
+    if decoded.error != "" || decoded.format != "PNG" || decoded.image.pixels.count != picture.pixels.count { return 3 }
+    for i: cast(s64)0..picture.pixels.count-1 { if picture.pixels[i] != decoded.image.pixels[i] { return 4 } }
+    for size: cast(s64)0..png.count-1 {
+        truncated := D.Decode(png[:size]); defer VecFree(truncated.image.pixels)
+        if truncated.error == "" { return 5 }
+    }
+    png[29] ^= cast(u8)1
+    broken := D.Decode(png[:]); defer VecFree(broken.image.pixels)
+    if broken.error != "PNG checksum mismatch" { return 6 }
+    png[29] ^= cast(u8)1
+    saved := png[16]; png[16] = 127
+    huge := D.Decode(png[:]); defer VecFree(huge.image.pixels)
+    if huge.error == "" || huge.image.pixels.count != 0 { return 7 }
+    png[16] = saved
+    jpeg: Vec(u8); defer VecFree(jpeg)
+    if !JPEG.WriteJPEG(*picture, *jpeg, 95) || !WriteEntireFile("build/desktop-registry/images/reference.jpg", TextView(jpeg[:])) { return 8 }
+    photo := D.Decode(jpeg[:]); defer VecFree(photo.image.pixels)
+    if photo.error != "" || photo.format != "JPEG" || photo.image.width != 64 || photo.image.height != 32 { return 9 }
+    for index: cast(s32)0..1 {
+        at := ifx index == 0 then (8*64+8)*4 else (8*64+48)*4
+        for channel: cast(s32)0..2 {
+            delta := cast(s32)photo.image.pixels[at+channel]-picture.pixels[at+channel]
+            if delta < -12 || delta > 12 { return 10 }
+        }
+        if photo.image.pixels[at+3] != 255 { return 11 }
+    }
+    cut := D.Decode(jpeg[:jpeg.count-2]); defer VecFree(cut.image.pixels)
+    if cut.error == "" { return 12 }
+    unsupported: [5]u8 = .[71, 73, 70, 56, 57]
+    other := D.Decode(unsupported[:]); defer VecFree(other.image.pixels)
+    if other.error == "" { return 13 }
+    w, h := D.DisplaySize(2048, 1024, 600, 400, 0)
+    if w != 600 || h != 300 { return 14 }
+    w2, h2 := D.DisplaySize(800, 1600, 600, 400, 0)
+    if w2 != 200 || h2 != 400 { return 15 }
+    w3, h3 := D.DisplaySize(2048, 1024, 600, 400, 200)
+    if w3 != 4096 || h3 != 2048 { return 16 }
+    large := NewImage(2048, 1024, 20, 80, 200, 255)
+    defer VecFree(large.pixels)
+    if !PNG.WritePNGFile("build/desktop-registry/images/large.png", *large) { return 17 }
+    excessive: Vec(u8); defer VecFree(excessive)
+    if !VecResizeBounded(excessive, 8388609, 8388609) { return 18 }
+    rejected := D.Decode(excessive[:]); defer VecFree(rejected.image.pixels)
+    if rejected.error == "" { return 19 }
+    print("TAIJI_IMAGE_DOCUMENT_OK\n")
+    return 0
+}

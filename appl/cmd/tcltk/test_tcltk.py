@@ -395,6 +395,21 @@ def coffee_window(env, run, *, native):
             return image if colors is None or len(colors) > 32 else None
 
         first = until(artwork, "Coffee artwork did not render")
+        close_y = 12
+        # Sweet-Dark adds ten pixels above the Coffee content. Both versions
+        # keep their own widget geometry below the window manager's title bar.
+        if capture().getpixel((2, 8)) == (12, 14, 20):
+            def below_title(rect):
+                left, top, right, bottom = rect
+                return left, top + 10, right, bottom + 10
+
+            art = below_title(art)
+            button = below_title(button)
+            if native:
+                sliders = tuple(below_title(slider) for slider in sliders)
+            close_y = 17
+            first = frame()
+        command("xdotool", "windowfocus", window, env=env, check=True)
         until(lambda: difference(first, frame()), "Coffee cups did not move")
         stop_button = capture().crop(button)
         x, y = (button[0]+button[2])//2, (button[1]+button[3])//2
@@ -420,7 +435,7 @@ def coffee_window(env, run, *, native):
 
         click(x, y)
         until(lambda: difference(still, frame()), "Go did not resume the animation")
-        click(close_x, 12)
+        click(close_x, close_y)
         until(lambda: capture().getpixel((art[0], art[1])) == (119, 119, 119), "Coffee did not close")
         if native:
             def success():

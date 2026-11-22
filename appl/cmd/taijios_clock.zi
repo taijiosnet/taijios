@@ -1,6 +1,7 @@
 // Milliseconds from the guest host's monotonic clock.
 host_api :: #system_library "host_api";
 MonotonicMillis :: () -> s64 #foreign host_api;
+UnixMillis :: () -> s64 #foreign host_api;
 
 #program_export
 Millis :: () -> s64 {

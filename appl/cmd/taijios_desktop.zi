@@ -1,0 +1,35 @@
+// Capabilities granted to the guest desktop selected by the window manager.
+host_api :: #system_library "host_api";
+
+// Call before zx_surface.Open to bind to the guest desktop layer.
+BindDesktop :: () -> bool #foreign host_api;
+
+// Snapshot the guest launchers and windows. Returns launcher count or -1.
+// Fields: generation, window count, focused ID, width, height,
+// workspace count, current workspace.
+Capture :: (fields: []s32) -> s32 #foreign host_api;
+
+// Copy a launcher's opaque ID and NUL-terminated UTF-8 display strings.
+LauncherAt :: (index: s32, fields: []s32, name: []u8, category: []u8, description: []u8) -> bool #foreign host_api;
+
+// Fields: ID, x, y, width, height, workspace, focused, minimized, maximized.
+// Coordinates are relative to the guest display. Strings are NUL-terminated.
+WindowAt :: (index: s32, fields: []s32, title: []u8, app_id: []u8) -> bool #foreign host_api;
+
+Launch :: (id: s32) -> bool #foreign host_api;
+WindowAction :: (id: s32, action: string, x: s32, y: s32, width: s32, height: s32) -> bool #reads #foreign host_api;
+DesktopAction :: (action: string, value: s32) -> bool #reads #foreign host_api;
+// Set up to eight topmost shell regions as consecutive x, y, width, height tuples.
+// List the persistent edge panel first, followed by transient overlays.
+// Taiji keeps application windows clear of the panel. An empty slice clears the regions.
+SetChromeRegions :: (regions: []s32) -> bool #reads #foreign host_api;
+UnixSeconds :: () -> s64 #foreign host_api;
+TimezoneOffsetSeconds :: () -> s32 #foreign host_api;
+
+Catalog :: #import "app_registry";
+CatalogReload :: () { Catalog.Reload() }
+CatalogCount :: () -> s32 { return Catalog.Count() }
+CatalogAt :: (index: s32) -> *Catalog.Record { return Catalog.At(index) }
+CatalogField :: (record: *Catalog.Record, key: string, output: []u8) -> bool { return Catalog.Field(record, key, output) }
+CatalogMatchesMenu :: (label: string) -> bool { return Catalog.MatchesMenu(label) }
+LaunchEntry :: (path: string, action: string, files: []string) -> bool { return Catalog.LaunchEntry(path, action, files) }

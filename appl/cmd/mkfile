@@ -233,7 +233,7 @@ rawdbfs.dis: $MODDIR/styxservers.m
 import.dis:	$MODDIR/encoding.m $MODDIR/factotum.m
 basename.dis: $MODDIR/names.m
 cleanname.dis: $MODDIR/names.m
-zxrun.dis: $MODDIR/zx.m $MODDIR/wmclient.m $MODDIR/timers.m $MODDIR/keyboard.m
+zxrun.dis: $MODDIR/daytime.m $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/wmlib.m $MODDIR/wmclient.m $MODDIR/timers.m $MODDIR/keyboard.m
 cat.zx: cat.zi taijios_args.zi taijios_io.zi
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry cat:main -o $target cat.zi
 
@@ -277,8 +277,8 @@ $TCLZX:Ppython3 ziran_package_inputs.py check tcl: ziran_package_inputs.py
 $TKZX:Ppython3 ziran_package_inputs.py check tk: ziran_package_inputs.py
 	python3 ziran_package_inputs.py write tk "$target"
 
-tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi ../wm/taijios_clock.zi $TCLZX mkfile
-	ziran bundle --project --root . --module-path . --module-path ../wm --bind-host taijios_stdin --bind-host taijios_files --bind-host taijios_io --bind-host taijios_clock --entry tclsh_stdin:main -o $target tclsh_stdin.zi
+tclsh.zx: tclsh_stdin.zi taijios_stdin.zi taijios_files.zi taijios_io.zi taijios_clock.zi $TCLZX mkfile
+	ziran bundle --project --root . --module-path . --bind-host taijios_stdin --bind-host taijios_files --bind-host taijios_io --bind-host taijios_clock --entry tclsh_stdin:main -o $target tclsh_stdin.zi
 
 coffee.zx: tcltk/coffee_app.zi tcltk/coffee_art.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_files.zi taijios_stdin.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --entry coffee_app:main -o $target tcltk/coffee_app.zi
@@ -289,8 +289,8 @@ man.zx: tcltk/man_app.zi tcltk/man_pages.zi tcltk/man_roff.zi tcltk/tcltk.zi tcl
 logwindow.zx: tcltk/logwindow_app.zi tcltk/logwindow_input.zi tcltk/logwindow_stream.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_args.zi taijios_files.zi taijios_stdin.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --bind-host zx_surface --bind-host taijios_args --bind-host taijios_files --bind-host taijios_stdin --entry logwindow_app:main -o $target tcltk/logwindow_app.zi
 
-memory.zx: tcltk/memory_app.zi tcltk/memory_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi ../wm/taijios_clock.zi $TKZX mkfile
-	ziran bundle --project --root tcltk --module-path tcltk --module-path . --module-path ../wm --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry memory_app:main -o $target tcltk/memory_app.zi
+memory.zx: tcltk/memory_app.zi tcltk/memory_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi taijios_clock.zi $TKZX mkfile
+	ziran bundle --project --root tcltk --module-path tcltk --module-path . --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry memory_app:main -o $target tcltk/memory_app.zi
 
 about.zx: tcltk/about_app.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_BITMAP --define TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --entry about_app:main -o $target tcltk/about_app.zi
@@ -301,7 +301,7 @@ dir.zx: tcltk/dir_app.zi tcltk/dir_model.zi tcltk/tk_cursor.zi tcltk/tk_window_c
 tcltk.zx: tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_LISTBOX --define TK_MENU --define TK_BITMAP --define TK_PACKAGES --bind-host zx_surface --bind-host taijios_stdin --bind-host taijios_files --entry tcltk:main -o $target tcltk/tcltk.zi
 
-linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi ../wm/taijios_clock.zi $TKZX mkfile
+linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi taijios_clock.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --module-path ../wm --define TK_LISTBOX --define TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry linbench_app:main -o $target tcltk/linbench_app.zi
 
 graph0.zx: tcltk/graph0_app.zi tcltk/graph0_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_args.zi taijios_files.zi $TKZX mkfile

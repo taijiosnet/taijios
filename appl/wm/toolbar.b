@@ -14,22 +14,21 @@ include "sh.m";
 include "string.m";
 	str: String;
 include "arg.m";
+include "zx.m";
+	zx: ZX;
+include "zxrun.m";
 
 myselfbuiltin: Shellbuiltin;
 
-Toolbar: module 
-{
-	init:	fn(ctxt: ref Draw->Context, argv: list of string);
-	initbuiltin: fn(c: ref Context, sh: Sh): string;
-	runbuiltin: fn(c: ref Context, sh: Sh,
-			cmd: list of ref Listnode, last: int): string;
-	runsbuiltin: fn(c: ref Context, sh: Sh,
-			cmd: list of ref Listnode): list of ref Listnode;
-	whatis: fn(c: ref Sh->Context, sh: Sh, name: string, wtype: int): string;
-	getself: fn(): Shellbuiltin;
-};
+include "toolbar.m";
 
 MAXCONSOLELINES:	con 1024;
+PanelCapacity: con 192;
+PanelImage: con "/dis/wm/desktop_panel.zx";
+
+panelstate: ref ZX->Panel;
+menucommands: array of string;
+menuserial: int;
 
 # execute this if no menu items have been created
 # by the init script.
@@ -48,7 +47,18 @@ badmodule(p: string)
 
 init(ctxt: ref Draw->Context, argv: list of string)
 {
+	run(ctxt, argv, nil, PanelImage);
+}
+
+desktop(ctxt: ref Draw->Context, service: ref ZX->Desktop, path: string)
+{
+	run(ctxt, "toolbar" :: nil, service, path);
+}
+
+run(ctxt: ref Draw->Context, argv: list of string, service: ref ZX->Desktop, path: string)
+{
 	sys  = load Sys Sys->PATH;
+	zx = load ZX ZX->PATH;
 	draw = load Draw Draw->PATH;
 	if(draw == nil)
 		badmodule(Draw->PATH);
@@ -82,7 +92,8 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	sys->bind("#s", "/chan", sys->MBEFORE);
 
 	arg->init(argv);
-	arg->setusage("toolbar [-s] [-p]");
+	arg->setusage("toolbar [-s] [-p] [-l]");
+	legacy := 0;
 	startmenu := 1;
 #	ownsnarf := (sys->open("/chan/snarf", Sys->ORDWR) == nil);
 	ownsnarf := sys->stat("/chan/snarf").t0 < 0;
@@ -90,6 +101,8 @@ init(ctxt: ref Draw->Context, argv: list of string)
 		case c {
 		's' =>
 			startmenu = 0;
+		'l' =>
+			legacy = 1;
 		'p' =>
 			ownsnarf = 1;
 		* =>
@@ -107,9 +120,45 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	exec := chan of string;
 	task := chan of string;
 
-	tbtop = toolbar(ctxt, startmenu, exec, task);
-	tkclient->startinput(tbtop, "ptr" :: "control" :: nil);
-	layout(tbtop);
+	paneldone := chan of string;
+	panelcontrol := chan of string;
+	panelaction := chan of (int, int);
+	kinput := chan of int;
+	pinput := chan of ref Pointer;
+	wcontrol := chan of string;
+	wrequest := chan of string;
+	if(startmenu && !legacy && (service != nil || sys->stat(path).t0 >= 0)){
+		zxrun := load Zxrun Zxrun->PATH;
+		if(zxrun != nil){
+			state := ref ZX->Panel(array[PanelCapacity] of ZX->PanelEntry, 0, 0, 0, 0, 0,
+				chan[1] of int, chan[16] of (int, int), chan[32] of string, chan[1] of int);
+			if(service != nil)
+				state.changed = service.changed;
+			spawn renderpanel(zxrun, ctxt, state, service, path, paneldone);
+			alt {
+			<-state.ready =>
+				panelstate = state;
+				menucommands = array[PanelCapacity] of string;
+				panelcontrol = state.control;
+				panelaction = state.action;
+			e := <-paneldone =>
+				if(service != nil)
+					fatal("Rill desktop exited before drawing: " + e);
+				sys->fprint(stderr(), "toolbar: desktop panel: %s\n", e);
+			}
+		}
+	}
+	if(panelstate == nil){
+		if(service != nil)
+			fatal("Rill desktop launcher unavailable");
+		tbtop = toolbar(ctxt, startmenu, exec, task);
+		tkclient->startinput(tbtop, "ptr" :: "control" :: nil);
+		layout(tbtop);
+		kinput = tbtop.ctxt.kbd;
+		pinput = tbtop.ctxt.ptr;
+		wcontrol = tbtop.ctxt.ctl;
+		wrequest = tbtop.wreq;
+	}
 
 	shctxt := Context.new(ctxt);
 	shctxt.addmodule("wm", myselfbuiltin);
@@ -122,7 +171,7 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	}else
 		snarfIO = ref Sys->FileIO(chan of (int, int, int, Sys->Rread), chan of (int, array of byte, int, Sys->Rwrite));
 	sync := chan of string;
-	spawn consoleproc(ctxt, sync);
+	spawn consoleproc(ctxt, sync, service != nil);
 	if ((err := <-sync) != nil)
 		fatal(err);
 
@@ -133,13 +182,22 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	snarf: array of byte;
 #	write("/prog/"+string sys->pctl(0, nil)+"/ctl", "restricted"); # for testing
 	for(;;) alt{
-	k := <-tbtop.ctxt.kbd =>
+	k := <-kinput =>
 		tk->keyboard(tbtop, k);
-	m := <-tbtop.ctxt.ptr =>
+	m := <-pinput =>
 		tk->pointer(tbtop, *m);
-	s := <-tbtop.ctxt.ctl or
-	s = <-tbtop.wreq =>
+	s := <-wcontrol or s = <-wrequest or s = <-panelcontrol =>
 		wmctl(tbtop, s);
+	e := <-paneldone =>
+		fatal("desktop panel exited: " + e);
+	(kind, id) := <-panelaction =>
+		if(donesetup && kind == ZX->PanelMenu){
+			i := panellookup(kind, id);
+			if(i >= 0 && menucommands[i] != nil){
+				{ shctxt.run(ref Listnode(nil, menucommands[i]) :: nil, 0); }
+				exception { "fail:*" => ; }
+			}
+		}
 	s := <-exec =>
 		# guard against parallel access to the shctxt environment
 		if (donesetup){
@@ -181,6 +239,85 @@ init(ctxt: ref Draw->Context, argv: list of string)
 	}
 }
 
+renderpanel(zxrun: Zxrun, ctxt: ref Draw->Context, state: ref ZX->Panel, service: ref ZX->Desktop, path: string, done: chan of string)
+{
+	(value, status, problem) := zxrun->desktop(ctxt, path, state, service);
+	if(problem == nil && status > 0)
+		problem = sys->sprint("exit %bd", value);
+	done <-= problem;
+}
+
+panelchange()
+{
+	panelstate.generation++;
+	alt { panelstate.changed <-= 1 =>; * =>; }
+}
+
+paneladd(kind, id: int, group, label, command: string): int
+{
+	if(panelstate.count == len panelstate.rows)
+		return 0;
+	i := panelstate.count++;
+	panelstate.rows[i] = (kind, id, group, label);
+	menucommands[i] = command;
+	panelchange();
+	return 1;
+}
+
+panelrequest(op, kind, id: int, reply: array of int): int
+{
+	if(zx == nil)
+		return 0;
+	request := array[4+2*panelstate.count] of int;
+	request[0:] = array[] of {op, panelstate.count, kind, id};
+	for(i := 0; i < panelstate.count; i++){
+		e := panelstate.rows[i];
+		(request[4+2*i], request[5+2*i]) = (e.kind, e.id);
+	}
+	return zx->wmcall(ZX->WindowPolicy, request, reply);
+}
+
+panellookup(kind, id: int): int
+{
+	reply := array[1] of int;
+	if(panelrequest(ZX->WmPanelLookup, kind, id, reply)){
+		i := reply[0];
+		if(i == -1 || (i >= 0 && i < panelstate.count && panelstate.rows[i].kind == kind && panelstate.rows[i].id == id))
+			return i;
+	}
+	for(i := 0; i < panelstate.count; i++)
+		if(panelstate.rows[i].kind == kind && panelstate.rows[i].id == id)
+			return i;
+	return -1;
+}
+
+panelremove(kind, id: int)
+{
+	if(panelstate.count == 0)
+		return;
+	keep := array[panelstate.count] of int;
+	ported := panelrequest(ZX->WmPanelRetain, kind, id, keep);
+	at := 0;
+	for(i := 0; i < panelstate.count; i++){
+		e := panelstate.rows[i];
+		if((ported && !keep[i]) || (!ported && e.kind == kind && (id == 0 || id == e.id)))
+			continue;
+		if(i != at){
+			panelstate.rows[at] = e;
+			menucommands[at] = menucommands[i];
+		}
+		at++;
+	}
+	if(at == panelstate.count)
+		return;
+	for(i = at; i < panelstate.count; i++){
+		panelstate.rows[i] = (0, 0, nil, nil);
+		menucommands[i] = nil;
+	}
+	panelstate.count = at;
+	panelchange();
+}
+
 wmctl(top: ref Tk->Toplevel, c: string)
 {
 	args := str->unquoted(c);
@@ -206,10 +343,13 @@ wmctl(top: ref Tk->Toplevel, c: string)
 		# delclient id
 		deiconify(hd tl args);
 	"rect" =>
-		tkclient->wmctl(top, c);
-		layout(top);
+		if(top != nil){
+			tkclient->wmctl(top, c);
+			layout(top);
+		}
 	* =>
-		tkclient->wmctl(top, c);
+		if(top != nil)
+			tkclient->wmctl(top, c);
 	}
 }
 
@@ -234,6 +374,11 @@ handlerequest(clientid: string, args: list of string): string
 iconify(id, label: string)
 {
 	label = condenselabel(label);
+	if(panelstate != nil){
+		panelremove(ZX->PanelTask, int id);
+		paneladd(ZX->PanelTask, int id, nil, label, nil);
+		return;
+	}
 	e := tk->cmd(tbtop, "button .toolbar." +id+" -command {send task "+id+"} -takefocus 0");
 	cmd(tbtop, ".toolbar." +id+" configure -text '" + label);
 	if(e[0] != '!')
@@ -243,6 +388,10 @@ iconify(id, label: string)
 
 deiconify(id: string)
 {
+	if(panelstate != nil){
+		panelremove(ZX->PanelTask, int id);
+		return;
+	}
 	e := tk->cmd(tbtop, "destroy .toolbar."+id);
 	if(e == nil){
 		tkclient->wmctl(tbtop, sys->sprint("ctl %q untask", id));
@@ -291,9 +440,12 @@ setup(shctxt: ref Context, finished: chan of int)
 	ctxt := shctxt.copy(0);
 	ctxt.run(shell->stringlist2list("run"::"/lib/wmsetup"::nil), 0);
 	# if no items in menu, then create some.
-	if (tk->cmd(tbtop, ".m type 0")[0] == '!')
+	if(panelstate == nil){
+		if(tk->cmd(tbtop, ".m type 0")[0] == '!')
+			ctxt.run(shell->stringlist2list(defaultscript::nil), 0);
+		cmd(tbtop, "update");
+	}else if(menuserial == 0)
 		ctxt.run(shell->stringlist2list(defaultscript::nil), 0);
-	cmd(tbtop, "update");
 	finished <-= 1;
 }
 
@@ -318,7 +470,7 @@ condenselabel(label: string): string
 
 initbuiltin(ctxt: ref Context, nil: Sh): string
 {
-	if (tbtop == nil) {
+	if (tbtop == nil && panelstate == nil) {
 		sys = load Sys Sys->PATH;
 		sys->fprint(sys->fildes(2), "wm: cannot load wm as a builtin\n");
 		raise "fail:usage";
@@ -382,6 +534,21 @@ builtin_menu(nil: ref Context, nil: Sh, argv: list of ref Listnode): string
 	}
 	primary := (hd tl argv).word;
 	argv = tl tl argv;
+	if(panelstate != nil){
+		group: string;
+		label := primary;
+		if(n == 4){
+			group = primary;
+			label = (hd argv).word;
+			argv = tl argv;
+		}
+		command := word(hd argv);
+		if(command == nil)
+			label = nil;
+		if(!paneladd(ZX->PanelMenu, ++menuserial, group, label, command))
+			return "desktop panel menu is full";
+		return nil;
+	}
 
 	if (n == 3) {
 		w := word(hd argv);
@@ -412,6 +579,10 @@ builtin_menu(nil: ref Context, nil: Sh, argv: list of ref Listnode): string
 
 builtin_delmenu(nil: ref Context, nil: Sh, nil: list of ref Listnode): string
 {
+	if(panelstate != nil){
+		panelremove(ZX->PanelMenu, 0);
+		return nil;
+	}
 	delmenu(".m");
 	cmd(tbtop, "menu .m");
 	return nil;
@@ -491,7 +662,36 @@ con_cfg := array[] of
 };
 nlines := 0;		# transcript length
 
-consoleproc(ctxt: ref Draw->Context, sync: chan of string)
+consoleforward(data: array of byte, wc: Sys->Rwrite, fd: ref Sys->FD)
+{
+    if(wc == nil)
+        return;
+    n := sys->write(fd, data, len data);
+    err: string;
+    if(n < 0){
+        n = 0;
+        err = sys->sprint("%r");
+    }
+    wc <-= (n, err);
+}
+
+consolehost(out, err: ref Sys->FileIO)
+{
+    stdout := sys->fildes(1);
+    stderr := sys->fildes(2);
+    for(;;) alt {
+    (nil, nil, nil, rc) := <-out.read or
+    (nil, nil, nil, rc) = <-err.read =>
+        if(rc != nil)
+            rc <-= (nil, "inappropriate use of file");
+    (nil, data, nil, wc) := <-out.write =>
+        consoleforward(data, wc, stdout);
+    (nil, data, nil, wc) := <-err.write =>
+        consoleforward(data, wc, stderr);
+    }
+}
+
+consoleproc(ctxt: ref Draw->Context, sync: chan of string, hostonly: int)
 {
 	iostdout := sys->file2chan("/chan", "wmstdout");
 	if(iostdout == nil){
@@ -505,6 +705,10 @@ consoleproc(ctxt: ref Draw->Context, sync: chan of string)
 	}
 
 	sync <-= nil;
+	if(hostonly){
+		consolehost(iostdout, iostderr);
+		return;
+	}
 
 	(top, titlectl) := tkclient->toplevel(ctxt, "", "Log", tkclient->Appl); 
 	for(i := 0; i < len con_cfg; i++)

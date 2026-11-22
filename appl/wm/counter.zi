@@ -1,0 +1,33 @@
+Surface :: #import "kryon/host/surface";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+#import "kryon/session"
+#import "kryon/tree"
+#import "std/number_text"
+
+count: s32;
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    width := TreeRootBounds(session).width - 24.0
+    column := (width - 16.0) / 3.0
+
+    if Button.Draw(session, .{.key = 1, .bounds = .{12.0, 64.0, column, 34.0}, .label = "Decrease"}) != 0 && count > -2147483648 {
+        count -= 1
+    }
+    if Button.Draw(session, .{.key = 2, .bounds = .{20.0 + column, 64.0, column, 34.0}, .label = "Reset"}) != 0 {
+        count = 0
+    }
+    if Button.Draw(session, .{.key = 3, .bounds = .{28.0 + column * 2.0, 64.0, column, 34.0}, .label = "Increase"}) != 0 && count < 2147483647 {
+        count += 1
+    }
+
+    label: [24]u8
+    Text.Draw(session, .{.key = 4, .bounds = .{12.0, 10.0, width, 46.0},
+        .text = FormatInteger(cast(s64)count, label[:]), .size = 32})
+}
+
+#program_export
+main :: () -> s32 {
+    return Surface.Run(.{.title = "Counter", .width = 300, .height = 110}, Draw, 250)
+}

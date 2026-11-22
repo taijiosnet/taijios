@@ -1,0 +1,61 @@
+Surface :: #import "zx_surface";
+
+main :: () -> s32 {
+    if !Surface.OpenWindow("Pointer events", 300, 96) { return 1 }
+    defer Surface.CloseWindow()
+    pixels: [300*96*4]u8
+    buffer := pixels[:]
+    for i: 0..300*96-1 {
+        buffer[i*4] = 244
+        buffer[i*4+1] = 246
+        buffer[i*4+2] = 247
+        buffer[i*4+3] = 255
+    }
+    if !Surface.PresentRGBA(300, 96, TextView(buffer)) { return 3 }
+    moves: s32
+    downs: s32
+    ups: s32
+    wheel_up: bool
+    wheel_down: bool
+    phase: s32
+    while true {
+        event := Surface.Event(1000)
+        if event.kind == Surface.Closed { return 4 }
+        if phase == 0 && event.kind == Surface.Up && event.x == 20 && event.y == 10 {
+            print("FOCUSED\n")
+        }
+        if event.kind == Surface.Key && event.key == 65 {
+            moves = 0; downs = 0; ups = 0; phase = 1
+            print("ARMED\n")
+        } else if event.kind == Surface.Key && event.key == 66 {
+            if moves != 0 || downs != 1 || ups != 1 {
+                print("COUNTS % % %\n", moves, downs, ups)
+                return 5
+            }
+            moves = 0; downs = 0; ups = 0; phase = 2
+            print("STATIONARY_OK\n")
+        } else if event.kind == Surface.Key && event.key == 67 {
+            if moves < 2 || downs != 1 || ups != 1 || !wheel_up || !wheel_down { return 6 }
+            print("MOTION_DRAG_WHEEL_OK\n")
+            return 0
+        } else if phase != 0 {
+            if event.kind == Surface.Move { moves += 1 }
+            if event.kind == Surface.Down && event.button == 1 {
+                if event.x != (ifx phase == 1 then 20 else 40) ||
+                    event.y != (ifx phase == 1 then 10 else 25) { return 7 }
+                downs += 1
+            }
+            if event.kind == Surface.Up && event.button == 1 {
+                if event.x != (ifx phase == 1 then 20 else 60) ||
+                    event.y != (ifx phase == 1 then 10 else 35) { return 8 }
+                ups += 1
+                print("RELEASED %\n", phase)
+            }
+            if event.kind == Surface.PointerWheel {
+                if event.x != 60 || event.y != 35 { return 9 }
+                if event.button == 1000 { wheel_up = true; print("WHEEL_UP\n") }
+                if event.button == -1000 { wheel_down = true; print("WHEEL_DOWN\n") }
+            }
+        }
+    }
+}

@@ -419,7 +419,8 @@ progclose(Chan *c)
 	}
 }
 
-static int
+/* Caller holds the interpreter lock and has checked that p is live. */
+int
 progsize(Prog *p)
 {
 	int size;
@@ -1503,3 +1504,61 @@ Dev progdevtab = {
 	devremove,
 	progwstat
 };
+
+/* Called by the hosted runner with the interpreter released. A namespace
+ * without the real /prog device cannot use the typed task capability. */
+int
+progdevbound(void)
+{
+	Chan *c;
+	int bound;
+
+	if(waserror())
+		return 0;
+	c = namec("/prog", Aaccess, 0, 0);
+	bound = devtab[c->type] == &progdevtab && c->qid.path == Qdir &&
+		(c->qid.type & QTDIR) != 0;
+	cclose(c);
+	poperror();
+	return bound;
+}
+
+int
+progdevkill(int pid)
+{
+	Chan *volatile c = nil;
+	Prog *p;
+	char path[48];
+	int gone;
+
+	if(waserror()){
+		if(c != nil)
+			cclose(c);
+		acquire();
+		p = progpid(pid);
+		gone = p == nil || p->state == Pexiting;
+		release();
+		return gone ? -2 : -3;
+	}
+	snprint(path, sizeof(path), "/prog/%d/ctl", pid);
+	c = namec(path, Aaccess, 0, 0);
+	if(devtab[c->type] != &progdevtab || QID(c->qid) != Qctl || PID(c->qid) != (ulong)pid)
+		error(Eperm);
+	c = cunique(c);
+	c = progopen(c, OWRITE);
+	/* Match the native ctl action while detecting a concurrent exit. */
+	acquire();
+	if(waserror()){
+		release();
+		nexterror();
+	}
+	p = progpid(pid);
+	gone = p == nil || p->state == Pexiting || (p->flags & Pkilled) != 0;
+	if(!gone)
+		killprog(p, "killed");
+	poperror();
+	release();
+	cclose(c);
+	poperror();
+	return gone ? -2 : 0;
+}

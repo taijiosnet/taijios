@@ -52,6 +52,7 @@ static struct Cmd cmdmain[] =
 	"update",	tkupdatecmd,
 	"variable",	tkvariable,
 	"winfo",	tkwinfo,
+	"wmchrome",	tkwmchrome,
 };
 
 char*	tkfont;

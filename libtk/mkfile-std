@@ -12,6 +12,7 @@ CANVSFILES=\
 	cwind.$O\
 
 LABELFILES=\
+	wmchrome.$O\
 	buton.$O\
 	label.$O\
 

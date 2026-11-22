@@ -1,0 +1,7 @@
+host_api :: #system_library "host_api";
+
+#scope_export
+Begin :: (encoded_bytes: s64) -> s32 #foreign host_api;
+Step :: (completed: s64) -> s32 #foreign host_api;
+End :: () -> s32 #foreign host_api;
+Cancel :: () -> s32 #foreign host_api;

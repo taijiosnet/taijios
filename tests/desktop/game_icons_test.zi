@@ -1,0 +1,165 @@
+D :: #import "desktop_entry";
+Theme :: #import "icon_theme";
+PNG :: #import "std/png_linux";
+#import "std/vec"
+#if #defined(GAME_ICONS_GUEST) {
+IO :: #import "taijios_io";
+Catalog :: #import "app_registry";
+#import "icon_pixels_taiji"
+#import "icon_png_taiji"
+} else {
+#import "std/file"
+}
+
+Root :: () -> string {
+    #if #defined(GAME_ICONS_GUEST) {
+        return "/build/desktop-registry/game-icons"
+    } else {
+        return "build/desktop-registry/game-icons"
+    }
+}
+Path :: (suffix: string, output: []u8) -> string {
+    n: s64
+    if !D.Put(output, *n, Root()) || !D.Put(output, *n, suffix) { return "" }
+    return TextView(output[:n])
+}
+Read :: (path: string, output: []u8) -> s64 {
+    #if #defined(GAME_ICONS_GUEST) {
+        return Catalog.ReadFile(path, output)
+    } else {
+        bytes: Vec(u8)
+        defer VecFree(bytes)
+        if !ReadFileInto(path, *bytes) || bytes.count > output.count { return -1 }
+        for i: cast(s64)0..bytes.count-1 { output[i] = bytes[i] }
+        return bytes.count
+    }
+}
+Exists :: (path: string) -> bool {
+    #if #defined(GAME_ICONS_GUEST) {
+        return Catalog.Exists(path)
+    } else {
+        return PathExists(path)
+    }
+}
+Text :: (bytes: []u8) -> string {
+    n: s64
+    while n < bytes.count && bytes[n] != 0 { n += 1 }
+    return TextView(bytes[:n])
+}
+Hash :: (bytes: []u8) -> u32 {
+    hash: u32 = 2166136261
+    for byte: bytes { hash = (hash ^ cast(u32)byte) * cast(u32)16777619 }
+    return hash
+}
+Prefix :: (text: string) -> bool {
+    return text.count >= 8 && text[:8] == "TaijiOS "
+}
+
+main :: () -> s32 {
+    stems: [9]string = .["bounce", "brutus", "c4", "collide", "polyhedra", "reversi", "snake", "sweeper", "tetris"]
+    titles: [9]string = .["Bounce", "Brutus", "Connect Four", "Collision Demo", "Polyhedra", "Reversi", "Snake", "Minesweeper", "Tetris"]
+    seen: [9]bool
+    icons: [9][128]u8
+    for i: cast(s32)0..8 {
+        n: s64
+        prefix := ifx i == 1 then "taiji-" else "taiji-game-"
+        if !D.Put(icons[i][:], *n, prefix) || !D.Put(icons[i][:], *n, stems[i]) { return 1 }
+    }
+    path: [2048]u8
+    listing: [32768]u8
+    length := Read(Path("/catalog-files", path[:]), listing[:])
+    if length <= 0 { return 2 }
+    files := TextView(listing[:length])
+    start: s64
+    entries: s32
+    games: s32
+    for end: cast(s64)0..files.count-1 {
+        if files[end] != 10 { continue }
+        id := files[start:end]; start = end + 1
+        relative: [1024]u8; used: s64
+        if !D.Put(relative[:], *used, "/lib/apps/") || !D.Put(relative[:], *used, id) { return 3 }
+        contents: [8192]u8
+        size := Read(Path(TextView(relative[:used]), path[:]), contents[:])
+        if size <= 0 { return 4 }
+        source := TextView(contents[:size])
+        keys: [3]string = .["Name", "GenericName", "Comment"]
+        for key: keys {
+            value := D.Value(source, "Desktop Entry", key)
+            if value == "" || Prefix(value) { print("bad label % %\n", id, key); return 5 }
+        }
+        entries += 1
+        category := D.Value(source, "Desktop Entry", "Categories")
+        is_game := D.ListHas(category, "Game")
+        matched: bool
+        for i: cast(s32)0..8 {
+            expected: [256]u8; n: s64
+            if !D.Put(expected[:], *n, "org.taijiosnet.wm-") ||
+                !D.Put(expected[:], *n, stems[i]) || !D.Put(expected[:], *n, ".desktop") { return 6 }
+            if TextView(expected[:n]) != id { continue }
+            if seen[i] || D.Value(source, "Desktop Entry", "Icon") != Text(icons[i][:]) ||
+                D.Value(source, "Desktop Entry", "Name") != titles[i] { return 7 }
+            if i == 1 { if is_game || !D.ListHas(category, "Office") { return 8 } }
+            else { if !is_game { return 9 }; games += 1 }
+            seen[i] = true; matched = true
+            #if #defined(GAME_ICONS_GUEST) {
+                found: bool
+                for index: cast(s32)0..Catalog.Count()-1 {
+                    record := Catalog.At(index)
+                    if record == null || Catalog.ZText(record.id[:]) != id { continue }
+                    icon: [128]u8
+                    if !Catalog.Field(record, "Icon", icon[:]) || Catalog.ZText(icon[:]) != Text(icons[i][:]) { return 10 }
+                    found = true
+                }
+                if !found { print("game missing from registry %\n", id); return 11 }
+            }
+        }
+        if is_game && !matched { print("uncovered game %\n", id); return 12 }
+    }
+    if entries < 300 || games != 8 { return 13 }
+    for present: seen { if !present { return 14 } }
+    roots: [1]string
+    root_path: [2048]u8
+    roots[0] = Path("/lib/icons", root_path[:])
+    sizes: [7]s32 = .[16, 20, 24, 30, 32, 40, 48]
+    hashes: [9]u32
+    for i: cast(s32)0..8 {
+        name := Text(icons[i][:])
+        for requested: sizes {
+            resolved: [2048]u8
+            if !Theme.Lookup(roots[:], "hicolor", name, requested, Read, Exists, resolved[:]) { return 15 }
+            image_path := Text(resolved[:])
+            bytes: [32768]u8
+            length := Read(image_path, bytes[:]); if length <= 0 { return 16 }
+            image := PNG.ReadPNG(bytes[:length]); defer VecFree(image.pixels)
+            if image.width < 1 || image.width != image.height || image.pixels.count != cast(s64)image.width * image.height * 4 { return 17 }
+            normalized: [9216]u8
+            count := cast(s64)requested * requested * 4
+            for y: cast(s32)0..requested-1 { for x: cast(s32)0..requested-1 {
+                source := ((y * image.height / requested) * image.width + x * image.width / requested) * 4
+                target := (y * requested + x) * 4
+                for channel: cast(s32)0..3 { normalized[target+channel] = image.pixels[source+channel] }
+            } }
+            transparent: s32; opaque: s32
+            for pixel: cast(s64)0..count/4-1 {
+                alpha := normalized[pixel*4+3]
+                if alpha == 0 { transparent += 1 }
+                if alpha == 255 { opaque += 1 }
+            }
+            if normalized[3] != 0 || transparent == 0 || opaque < requested { return 18 }
+            #if #defined(GAME_ICONS_GUEST) {
+                raw: [9216]u8; decoded: [9216]u8
+                if !TaijiThemedIconPixels(name, requested, raw[:count]) ||
+                    !TaijiPngIconPixels(image_path, requested, decoded[:count]) { return 19 }
+                for at: cast(s64)0..count-1 { if raw[at] != normalized[at] || decoded[at] != normalized[at] { return 20 } }
+            }
+            hash := Hash(normalized[:count])
+            if requested == 32 {
+                hashes[i] = hash
+                for previous: cast(s32)0..i-1 { if hashes[previous] == hash { return 21 } }
+            }
+            print("GAME_ICON_PIXELS % % %\n", name, requested, hash)
+        }
+    }
+    print("GAME_ICONS_COVERAGE_OK games=% entries=% icons=9\n", games, entries)
+    return 0
+}

@@ -1,0 +1,175 @@
+Space :: (c: u8) -> bool { return c == 32 || c == 9 || c == 13 }
+Trim :: (s: string) -> string {
+    a: s64; b := s.count
+    while a < b && Space(s[a]) { a += 1 }
+    while b > a && Space(s[b-1]) { b -= 1 }
+    return s[a:b]
+}
+Value :: (source: string, section: string, key: string) -> string {
+    current: string; start: s64
+    while start < source.count {
+        end := start
+        while end < source.count && source[end] != 10 { end += 1 }
+        line := Trim(source[start:end]); start = end + 1
+        if line.count == 0 || line[0] == 35 { continue }
+        if line[0] == 91 && line[line.count-1] == 93 { current = line[1:line.count-1]; continue }
+        if current != section { continue }
+        eq: s64
+        while eq < line.count && line[eq] != 61 { eq += 1 }
+        if eq < line.count && Trim(line[:eq]) == key { return Trim(line[eq+1:]) }
+    }
+    return ""
+}
+Put :: (output: []u8, used: *s64, text: string) -> bool {
+    if text.count > output.count - used.* { return false }
+    for c: text { output[used.*] = c; used.* += 1 }
+    return true
+}
+Decode :: (text: string, output: []u8) -> s64 {
+    used: s64; i: s64
+    while i < text.count {
+        c := text[i]; i += 1
+        if c == 92 {
+            if i == text.count { return -1 }
+            c = text[i]; i += 1
+            if c == 115 { c = 32 } else if c == 110 { c = 10 }
+            else if c == 116 { c = 9 } else if c == 114 { c = 13 }
+            else if c != 92 && c != 59 { return -1 }
+        }
+        if c == 0 || used == output.count { return -1 }
+        output[used] = c; used += 1
+    }
+    return used
+}
+ListHas :: (list: string, item: string, delimiter: u8 = 59) -> bool {
+    start: s64; escaped: bool
+    for i: cast(s64)0..list.count {
+        if i == list.count || (list[i] == delimiter && !escaped) {
+            bytes: [1024]u8
+            n := Decode(Trim(list[start:i]), bytes[:])
+            if n >= 0 && TextView(bytes[:n]) == item { return true }
+            start = i + 1
+        }
+        if i < list.count { if list[i] == 92 { escaped = !escaped } else { escaped = false } }
+    }
+    return false
+}
+Localized :: (source: string, section: string, key: string, locale: string) -> string {
+    lang_end := locale.count; country: s64 = -1; modifier: s64 = -1; encoding: s64 = -1
+    for i: cast(s64)0..locale.count-1 {
+        if locale[i] == 95 && country < 0 { country = i }
+        if locale[i] == 46 && encoding < 0 { encoding = i }
+        if locale[i] == 64 && modifier < 0 { modifier = i }
+    }
+    if country >= 0 { lang_end = country }
+    if encoding >= 0 && encoding < lang_end { lang_end = encoding }
+    if modifier >= 0 && modifier < lang_end { lang_end = modifier }
+    base_end := locale.count
+    if encoding >= 0 { base_end = encoding } else if modifier >= 0 { base_end = modifier }
+    candidates: [4][128]u8; lengths: [4]s64
+    unused Put(candidates[0][:], *lengths[0], locale[:base_end])
+    if modifier >= 0 { unused Put(candidates[0][:], *lengths[0], locale[modifier:]) }
+    unused Put(candidates[1][:], *lengths[1], locale[:base_end])
+    unused Put(candidates[2][:], *lengths[2], locale[:lang_end])
+    if modifier >= 0 { unused Put(candidates[2][:], *lengths[2], locale[modifier:]) }
+    unused Put(candidates[3][:], *lengths[3], locale[:lang_end])
+    for i: cast(s32)0..3 {
+        if lengths[i] == 0 { continue }
+        bytes: [256]u8; n: s64
+        if !Put(bytes[:], *n, key) || !Put(bytes[:], *n, "[") ||
+            !Put(bytes[:], *n, TextView(candidates[i][:lengths[i]])) || !Put(bytes[:], *n, "]") { continue }
+        value := Value(source, section, TextView(bytes[:n]))
+        if value != "" { return value }
+    }
+    return Value(source, section, key)
+}
+Visible :: (source: string, desktop: string) -> bool {
+    section := "Desktop Entry"
+    if Value(source, section, "Type") != "Application" || Value(source, section, "Name") == "" ||
+        Value(source, section, "Exec") == "" || Value(source, section, "Hidden") == "true" ||
+        Value(source, section, "NoDisplay") == "true" { return false }
+    only := Value(source, section, "OnlyShowIn"); excluded := Value(source, section, "NotShowIn")
+    start: s64; allowed := only == ""
+    for i: cast(s64)0..desktop.count {
+        if i == desktop.count || desktop[i] == 58 {
+            name := desktop[start:i]; start = i + 1
+            if ListHas(excluded, name) { return false }
+            if ListHas(only, name) { allowed = true }
+        }
+    }
+    return allowed
+}
+ExpandExec :: (exec: string, name: string, icon: string, path: string,
+    files: []string, output: []u8) -> s64 {
+    decoded: [8192]u8
+    n := Decode(exec, decoded[:]); if n <= 0 { return -1 }
+    text := TextView(decoded[:n]); i: s64; used: s64; file_code: bool
+    while i < text.count {
+        while i < text.count && Space(text[i]) { i += 1 }
+        if i == text.count { break }
+        token: [4096]u8; count: s64; quoted: bool; had_quote: bool
+        while i < text.count {
+            c := text[i]; i += 1
+            if c == 34 { quoted = !quoted; had_quote = true; continue }
+            if !quoted && Space(c) { break }
+            if c == 92 {
+                if i == text.count { return -1 }
+                c = text[i]; i += 1
+                if quoted && c != 34 && c != 96 && c != 36 && c != 92 {
+                    if !Put(token[:], *count, "\\") { return -1 }
+                }
+            } else if !quoted && (c == 39 || c == 96 || c == 36 || c == 62 || c == 60 ||
+                c == 126 || c == 124 || c == 38 || c == 59 || c == 40 || c == 41 || c == 42 ||
+                c == 63 || c == 35) { return -1 }
+            if c == 0 || count >= token.count { return -1 }
+            token[count] = c; count += 1
+        }
+        if quoted { return -1 }
+        word := TextView(token[:count])
+        if word == "%F" || word == "%U" || word == "%f" || word == "%u" {
+            if file_code || had_quote { return -1 }; file_code = true
+            amount := files.count
+            if word == "%f" || word == "%u" { if amount > 1 { amount = 1 } }
+            for j: cast(s64)0..amount-1 {
+                for c: files[j] { if c == 0 { return -1 } }
+                if !Put(output, *used, files[j]) || !Put(output, *used, "\0") { return -1 }
+            }
+            continue
+        }
+        if word == "%i" {
+            if had_quote { return -1 }
+            if icon != "" {
+                if !Put(output, *used, "--icon\0") || !Put(output, *used, icon) || !Put(output, *used, "\0") { return -1 }
+            }
+            continue
+        }
+        j: s64
+        while j < count {
+            c := token[j]; j += 1
+            if c == 37 {
+                if j == count || had_quote { return -1 }
+                c = token[j]; j += 1
+                if c == 99 { if !Put(output, *used, name) { return -1 } }
+                else if c == 107 { if !Put(output, *used, path) { return -1 } }
+                else if c == 37 { if !Put(output, *used, "%") { return -1 } }
+                else if c == 102 || c == 117 {
+                    if file_code { return -1 }; file_code = true
+                    if files.count > 0 { if !Put(output, *used, files[0]) { return -1 } }
+                }
+                else if c == 100 || c == 68 || c == 110 || c == 78 || c == 118 || c == 109 { continue }
+                else { return -1 }
+            } else {
+                if used >= output.count { return -1 }
+                output[used] = c; used += 1
+            }
+        }
+        if !Put(output, *used, "\0") { return -1 }
+    }
+    return used
+}
+ActionExec :: (source: string, action: string) -> string {
+    if !ListHas(Value(source, "Desktop Entry", "Actions"), action) { return "" }
+    bytes: [256]u8; used: s64
+    if !Put(bytes[:], *used, "Desktop Action ") || !Put(bytes[:], *used, action) { return "" }
+    return Value(source, TextView(bytes[:used]), "Exec")
+}
