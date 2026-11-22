@@ -1,0 +1,59 @@
+// Tests for appl/lib/strokes.zi and strokes_text.zi. The digests shipped in
+// lib/strokes were written by the Limbo digest command; building them again
+// from the example files must give the same bytes.
+//
+//     ziran run --target=c --root tests/strokes --module-path appl/lib tests/strokes/strokes_test.zi
+#import "std/file"
+using Strokes :: #import "strokes"
+using Files :: #import "strokes_text"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok { failures += 1; print("FAIL: %\n", what) }
+}
+
+Digest :: (examples_path: string) -> Text {
+    source, ok := ReadEntireFile(examples_path)
+    examples := Files.ReadExamples(ifx ok then source else "")
+    if examples.error != "" { none: Text; return none }
+    names: Vec(Text)
+    points: Vec(Strokes.Stroke)
+    for c: 0..examples.classes.count - 1 {
+        name: Text
+        BuilderAppend(name.bytes, TextView(examples.classes[c].name))
+        VecPush(names, name)
+        strokes: Vec(Strokes.Stroke)
+        VecSwap(strokes, examples.classes[c].examples)
+        VecPush(points, Strokes.ClassDominant(strokes[:]))
+    }
+    return Files.FormatDigest(names[:], points[:])
+}
+
+main :: () -> s32 {
+    sets := string.["digits", "letters", "punc"]
+    for set: sets {
+        examples: Vec(u8)
+        BuilderPrint(*examples, "lib/strokes/%.cl", set)
+        built: Text = Digest(BuilderFinish(examples))
+        shipped: Vec(u8)
+        BuilderPrint(*shipped, "lib/strokes/%.clx", set)
+        expected, ok := ReadEntireFile(BuilderFinish(shipped))
+        Expect(ok && built.bytes.count > 0 && TextView(built) == expected, "digest equals the Limbo digest")
+        // A digest read back and written again is unchanged.
+        read := Files.ReadDigest(expected)
+        again: Text = Files.FormatDigest(read.names[:], read.points[:])
+        Expect(read.error == "" && TextView(again) == expected, "digest round trip")
+    }
+    bad := Files.ReadExamples("not a classifier\n")
+    Expect(bad.error == "missing number of classes", "bad class count")
+    short := Files.ReadExamples("1 2 dot 1 5 5\n")
+    Expect(short.error == "couldn't read examples", "missing example")
+    broken := Files.ReadDigest("a 2 1\n")
+    Expect(broken.error == "bad points list", "short point list")
+    Expect(Strokes.Sqrt(0) == 0 && Strokes.Sqrt(10000) == 100, "integer square roots")
+    Expect(Strokes.LikeAtan(0, -5) == 0 && Strokes.Quadrant(Strokes.LikeAtan(5, 0)) == 6, "Limbo angle helpers")
+    if failures != 0 { print("strokes: % failures\n", failures); return 1 }
+    print("strokes: digits, letters and punc digests match the Limbo digests\n")
+    return 0
+}

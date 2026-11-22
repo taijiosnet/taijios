@@ -395,7 +395,6 @@ appl
 			verify.b
 		auxi
 			cpuslave.b
-			digest.b
 			fpgaload.b
 			mangaload.b
 			mkfile

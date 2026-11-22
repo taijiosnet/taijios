@@ -2,7 +2,6 @@
 
 TARG=\
 	cpuslave.dis\
-	digest.dis\
 	fpgaload.dis\
 	mangaload.dis\
 	pcmcia.dis\
@@ -22,3 +21,17 @@ SYSMODULES=\
 DISBIN=$ROOT/dis/auxi
 
 <$ROOT/mkfiles/mkdis
+
+# Commands that exist only as ZX bundles.
+ZXCOMMANDS=digest
+ZXUTIL=../zx_cli.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../../lib/strokes.zi ../../lib/strokes_text.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

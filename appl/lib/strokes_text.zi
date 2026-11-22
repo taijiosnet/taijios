@@ -1,0 +1,135 @@
+// The classifier files of the strokes recogniser, read and written as the
+// Limbo Readstrokes and Writestrokes modules did. An example file (.cl)
+// holds a class count, then for each class its example count, its name
+// and the examples; a digest (.clx) holds each class name with its
+// dominant points. A point list is a count followed by x y pairs.
+using Strokes :: #import "strokes";
+
+Cursor :: struct { at: s64; }
+
+Blank :: (c: s64) -> bool { return c == #char " " || c == #char "\t" || c == #char "\n" }
+
+Getc :: (text: string, cursor: *Cursor) -> s64 {
+    if cursor.at >= text.count { cursor.at += 1; return -1 }
+    c := cast(s64)text[cursor.at];
+    cursor.at += 1;
+    return c;
+}
+
+Unget :: (cursor: *Cursor) { cursor.at -= 1 }
+
+// A signed decimal number after white space. ok is -1 at the end of the
+// text, 0 when no digit follows and 1 otherwise.
+GetInt :: (text: string, cursor: *Cursor) -> (ok: s64, value: s64) {
+    c := Getc(text, cursor);
+    while Blank(c) { c = Getc(text, cursor) }
+    if c < 0 { return -1, 0 }
+    sign: s64 = 1;
+    if c == #char "-" {
+        sign = -1;
+    } else if c != #char "+" {
+        Unget(cursor);
+    }
+    ok: s64 = 0;
+    n: s64 = 0;
+    c = Getc(text, cursor);
+    while c >= #char "0" && c <= #char "9" {
+        n = n * 10 + c - #char "0";
+        ok = 1;
+        c = Getc(text, cursor);
+    }
+    // The character that ended the number is consumed, as Bufio getc left it.
+    return ok, n * sign;
+}
+
+// A word after white space; false at the end of the text.
+GetStr :: (text: string, cursor: *Cursor, word: *Text) -> bool {
+    VecClear(word.bytes);
+    c := Getc(text, cursor);
+    while Blank(c) { c = Getc(text, cursor) }
+    if c < 0 { return false }
+    while c >= 0 && !Blank(c) {
+        VecPush(word.bytes, cast(u8)c);
+        c = Getc(text, cursor);
+    }
+    return true;
+}
+
+GetPoints :: (text: string, cursor: *Cursor, out: *Strokes.Stroke) -> bool {
+    VecClear(out.pts);
+    ok, count := GetInt(text, cursor);
+    if ok <= 0 || count < 0 || count > 4000 { return false }
+    for 1..count {
+        okx, x := GetInt(text, cursor);
+        oky, y := GetInt(text, cursor);
+        if okx <= 0 || oky <= 0 { return false }
+        VecPush(out.pts, Strokes.Penpoint.{x = x, y = y});
+    }
+    return true;
+}
+
+Class :: struct {
+    name: Text;
+    examples: Vec(Strokes.Stroke); // in file order
+}
+
+Examples :: struct {
+    classes: Vec(Class);
+    error: string;
+}
+
+ReadExamples :: (text: string) -> Examples {
+    result: Examples;
+    cursor: Cursor;
+    ok, count := GetInt(text, *cursor);
+    if ok <= 0 { result.error = "missing number of classes"; return result }
+    for 1..count {
+        class: Class;
+        ok_n, examples := GetInt(text, *cursor);
+        if ok_n <= 0 || !GetStr(text, *cursor, *class.name) { result.error = "couldn't read examples"; return result }
+        for 1..examples {
+            stroke: Strokes.Stroke;
+            if !GetPoints(text, *cursor, *stroke) { result.error = "couldn't read examples"; return result }
+            VecPush(class.examples, stroke);
+        }
+        VecPush(result.classes, class);
+    }
+    return result;
+}
+
+Digest :: struct {
+    names: Vec(Text);
+    points: Vec(Strokes.Stroke);
+    error: string;
+}
+
+ReadDigest :: (text: string) -> Digest {
+    result: Digest;
+    cursor: Cursor;
+    while true {
+        name: Text;
+        if !GetStr(text, *cursor, *name) { break }
+        stroke: Strokes.Stroke;
+        if !GetPoints(text, *cursor, *stroke) { result.error = "bad points list"; return result }
+        Strokes.ChainCode(*stroke);
+        VecPush(result.names, name);
+        VecPush(result.points, stroke);
+    }
+    return result;
+}
+
+// One line per class: its name, then its point count and points.
+FormatDigest :: (names: []Text, points: []Strokes.Stroke) -> Text {
+    out: Vec(u8);
+    for i: 0..names.count - 1 {
+        BuilderAppend(out, TextView(names[i]));
+        BuilderPrint(*out, " %", points[i].pts.count);
+        for p: 0..points[i].pts.count - 1 {
+            BuilderPrint(*out, " % %", points[i].pts[p].x, points[i].pts[p].y);
+        }
+        VecPush(out, #char "\n");
+    }
+    result: Text;
+    VecSwap(result.bytes, out);
+    return result;
+}

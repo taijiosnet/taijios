@@ -1,0 +1,116 @@
+// digest [file.cl ...]: writes file.clx, the digest of each classifier
+// example file: each class name with the dominant points of its canonical
+// example. An existing, readable digest is rewritten from itself, as the
+// Limbo command did.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Strokes :: #import "strokes";
+using Files :: #import "strokes_text";
+
+Error :: (message: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "digest: %\n", message);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+// Reads a whole guest file into text, or the reason it cannot be read into problem.
+ReadGuest :: (path: string, text: *Text, problem: *Text) -> bool {
+    fd := Io.OpenFile(path, 0);
+    if fd < 0 { BuilderAppend(problem.bytes, Io.LastError()); return false }
+    chunk: [8192]u8;
+    count := Io.ReadBytes(fd, chunk[:]);
+    while count > 0 {
+        BuilderAppend(text.bytes, TextView(chunk[:count]));
+        count = Io.ReadBytes(fd, chunk[:]);
+    }
+    unused Io.CloseFile(fd);
+    return true;
+}
+
+EndsWith :: (text: string, tail: string) -> bool {
+    return text.count >= tail.count && text[text.count - tail.count:] == tail;
+}
+
+// The digest text of a classifier file, or the reason it cannot be made.
+Classify :: (file: string, digest: *Text, problem: *Text) -> bool {
+    path: Vec(u8);
+    if EndsWith(file, ".clx") {
+        BuilderAppend(path, file);
+    } else if EndsWith(file, ".cl") {
+        BuilderPrint(*path, "%x", file);
+    }
+    if path.count > 0 {
+        text: Text;
+        ignored: Text;
+        if ReadGuest(TextView(path[:]), *text, *ignored) {
+            read := Files.ReadDigest(TextView(text));
+            if read.error == "" && read.names.count > 0 {
+                result: Text = Files.FormatDigest(read.names[:], read.points[:]);
+                VecSwap(digest.bytes, result.bytes);
+                return true;
+            }
+        }
+    }
+    source: Text;
+    if !ReadGuest(file, *source, problem) { return false }
+    examples := Files.ReadExamples(TextView(source));
+    if examples.error != "" { BuilderAppend(problem.bytes, examples.error); return false }
+    names: Vec(Text);
+    points: Vec(Strokes.Stroke);
+    for c: 0..examples.classes.count - 1 {
+        name: Text;
+        BuilderAppend(name.bytes, TextView(examples.classes[c].name));
+        VecPush(names, name);
+        strokes: Vec(Strokes.Stroke);
+        VecSwap(strokes, examples.classes[c].examples);
+        VecPush(points, Strokes.ClassDominant(strokes[:]));
+    }
+    result: Text = Files.FormatDigest(names[:], points[:]);
+    VecSwap(digest.bytes, result.bytes);
+    return true;
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    if Arg.Option(*scan) != 0 {
+        unused Cli.WriteAll(2, "Usage: digest [file.cl ...]\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    message: Vec(u8);
+    while scan.next < Args.OperandCount() {
+        file := Args.Operand(scan.next);
+        scan.next += 1;
+        output: Vec(u8);
+        if EndsWith(file, ".cl") {
+            BuilderAppend(output, file[0:file.count - 3]);
+        } else {
+            BuilderAppend(output, file);
+        }
+        BuilderAppend(output, ".clx");
+        digest: Text;
+        problem: Text;
+        if !Classify(file, *digest, *problem) {
+            BuilderPrint(*message, "error reading classifier from %: %", file, TextView(problem));
+            return Error(BuilderFinish(message));
+        }
+        fd := Io.CreateFile(TextView(output[:]), 1, 438);
+        if fd < 0 {
+            // The Limbo command named the input file here.
+            BuilderPrint(*message, "can't create %: %", file, Io.LastError());
+            return Error(BuilderFinish(message));
+        }
+        written := Cli.WriteAll(fd, TextView(digest));
+        unused Io.CloseFile(fd);
+        if !written {
+            BuilderPrint(*message, "error writing digest to %: write error: %", file, Io.LastError());
+            return Error(BuilderFinish(message));
+        }
+    }
+    return 0;
+}

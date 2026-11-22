@@ -1,6 +1,7 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
-// ndb/csquery, ndb/dnsquery, ndb/mkhash, ndb/query and ndb/regquery.
+// ndb/csquery, ndb/dnsquery, ndb/mkhash, ndb/query, ndb/regquery and
+// auxi/digest.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -37,7 +38,7 @@ NDB_SECOND :: "sys=delta ip=10.1.0.1\n\tdom=delta.example\nsys=alpha ip=10.1.0.2
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [108]Case = Case.[
+cases: [111]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -138,6 +139,10 @@ cases: [108]Case = Case.[
     .{args = "ndb/mkhash ndb.second sys; wc -c ndb.second.sys", out = "     23 ndb.second.sys\n"},
     .{tool = "ndb/mkhash", args = "/nonexist sys", status = "error", err = "mkhash: can't open /nonexist: '/nonexist' file does not exist\n"},
     .{tool = "ndb/mkhash", args = "ndb.second", status = "error", err = "mkhash: usage: mkhash file attr\n"},
+    // The digest shipped in lib/strokes was written by the Limbo digest.
+    .{args = "auxi/digest digits.cl; cmp digits.clx /lib/strokes/digits.clx"},
+    .{tool = "auxi/digest", args = "missing.cl", status = "error", err = "digest: error reading classifier from missing.cl: 'missing.cl' file does not exist\n"},
+    .{tool = "auxi/digest", args = "-x", status = "usage", err = "Usage: digest [file.cl ...]\n"},
     .{args = "mount -c {ndb/registry -f reg.db} mnt"},
     .{tool = "ndb/regquery", args = "-m mnt name alpha", out = "tcp!alpha.example!1 kind x owner 'a b' name alpha\n"},
     .{tool = "ndb/regquery", args = "-m mnt -n kind x", out = "tcp!alpha.example!1\ntcp!gamma.example!3\n"},
@@ -184,6 +189,8 @@ Binary :: () -> Text {
 }
 
 Prepare :: (binary: string) -> bool {
+    digits, digits_ok := ReadEntireFile("lib/strokes/digits.cl")
+    if !digits_ok { return false }
     unused RemoveTree(WORK)
     unused CreateDirectory("build")
     unused CreateDirectory("build/tests")
@@ -194,7 +201,7 @@ Prepare :: (binary: string) -> bool {
         Write("empty", "") && Write("bin", binary) && Write("-dash", "dash\n") &&
         Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("file.tcl", TCL_FILE) && Write("two.tcl", "puts file-two\n") && Write("lines.tcl", TCL_LINES) &&
-        Write("reg.db", REGISTRY) && Write("ndb.main", NDB_MAIN) && Write("ndb.second", NDB_SECOND) && Directory("work/mnt") &&
+        Write("reg.db", REGISTRY) && Write("digits.cl", digits) && Write("ndb.main", NDB_MAIN) && Write("ndb.second", NDB_SECOND) && Directory("work/mnt") &&
         Write("fake/date.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
         SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755
 }
