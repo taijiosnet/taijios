@@ -1,5 +1,12 @@
 # Desktop registry local tests
 
+`rill_lifecycle_test.py BUNDLE SHA256 --emu EMULATOR --guest-overlay OVERLAY
+--desktop-extras` checks the full Rill desktop, application launch, input,
+move/resize, task-menu Minimize, task restore, Explorer and Settings. It uses a
+private display and a 128 MiB main pool by default. Its task operations use the
+actual Rill context menu so titlebar layout changes cannot turn Minimize into
+Close. OCR uses three-times scaling and unquoted TSV fields.
+
 The parser and icon-theme tests are ordinary Ziran:
 
 ```sh
