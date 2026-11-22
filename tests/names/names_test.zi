@@ -1,0 +1,80 @@
+// Tests for appl/lib/taijios_names.zi. Every expected value was printed by
+// the Limbo Names module for the same arguments.
+//
+//     ziran run --target=c --root tests/names --module-path appl/lib tests/names/names_test.zi
+using Names :: #import "taijios_names"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string, got: string, want: string) {
+    if ok { return }
+    failures += 1
+    print("FAIL: % got <%> want <%>\n", what, got, want)
+}
+
+Same :: (what: string, got: string, want: string) { Expect(got == want, what, got, want) }
+
+Joined :: (path: string) -> Text {
+    elements := Names.Elements(path)
+    out: Text
+    Names.Pathname(elements[:], *out)
+    return out
+}
+
+Listed :: (path: string) -> Text {
+    elements := Names.Elements(path)
+    out: Vec(u8)
+    for elements { BuilderPrint(*out, "<%>", it) }
+    result: Text
+    VecSwap(result.bytes, out)
+    return result
+}
+
+main :: () -> s32 {
+    Same("dirname empty", Names.Directory(""), "")
+    Same("dirname a", Names.Directory("a"), "")
+    Same("dirname /", Names.Directory("/"), "/")
+    Same("dirname /a", Names.Directory("/a"), "/")
+    Same("dirname a/b", Names.Directory("a/b"), "a")
+    Same("dirname /a/b/", Names.Directory("/a/b/"), "/a/b")
+    Same("dirname //a", Names.Directory("//a"), "/")
+    Same("dirname #e/x", Names.Directory("#e/x"), "#e")
+
+    Same("relative /a/b /a", Names.Relative("/a/b", "/a"), "b")
+    Same("relative /a/b /a/", Names.Relative("/a/b", "/a/"), "b")
+    Same("relative /ab /a", Names.Relative("/ab", "/a"), "/ab")
+    Same("relative /a /a", Names.Relative("/a", "/a"), "")
+    Same("relative a/b a", Names.Relative("a/b", "a"), "b")
+    Same("relative x empty", Names.Relative("x", ""), "x")
+    Same("relative empty /a", Names.Relative("", "/a"), "")
+    Same("relative /a/b//c /a/b", Names.Relative("/a/b//c", "/a/b"), "c")
+    Same("relative / /", Names.Relative("/", "/"), "")
+    Same("relative /a /", Names.Relative("/a", "/"), "a")
+
+    prefixes := bool.[Names.IsPrefix("/a", "/a/b"), Names.IsPrefix("/a/", "/a/b"), !Names.IsPrefix("/a", "/ab"),
+        Names.IsPrefix("/a", "/a"), Names.IsPrefix("a", "a/b"), !Names.IsPrefix("", "x"), !Names.IsPrefix("/a", ""),
+        Names.IsPrefix("/a/b", "/a/b//c"), Names.IsPrefix("/", "/"), Names.IsPrefix("/", "/a")]
+    for prefixes { Expect(it, "isprefix case", "", "") }
+
+    out: Text
+    Names.Rooted("/a", "b", *out); Same("rooted /a b", TextView(out), "/a/b")
+    Names.Rooted("/a/", "b", *out); Same("rooted /a/ b", TextView(out), "/a/b")
+    Names.Rooted("/a", "/b", *out); Same("rooted /a /b", TextView(out), "/b")
+    Names.Rooted("/a", "#e", *out); Same("rooted /a #e", TextView(out), "#e")
+    Names.Rooted("", "b", *out); Same("rooted empty b", TextView(out), "b")
+    Names.Rooted("/a", "", *out); Same("rooted /a empty", TextView(out), "/a")
+    Names.Rooted("a", "b", *out); Same("rooted a b", TextView(out), "a/b")
+
+    cases := string.["", "/", "a", "/a/b", "a//b/", "//x//y"]
+    lists := string.["", "</>", "<a>", "</><a><b>", "<a><b>", "</><x><y>"]
+    paths := string.["", "/", "/a", "//a/b", "/a/b", "//x/y"]
+    for cases {
+        listed: Text = Listed(it)
+        Same("elements", TextView(listed), lists[it_index])
+        joined: Text = Joined(it)
+        Same("pathname", TextView(joined), paths[it_index])
+    }
+    if failures != 0 { print("names: % failures\n", failures); return 1 }
+    print("names: all Names functions match the Limbo module\n")
+    return 0
+}

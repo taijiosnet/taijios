@@ -73,3 +73,68 @@ Clean :: (path: string, out: *Text) -> bool {
     }
     return out.bytes.count != 0 || BuilderAppend(out.bytes, ".");
 }
+
+// The directory part of path as the Names module's dirname returned it:
+// empty when path has no slash, and "/" for a name in the root.
+Directory :: (path: string) -> string {
+    slash := LastSlash(path);
+    if slash < 0 { return "" }
+    if slash == 0 { return "/" }
+    return path[:slash];
+}
+
+// Whether path a is b or one of b's ancestors, ignoring slashes at the end
+// of a. The empty string is not a path.
+IsPrefix :: (a: string, b: string) -> bool {
+    la := a.count;
+    if la == 0 { return false }
+    while la > 1 && a[la - 1] == #char "/" { la -= 1 }
+    prefix := a[:la];
+    if la > b.count { return false }
+    if la == b.count { return prefix == b }
+    return prefix == b[:la] && (prefix == "/" || b[la] == #char "/");
+}
+
+// name without the leading root and the slashes after it, when root is a
+// prefix of name; name itself otherwise.
+Relative :: (name: string, root: string) -> string {
+    if root.count == 0 || name.count == 0 || !IsPrefix(root, name) { return name }
+    rest := name[root.count:];
+    while rest.count > 0 && rest[0] == #char "/" { rest = rest[1:] }
+    return rest;
+}
+
+// name looked up from root: name itself when it is rooted, else joined to
+// root with one slash.
+Rooted :: (root: string, name: string, out: *Text) {
+    VecClear(out.bytes);
+    if name.count == 0 { BuilderAppend(out.bytes, root); return }
+    if root.count == 0 || name[0] == #char "/" || name[0] == #char "#" { BuilderAppend(out.bytes, name); return }
+    BuilderAppend(out.bytes, root);
+    if root[root.count - 1] != #char "/" { VecPush(out.bytes, #char "/") }
+    BuilderAppend(out.bytes, name);
+}
+
+// The nonempty elements of path, preceded by "/" when it is rooted.
+Elements :: (path: string) -> Vec(string) {
+    out: Vec(string);
+    if path.count > 0 && path[0] == #char "/" { VecPush(out, "/") }
+    i: s64 = 0;
+    while i < path.count {
+        start := i;
+        while i < path.count && path[i] != #char "/" { i += 1 }
+        if i > start { VecPush(out, path[start:i]) }
+        i += 1;
+    }
+    return out;
+}
+
+// The elements joined as the Names module's pathname joined them: each one
+// after a slash, except a leading "/" element.
+Pathname :: (elements: []string, out: *Text) {
+    VecClear(out.bytes);
+    for elements {
+        if it_index > 0 || it != "/" { VecPush(out.bytes, #char "/") }
+        BuilderAppend(out.bytes, it);
+    }
+}

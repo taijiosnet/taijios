@@ -73,7 +73,6 @@ TARG=\
 	mpeg.dis\
 	msgio.dis\
 	nametree.dis\
-	names.dis\
 	newns.dis\
 	ninep.dis\
 	oldauth.dis\
@@ -226,7 +225,6 @@ auth9.dis: $ROOT/module/auth9.m
 factotum.dis:	$ROOT/module/factotum.m
 sexprs.dis:	$ROOT/module/sexprs.m
 dbm.dis: $ROOT/module/dbm.m
-names.dis: $ROOT/module/names.m
 disks.dis: $ROOT/module/disks.m
 scsiio.dis:	$ROOT/module/scsiio.m
 dhcpclient.dis:	$ROOT/module/dhcp.m

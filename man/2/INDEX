@@ -286,15 +286,6 @@ puterror msgio
 putstring msgio
 senderrmsg msgio
 sendmsg msgio
-basename names
-cleanname names
-dirname names
-elements names
-isprefix names
-names names
-pathname names
-relative names
-rooted names
 newns newns
 newuser newns
 categories palmfile

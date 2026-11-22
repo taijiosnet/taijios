@@ -1019,7 +1019,6 @@ appl
 		mpeg.b
 		msgio.b
 		nametree.b
-		names.b
 		newns.b
 		palm.b
 		palmdb.b
@@ -1631,7 +1630,6 @@ dis
 		mpeg.dis
 		msgio.dis
 		nametree.dis
-		names.dis
 		newns.dis
 		palm.dis
 		palmdb.dis
@@ -2281,7 +2279,6 @@ module
 	msgio.m
 	multistyx.m
 	muxclient.m
-	names.m
 	newns.m
 	palm.m
 	palmfile.m
