@@ -1001,14 +1001,8 @@ appl
 		gamer.b
 		hash.b
 		html.b
-		ida
-			NOTICE
-			ida.b
-			idatab.b
-			idatest.b
-			mkfile
-			mktab.b
-			idatab.dis
+		ida.NOTICE
+		ida.zi
 		imageremap.b
 		inflate.b
 		ip.b
@@ -1619,8 +1613,6 @@ dis
 		gamer.dis
 		hash.dis
 		html.dis
-		ida
-			+
 		imageremap.dis
 		inflate.dis
 		ip.dis
@@ -2270,7 +2262,6 @@ module
 		srvbrowse.m
 	hash.m
 	html.m
-	ida.m
 	imagefile.m
 	inflate.m
 	ip.m

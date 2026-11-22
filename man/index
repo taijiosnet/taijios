@@ -232,7 +232,6 @@ able	/man/1/wm
 able	/man/10/plan9.ini
 able	/man/2/asn1
 able	/man/2/format
-able	/man/2/ida
 able	/man/2/security-0intro
 able	/man/2/spree-objstore
 able	/man/3/ds
@@ -1428,7 +1427,6 @@ adt	/man/2/filter
 adt	/man/2/format
 adt	/man/2/geodesy
 adt	/man/2/hash
-adt	/man/2/ida
 adt	/man/2/imagefile
 adt	/man/2/ip
 adt	/man/2/itslib
@@ -1585,7 +1583,6 @@ aggregates	/man/10/mk
 aghnsu	/man/10/inm
 agp	/man/10/plan9.ini
 agree	/man/2/disks
-agree	/man/2/ida
 agree	/man/8/collabsrv
 agreed	/man/1/collab-clients
 agreed	/man/2/factotum
@@ -1665,7 +1662,6 @@ algorithm	/man/10/2l
 algorithm	/man/10/a.out
 algorithm	/man/2/crc
 algorithm	/man/2/filter
-algorithm	/man/2/ida
 algorithm	/man/2/keyring-0intro
 algorithm	/man/2/keyring-certtostr
 algorithm	/man/2/keyring-crypt
@@ -2664,7 +2660,6 @@ appl	/man/2/format
 appl	/man/2/fsproto
 appl	/man/2/geodesy
 appl	/man/2/hash
-appl	/man/2/ida
 appl	/man/2/imagefile
 appl	/man/2/ip
 appl	/man/2/ir
@@ -3046,7 +3041,6 @@ approximately	/man/2/bloomfilter
 approximation	/man/1/man
 approximation	/man/3/fs
 apreceding	/man/2/w3c-xpointers
-april	/man/2/ida
 aprint	/man/2/sys-print
 aprvx	/man/8/mkfs
 apx	/man/10/2c
@@ -3423,7 +3417,6 @@ array	/man/2/ether
 array	/man/2/factotum
 array	/man/2/filter
 array	/man/2/format
-array	/man/2/ida
 array	/man/2/imagefile
 array	/man/2/ip
 array	/man/2/json
@@ -3802,7 +3795,6 @@ assumes	/man/1/cook
 assumes	/man/1/listen
 assumes	/man/10/qlock
 assumes	/man/10/styx
-assumes	/man/2/ida
 assumes	/man/2/security-login
 assumes	/man/2/styxflush
 assumes	/man/2/venti
@@ -4658,7 +4650,6 @@ bad	/man/3/logfs
 bad	/man/4/keyfs
 bad	/man/8/kfscmd
 badel	/man/2/spki-verifier
-balancing	/man/2/ida
 balancing	/man/9/0intro
 band	/man/2/keyring-0intro
 bang	/man/1/sh-tk
@@ -5518,7 +5509,6 @@ block	/man/2/diskblocks
 block	/man/2/disks
 block	/man/2/draw-image
 block	/man/2/filter-slip
-block	/man/2/ida
 block	/man/2/keyring-crypt
 block	/man/2/lock
 block	/man/2/security-0intro
@@ -6016,7 +6006,6 @@ breakpoints	/man/10/acid
 breakpoints	/man/2/debug
 breaks	/man/1/deb
 breaks	/man/10/getfields
-breaks	/man/2/ida
 breaks	/man/2/math-fp
 breaks	/man/2/prefab-element
 breaks	/man/2/sys-tokenize
@@ -6662,7 +6651,6 @@ byte	/man/2/ether
 byte	/man/2/factotum
 byte	/man/2/filter
 byte	/man/2/format
-byte	/man/2/ida
 byte	/man/2/imagefile
 byte	/man/2/ip
 byte	/man/2/keyring-0intro
@@ -6808,7 +6796,6 @@ bytes	/man/2/ether
 bytes	/man/2/factotum
 bytes	/man/2/filter
 bytes	/man/2/filter-slip
-bytes	/man/2/ida
 bytes	/man/2/imagefile
 bytes	/man/2/ip
 bytes	/man/2/keyring-0intro
@@ -7376,7 +7363,6 @@ ce	/man/10/srclist
 ceases	/man/9/canvas
 ceases	/man/9/text
 ceil	/man/2/bloomfilter
-ceil	/man/2/ida
 ceil	/man/2/math-fp
 ceiling	/man/1/calc
 cell	/man/1/tktester
@@ -8149,7 +8135,6 @@ checks	/man/1/passwd
 checks	/man/10/newchan
 checks	/man/10/styx
 checks	/man/10/styxserver
-checks	/man/2/ida
 checks	/man/2/math-fp
 checks	/man/2/spki-verifier
 checks	/man/2/styxservers
@@ -9773,7 +9758,6 @@ components	/man/2/draw-0intro
 components	/man/2/draw-display
 components	/man/2/draw-image
 components	/man/2/fsproto
-components	/man/2/ida
 components	/man/2/plumbmsg
 components	/man/2/prefab-0intro
 components	/man/2/prefab-element
@@ -10522,7 +10506,6 @@ consist	/man/9/canvas
 consist	/man/9/grid
 consist	/man/9/pack
 consistency	/man/10/allocb
-consistency	/man/2/ida
 consistency	/man/2/sys-0intro
 consistency	/man/5/stat
 consistency	/man/6/colour
@@ -10530,7 +10513,6 @@ consistency	/man/9/text
 consistent	/man/1/0intro
 consistent	/man/10/0intro
 consistent	/man/2/draw-example
-consistent	/man/2/ida
 consistent	/man/2/w3c-xpointers
 consistent	/man/3/fs
 consistent	/man/3/touch
@@ -11860,7 +11842,6 @@ corresponds	/man/10/devattach
 corresponds	/man/2/dial
 corresponds	/man/2/draw-image
 corresponds	/man/2/draw-pointer
-corresponds	/man/2/ida
 corresponds	/man/2/styxservers
 corresponds	/man/2/sys-dial
 corresponds	/man/3/draw
@@ -13020,7 +13001,6 @@ data	/man/2/filter-deflate
 data	/man/2/filter-slip
 data	/man/2/format
 data	/man/2/hash
-data	/man/2/ida
 data	/man/2/imagefile
 data	/man/2/ip
 data	/man/2/keyring-0intro
@@ -14949,7 +14929,6 @@ desired	/man/1/zeros
 desired	/man/10/devattach
 desired	/man/10/plan9.ini
 desired	/man/2/command
-desired	/man/2/ida
 desired	/man/2/plumbmsg
 desired	/man/2/prof
 desired	/man/2/security-login
@@ -15127,7 +15106,6 @@ detection	/man/1/blur
 detection	/man/3/logfs
 detects	/man/10/9load
 detects	/man/10/newchan
-detects	/man/2/ida
 detects	/man/3/pbus
 detects	/man/8/prep
 determine	/man/1/alphabet-fs
@@ -15708,7 +15686,6 @@ diagnostic	/man/2/dis
 diagnostic	/man/2/draw-context
 diagnostic	/man/2/factotum
 diagnostic	/man/2/fsproto
-diagnostic	/man/2/ida
 diagnostic	/man/2/ip
 diagnostic	/man/2/json
 diagnostic	/man/2/keyring-getmsg
@@ -16638,7 +16615,6 @@ disabling	/man/1/emu
 disabling	/man/10/kbdputc
 disabling	/man/10/lock
 disagree	/man/10/2c
-disagree	/man/2/ida
 disallow	/man/10/styxserver
 disallow	/man/6/namespace
 disallow	/man/8/kfscmd
@@ -16787,7 +16763,6 @@ disp.r	/man/2/draw-example
 disp.r.min	/man/2/draw-example
 disp.text	/man/2/draw-example
 dispath	/man/1/stack
-dispersal	/man/2/ida
 display	/man/1/0intro
 display	/man/1/acme
 display	/man/1/charon
@@ -17054,7 +17029,6 @@ distinct	/man/10/ntsrv
 distinct	/man/10/qlock
 distinct	/man/10/strcat
 distinct	/man/2/asn1
-distinct	/man/2/ida
 distinct	/man/2/math-fp
 distinct	/man/2/registries
 distinct	/man/2/sexprs
@@ -17157,7 +17131,6 @@ divorce	/man/1/0intro
 dk	/man/6/keytext
 dk	/man/8/ai2key
 dleft	/man/2/spree-cardlib
-dlen	/man/2/ida
 dlineinfo	/man/9/text
 dlr	/man/3/lpt
 dma	/man/10/allocb
@@ -18072,7 +18045,6 @@ eexists	/man/2/styxservers
 efbwr	/man/1/diff
 effective	/man/1/m4
 effective	/man/10/styx
-effective	/man/2/ida
 effective	/man/3/ip
 effective	/man/3/vid
 effective	/man/8/ftl
@@ -18095,7 +18067,6 @@ efficient	/man/1/acme
 efficient	/man/1/dd
 efficient	/man/2/draw-0intro
 efficient	/man/2/format
-efficient	/man/2/ida
 efficient	/man/2/math-export
 efficient	/man/2/sets
 efficient	/man/2/sys-pipe
@@ -18526,7 +18497,6 @@ ename	/man/5/0intro
 ename	/man/5/error
 ename	/man/8/styxchat
 enc	/man/2/encoding
-enc	/man/2/ida
 enc	/man/2/rfc822
 enc	/man/2/w3c-uris
 enc	/man/3/audio
@@ -18585,7 +18555,6 @@ encoded	/man/2/asn1
 encoded	/man/2/bufio
 encoded	/man/2/dis
 encoded	/man/2/encoding
-encoded	/man/2/ida
 encoded	/man/2/imagefile
 encoded	/man/2/keyring-crypt
 encoded	/man/2/keyring-ipint
@@ -18629,7 +18598,6 @@ encoding	/man/2/draw-0intro
 encoding	/man/2/encoding
 encoding	/man/2/filter
 encoding	/man/2/filter-slip
-encoding	/man/2/ida
 encoding	/man/2/json
 encoding	/man/2/keyring-0intro
 encoding	/man/2/keyring-getmsg
@@ -19408,7 +19376,6 @@ err	/man/2/complete
 err	/man/2/debug
 err	/man/2/dhcpclient
 err	/man/2/format
-err	/man/2/ida
 err	/man/2/json
 err	/man/2/keyset
 err	/man/2/palmfile
@@ -19516,7 +19483,6 @@ error	/man/2/factotum
 error	/man/2/filter
 error	/man/2/format
 error	/man/2/fsproto
-error	/man/2/ida
 error	/man/2/imagefile
 error	/man/2/ip
 error	/man/2/ir
@@ -21585,7 +21551,6 @@ fatal	/man/2/w3c-css
 fatal	/man/2/xml
 fatal	/man/3/arch
 fatal	/man/3/tls
-fault	/man/2/ida
 fault	/man/3/prog
 faults	/man/3/prog
 fauth	/man/2/factotum
@@ -22044,7 +22009,6 @@ file	/man/2/filter
 file	/man/2/filter-deflate
 file	/man/2/format
 file	/man/2/fsproto
-file	/man/2/ida
 file	/man/2/imagefile
 file	/man/2/ir
 file	/man/2/itslib
@@ -23165,7 +23129,6 @@ fn	/man/2/format
 fn	/man/2/fsproto
 fn	/man/2/geodesy
 fn	/man/2/hash
-fn	/man/2/ida
 fn	/man/2/imagefile
 fn	/man/2/ip
 fn	/man/2/ir
@@ -23844,12 +23807,8 @@ fractional	/man/9/types
 fractions	/man/9/listbox
 fractions	/man/9/scrollbar
 fractions	/man/9/text
-frag	/man/2/ida
-fragment	/man/2/ida
 fragment	/man/2/plumbmsg
 fragment	/man/2/w3c-uris
-fragments	/man/2/ida
-frags	/man/2/ida
 frame	/man/1/charon
 frame	/man/1/deb
 frame	/man/1/tktester
@@ -24120,7 +24079,6 @@ functioning	/man/2/sys-pctl
 functionname	/man/2/w3c-xpointers
 fundamental	/man/10/intrenable
 fundamental	/man/10/master
-fundamental	/man/2/ida
 fundamental	/man/2/math-0intro
 fundamental	/man/2/sys-0intro
 fundamental	/man/3/draw
@@ -24321,7 +24279,6 @@ generated	/man/10/conf
 generated	/man/10/devattach
 generated	/man/10/master
 generated	/man/2/draw-image
-generated	/man/2/ida
 generated	/man/2/keyring-0intro
 generated	/man/2/keyring-auth
 generated	/man/2/math-0intro
@@ -25066,7 +25023,6 @@ hash	/man/2/dbm
 hash	/man/2/dict
 hash	/man/2/dis
 hash	/man/2/hash
-hash	/man/2/ida
 hash	/man/2/keyring-0intro
 hash	/man/2/keyring-certtostr
 hash	/man/2/keyring-sha1
@@ -25934,10 +25890,6 @@ id	/man/8/manufacture
 id	/man/8/register
 id	/man/8/signer
 id	/man/9/canvas
-ida	/man/2/ida
-ida.b	/man/2/ida
-ida.m	/man/2/ida
-idatab.b	/man/2/ida
 idea	/man/1/acme
 idea	/man/1/idea
 idea	/man/10/c2l
@@ -26571,7 +26523,6 @@ implements	/man/2/complete
 implements	/man/2/debug
 implements	/man/2/dhcpclient
 implements	/man/2/filter-deflate
-implements	/man/2/ida
 implements	/man/2/popup
 implements	/man/2/styxservers
 implements	/man/2/tabs
@@ -26823,7 +26774,6 @@ include	/man/2/format
 include	/man/2/fsproto
 include	/man/2/geodesy
 include	/man/2/hash
-include	/man/2/ida
 include	/man/2/imagefile
 include	/man/2/ip
 include	/man/2/ir
@@ -27095,7 +27045,6 @@ incomplete	/man/2/asn1
 incomplete	/man/2/sys-utfbytes
 inconsistencies	/man/3/logfs
 inconsistencies	/man/8/applylog
-inconsistency	/man/2/ida
 inconsistency	/man/8/applylog
 inconsistent	/man/10/lock
 inconsistent	/man/2/0intro
@@ -27727,7 +27676,6 @@ init	/man/2/filter-slip
 init	/man/2/format
 init	/man/2/fsproto
 init	/man/2/geodesy
-init	/man/2/ida
 init	/man/2/imagefile
 init	/man/2/ip
 init	/man/2/ir
@@ -28079,7 +28027,6 @@ input	/man/2/draw-context
 input	/man/2/draw-rect
 input	/man/2/filter
 input	/man/2/filter-deflate
-input	/man/2/ida
 input	/man/2/ip
 input	/man/2/ir
 input	/man/2/json
@@ -28335,7 +28282,6 @@ instance	/man/2/draw-0intro
 instance	/man/2/draw-context
 instance	/man/2/draw-font
 instance	/man/2/factotum
-instance	/man/2/ida
 instance	/man/2/imagefile
 instance	/man/2/json
 instance	/man/2/keyring-ipint
@@ -28529,7 +28475,6 @@ int	/man/2/filter
 int	/man/2/format
 int	/man/2/geodesy
 int	/man/2/hash
-int	/man/2/ida
 int	/man/2/imagefile
 int	/man/2/ip
 int	/man/2/ir
@@ -28671,7 +28616,6 @@ integer	/man/2/draw-rect
 integer	/man/2/draw-screen
 integer	/man/2/factotum
 integer	/man/2/geodesy
-integer	/man/2/ida
 integer	/man/2/itslib
 integer	/man/2/keyring-0intro
 integer	/man/2/keyring-gensk
@@ -29295,7 +29239,6 @@ interval	/man/1/calc
 interval	/man/1/prof
 interval	/man/1/sleep
 interval	/man/2/dhcpclient
-interval	/man/2/ida
 interval	/man/2/ip
 interval	/man/2/prof
 interval	/man/2/timers
@@ -29479,7 +29422,6 @@ invalidated	/man/9/image
 invalidates	/man/8/createsignerkey
 invariably	/man/10/intrenable
 invariably	/man/10/newchan
-invariably	/man/2/ida
 invariably	/man/8/ftl
 invariant	/man/10/conf
 invariant	/man/6/sbl
@@ -29611,7 +29553,6 @@ invoking	/man/2/dhcpclient
 invoking	/man/2/disks
 invoking	/man/2/drawmux
 invoking	/man/2/exception
-invoking	/man/2/ida
 invoking	/man/2/json
 invoking	/man/2/secstore
 invoking	/man/2/sexprs
@@ -30031,7 +29972,6 @@ iv	/man/1/secstore
 ivec	/man/2/keyring-crypt
 ivec	/man/6/login
 i²c	/man/3/vid
-jacm	/man/2/ida
 jacm	/man/6/image
 james	/man/1/idea
 james	/man/6/attrdb
@@ -31122,7 +31062,6 @@ length	/man/2/convcs
 length	/man/2/dis
 length	/man/2/disks
 length	/man/2/ether
-length	/man/2/ida
 length	/man/2/ip
 length	/man/2/keyring-crypt
 length	/man/2/keyring-gensk
@@ -31280,7 +31219,6 @@ level	/man/2/draw-example
 level	/man/2/draw-image
 level	/man/2/factotum
 level	/man/2/filter-deflate
-level	/man/2/ida
 level	/man/2/itslib
 level	/man/2/json
 level	/man/2/prefab-compound
@@ -31438,7 +31376,6 @@ lib	/man/2/filter-slip
 lib	/man/2/format
 lib	/man/2/fsproto
 lib	/man/2/hash
-lib	/man/2/ida
 lib	/man/2/imagefile
 lib	/man/2/ip
 lib	/man/2/ir
@@ -32448,7 +32385,6 @@ load	/man/2/format
 load	/man/2/fsproto
 load	/man/2/geodesy
 load	/man/2/hash
-load	/man/2/ida
 load	/man/2/imagefile
 load	/man/2/ip
 load	/man/2/ir
@@ -33410,7 +33346,6 @@ maintains	/man/9/pack
 maintenance	/man/1/tiny
 maintenance	/man/3/sd
 maintenance	/man/9/1copyright
-majority	/man/2/ida
 make.b	/man/1/mash
 make.b	/man/1/mash-make
 makecard	/man/2/spree-cardlib
@@ -33998,7 +33933,6 @@ mathematics	/man/2/math-0intro
 mathematics	/man/2/math-elem
 maths	/man/10/c2l
 matrices	/man/2/math-linalg
-matrix	/man/2/ida
 matrix	/man/2/math-linalg
 matrix	/man/8/touchcal
 matte	/man/2/draw-display
@@ -34491,7 +34425,6 @@ message	/man/2/factotum
 message	/man/2/filter
 message	/man/2/filter-deflate
 message	/man/2/filter-slip
-message	/man/2/ida
 message	/man/2/itslib
 message	/man/2/keyring-0intro
 message	/man/2/keyring-auth
@@ -34800,7 +34733,6 @@ minimum	/man/1/math-misc
 minimum	/man/10/plan9.ini
 minimum	/man/10/print
 minimum	/man/2/dhcpclient
-minimum	/man/2/ida
 minimum	/man/2/math-fp
 minimum	/man/2/sys-print
 minimum	/man/2/timers
@@ -35322,7 +35254,6 @@ module	/man/2/filter-slip
 module	/man/2/fsproto
 module	/man/2/geodesy
 module	/man/2/hash
-module	/man/2/ida
 module	/man/2/imagefile
 module	/man/2/ip
 module	/man/2/ir
@@ -36962,7 +36893,6 @@ nil	/man/2/factotum
 nil	/man/2/format
 nil	/man/2/fsproto
 nil	/man/2/hash
-nil	/man/2/ida
 nil	/man/2/imagefile
 nil	/man/2/ip
 nil	/man/2/ir
@@ -37551,7 +37481,6 @@ nq	/man/10/styxserver
 nqid	/man/10/devattach
 nr	/man/1/cp
 nr	/man/1/sort
-nr	/man/2/ida
 nr	/man/2/math-fp
 nread	/man/10/styxserver
 nrec	/man/2/palmfile
@@ -37865,7 +37794,6 @@ obtain	/man/10/sleep
 obtain	/man/2/dhcpclient
 obtain	/man/2/dial
 obtain	/man/2/exception
-obtain	/man/2/ida
 obtain	/man/2/lock
 obtain	/man/2/scsiio
 obtain	/man/2/security-0intro
@@ -38021,7 +37949,6 @@ occurs	/man/2/bufio
 occurs	/man/2/debug
 occurs	/man/2/dis
 occurs	/man/2/fsproto
-occurs	/man/2/ida
 occurs	/man/2/json
 occurs	/man/2/lists
 occurs	/man/2/palmfile
@@ -38574,7 +38501,6 @@ operation	/man/2/filter
 operation	/man/2/filter-deflate
 operation	/man/2/filter-slip
 operation	/man/2/fsproto
-operation	/man/2/ida
 operation	/man/2/json
 operation	/man/2/keyring-0intro
 operation	/man/2/keyring-auth
@@ -38645,7 +38571,6 @@ operations	/man/2/drawmux
 operations	/man/2/exception
 operations	/man/2/factotum
 operations	/man/2/format
-operations	/man/2/ida
 operations	/man/2/ip
 operations	/man/2/json
 operations	/man/2/keyring-certtostr
@@ -39298,7 +39223,6 @@ original	/man/2/filter-deflate
 original	/man/2/filter-slip
 original	/man/2/format
 original	/man/2/geodesy
-original	/man/2/ida
 original	/man/2/msgio
 original	/man/2/plumbmsg
 original	/man/2/security-0intro
@@ -39329,7 +39253,6 @@ originally	/man/1/sh-std
 originally	/man/10/dmainit
 originally	/man/10/newchan
 originally	/man/10/styxserver
-originally	/man/2/ida
 originally	/man/2/ir
 originally	/man/2/spki
 originally	/man/2/sys-bind
@@ -39848,7 +39771,6 @@ p9sk1	/man/4/factotum
 pa	/man/2/ubfa
 pa	/man/6/ubfa
 pack	/man/1/tktester
-pack	/man/2/ida
 pack	/man/2/palmfile
 pack	/man/2/plumbmsg
 pack	/man/2/prefab-element
@@ -40215,7 +40137,6 @@ parameter	/man/2/draw-screen
 parameter	/man/2/env
 parameter	/man/2/factotum
 parameter	/man/2/geodesy
-parameter	/man/2/ida
 parameter	/man/2/json
 parameter	/man/2/keyring-sha1
 parameter	/man/2/lists
@@ -40259,7 +40180,6 @@ parameters	/man/2/dhcpclient
 parameters	/man/2/draw-image
 parameters	/man/2/factotum
 parameters	/man/2/geodesy
-parameters	/man/2/ida
 parameters	/man/2/ip
 parameters	/man/2/json
 parameters	/man/2/keyring-0intro
@@ -40806,7 +40726,6 @@ path	/man/2/format
 path	/man/2/fsproto
 path	/man/2/geodesy
 path	/man/2/hash
-path	/man/2/ida
 path	/man/2/imagefile
 path	/man/2/ip
 path	/man/2/ir
@@ -41513,7 +41432,6 @@ pids	/man/1/grid-monitor
 pids	/man/3/prog
 piece	/man/6/keyboard
 pieces	/man/1/wm-misc
-pieces	/man/2/ida
 pieces	/man/2/prefab-element
 pieces	/man/2/sys-iounit
 pieces	/man/6/keyboard
@@ -42386,7 +42304,6 @@ powers.b	/man/1/math-misc
 pp	/man/1/alphabet-fs
 pp	/man/1/fs
 pp	/man/2/draw-image
-pp	/man/2/ida
 pp	/man/6/image
 pp	/man/6/man
 ppath	/man/10/styxserver
@@ -42767,7 +42684,6 @@ previously	/man/10/lock
 previously	/man/10/xalloc
 previously	/man/2/bufio
 previously	/man/2/dhcpclient
-previously	/man/2/ida
 previously	/man/2/plumbmsg
 previously	/man/2/secstore
 previously	/man/2/security-0intro
@@ -43513,7 +43429,6 @@ produced	/man/10/dynld
 produced	/man/10/styx
 produced	/man/2/draw-image
 produced	/man/2/fsproto
-produced	/man/2/ida
 produced	/man/2/keyring-crypt
 produced	/man/2/keyset
 produced	/man/2/names
@@ -44038,7 +43953,6 @@ provide	/man/2/draw-0intro
 provide	/man/2/draw-context
 provide	/man/2/format
 provide	/man/2/hash
-provide	/man/2/ida
 provide	/man/2/keyring-0intro
 provide	/man/2/keyring-certtostr
 provide	/man/2/keyring-getstring
@@ -44114,7 +44028,6 @@ provided	/man/2/factotum
 provided	/man/2/filter-deflate
 provided	/man/2/format
 provided	/man/2/geodesy
-provided	/man/2/ida
 provided	/man/2/ip
 provided	/man/2/keyring-0intro
 provided	/man/2/keyring-crypt
@@ -44233,7 +44146,6 @@ provides	/man/2/format
 provides	/man/2/fsproto
 provides	/man/2/geodesy
 provides	/man/2/hash
-provides	/man/2/ida
 provides	/man/2/ip
 provides	/man/2/ir
 provides	/man/2/itslib
@@ -44873,8 +44785,6 @@ r5g6b5	/man/2/draw-display
 r8g8b8	/man/6/image
 rab	/man/4/dossrv
 rab	/man/4/memfs
-rabin	/man/2/ida
-rabin's	/man/2/ida
 race	/man/5/open
 rad	/man/1/fc
 raddr	/man/2/dial
@@ -45800,7 +45710,6 @@ rebound	/man/2/dhcpclient
 rebound	/man/2/sys-fd2path
 rebound	/man/3/fs
 rebroadcast	/man/8/collabsrv
-rebuild	/man/2/ida
 rebuild	/man/8/kfscmd
 rebuilt	/man/10/iar
 rec	/man/2/format
@@ -45894,7 +45803,6 @@ receives	/man/10/devattach
 receives	/man/10/plan9.ini
 receives	/man/2/dhcpclient
 receives	/man/2/draw-context
-receives	/man/2/ida
 receives	/man/2/popup
 receives	/man/2/spree
 receives	/man/2/styx
@@ -46009,9 +45917,7 @@ reconnection	/man/2/pop3
 reconnections	/man/2/pop3
 reconstruct	/man/1/mash-make
 reconstruct	/man/1/ns
-reconstruct	/man/2/ida
 reconstructing	/man/1/mash-make
-reconstruction	/man/2/ida
 record	/man/1/alphabet-abc
 record	/man/1/alphabet-grid
 record	/man/1/avr
@@ -46086,7 +45992,6 @@ recover	/man/3/arch
 recover	/man/3/pbus
 recover	/man/3/prog
 recover	/man/4/acme
-recovered	/man/2/ida
 recovered	/man/3/draw
 recovered	/man/3/logfs
 recovery	/man/10/allocb
@@ -46262,7 +46167,6 @@ reduces	/man/3/logfs
 reducing	/man/2/0intro
 reductions	/man/1/yacc
 redundancy	/man/2/crc
-redundancy	/man/2/ida
 redundant	/man/1/cleanname
 redundant	/man/2/names
 redundant	/man/8/kfscmd
@@ -46311,7 +46215,6 @@ ref	/man/2/filter-slip
 ref	/man/2/format
 ref	/man/2/fsproto
 ref	/man/2/hash
-ref	/man/2/ida
 ref	/man/2/imagefile
 ref	/man/2/ip
 ref	/man/2/ir
@@ -46471,7 +46374,6 @@ reference	/man/2/draw-display
 reference	/man/2/factotum
 reference	/man/2/fsproto
 reference	/man/2/geodesy
-reference	/man/2/ida
 reference	/man/2/json
 reference	/man/2/keyring-0intro
 reference	/man/2/keyring-auth
@@ -47368,7 +47270,6 @@ repeated	/man/1/uniq
 repeated	/man/1/xd
 repeated	/man/10/acid
 repeated	/man/10/kbdputc
-repeated	/man/2/ida
 repeated	/man/2/prof
 repeated	/man/6/keyboard
 repeated	/man/8/prep
@@ -47620,7 +47521,6 @@ represent	/man/2/disks
 represent	/man/2/draw-display
 represent	/man/2/draw-font
 represent	/man/2/draw-pointer
-represent	/man/2/ida
 represent	/man/2/json
 represent	/man/2/prefab-element
 represent	/man/2/registries
@@ -47739,7 +47639,6 @@ representing	/man/2/draw-screen
 representing	/man/2/drawmux
 representing	/man/2/encoding
 representing	/man/2/factotum
-representing	/man/2/ida
 representing	/man/2/imagefile
 representing	/man/2/ip
 representing	/man/2/ir
@@ -48116,7 +48015,6 @@ required	/man/2/encoding
 required	/man/2/factotum
 required	/man/2/filter-slip
 required	/man/2/geodesy
-required	/man/2/ida
 required	/man/2/keyring-crypt
 required	/man/2/keyring-ipint
 required	/man/2/palmfile
@@ -48963,7 +48861,6 @@ returned	/man/2/diskblocks
 returned	/man/2/disks
 returned	/man/2/exception
 returned	/man/2/geodesy
-returned	/man/2/ida
 returned	/man/2/imagefile
 returned	/man/2/ip
 returned	/man/2/keyring-auth
@@ -49156,7 +49053,6 @@ returns	/man/2/filter
 returns	/man/2/filter-slip
 returns	/man/2/format
 returns	/man/2/hash
-returns	/man/2/ida
 returns	/man/2/imagefile
 returns	/man/2/ip
 returns	/man/2/ir
@@ -49756,7 +49652,6 @@ routines	/man/5/0intro
 routines	/man/5/stat
 routines	/man/6/utf
 routing	/man/10/plan9.ini
-routing	/man/2/ida
 routing	/man/2/ip
 routing	/man/2/plumbmsg
 routing	/man/3/ip
@@ -49765,7 +49660,6 @@ routing	/man/8/rip
 row	/man/1/miniterm
 row	/man/1/sh-csv
 row	/man/1/tktester
-row	/man/2/ida
 row	/man/6/image
 row	/man/7/db
 row	/man/9/grid
@@ -50392,7 +50286,6 @@ scheduling	/man/3/cmd
 scheme	/man/10/intrenable
 scheme	/man/2/0intro
 scheme	/man/2/convcs
-scheme	/man/2/ida
 scheme	/man/2/spree
 scheme	/man/2/spree-cardlib
 scheme	/man/2/w3c-uris
@@ -50885,7 +50778,6 @@ security	/man/1/cpu
 security	/man/1/rcmd
 security	/man/1/secstore
 security	/man/2/0intro
-security	/man/2/ida
 security	/man/2/keyring-0intro
 security	/man/2/keyring-auth
 security	/man/2/keyring-certtostr
@@ -51218,7 +51110,6 @@ self	/man/2/draw-rect
 self	/man/2/draw-screen
 self	/man/2/factotum
 self	/man/2/format
-self	/man/2/ida
 self	/man/2/ip
 self	/man/2/itslib
 self	/man/2/json
@@ -52194,7 +52085,6 @@ sha	/man/6/keys
 sha	/man/6/login
 sha	/man/8/changelogin
 sha1	/man/1/sum
-sha1	/man/2/ida
 sha1	/man/2/keyring-0intro
 sha1	/man/2/keyring-sha1
 sha1	/man/2/keyset
@@ -53673,7 +53563,6 @@ source	/man/2/format
 source	/man/2/fsproto
 source	/man/2/geodesy
 source	/man/2/hash
-source	/man/2/ida
 source	/man/2/imagefile
 source	/man/2/ip
 source	/man/2/ir
@@ -55449,7 +55338,6 @@ storage	/man/10/styx
 storage	/man/2/dbm
 storage	/man/2/diskblocks
 storage	/man/2/draw-display
-storage	/man/2/ida
 storage	/man/2/math-linalg
 storage	/man/2/secstore
 storage	/man/2/sexprs
@@ -55526,7 +55414,6 @@ stored	/man/2/dhcpclient
 stored	/man/2/disks
 stored	/man/2/draw-0intro
 stored	/man/2/hash
-stored	/man/2/ida
 stored	/man/2/imagefile
 stored	/man/2/ip
 stored	/man/2/keyring-0intro
@@ -55809,7 +55696,6 @@ string	/man/2/format
 string	/man/2/fsproto
 string	/man/2/geodesy
 string	/man/2/hash
-string	/man/2/ida
 string	/man/2/imagefile
 string	/man/2/ip
 string	/man/2/ir
@@ -56576,7 +56462,6 @@ subset	/man/10/kproc
 subset	/man/2/bloomfilter
 subset	/man/2/factotum
 subset	/man/2/format
-subset	/man/2/ida
 subset	/man/2/sys-self
 subset	/man/3/audio
 subset	/man/3/ip
@@ -56896,7 +56781,6 @@ suitable	/man/2/dhcpclient
 suitable	/man/2/dial
 suitable	/man/2/diskblocks
 suitable	/man/2/factotum
-suitable	/man/2/ida
 suitable	/man/2/keyring-certtostr
 suitable	/man/2/keyset
 suitable	/man/2/newns
@@ -57846,7 +57730,6 @@ tag	/man/2/asn1
 tag	/man/2/attrdb
 tag	/man/2/dis
 tag	/man/2/factotum
-tag	/man/2/ida
 tag	/man/2/prefab-element
 tag	/man/2/spki
 tag	/man/2/spki-verifier
@@ -57988,7 +57871,6 @@ takes	/man/2/disks
 takes	/man/2/draw-image
 takes	/man/2/ether
 takes	/man/2/filter-slip
-takes	/man/2/ida
 takes	/man/2/keyring-certtostr
 takes	/man/2/lists
 takes	/man/2/plumbmsg
@@ -59243,8 +59125,6 @@ tokens	/man/3/usb
 tokens	/man/6/namespace
 tokens	/man/6/sexprs
 toks	/man/2/spree-allow
-tolerance	/man/2/ida
-tolerant	/man/2/ida
 tolerate	/man/1/charon
 tolower	/man/1/sh-string
 tolower	/man/2/string
@@ -59590,7 +59470,6 @@ transmits	/man/8/rip
 transmitted	/man/1/idea
 transmitted	/man/1/sh-file2chan
 transmitted	/man/10/print
-transmitted	/man/2/ida
 transmitted	/man/2/json
 transmitted	/man/2/keyring-0intro
 transmitted	/man/2/keyring-getmsg
@@ -59900,7 +59779,6 @@ tuple	/man/2/factotum
 tuple	/man/2/format
 tuple	/man/2/fsproto
 tuple	/man/2/geodesy
-tuple	/man/2/ida
 tuple	/man/2/imagefile
 tuple	/man/2/ip
 tuple	/man/2/json
@@ -61085,7 +60963,6 @@ unoccupied	/man/9/grid
 unopened	/man/2/styxservers
 unordered	/man/2/asn1
 unpack	/man/2/dis
-unpack	/man/2/ida
 unpack	/man/2/palmfile
 unpack	/man/2/plumbmsg
 unpack	/man/2/sexprs
@@ -61469,7 +61346,6 @@ user	/man/2/debug
 user	/man/2/dialog
 user	/man/2/dividers
 user	/man/2/factotum
-user	/man/2/ida
 user	/man/2/keyring-0intro
 user	/man/2/keyring-auth
 user	/man/2/keyring-certtostr
@@ -61712,7 +61588,6 @@ using	/man/2/ether
 using	/man/2/factotum
 using	/man/2/filepat
 using	/man/2/geodesy
-using	/man/2/ida
 using	/man/2/imagefile
 using	/man/2/ip
 using	/man/2/json
@@ -62240,7 +62115,6 @@ value	/man/2/factotum
 value	/man/2/filter
 value	/man/2/format
 value	/man/2/hash
-value	/man/2/ida
 value	/man/2/ip
 value	/man/2/json
 value	/man/2/keyring-certtostr
@@ -62479,7 +62353,6 @@ values	/man/2/factotum
 values	/man/2/format
 values	/man/2/geodesy
 values	/man/2/hash
-values	/man/2/ida
 values	/man/2/ip
 values	/man/2/json
 values	/man/2/keyring-0intro
@@ -62751,7 +62624,6 @@ various	/man/2/convcs
 various	/man/2/draw-font
 various	/man/2/draw-image
 various	/man/2/factotum
-various	/man/2/ida
 various	/man/2/imagefile
 various	/man/2/keyring-getmsg
 various	/man/2/msgio

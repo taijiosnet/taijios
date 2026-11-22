@@ -1,0 +1,139 @@
+// Tests for appl/lib/ida.zi. The encoding rows and words below were
+// printed by the Limbo Ida module for DATA with m = 3; the Ziran module must
+// encode them to the same words and rebuild DATA from them.
+//
+//     ziran run --target=c --root tests/ida --module-path appl/lib tests/ida/ida_test.zi
+// The same test runs in the guest as a ZX bundle:
+//     zi2zx --root tests/ida --module-path appl/lib --entry ida_test:main -o build/tests/ida/ida_test.zx tests/ida/ida_test.zi
+#import "ida"
+
+DATA :: "The quick brown fox jumps over the lazy dog, 0123456789!";
+
+rows: [15]s64 = .[
+    48852, 60641, 39127,
+    43738, 63255, 23152,
+    56502, 11901, 8753,
+    4118, 44664, 11514,
+    32676, 58953, 6264,
+];
+
+words: [50]s64 = .[
+    22602, 55399, 58306, 4867, 48753, 41829, 34479, 7055, 45872, 41663,
+    59805, 20877, 46057, 25135, 49275, 8252, 58596, 60508, 29593, 27130,
+    22956, 36703, 57267, 12494, 805, 15153, 35113, 10733, 35552, 51254,
+    29195, 36842, 7059, 31653, 40032, 35303, 17809, 53773, 42826, 62784,
+    55220, 9131, 24567, 29760, 826, 47758, 5928, 42040, 7498, 56233,
+];
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok { failures += 1; print("FAIL: %\n", what) }
+}
+
+Bytes :: (text: string) -> Vec(u8) {
+    bytes: Vec(u8)
+    for text { VecPush(bytes, it) }
+    return bytes
+}
+
+Same :: (bytes: []u8, text: string) -> bool {
+    if bytes.count != text.count { return false }
+    for i: 0..text.count - 1 { if bytes[i] != text[i] { return false } }
+    return true
+}
+
+LimboFragment :: (i: s64) -> Frag {
+    frag: Frag
+    frag.dlen = DATA.count
+    frag.m = 3
+    for j: 0..2 { VecPush(frag.a, rows[i * 3 + j]) }
+    for j: 0..9 { VecPush(frag.enc, words[i * 10 + j]) }
+    return frag
+}
+
+FieldChecks :: () {
+    Expect(Inverse(0) == 0 && Inverse(1) == 1 && Inverse(2) == 32769 && Inverse(FMAX) == FMAX, "inverse table ends")
+    bad: s64 = 0
+    for x: 1..FMAX { if Mul(x, Inverse(x)) != 1 { bad += 1 } }
+    Expect(bad == 0, "every nonzero element has its inverse")
+    Expect(Mul(FMAX, FMAX) == 1 && Sub(0, 1) == FMAX && Add(FMAX, 1) == 0, "field edges")
+}
+
+LimboChecks :: () {
+    data := Bytes(DATA)
+    for i: 0..4 {
+        frag := FragmentWith(data[:], rows[i * 3:i * 3 + 3])
+        same := frag.dlen == DATA.count && frag.m == 3 && frag.enc.count == 10
+        if same { for j: 0..9 { if frag.enc[j] != words[i * 10 + j] { same = false } } }
+        Expect(same, "Limbo encoding words")
+    }
+    f0 := LimboFragment(0)
+    f1 := LimboFragment(1)
+    f2 := LimboFragment(2)
+    f4 := LimboFragment(4)
+    out: Vec(u8)
+    chosen: [3]*Frag = .[*f4, *f2, *f1]
+    Expect(Reconstruct(chosen[:], *out) == "" && Same(out[:], DATA), "rebuild from Limbo fragments 4, 2 and 1")
+    few: [2]*Frag = .[*f0, *f1]
+    Expect(Reconstruct(few[:], *out) == "too few fragments" && out.count == 0, "two of three fragments")
+    // The Limbo module kept the damaged fragment that followed the dropped null one.
+    damaged := LimboFragment(3)
+    damaged.a[0] = 0
+    none: *Frag
+    mixed: [5]*Frag = .[*f0, none, *damaged, *f1, *f2]
+    kept: Vec(s64) = Consistent(mixed[:])
+    Expect(kept.count == 3 && kept[0] == 0 && kept[1] == 3 && kept[2] == 4, "consistent drops null and damaged fragments")
+    survivors: [3]*Frag = .[*f0, *f1, *f2]
+    Expect(Reconstruct(survivors[:], *out) == "" && Same(out[:], DATA), "rebuild from the consistent fragments")
+    longer := LimboFragment(3)
+    longer.dlen = 1
+    majority: [4]*Frag = .[*longer, *f0, *f1, *f2]
+    picked: Vec(s64) = Consistent(majority[:])
+    Expect(picked.count == 3 && picked[0] == 1, "consistent follows the majority data length")
+}
+
+RoundTrips :: () {
+    state: u64 = 88172645463325252
+    sizes := s64.[0, 1, 2, 3, 14, 1023, 1024]
+    ms := s64.[1, 3, 7]
+    source: Vec(u8)
+    for i: 0..1023 { VecPush(source, cast(u8)((i * 37 + 11) % 256)) }
+    for size: sizes {
+        for m: ms {
+            frags: Vec(Frag)
+            for 1..14 { VecPush(frags, Fragment(source[0:size], m, *state)) }
+            // Every window of m consecutive fragments, read backwards, rebuilds the data.
+            for start: 0..13 {
+                chosen: Vec(*Frag)
+                for j: 0..m - 1 { VecPush(chosen, *frags[(start + m - 1 - j) % 14]) }
+                out: Vec(u8)
+                ok := Reconstruct(chosen[:], *out) == "" && out.count == size
+                if ok { for b: 0..size - 1 { if out[b] != source[b] { ok = false } } }
+                if !ok { print("size % m % start %\n", size, m, start) }
+                Expect(ok, "round trip")
+            }
+        }
+    }
+    data := Bytes(DATA)
+    a := s64.[1, 2, 3]
+    short := s64.[1, 2]
+    g0 := FragmentWith(data[:], a[:])
+    g1 := FragmentWith(data[:], short[:])
+    g2 := FragmentWith(data[:], a[:])
+    out: Vec(u8)
+    uneven: [3]*Frag = .[*g0, *g1, *g2]
+    Expect(Reconstruct(uneven[:], *out) == "inconsistent encoding matrix", "row of the wrong length")
+    VecPush(g2.enc, 1)
+    sizes_differ: [3]*Frag = .[*g0, *g0, *g2]
+    Expect(Reconstruct(sizes_differ[:], *out) == "inconsistent fragments", "fragments of different lengths")
+}
+
+main :: () -> s32 {
+    FieldChecks()
+    LimboChecks()
+    RoundTrips()
+    if failures != 0 { print("ida: % failures\n", failures); return 1 }
+    print("ida: field, Limbo vectors, consistency and round trips passed\n")
+    return 0
+}

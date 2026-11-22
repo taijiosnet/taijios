@@ -1,0 +1,196 @@
+// Information dispersal: data split into fragments of which any m rebuild
+// it. M. Rabin, "Efficient Dispersal of Information for Security, Load
+// Balancing, and Fault Tolerance", JACM 36(2), April 1989, pp. 335-348,
+// with the scheme at the top of page 340. Arithmetic is in the prime field
+// of 65537 elements and data is read as big-endian 16-bit words.
+// Ported from the Limbo Ida module, Copyright © 2006 C H Forsyth, Vita Nuova
+// Holdings Limited, based on MIT's sfsnet IDA; terms in ida.NOTICE.
+
+FIELD :: 65537;
+FMAX :: 65536;
+
+Frag :: struct {
+    dlen: s64 // length of the original data
+    m: s64 // fragments needed to rebuild it
+    a: Vec(s64) // this fragment's row of the encoding matrix
+    enc: Vec(s64) // encoded words
+    tag: Vec(u8) // caller data, such as a SHA-1 hash
+}
+
+Add :: (a: s64, b: s64) -> s64 { return (a + b) % FIELD }
+Sub :: (a: s64, b: s64) -> s64 { return (a - b + FIELD) % FIELD }
+Mul :: (a: s64, b: s64) -> s64 { return (a * b) % FIELD }
+
+// x to the power FIELD-2, the inverse of x; zero gives zero.
+Inverse :: (x: s64) -> s64 {
+    result: s64 = 1
+    base := x % FIELD
+    exponent: s64 = FIELD - 2
+    while exponent > 0 {
+        if exponent % 2 == 1 { result = Mul(result, base) }
+        base = Mul(base, base)
+        exponent /= 2
+    }
+    return result
+}
+
+Div :: (a: s64, b: s64) -> s64 { return Mul(a, Inverse(b)) }
+
+// The next encoding coefficient, from 1 to FMAX, of a xorshift generator
+// whose state the caller seeds with any nonzero value.
+NextCoefficient :: (state: *u64) -> s64 {
+    x := <<state
+    x ^= x << 13
+    x ^= x >> 7
+    x ^= x << 17
+    <<state = x
+    return cast(s64)(x % cast(u64)FMAX) + 1
+}
+
+// The fragment of data for the encoding row a, whose m values are in 1..FMAX.
+FragmentWith :: (data: []u8, a: []s64) -> Frag {
+    frag: Frag
+    frag.dlen = data.count
+    frag.m = a.count
+    for a { VecPush(frag.a, it) }
+    words := (data.count + 1) / 2
+    count: s64 = 0
+    if a.count > 0 { count = (words + a.count - 1) / a.count }
+    i: s64 = 0
+    k: s64 = 0
+    while k < count {
+        c: s64 = 0
+        j: s64 = 0
+        while j < a.count && i < data.count {
+            word := cast(s64)data[i] * 256
+            i += 1
+            if i < data.count { word += cast(s64)data[i]; i += 1 }
+            c = Add(c, Mul(word, a[j]))
+            j += 1
+        }
+        VecPush(frag.enc, c)
+        k += 1
+    }
+    return frag
+}
+
+// A fragment of data with a fresh encoding row of m coefficients.
+Fragment :: (data: []u8, m: s64, state: *u64) -> Frag {
+    a: Vec(s64)
+    while a.count < m { VecPush(a, NextCoefficient(state)) }
+    return FragmentWith(data, a[:])
+}
+
+// The inverse of the m by m row-major matrix, by Gauss-Jordan elimination
+// without pivoting; rows built by Fragment never need it.
+Invert :: (matrix: []s64, m: s64) -> Vec(s64) {
+    width := 2 * m
+    work: Vec(s64)
+    for r: 0..m - 1 {
+        for c: 0..width - 1 {
+            if c < m {
+                VecPush(work, matrix[r * m + c])
+            } else {
+                VecPush(work, ifx c - m == r then 1 else 0)
+            }
+        }
+    }
+    for r: 0..m - 1 {
+        x := work[r * width + r]
+        for c: 0..width - 1 { work[r * width + c] = Div(work[r * width + c], x) }
+        for r1: 0..m - 1 {
+            if r1 == r { continue }
+            y := Div(work[r1 * width + r], work[r * width + r])
+            for c: 0..width - 1 {
+                work[r1 * width + c] = Sub(work[r1 * width + c], Mul(y, work[r * width + c]))
+            }
+        }
+    }
+    inverse: Vec(s64)
+    for r: 0..m - 1 {
+        for c: m..width - 1 { VecPush(inverse, work[r * width + c]) }
+    }
+    return inverse
+}
+
+// Rebuilds into out the data encoded by the first m fragments. The result
+// is "" or the reason the fragments cannot be used.
+Reconstruct :: (frags: []*Frag, out: *Vec(u8)) -> string {
+    VecClear(<<out)
+    if frags.count < 1 || frags[0] == null || frags.count < frags[0].m { return "too few fragments" }
+    m := frags[0].m
+    length := frags[0].enc.count
+    matrix: Vec(s64)
+    for j: 0..m - 1 {
+        frag := frags[j]
+        if frag == null || frag.a.count != m { return "inconsistent encoding matrix" }
+        if frag.enc.count != length { return "inconsistent fragments" }
+        for frag.a { VecPush(matrix, it) }
+    }
+    inverse: Vec(s64) = Invert(matrix[:], m)
+    for k: 0..length - 1 {
+        for i: 0..m - 1 {
+            b: s64 = 0
+            for j: 0..m - 1 { b = Add(b, Mul(frags[j].enc[k], inverse[i * m + j])) }
+            if b >= 65536 { VecClear(<<out); return "corrupt output" }
+            VecPush(<<out, cast(u8)(b / 256))
+            VecPush(<<out, cast(u8)(b % 256))
+        }
+    }
+    if frags[0].dlen < out.count { unused VecResize(<<out, frags[0].dlen) }
+    return ""
+}
+
+FRAG_LENGTH :: 0;
+FRAG_M :: 1;
+FRAG_SIZE :: 2;
+
+Property :: (frag: *Frag, property: s64) -> s64 {
+    if property == FRAG_LENGTH { return frag.dlen }
+    if property == FRAG_M { return frag.m }
+    return frag.enc.count
+}
+
+// The property value most fragments share; of equally common values, the
+// one first seen latest, as the Limbo module chose. -1 without fragments.
+Majority :: (frags: []*Frag, property: s64) -> s64 {
+    best: s64 = -1
+    best_count: s64 = 0
+    for < i: 0..frags.count - 1 {
+        if frags[i] == null { continue }
+        value := Property(frags[i], property)
+        first := true
+        for j: 0..i - 1 { if frags[j] != null && Property(frags[j], property) == value { first = false } }
+        if !first { continue }
+        count: s64 = 0
+        for frags { if it != null && Property(it, property) == value { count += 1 } }
+        if best < 0 || count > best_count { best = value; best_count = count }
+    }
+    return best
+}
+
+// A row value outside the field, or one of the first m encoded words zero
+// or outside it, marks a fragment as damaged.
+Damaged :: (frag: *Frag) -> bool {
+    for frag.a { if it <= 0 || it >= FIELD { return true } }
+    for i: 0..frag.a.count - 1 {
+        if i >= frag.enc.count { break }
+        if frag.enc[i] == 0 || frag.enc[i] >= FIELD { return true }
+    }
+    return false
+}
+
+// The positions in frags of the fragments that agree with the majority on
+// data length, m and encoded length and are not damaged. Null entries are
+// dropped.
+Consistent :: (frags: []*Frag) -> Vec(s64) {
+    kept: Vec(s64)
+    dlen := Majority(frags, FRAG_LENGTH)
+    m := Majority(frags, FRAG_M)
+    size := Majority(frags, FRAG_SIZE)
+    for frags {
+        if it == null || it.m != m || it.a.count != m || it.enc.count != size || it.dlen != dlen || Damaged(it) { continue }
+        VecPush(kept, it_index)
+    }
+    return kept
+}
