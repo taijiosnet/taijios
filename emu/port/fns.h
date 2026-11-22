@@ -82,6 +82,10 @@ ulong	getcallerpc(void*);
 ulong	getFPcontrol(void);
 ulong	getFPstatus(void);
 int		ginputevent(int, int, int, int, ulong);
+#ifdef __linux__
+int		ginputready(void);
+void		zxnotifyactivity(void);
+#endif
 void		gkbdcancelcompose(void);
 void		gkbdputc(Queue*, int);
 void		gkeyinit(void);

@@ -1,0 +1,284 @@
+#import "std/vec";
+Args :: #import "taijios_args";
+Process :: #import "taijios_process";
+Link :: #import "taijios_native_wm";
+Surface :: #import "zx_surface";
+Draw :: #import "guest_draw";
+Compositor :: #import "compositor";
+Input :: #import "guest_input";
+Windows :: #import "desktop_windows";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 { return Fail("supply a guest ZX application path") }
+    manager: Manager;
+    manager.windows = Windows.New(false, false);
+    if !Draw.Open(*manager.display) { return Fail("open Draw") }
+    defer Draw.Close(*manager.display);
+    manager.bounds = Draw.Screen(*manager.display).bounds;
+    manager.background = Draw.Solid(*manager.display, 0x183858ff);
+    if !Paint(*manager) { return Fail("paint desktop") }
+    input := Input.OpenPoll();
+    if input < 0 { return Fail("open input") }
+    defer Input.Close(input);
+
+    noargs: [0]string;
+    for i: 0 .. count - 1 {
+        id := Link.StartWindow(Args.Operand(i), noargs[:]);
+        if id <= 0 || !VecPush(manager.apps, Application.{id = id}) { return Fail("start application") }
+    }
+    return Run(*manager, input);
+}
+
+#scope_file
+
+Application :: struct {
+    id: s32;
+    bounds: Draw.Rect;
+    image: Draw.Image;
+    pending: Draw.Image;
+    title: string;
+    open: bool;
+}
+
+Manager :: struct {
+    display: Draw.Display;
+    background: Draw.Image;
+    bounds: Draw.Rect;
+    windows: Windows.State;
+    apps: Vec(Application);
+    buttons: s32;
+    pointer_tick: u32;
+    pointer_epoch: s64;
+    dirty: bool;
+}
+
+Fail :: (message: string) -> s32 {
+    unused Args.SetFailure(message);
+    return 1;
+}
+
+Paint :: (manager: *Manager) -> bool {
+    chrome: [0]Compositor.Layer;
+    return Windows.Repaint(*manager.windows, *manager.display, manager.background, chrome[:], manager.bounds);
+}
+
+Run :: (manager: *Manager, input: s32) -> s32 {
+    status: s32 = 0;
+    while manager.apps.count != 0 {
+        for i: 0 .. 31 {
+            event := Input.Next(input);
+            if event.kind == 0 { break }
+            HandleInput(manager, event);
+        }
+        cursor: s32 = 0;
+        request: [7]s32;
+        for n: 0 .. manager.apps.count - 1 {
+            id := Link.Request(cursor, request[:]);
+            if id <= 0 { break }
+            cursor = id;
+            index := Find(manager, id);
+            ok := false;
+            if index >= 0 { ok = Service(manager, *manager.apps[index], request[:]) }
+            unused Link.Reply(id, ok);
+        }
+        i: s64 = 0;
+        while i < manager.apps.count {
+            app := *manager.apps[i];
+            outcome := Process.Poll(app.id);
+            if outcome.status == -2 {
+                i += 1;
+                continue;
+            }
+            if outcome.status < 0 || outcome.value != 0 {
+                status = 1;
+                if outcome.error != "" { unused Args.SetFailure(outcome.error) }
+            }
+            if app.open { RemoveWindow(manager, app) }
+            manager.apps[i] = manager.apps[manager.apps.count - 1];
+            unused VecResize(manager.apps, manager.apps.count - 1);
+        }
+        if manager.dirty {
+            if !Paint(manager) { return Fail("repaint desktop") }
+            manager.dirty = false;
+        }
+        if manager.apps.count != 0 && !Link.WaitActivity() { return Fail("wait for desktop activity") }
+    }
+    return status;
+}
+
+Find :: (manager: *Manager, id: s32) -> s64 {
+    if id <= 0 { return -1 }
+    for i: 0 .. manager.apps.count - 1 {
+        if manager.apps[i].id == id { return i }
+    }
+    return -1;
+}
+
+Layer :: (app: *Application) -> Compositor.Layer {
+    return .{app.image, app.image.bounds, app.bounds.left, app.bounds.top};
+}
+
+Service :: (manager: *Manager, app: *Application, request: []s32) -> bool {
+    if request[0] == Link.Open { return OpenWindow(manager, app, request[1], request[2]) }
+    if !app.open { return false }
+    if request[0] == Link.Frame { return PaintFrame(manager, app, request) }
+    if request[0] == Link.Close {
+        RemoveWindow(manager, app);
+        return true;
+    }
+    if request[0] == Link.SetTitle {
+        app.title = Link.Title(app.id);
+        return true;
+    }
+    if request[0] == Link.SetTasked {
+        ok := false;
+        if request[5] != 0 {
+            ok = Windows.Minimize(*manager.windows, app.id);
+        } else {
+            ok = Windows.Focus(*manager.windows, app.id);
+        }
+        if ok { manager.dirty = true }
+        return ok;
+    }
+    return false;
+}
+
+OpenWindow :: (manager: *Manager, app: *Application, width: s32, height: s32) -> bool {
+    if app.open { return false }
+    app.bounds = Windows.Place(*manager.windows, manager.bounds, width, height);
+    if app.bounds.right <= app.bounds.left { return false }
+    app.image = Draw.Buffer(*manager.display, .{0, 0, width, height}, 0x000000ff);
+    if app.image.id == 0 { return false }
+    if !Windows.Add(*manager.windows, app.id, Layer(app), true, true) {
+        unused Draw.Release(*manager.display, *app.image);
+        return false;
+    }
+    app.title = Link.Title(app.id);
+    app.open = true;
+    manager.dirty = true;
+    return true;
+}
+
+RemoveWindow :: (manager: *Manager, app: *Application) {
+    unused Windows.Remove(*manager.windows, app.id);
+    unused Draw.Release(*manager.display, *app.pending);
+    unused Draw.Release(*manager.display, *app.image);
+    app.open = false;
+    manager.dirty = true;
+}
+
+PaintFrame :: (manager: *Manager, app: *Application, request: []s32) -> bool {
+    width := request[1];
+    height := request[2];
+    first := request[3];
+    rows := request[4];
+    publish := (request[5] & Link.Publish) != 0;
+    staged := (request[5] & Link.Staged) != 0;
+    if request[6] != width * rows * 4 { return false }
+    image := app.image;
+    if staged && first != 0 {
+        image = app.pending;
+    } else {
+        unused Draw.Release(*manager.display, *app.pending);
+        if staged || width != image.bounds.right || height != image.bounds.bottom {
+            if first != 0 { return false }
+            app.pending = Draw.Buffer(*manager.display, .{0, 0, width, height}, 0x000000ff);
+            image = app.pending;
+        }
+    }
+    if !UploadPixels(*manager.display, image, app.id, width, first, rows) {
+        unused Draw.Release(*manager.display, *app.pending);
+        return false;
+    }
+    if publish && image.id == app.pending.id {
+        unused Draw.Release(*manager.display, *app.image);
+        app.image = image;
+        app.pending = .{};
+        app.bounds.right = app.bounds.left + width;
+        app.bounds.bottom = app.bounds.top + height;
+        unused Windows.SetLayer(*manager.windows, app.id, Layer(app));
+    }
+    if publish { manager.dirty = true }
+    return true;
+}
+
+UploadPixels :: (display: *Draw.Display, image: Draw.Image, id: s32,
+                 width: s32, first: s32, rows: s32) -> bool {
+    // Draw messages have 21 bytes of framing and fit at most 2042 RGBA pixels.
+    buffer: [2042 * 4]u8;
+    if image.id == 0 { return false }
+    rows_per_tile: s32 = 2042 / width;
+    if rows_per_tile == 0 { rows_per_tile = 1 }
+    y: s32 = 0;
+    while y < rows {
+        lines := ifx rows - y < rows_per_tile then rows - y else rows_per_tile;
+        x: s32 = 0;
+        while x < width {
+            columns: s32 = ifx width - x < 2042 then width - x else 2042;
+            size := columns * lines * 4;
+            offset := (y * width + x) * 4;
+            pixels := buffer[:size];
+            bounds: Draw.Rect = .{x, first + y, x + columns, first + y + lines};
+            if Link.Pixels(id, offset, pixels) != size || !Draw.Upload(display, image, bounds, pixels) { return false }
+            x += columns;
+        }
+        y += lines;
+    }
+    return true;
+}
+
+HandleInput :: (manager: *Manager, event: Input.Event) {
+    workspace := manager.windows.workspace;
+    if Windows.WorkspaceKey(*manager.windows, event) {
+        if manager.windows.workspace != workspace { manager.dirty = true }
+        return;
+    }
+    if event.kind == Input.Pointer {
+        chrome: [0]Compositor.Layer;
+        id := Windows.PointerTarget(*manager.windows, chrome[:], event);
+        changed := manager.buttons ^ event.buttons;
+        if manager.buttons == 0 && event.buttons != 0 && id > 0 { manager.dirty = true }
+        manager.buttons = event.buttons;
+        if event.millis < manager.pointer_tick && manager.pointer_tick - event.millis > 0x80000000 {
+            manager.pointer_epoch += 4294967296;
+        }
+        manager.pointer_tick = event.millis;
+        index := Find(manager, id);
+        if index < 0 { return }
+        bounds := manager.apps[index].bounds;
+        x := event.x - bounds.left;
+        y := event.y - bounds.top;
+        millis := manager.pointer_epoch + cast(s64)event.millis;
+        if changed == 0 {
+            Send(id, Surface.Move, x, y, 0, 0, 0, 0, millis);
+            return;
+        }
+        wheel := changed & event.buttons;
+        if (wheel & 8) != 0 { Send(id, Surface.PointerWheel, x, y, 1000, 0, 0, 0, -1) }
+        if (wheel & 16) != 0 { Send(id, Surface.PointerWheel, x, y, -1000, 0, 0, 0, -1) }
+        for button: 0 .. 2 {
+            bit := cast(s32)(1 << button);
+            if (changed & bit) != 0 {
+                kind: s32 = ifx (event.buttons & bit) != 0 then Surface.Down else Surface.Up;
+                Send(id, kind, x, y, cast(s32)button + 1, 0, 0, 0, millis);
+            }
+        }
+        return;
+    }
+    id := manager.windows.keyboard_focus;
+    if id <= 0 { return }
+    if event.kind == Input.Text {
+        Send(id, Surface.TextEvent, 0, 0, 0, 0, 0, event.code, -1);
+    } else if event.kind == Input.KeyDown || event.kind == Input.KeyUp {
+        kind: s32 = ifx event.kind == Input.KeyDown then Surface.Key else 8;
+        Send(id, kind, 0, 0, 0, event.code, event.modifiers, 0, -1);
+    }
+}
+
+Send :: (id: s32, kind: s32, x: s32, y: s32, button: s32, key: s32,
+         modifiers: s32, rune: s32, millis: s64) {
+    fields: [9]s32 = .{kind, x, y, button, key, modifiers, 0, 0, rune};
+    if !Link.Dispatch(id, fields[:], millis) { Link.Disconnect(id) }
+}

@@ -23,8 +23,8 @@ accepted by `-d` for daemon mode. The guest's standard streams inherit the
 host process's standard streams. A void or zero result exits with status 0.
 Positive results through 255 are returned as process exit statuses. Other
 results and loader errors exit with status 1. A direct bundle can access guest
-Draw and input devices. Window-manager services and Dis task inspection remain
-available through the normal desktop runner.
+Draw and input devices. The normal desktop runner provides Rill integration and
+Dis task inspection.
 Run `python3 tests/desktop/zx_boot_test.py` to verify direct startup in a guest
 root containing only ZX programs. Add `--graphics` to test compositing, clipped
 updates, workspace and focus policy, pointer input, and keyboard input on a
@@ -38,11 +38,18 @@ ZX command from another in a guest without Dis, start the emulator with
 `/appl/cmd/zxrun.zx -c /hello.zx operand`. The child inherits the guest streams
 and namespace. A scalar is printed by default. `-c` returns the scalar as
 command status, and `-s` also reports the child's named failure when present.
-Windowed execution and Dis process groups still use the existing Dis runner.
+The regular `zxrun` command manages Dis process groups in the normal desktop.
 In a direct ZX guest, `taijios_process.Start` launches a concurrent console
 child. `Poll` and `Wait` collect its result using the returned ID. Children
 inherit the guest namespace and standard streams. Other open descriptors stay
 with the caller.
+
+Build the direct ZX window manager with `(cd appl/wm && mk native_wm.zx)`.
+To run an existing ZX GUI app under it with the current Linux build, use
+`emu/Linux/o.emu -r "$PWD" -g 960x600 /appl/wm/native_wm.zx /dis/wm/counter.zx`.
+Pass multiple app paths to open them concurrently. Switch workspaces with
+Ctrl+Alt+Left or Ctrl+Alt+Right. Hold Shift as well to move the focused window.
+The default desktop continues to start Rill through the regular desktop runner.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including
 the ZX runtime. Use `-p main=64M` or `-p main=32M` before the guest command to set

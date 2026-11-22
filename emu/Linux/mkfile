@@ -31,6 +31,7 @@ OBJ=\
 	$CONF.root.$O\
 	lock.$O\
 	zx.$O\
+	zxwindow.$O\
 	$DEVS\
 	$PORT\
 
@@ -61,8 +62,11 @@ install:V: $O.$CONF
 win-x11a.$O:	../port/win-x11a.c ../port/taijios-icon.h
 	$CC $CFLAGS -I. ../port/win-x11a.c
 
-zx.$O:	../port/zx.c $ROOT/mkconfig $ZX_LIB $ROOT/include/drawif.h zxrunt.h zxmod.h
+zx.$O:	../port/zx.c ../port/zxwindow.h $ROOT/mkconfig $ZX_LIB $ROOT/include/drawif.h zxrunt.h zxmod.h
 	$CC $CFLAGS $ZX_CFLAGS ../port/zx.c
+
+zxwindow.$O:	../port/zxwindow.c ../port/zxwindow.h $ROOT/mkconfig $ZX_LIB zxrunt.h
+	$CC $CFLAGS $ZX_CFLAGS ../port/zxwindow.c
 
 zxrunt.h:D:	../port/zxbuiltin.b $ROOT/module/zx.m $ROOT/module/draw.m $ROOT/module/sys.m
 	limbo -I $ROOT/module -a ../port/zxbuiltin.b > $target

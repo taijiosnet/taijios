@@ -13,6 +13,13 @@ Contains :: (layer: Layer, x: s32, y: s32) -> bool {
            cast(s64)y - layer.y < cast(s64)layer.source.bottom - layer.source.top;
 }
 
+Intersect :: (a: Draw.Rect, b: Draw.Rect) -> Draw.Rect {
+    return .{ifx a.left > b.left then a.left else b.left,
+             ifx a.top > b.top then a.top else b.top,
+             ifx a.right < b.right then a.right else b.right,
+             ifx a.bottom < b.bottom then a.bottom else b.bottom};
+}
+
 // Paint the damaged screen rectangle, in back-to-front order, then present it.
 // Each layer's x and y locate the first pixel of its source rectangle.
 Repaint :: (display: *Draw.Display, background: Draw.Image, layers: []Layer, damage: Draw.Rect) -> bool {
@@ -45,11 +52,4 @@ PaintLayer :: (display: *Draw.Display, screen: Draw.Image, layer: Layer, area: D
     x := cast(s32)(cast(s64)source.left + target.left - layer.x);
     y := cast(s32)(cast(s64)source.top + target.top - layer.y);
     return Draw.Composite(display, screen, layer.image, target, x, y);
-}
-
-Intersect :: (a: Draw.Rect, b: Draw.Rect) -> Draw.Rect {
-    return .{ifx a.left > b.left then a.left else b.left,
-             ifx a.top > b.top then a.top else b.top,
-             ifx a.right < b.right then a.right else b.right,
-             ifx a.bottom < b.bottom then a.bottom else b.bottom};
 }

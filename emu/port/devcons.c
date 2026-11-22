@@ -36,6 +36,7 @@ enum
 	Quser,
 	Qkeyevent,
 	Qinput,
+	Qinputpoll,
 };
 
 Dirtab contab[] =
@@ -63,6 +64,7 @@ Dirtab contab[] =
 	"user",		{Quser},	0,	0644,
 	"keyevent",	{Qkeyevent},	0,	0444,
 	"input",	{Qinput},	0,	0444,
+	"inputpoll",	{Qinputpoll},	0,	0444,
 };
 
 Queue*	gkscanq;		/* Graphics keyboard raw scancodes */
@@ -134,6 +136,14 @@ kbdslave(void *a)
 
 static int collecting;
 
+#ifdef __linux__
+int
+ginputready(void)
+{
+	return ginputq != nil && qcanread(ginputq);
+}
+#endif
+
 int
 ginputevent(int kind, int a, int b, int c, ulong msec)
 {
@@ -152,7 +162,12 @@ ginputevent(int kind, int a, int b, int c, ulong msec)
 	BPLONG(record+8, b);
 	BPLONG(record+12, c);
 	BPLONG(record+16, msec);
-	return qproduce(ginputq, record, sizeof(record)) == sizeof(record);
+	if(qproduce(ginputq, record, sizeof(record)) != sizeof(record))
+		return 0;
+#ifdef __linux__
+	zxnotifyactivity();
+#endif
+	return 1;
 }
 
 void
@@ -298,6 +313,7 @@ consopen(Chan *c, int omode)
 		break;
 
 	case Qinput:
+	case Qinputpoll:
 		if(ginputq == nil){
 			c->flag &= ~COPEN;
 			error("not supported");
@@ -366,6 +382,7 @@ consclose(Chan *c)
 		break;
 
 	case Qinput:
+	case Qinputpoll:
 		decref(&ginputreader);
 		break;
 
@@ -511,6 +528,12 @@ consread(Chan *c, void *va, long n, vlong offset)
 		if(n < GinputBytes)
 			error(Eshort);
 		return qread(ginputq, va, GinputBytes);
+
+	case Qinputpoll:
+		if(n < GinputBytes)
+			error(Eshort);
+		n = qconsume(ginputq, va, GinputBytes);
+		return n < 0 ? 0 : n;
 
 	case Qkprint:
 		rlock(&kprintq.l);

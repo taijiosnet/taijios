@@ -18,9 +18,11 @@ Event :: struct {
 }
 
 Open :: () -> s32 { return Io.OpenFile("/dev/input", 0) }
+OpenPoll :: () -> s32 { return Io.OpenFile("/dev/inputpoll", 0) }
 Close :: (input: s32) { unused Io.CloseFile(input) }
 
-// Wait for the next complete record. A zero kind indicates a failed read.
+// Read one complete record. Kind zero indicates a failed read or no event
+// when the input handle was opened with OpenPoll.
 Next :: (input: s32) -> Event {
     record: [20]u8;
     if Io.ReadBytes(input, record[:]) != record.count { return .{} }

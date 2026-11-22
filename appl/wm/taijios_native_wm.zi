@@ -1,0 +1,26 @@
+host_api :: #system_library "host_api";
+
+Open :: 1;
+Frame :: 2;
+Close :: 3;
+SetTitle :: 4;
+SetTasked :: 5;
+Publish :: 1;
+Staged :: 2;
+
+StartWindow :: (path: string, operands: []string) -> s32 #foreign host_api;
+
+// Read one outstanding request from a child below before_id, or any child
+// when before_id is zero. Fields are kind, width, height, first row, rows,
+// flag, and payload byte length. Reply once after using its borrowed payload.
+Request :: (before_id: s32, fields: []s32) -> s32 #foreign host_api;
+Title :: (id: s32) -> string #foreign host_api;
+Pixels :: (id: s32, offset: s32, bytes: []u8) -> s32 #foreign host_api;
+Reply :: (id: s32, accepted: bool) -> bool #foreign host_api;
+
+// Events use zx_surface.SurfaceEvent order. The last field is the text rune.
+Dispatch :: (id: s32, fields: []s32, pointer_millis: s64) -> bool #reads #foreign host_api;
+Disconnect :: (id: s32) #foreign host_api;
+
+// Wait for input, an application request, or a completed child process.
+WaitActivity :: () -> bool #foreign host_api;

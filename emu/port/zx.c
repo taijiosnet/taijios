@@ -16,6 +16,9 @@
 #include "zxrunt.h"
 #include "drawif.h"
 #include "zxmod.h"
+#ifdef __linux__
+#include "zxwindow.h"
+#endif
 
 enum {
 	ZxMaxImage = 32 * 1024 * 1024,
@@ -914,6 +917,7 @@ struct ZxCommand {
 	HostField outfields[3];
 #ifdef __linux__
 	ZxProcess *children;
+	ZxNativeWindow *window;
 	int childid, nchild;
 #endif
 };
@@ -1086,6 +1090,13 @@ struct ZxProcess {
 
 static Lock zxprocesslock;
 static int zxprocessactive;
+static Rendez zxactivity;
+
+void
+zxnotifyactivity(void)
+{
+	Wakeup(&zxactivity);
+}
 
 static int
 zxprocessadmit(void)
@@ -1115,6 +1126,7 @@ zxprocessrelease(ZxProcess *process)
 		return;
 	closefgrp(process->files);
 	zxfreeargs(&process->command);
+	zxwindowfree(process->command.window);
 	free(process);
 }
 
@@ -1134,6 +1146,8 @@ zxprocessworker(void *arg)
 	process->done = 1;
 	unlock(&process->wait.l);
 	Wakeup(&process->wait);
+	if(process->command.window != nil)
+		zxnotifyactivity();
 	zxprocessrelease(process);
 }
 
@@ -1178,7 +1192,7 @@ zxprocessargs(ZxCommand *command, const HostValue *operands)
 }
 
 static ZxProcess *
-zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result)
+zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int windowed)
 {
 	ZxProcess *process;
 	Fgrp *parent;
@@ -1200,6 +1214,8 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result)
 		problem = "invalid ZX program path";
 	else if(!zxprocessargs(&process->command, args+1))
 		problem = "cannot copy ZX process arguments";
+	else if(windowed && (process->command.window = zxwindownew()) == nil)
+		problem = "cannot create ZX window channel";
 	else if(!zxprocessadmit())
 		problem = "too many active ZX processes";
 	if(problem != nil){
@@ -1261,7 +1277,7 @@ zxprocessrun(ZxCommand *command, const HostValue *args)
 	ZxProcess *process;
 	ZxResult result = {0, -1, ""};
 
-	process = zxprocessstart(command, args, &result);
+	process = zxprocessstart(command, args, &result, 0);
 	if(process != nil){
 		zxprocessresult(process, 1, &result);
 		zxprocessrelease(process);
@@ -1295,8 +1311,28 @@ zxprocessforget(ZxCommand *command)
 
 	while((process = command->children) != nil){
 		command->children = process->next;
+		zxwindowdisconnect(process->command.window);
 		zxprocessrelease(process);
 	}
+}
+
+static int
+zxprocessregister(ZxCommand *command, const HostValue *args, ZxResult *result, int windowed)
+{
+	ZxProcess *process;
+
+	if(command->nchild >= ZxProcessLimit || command->childid == INT32_MAX){
+		snprint(result->problem, sizeof(result->problem), "too many outstanding ZX processes");
+		return 0;
+	}
+	process = zxprocessstart(command, args, result, windowed);
+	if(process == nil)
+		return 0;
+	process->id = ++command->childid;
+	process->next = command->children;
+	command->children = process;
+	command->nchild++;
+	return process->id;
 }
 
 static int
@@ -1306,7 +1342,6 @@ zxprocess(void *context, const char *module, const char *function,
 	ZxCommand *command = context;
 	ZxResult *outcome = &command->outcome;
 	HostField *fields = command->outfields;
-	ZxProcess *process;
 	int id;
 
 	USED(module);
@@ -1315,15 +1350,7 @@ zxprocess(void *context, const char *module, const char *function,
 			return 0;
 		if(strcmp(function, "Start") == 0){
 			*outcome = (ZxResult){0, -1, ""};
-			id = 0;
-			if(command->nchild >= ZxProcessLimit || command->childid == INT32_MAX)
-				snprint(outcome->problem, sizeof(outcome->problem), "too many outstanding ZX processes");
-			else if((process = zxprocessstart(command, args, outcome)) != nil){
-				id = process->id = ++command->childid;
-				process->next = command->children;
-				command->children = process;
-				command->nchild++;
-			}
+			id = zxprocessregister(command, args, outcome, 0);
 			fields[0] = (HostField){"id", {.kind = HOST_INTEGER, .type = "s32", .integer = id}};
 			fields[1] = (HostField){"error", {.kind = HOST_STRING, .type = "string",
 				.data = (uchar*)outcome->problem, .length = strlen(outcome->problem)}};
@@ -1724,6 +1751,130 @@ zxtaskslice(const HostValue *value, const char *type, size_t count)
 	return value->kind == HOST_SLICE && value->type != nil &&
 		strcmp(value->type, type) == 0 && value->length >= count && value->elements != nil;
 }
+
+#ifdef __linux__
+static int
+zxnativeready(void *arg)
+{
+	ZxCommand *command = arg;
+	ZxProcess *process;
+	int done;
+
+	if(ginputready())
+		return 1;
+	for(process = command->children; process != nil; process = process->next){
+		lock(&process->wait.l);
+		done = process->done;
+		unlock(&process->wait.l);
+		if(done || zxwindowrequest(process->command.window, nil))
+			return 1;
+	}
+	return 0;
+}
+
+static int
+zxnativemanager(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	ZxProcess *process;
+	ZxNativeRequest request;
+	ZxNativeWindow *window;
+	int i, kind, fields[9];
+
+	USED(module);
+	if(strcmp(function, "StartWindow") == 0){
+		if(n != 2 || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE)
+			return 0;
+		return zxs32(result, zxprocessregister(command, args, &command->outcome, 1));
+	}
+	if(strcmp(function, "WaitActivity") == 0){
+		if(n != 0)
+			return 0;
+		if(waserror()){
+			poperror();
+			zxbool(result, 0);
+			return 1;
+		}
+		Sleep(&zxactivity, zxnativeready, command);
+		poperror();
+		BundleHostRenewSteps();
+		zxbool(result, 1);
+		return 1;
+	}
+	if(strcmp(function, "Request") == 0){
+		if(n != 2 || !zxisindex(args) || !zxtaskslice(args+1, "[]s32", 7))
+			return 0;
+		for(process = command->children; process != nil; process = process->next){
+			if(args[0].integer != 0 && process->id >= args[0].integer)
+				continue;
+			if(!zxwindowrequest(process->command.window, &request))
+				continue;
+			args[1].elements[0].integer = request.kind;
+			args[1].elements[1].integer = request.width;
+			args[1].elements[2].integer = request.height;
+			args[1].elements[3].integer = request.first;
+			args[1].elements[4].integer = request.rows;
+			args[1].elements[5].integer = request.flag;
+			args[1].elements[6].integer = request.length;
+			return zxs32(result, process->id);
+		}
+		return zxs32(result, 0);
+	}
+	if(n < 1 || !zxisindex(args))
+		return 0;
+	for(process = command->children; process != nil && process->id != args[0].integer; process = process->next)
+		;
+	window = process == nil ? nil : process->command.window;
+	if(strcmp(function, "Title") == 0){
+		*result = (HostValue){.kind = HOST_STRING, .type = "string"};
+		if(n != 1)
+			return 0;
+		kind = zxwindowrequest(window, &request);
+		if(kind == ZxnOpen || kind == ZxnTitle){
+			result->data = request.data;
+			result->length = request.length;
+		}
+		return 1;
+	}
+	if(strcmp(function, "Pixels") == 0){
+		if(n != 3 || !zxisindex(args+1) || !zxioslice(args+2) || args[1].integer < 0)
+			return 0;
+		if(zxwindowrequest(window, &request) != ZxnFrame ||
+		   args[1].integer > request.length || args[2].length > request.length - args[1].integer ||
+		   args[2].length > ZxIoBytes)
+			return zxs32(result, 0);
+		for(i = 0; i < args[2].length; i++)
+			args[2].elements[i].bits = request.data[args[1].integer+i];
+		return zxs32(result, i);
+	}
+	if(strcmp(function, "Reply") == 0){
+		if(n != 2 || args[1].kind != HOST_INTEGER || args[1].type == nil || strcmp(args[1].type, "bool") != 0)
+			return 0;
+		zxbool(result, zxwindowreply(window, args[1].integer != 0));
+		return 1;
+	}
+	if(strcmp(function, "Disconnect") == 0){
+		if(n != 1)
+			return 0;
+		zxwindowdisconnect(window);
+		result->kind = HOST_VOID;
+		return 1;
+	}
+	if(n != 3 || !zxtaskslice(args+1, "[]s32", nelem(fields)) || args[2].kind != HOST_INTEGER ||
+	   args[2].type == nil || strcmp(args[2].type, "s64") != 0)
+		return 0;
+	for(i = 0; i < nelem(fields); i++){
+		if(!zxisindex(&args[1].elements[i]))
+			return 0;
+		fields[i] = args[1].elements[i].integer;
+	}
+	if(fields[0] == ZX_Closed)
+		zxwindowdisconnect(window);
+	zxbool(result, fields[0] == ZX_Closed ? window != nil : zxwindowinput(window, fields, args[2].integer));
+	return 1;
+}
+#endif
 
 static void
 zxtaskname(const HostValue *value, const char *name)
@@ -2223,6 +2374,23 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
 			continue;
 		}
+		if(!usesdis() && command->depth == 0 && zxmodule(abi.module, "taijios_native_wm")){
+			if(strcmp(abi.function, "StartWindow") == 0 || strcmp(abi.function, "WaitActivity") == 0 ||
+			   strcmp(abi.function, "Request") == 0 || strcmp(abi.function, "Title") == 0 ||
+			   strcmp(abi.function, "Pixels") == 0 ||
+			   strcmp(abi.function, "Reply") == 0 || strcmp(abi.function, "Disconnect") == 0 ||
+			   strcmp(abi.function, "Dispatch") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxnativemanager, command};
+			continue;
+		}
+		if(command->window != nil && zxmodule(abi.module, "zx_surface")){
+			for(j = 0; j < nelem(names); j++)
+				if(strcmp(abi.function, names[j]) == 0){
+					bindings[count++] = (HostBinding){abi.module, abi.function, zxnativesurface, command->window};
+					break;
+				}
+			continue;
+		}
 #endif
 		if(zxmodule(abi.module, "taijios_io")){
 			for(j = 0; j < nelem(io); j++)
@@ -2487,7 +2655,11 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 				if(program != nil){
 					/* Present consumes the pixels within the host call. */
 					for(size_t i = 0; i < count; i++){
-						if(bindings[i].call != zxsurface)
+						if(bindings[i].call != zxsurface
+#ifdef __linux__
+						   && bindings[i].call != zxnativesurface
+#endif
+						  )
 							continue;
 						if(strcmp(bindings[i].function, "Present") == 0)
 							ZxModuleProgramBorrowHostString(program, bindings[i].module,
@@ -2615,6 +2787,13 @@ ZX_runwindowargs(void *fp)
 #endif
 
 #ifdef __linux__
+#ifndef TAIJI_ZX
+void
+zxnotifyactivity(void)
+{
+}
+#endif
+
 int
 zxbootable(const char *path)
 {

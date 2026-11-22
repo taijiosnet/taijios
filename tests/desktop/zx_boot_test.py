@@ -167,6 +167,86 @@ def check_draw(emulator, root, env):
     print('Private ZX-only guest composited its workspace and received pointer and keyboard events')
 
 
+def check_window_manager(emulator, root, env):
+    from PIL import Image
+    from test_logwindow import private_display
+    from test_tcltk import launch, stop, until
+
+    wm = ROOT / 'appl/wm'
+    surfaces = ROOT / 'appl/cmd/tcltk'
+    subprocess.run([
+        'ziran', 'bundle', '--root', wm, '--module-path', ROOT / 'appl/cmd',
+        '--module-path', ROOT / 'appl/lib', '--module-path', surfaces,
+        '--bind-host', 'taijios_args', '--bind-host', 'taijios_io',
+        '--bind-host', 'taijios_process', '--bind-host', 'taijios_native_wm',
+        '--entry', 'native_wm:main', '-o', root / 'wm.zx', wm / 'native_wm.zi',
+    ], env=env, check=True, timeout=60)
+    fixture = Path(__file__).with_name('zx_window_app.zi').read_text(encoding='utf-8')
+    for red in (37, 108):
+        source = root / 'zx_window_app.zi'
+        source.write_text(fixture.replace('Color :: 37;', f'Color :: {red};'), encoding='utf-8')
+        subprocess.run([
+            'ziran', 'bundle', '--root', root, '--module-path', surfaces, '--bind-host', 'zx_surface',
+            '--entry', 'zx_window_app:main', '-o', root / f'window{red}.zx', source,
+        ], env=env, check=True, timeout=60)
+    assert not any(root.rglob('*.dis'))
+
+    with private_display() as display:
+        env = env | {'DISPLAY': display['DISPLAY']}
+        app = launch(env, emulator, '-v', '-r', root, '-g', '640x480', '/wm.zx',
+                     '/window37.zx', '/window108.zx', stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        def desktop(*args, check=True):
+            return subprocess.run(args, env=env, capture_output=True, check=check, timeout=5).stdout
+
+        try:
+            window = until(lambda: desktop('xdotool', 'search', '--onlyvisible', '--name',
+                                           '^inferno$', check=False).decode().strip(), 'native WM window missing')
+
+            def samples():
+                assert app.poll() is None, f'native WM exited with {app.returncode}'
+                frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
+                return tuple(frame.getpixel((x + 16, y)) for x in (0, 48) for y in (17, 31))
+
+            frames = {((37, 90, 170), (37, 90, 170)), ((108, 90, 170), (108, 90, 200))}
+            background = (24, 56, 88)
+
+            def both_visible():
+                pixels = samples()
+                return {pixels[:2], pixels[2:]} == frames
+
+            until(both_visible, 'both ZX application frames were not visible')
+            desktop('xdotool', 'windowfocus', window)
+            desktop('xdotool', 'key', 'ctrl+alt+Right')
+            until(lambda: set(samples()) == {background}, 'inactive workspace left its windows visible')
+            desktop('xdotool', 'key', 'ctrl+alt+Left')
+            until(both_visible, 'returning workspace lost its windows')
+
+            def close(x):
+                desktop('xdotool', 'mousemove', '--window', window, str(x), '17', 'click', '1')
+                desktop('xdotool', 'key', 'a')
+
+            close(16)
+            def first_closed():
+                pixels = samples()
+                return pixels[:2] == (background, background) and pixels[2:] in frames
+
+            until(first_closed, 'first child did not close independently')
+            close(64)
+            assert app.wait(timeout=8) == 0
+            transcript = app.stdout.read(4096)
+            assert b'Initial ZX: "/wm.zx"' in transcript and b'Initial Dis:' not in transcript, transcript
+            assert b'ZX_WINDOW_DONE 37' in transcript and b'ZX_WINDOW_DONE 108' in transcript, transcript
+        except (AssertionError, subprocess.SubprocessError) as error:
+            stop(app)
+            raise AssertionError(f'{error}\n{app.stdout.read(4096).decode(errors="replace")}') from error
+        finally:
+            stop(app)
+            app.stdout.close()
+    print('Native ZX WM placed, composited, switched and routed input to two real ZX windows')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--emu', type=Path, default=ROOT / 'emu/Linux/o.emu')
@@ -259,6 +339,7 @@ def main():
         check_async(emulator, root, env)
         if args.graphics:
             check_draw(emulator, root, env)
+            check_window_manager(emulator, root, env)
 
 
 if __name__ == '__main__':

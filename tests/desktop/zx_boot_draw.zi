@@ -105,13 +105,46 @@ CheckWindows :: (display: *Draw.Display, background: Draw.Image) -> bool {
     return Windows.Repaint(*state, display, background, chrome[:], .{30, 30, 80, 80});
 }
 
+CheckPlacement :: () -> bool {
+    state := Windows.New(false, false);
+    screen: Draw.Rect = .{100, 50, 400, 250};
+    no_image: Draw.Image;
+    chrome: [2]Compositor.Layer = .{
+        .{no_image, .{0, 0, 300, 28}, 100, 50},
+        .{no_image, .{0, 0, 180, 160}, 100, 78},
+    };
+    area := Windows.WorkArea(screen, chrome[:]);
+    if area.left != 100 || area.top != 78 || area.right != 400 || area.bottom != 250 { return false }
+    first := Windows.Place(*state, area, 50, 40);
+    if first.left != 100 || first.top != 78 || first.right != 150 || first.bottom != 118 { return false }
+    occupied: Compositor.Layer = .{no_image, .{0, 0, 50, 40}, first.left, first.top};
+    if !Windows.Add(*state, 1, occupied, false, false) { return false }
+    second := Windows.Place(*state, area, 50, 40);
+    if second.left < area.left || second.top < area.top ||
+       second.right - second.left != 50 || second.bottom - second.top != 40 ||
+       (second.left < first.right && second.top < first.bottom) { return false }
+    if !Windows.Minimize(*state, 1) { return false }
+    hidden := Windows.Place(*state, area, 50, 40);
+    if hidden.left != first.left || hidden.top != first.top { return false }
+    chrome[0] = .{no_image, .{0, 0, 24, 200}, 376, 50};
+    area = Windows.WorkArea(screen, chrome[:]);
+    if area.left != 100 || area.top != 50 || area.right != 376 || area.bottom != 250 { return false }
+    largest := Windows.Place(*state, area, 600, 600);
+    return largest.left == area.left && largest.top == area.top &&
+           largest.right == area.right && largest.bottom == area.bottom;
+}
+
 main :: () -> s32 {
     display: Draw.Display;
     if !Draw.Open(*display) { return Fail("open Draw") }
     defer Draw.Close(*display);
     if !Paint(*display) { return Fail("paint") }
+    if !CheckPlacement() { return Fail("place window") }
+    poll := Input.OpenPoll();
+    if poll < 0 || Input.Next(poll).kind != 0 || Input.Open() >= 0 { return Fail("poll idle input") }
+    Input.Close(poll);
     input := Input.Open();
-    if input < 0 || Input.Open() >= 0 { return Fail("open exclusive input") }
+    if input < 0 || Input.OpenPoll() >= 0 { return Fail("open exclusive input") }
     keyboard := Io.OpenFile("/dev/keyboard", 0);
     if keyboard < 0 { return Fail("open keyboard") }
     defer Io.CloseFile(keyboard);

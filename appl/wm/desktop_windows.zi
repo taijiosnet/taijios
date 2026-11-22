@@ -2,6 +2,7 @@
 Draw :: #import "guest_draw";
 Compositor :: #import "compositor";
 Input :: #import "guest_input";
+Placement :: #import "winplace";
 
 NoTarget :: 0;
 Desktop :: -1;
@@ -29,12 +30,57 @@ State :: struct {
     discard_pointer: bool;
     workspace_keys: [2]bool;
     layers: Vec(Compositor.Layer);
+    last_placement: Placement.Rect;
 }
 
 New :: (desktop_keyboard: bool, desktop_pointer: bool) -> State {
     focus: s32 = ifx desktop_keyboard then Desktop else NoTarget;
     return .{workspace_count = 4, keyboard_focus = focus,
              desktop_keyboard = desktop_keyboard, desktop_pointer = desktop_pointer};
+}
+
+// Only the first chrome region reserves work area. Popup regions can overlap
+// windows without affecting placement or maximized bounds.
+WorkArea :: (screen: Draw.Rect, chrome: []Compositor.Layer) -> Draw.Rect {
+    if chrome.count == 0 { return screen }
+    panel := LayerBounds(chrome[0]);
+    if panel.left < screen.left || panel.top < screen.top || panel.right > screen.right ||
+       panel.bottom > screen.bottom || panel.left >= panel.right || panel.top >= panel.bottom { return screen }
+    width := cast(s64)panel.right - panel.left;
+    height := cast(s64)panel.bottom - panel.top;
+    area := screen;
+    if width >= height && height < cast(s64)screen.bottom - screen.top {
+        if panel.top == screen.top { area.top = panel.bottom }
+        else if panel.bottom == screen.bottom { area.bottom = panel.top }
+    } else if width < height && width < cast(s64)screen.right - screen.left {
+        if panel.left == screen.left { area.left = panel.right }
+        else if panel.right == screen.right { area.right = panel.left }
+    }
+    return area;
+}
+
+Place :: (state: *State, area: Draw.Rect, width: s32, height: s32) -> Draw.Rect {
+    span_x := cast(s64)area.right - area.left;
+    span_y := cast(s64)area.bottom - area.top;
+    if span_x <= 0 || span_y <= 0 || width <= 0 || height <= 0 { return .{} }
+    if span_x > 2147483647 || span_y > 2147483647 || area.left == -2147483648 ||
+       area.top == -2147483648 || area.right == 2147483647 || area.bottom == 2147483647 { return .{} }
+
+    occupied: Vec(Placement.Rect);
+    for window: state.windows[:] {
+        if !Visible(state, window) { continue }
+        bounds := LayerBounds(window.layer);
+        if bounds.right <= bounds.left || bounds.bottom <= bounds.top { continue }
+        rect := Compositor.Intersect(bounds, area);
+        if rect.right <= rect.left || rect.bottom <= rect.top { continue }
+        if !VecPush(occupied, Placement.Rect.{rect.left, rect.top, rect.right, rect.bottom}) { return .{} }
+    }
+    screen: Placement.Rect = .{area.left, area.top, area.right, area.bottom};
+    fitted_width := ifx width > span_x then cast(s32)span_x else width;
+    fitted_height := ifx height > span_y then cast(s32)span_y else height;
+    rect := Placement.Place(occupied[:], screen, state.last_placement, fitted_width, fitted_height);
+    state.last_placement = rect;
+    return .{rect.min_x, rect.min_y, rect.max_x, rect.max_y};
 }
 
 // The caller owns Draw images and keeps them alive while attached to a window.
@@ -202,6 +248,13 @@ RawRight :: 262;
 RawLeft :: 263;
 RawShift :: 1;
 RawCtrlAlt :: 6;
+
+LayerBounds :: (layer: Compositor.Layer) -> Draw.Rect {
+    right := cast(s64)layer.x + layer.source.right - layer.source.left;
+    bottom := cast(s64)layer.y + layer.source.bottom - layer.source.top;
+    if right > 2147483647 || bottom > 2147483647 || right <= layer.x || bottom <= layer.y { return .{} }
+    return .{layer.x, layer.y, cast(s32)right, cast(s32)bottom};
+}
 
 Find :: (state: *State, id: s32) -> s64 {
     if id <= 0 { return -1 }
