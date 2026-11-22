@@ -1,8 +1,10 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
-// basename, cleanname, wc, uniq, tr, tee, cp, test, ls and mkdir.
+// basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir and tclsh.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
-// guest shell, which starts /dis/NAME.zx.
+// guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
+// prompts from a second thread, so they raced its results; here they are in
+// the order the commands were read.
 //
 // From the TaijiOS root, after `(cd appl/cmd && mk install)`:
 //     ziran run --target=c --root tests/commands tests/commands/commands_test.zi -- [EMU]
@@ -27,9 +29,11 @@ WORK :: "build/tests/commands";
 ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 SQUEEZE :: "abczz\naabb\n";
+TCL_FILE :: "puts file-one\nset y 7\nnoSuch arg\nputs after-error\n";
+TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [71]Case = Case.[
+cases: [74]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -97,6 +101,10 @@ cases: [71]Case = Case.[
     .{tool = "mkdir", args = "a.txt", status = "error", err = "mkdir: a.txt already exists\n"},
     .{tool = "mkdir", args = "missing/x", status = "error", err = "mkdir: can't create missing/x: 'missing' file does not exist\n"},
     .{args = "whatis cat echo basename cleanname wc uniq tr tee cp test ls mkdir date", out = "/dis/cat.zx\n/dis/echo.zx\n/dis/basename.zx\n/dis/cleanname.zx\n/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n/dis/tee.zx\n/dis/cp.zx\n/dis/test.zx\n/dis/ls.zx\n/dis/mkdir.zx\n/dis/date.dis\n"},
+    .{tool = "tclsh", input = "lines.tcl", out = "tcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% In function set y.....\n\tcan't read \"y\": no such variable\ntcl% "},
+    // A file stops at its first error without a report; its variables stay set.
+    .{tool = "tclsh", args = "file.tcl missing.tcl two.tcl", input = "lines.tcl", out = "file-one\nfile-two\ntcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% 7\ntcl% "},
+    .{tool = "tclsh", args = "missing.tcl", out = "tcl% "},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},
@@ -144,6 +152,7 @@ Prepare :: (binary: string) -> bool {
     return Write("a.txt", ALPHA) && Write("words", WORDS) && Write("squeeze", SQUEEZE) &&
         Write("empty", "") && Write("bin", binary) && Write("-dash", "dash\n") &&
         Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
+        Write("file.tcl", TCL_FILE) && Write("two.tcl", "puts file-two\n") && Write("lines.tcl", TCL_LINES) &&
         Write("fake/date.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
         SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755
 }

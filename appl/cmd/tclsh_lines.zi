@@ -1,0 +1,60 @@
+// Line rules of the TaijiOS tclsh, kept from the Limbo shell: when typed
+// lines form a whole command, and how a failed command is reported.
+
+// A command is whole when its braces, brackets and double quotes balance
+// and it does not end in a backslash before the final character. As in the
+// Limbo shell, a character after a backslash is not counted and a closing
+// brace or bracket without an opening one is ignored.
+Finished :: (text: string) -> bool {
+    if text.count == 0 { return true }
+    if text.count > 1 && text[text.count - 2] == #char "\\" { return false }
+    braces: s64
+    brackets: s64
+    quoted := false
+    for i: 0..text.count - 1 {
+        if i > 0 && text[i - 1] == #char "\\" { continue }
+        c := text[i]
+        if c == #char "{" {
+            braces += 1
+        } else if c == #char "}" && braces > 0 {
+            braces -= 1
+        } else if c == #char "[" {
+            brackets += 1
+        } else if c == #char "]" && brackets > 0 {
+            brackets -= 1
+        } else if c == #char "\"" {
+            quoted = !quoted
+        }
+    }
+    return braces == 0 && brackets == 0 && !quoted
+}
+
+Separator :: (c: u8) -> bool {
+    return c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r" || c == #char ";"
+}
+
+// The word of command that starts at or after from, and where it ends.
+NextWord :: (command: string, from: s64) -> (word: string, end: s64) {
+    start := from
+    while start < command.count && Separator(command[start]) { start += 1 }
+    end := start
+    while end < command.count && !Separator(command[end]) { end += 1 }
+    return command[start:end], end
+}
+
+// The Limbo shell named the command and its first argument before the
+// message: "In function set y.....\n\tcan't read ...".
+ErrorReport :: (command: string, message: string) -> Text {
+    out: Vec(u8)
+    name, after := NextWord(command, 0)
+    if name.count > 0 {
+        argument, _ := NextWord(command, after)
+        if argument.count > 0 {
+            BuilderPrint(*out, "In function % %.....\n\t", name, argument)
+        } else {
+            BuilderPrint(*out, "In function %.....\n\t", name)
+        }
+    }
+    BuilderPrint(*out, "%", message)
+    return BuilderFinish(out)
+}

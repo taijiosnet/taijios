@@ -7,9 +7,9 @@ and lock. The guest shell and test fixtures live under `appl/cmd`.
 
 ### Comparison with shipped Inferno Tcl
 
-Limbo `load` resolves `/dis/lib/tcl_<name>.dis` and calls the module’s `TclLib`
-interface. The five libraries shipped here are `calc`, `io`, `list`, `string`
-and `tk`. The first four are built into the port, and the optional Tcl/Tk
+The Limbo interpreter's `load` resolved `/dis/lib/tcl_<name>.dis` and called
+the module’s `TclLib` interface. Its five libraries are `calc`, `io`, `list`,
+`string` and `tk`; `wm/wish` still uses them. The first four are built into the port, and the optional Tcl/Tk
 app imports its Tk bridge at startup. Hosted ZX resolves imports at startup.
 Loading separately compiled extensions after startup would require a guest API
 for named lookup and invocation.
@@ -36,25 +36,30 @@ build/tcl/native/tclsh_native appl/cmd/tclsh_tests/core.tcl
 ```
 
 The native shell also reads stdin with `-` or when given no filename. The
-test runner compares the reference, compatibility, expression, format,
-headless and channel scripts with the existing Limbo `tclsh` and runs the scripts under ZX
-and hosted Taiji. API tests exercise injected channels, clocks and command
+test runner checks the reference, compatibility, expression, format,
+headless and channel scripts against the output of the Limbo `tclsh` and runs
+them under ZX and hosted Taiji. API tests exercise injected channels, clocks and command
 libraries. `zxrun` prints a
 final scalar `0` on success and `1` on a Tcl error. `zxrun -c` reports the
 result as a guest command status.
 
-With a Taiji emulator that provides `taijios_stdin`, `taijios_files` and
-`taijios_clock` and `taijios_io` including `Create`, `Seek` and `Stat`, build the shell that
-reads a script from the guest's standard input. It evaluates after EOF and
-accepts scripts up to 1 MiB.
+The guest `tclsh [file ...]` is `/dis/tclsh.zx`, built from
+`appl/cmd/tclsh_shell.zi`. Like the Limbo shell it replaced, it evaluates
+each file, then reads commands from standard input. It prompts with `tcl% `,
+and with `tcl> ` while a command's braces, brackets or quotes are open. It
+prints each nonempty result and reports an error as
+`In function NAME ARG.....` followed by a tab and the message. A file that
+cannot be read is skipped, and a file stops at its first error without a
+report. `exit` or the end of input ends the shell. Unlike the Limbo shell it
+prints its prompts in order and exits at the end of input. Its error reports
+name only the command typed at the prompt. Scripts are limited to 1 MiB.
 
 ```sh
 (cd appl/cmd && mk zxrun.install install-tclsh-zx)
 python3 appl/cmd/tclsh_tests/run.py --stdin /dis/tclsh.zx
 ```
 
-At the Taiji shell, run `zxrun /dis/tclsh.zx < /appl/cmd/tclsh_tests/reference.tcl`
-or pipe a script from a Dis command. For emulators with only console output,
+At the Taiji shell, run `tclsh /appl/cmd/tclsh_tests/reference.tcl`. For emulators with only console output,
 `appl/cmd/tclsh.zi` takes `Script` from an in-memory `tcl_input` module.
 Install the tested reference example with
 `install -m 0644 build/tcl/tclsh.zx dis/tclsh.zx` and run `zxrun /dis/tclsh.zx`.

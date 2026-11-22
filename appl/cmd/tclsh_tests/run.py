@@ -41,25 +41,38 @@ def guest(command):
     return capture([EMU, "-r", ROOT, "/dis/sh.dis", "-c", command], "")
 
 
+PROMPT = "tcl% "
+
+
+def run_file(image, path, *, status=False):
+    # The shell evaluates its file operand, then prompts once before end of input.
+    if status:
+        return guest(f"zxrun -c {image} {path} < /dev/null; echo $status")
+    return guest(f"zxrun {image} {path} < /dev/null")
+
+
 def stdin_suite(image):
     # The prefix forces several guest fd 0 reads before the first Tcl command.
+    (BUILD / "stdin.tcl").write_text(("# stdin read boundary test\n" * 400) + "set x 5\n")
+    expect(guest(f"zxrun {image} < /build/tcl/stdin.tcl"), PROMPT * 401 + "5\n" + PROMPT + "0\n", codes=(0, -9))
     script = (FIXTURES / "core.tcl").read_text()
-    (BUILD / "stdin.tcl").write_text(("# stdin read boundary test\n" * 400) + script)
     expected = (FIXTURES / "core.out").read_text()
-    expect(guest(f"zxrun {image} < /build/tcl/stdin.tcl"), expected + "0\n", codes=(0, -9))
-    expect(guest(f"echo 'puts from-pipe' | zxrun {image}"), "from-pipe\n0\n", codes=(0, -9))
-    expect(guest(f"zxrun {image} < /dev/null"), "0\n", codes=(0, -9))
-    expect(guest(f"echo 'error intentional' | zxrun {image}"), "tclsh: intentional\n1\n", codes=(0, -9))
+    expect(run_file(image, "/appl/cmd/tclsh_tests/core.tcl"), expected + PROMPT + "0\n", codes=(0, -9))
+    expect(guest(f"echo 'puts from-pipe' | zxrun {image}"), PROMPT + "from-pipe\n" + PROMPT + "0\n", codes=(0, -9))
+    expect(guest(f"zxrun {image} < /dev/null"), PROMPT + "0\n", codes=(0, -9))
+    expect(guest(f"echo 'error intentional' | zxrun {image}"),
+           PROMPT + "In function error intentional.....\n\tintentional\n" + PROMPT + "0\n", codes=(0, -9))
     path = "/appl/cmd/tclsh_tests/sourced.tcl"
     (BUILD / "source-script.tcl").write_text(source_script(path))
-    expect(guest(f"zxrun {image} < /build/tcl/source-script.tcl"), "sourced=8\n0\n", codes=(0, -9))
+    expect(run_file(image, "/build/tcl/source-script.tcl"), "sourced=8\n" + PROMPT + "0\n", codes=(0, -9))
     expect(guest(f"echo 'source {path}.missing' | zxrun {image}"),
-           f'tclsh: could not read Tcl script "{path}.missing"\n1\n', codes=(0, -9))
-    print("Hosted Tcl stdin passed file redirection, multiple reads, pipes, EOF, source and error status")
+           PROMPT + f'In function source {path}.missing.....\n\tcould not read Tcl script "{path}.missing"\n'
+           + PROMPT + "0\n", codes=(0, -9))
+    print("Hosted Tcl shell passed file operands, multiple stdin reads, pipes, EOF, source and error reports")
     precision = "puts [expr {1.0000000009313225746 > 1.0}]\nputs [expr {sqrt(2)}]\n"
     (BUILD / "expression-installed-precision.tcl").write_text(precision)
-    expect(guest(f"zxrun {image} < /build/tcl/expression-installed-precision.tcl"),
-           "1\n1.4142135623730951\n0\n", codes=(0, -9))
+    expect(run_file(image, "/build/tcl/expression-installed-precision.tcl"),
+           "1\n1.4142135623730951\n" + PROMPT + "0\n", codes=(0, -9))
     print("Hosted Tcl preserves binary64 precision")
 
 
@@ -84,10 +97,10 @@ def fixed_format_edges(shell, image):
     expect(capture(["zi2zx", "run", "--backend", "engine", bundled]), expected + "0\n")
     if image:
         (BUILD / "format-edges.tcl").write_text(script)
-        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/format.tcl"),
-               (FIXTURES / "format.out").read_text() + "0\n", codes=(0, -9))
-        expect(guest(f"zxrun {image} < /build/tcl/format-edges.tcl"),
-               expected + "0\n", codes=(0, -9))
+        expect(run_file(image, "/appl/cmd/tclsh_tests/format.tcl"),
+               (FIXTURES / "format.out").read_text() + PROMPT + "0\n", codes=(0, -9))
+        expect(run_file(image, "/build/tcl/format-edges.tcl"),
+               expected + PROMPT + "0\n", codes=(0, -9))
     print("Fixed-point formatting covered maximum and subnormal binary64 values, signed zero and limits")
 
 
@@ -128,7 +141,7 @@ def headless_suite(shell, image):
         (guest("zxrun /build/tcl/tcl_headless_api.zx"), expected + "0\n", (0, -9)),
     ]
     if image:
-        workloads.append((guest(f"zxrun {image} < /appl/cmd/tclsh_tests/headless.tcl"), expected + "0\n", (0, -9)))
+        workloads.append((run_file(image, "/appl/cmd/tclsh_tests/headless.tcl"), expected + PROMPT + "0\n", (0, -9)))
     for result, output, codes in workloads:
         result.stdout = headless_output(result.stdout)
         expect(result, output, codes=codes)
@@ -163,14 +176,14 @@ def channel_suite(image):
     (BUILD / "legacy-channels.tcl").write_text((FIXTURES / "channels.tcl").read_text() + "exit\n")
     expect(guest("tclsh /build/tcl/legacy-channels.tcl"), expected, codes=(0, -9))
     assert (directory / "existing").read_bytes() == b"xyq\nE"
-    print("Channel compatibility fixture matched shipped Limbo Dis")
+    print("Channel compatibility fixture matched the shipped Limbo output")
 
     if image:
         directory = prepare_channel_files()
-        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/channels.tcl"), expected + "0\n", codes=(0, -9))
+        expect(run_file(image, "/appl/cmd/tclsh_tests/channels.tcl"), expected + PROMPT + "0\n", codes=(0, -9))
         assert (directory / "existing").read_bytes() == b"xyq\nE"
         expected = (FIXTURES / "channel_file.out").read_text()
-        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/channel_file.tcl"), expected + "0\n", codes=(0, -9))
+        expect(run_file(image, "/appl/cmd/tclsh_tests/channel_file.tcl"), expected + PROMPT + "0\n", codes=(0, -9))
         assert (directory / "created").read_bytes() == b"ok"
         print("Hosted Tcl matched Limbo channels and passed guest create, seek, tell and file metadata")
 
@@ -182,18 +195,18 @@ def channel_suite(image):
             "seek $out 0\nputs \"[string length [read $out 10000]]:[string length [read $out 10000]]:[eof $out]\"\n"
             "read $out 1\nputs [eof $out]\nclose $out\n")
         length = len(payload)
-        expect(guest(f"zxrun {image} < /build/tcl/large-channel.tcl"),
-               f"10000:{length - 10000}:0\n1\n0\n", codes=(0, -9))
+        expect(run_file(image, "/build/tcl/large-channel.tcl"),
+               f"10000:{length - 10000}:0\n1\n" + PROMPT + "0\n", codes=(0, -9))
         assert (directory / "large file").read_bytes() == payload.encode()
 
     script = "puts before\nproc stop {} {exit 7; puts after-exit}\ncatch {stop}; puts after-catch\n"
     (BUILD / "channel-exit.tcl").write_text(script)
     expect(guest("tclsh /build/tcl/channel-exit.tcl"), "before\n", codes=(0, -9))
     if image:
-        expect(guest(f"zxrun -c {image} < /build/tcl/channel-exit.tcl; echo $status"),
-               "before\n\n", codes=(0, -9))
+        expect(run_file(image, "/build/tcl/channel-exit.tcl", status=True), "before\n\n", codes=(0, -9))
         expect(guest(f"echo 'read missing 1' | zxrun -c {image}; echo $status"),
-               'tclsh: bad file identifier "missing"\n|1\n', codes=(0, -9))
+               PROMPT + 'In function read missing.....\n\tbad file identifier "missing"\n' + PROMPT + "\n",
+               codes=(0, -9))
         print("Hosted Tcl passed oversized transfers, noncatchable exit and shell status")
 
 
@@ -225,10 +238,10 @@ puts [list [package require demo::twice] $initializations]
     expect(capture([shell, "-"], script(FIXTURES / "packages")), expected)
     if image:
         (BUILD / "package-discovery.tcl").write_text(script("/appl/cmd/tclsh_tests/packages"))
-        expect(guest(f"zxrun {image} < /build/tcl/package-discovery.tcl"), expected + "0\n", codes=(0, -9))
+        expect(run_file(image, "/build/tcl/package-discovery.tcl"), expected + PROMPT + "0\n", codes=(0, -9))
         expected_registry = (FIXTURES / "packages.out").read_text()
-        expect(guest(f"zxrun {image} < /appl/cmd/tclsh_tests/packages.tcl"),
-               expected_registry + "0\n", codes=(0, -9))
+        expect(run_file(image, "/appl/cmd/tclsh_tests/packages.tcl"),
+               expected_registry + PROMPT + "0\n", codes=(0, -9))
     print("Tcl package discovery loaded indexed scripts, resolved dependencies and initialized once")
 
 
@@ -259,28 +272,26 @@ def main():
     script = (FIXTURES / "reference.tcl").read_text()
     (BUILD / "legacy-reference.tcl").write_text(script + "exit\n")
     reference = (FIXTURES / "reference.out").read_text()
-    legacy = guest("tclsh /build/tcl/legacy-reference.tcl")
-    # Inferno Tcl adds this call-site annotation around the same error.
-    dis_error = 'In function noSuchCommand.....\n\tinvalid command name "noSuchCommand"'
-    expect(legacy, reference.replace('invalid command name "noSuchCommand"', dis_error), codes=(0, -9))
-    print("reference.tcl matched Limbo Dis, including its extra error annotation")
+    # The Limbo shell also put its "In function noSuchCommand....." report into caught messages.
+    expect(guest("tclsh /build/tcl/legacy-reference.tcl"), reference, codes=(0, -9))
+    print("tclsh reference.tcl matched the Limbo output apart from its caught-error annotation")
 
     script = (FIXTURES / "compatibility.tcl").read_text()
     (BUILD / "legacy-compatibility.tcl").write_text(script + "exit\n")
     expect(guest("tclsh /build/tcl/legacy-compatibility.tcl"),
            (FIXTURES / "compatibility.out").read_text(), codes=(0, -9))
-    print("compatibility.tcl matched Limbo Dis for arrays, global, info, switch, lists and strings")
+    print("tclsh compatibility.tcl matched the Limbo output for arrays, global, info, switch, lists and strings")
 
     expression = (FIXTURES / "expression.out").read_text()
     script = (FIXTURES / "expression.tcl").read_text()
     (BUILD / "legacy-expression.tcl").write_text(script + "exit\n")
     expect(guest("tclsh /build/tcl/legacy-expression.tcl"), expression, codes=(0, -9))
-    print("expression.tcl matched Limbo Dis for numeric operations and all 20 math functions")
+    print("tclsh expression.tcl matched the Limbo output for numeric operations and all 20 math functions")
     fixture = FIXTURES / "format.tcl"
     (BUILD / "legacy-format.tcl").write_text(fixture.read_text() + "exit\n")
     expect(guest("tclsh /build/tcl/legacy-format.tcl"),
            fixture.with_suffix(".out").read_text(), codes=(0, -9))
-    print("format.tcl matched Limbo Dis for fixed-point precision, rounding and alignment")
+    print("tclsh format.tcl matched the Limbo output for fixed-point precision, rounding and alignment")
     fixed_format_edges(shell, args.stdin)
 
     expect(capture([shell, "-"], "puts [calc {sqrt(81)}]; puts [expr {2+1.0+1}]"), "9\n4\n")
@@ -297,7 +308,7 @@ def main():
     expect(capture([shell, "-"], source_script(FIXTURES / "sourced.tcl")), "sourced=8\n")
     (BUILD / "source-script.tcl").write_text(source_script("/appl/cmd/tclsh_tests/sourced.tcl") + "exit\n")
     expect(guest("tclsh /build/tcl/source-script.tcl"), "sourced=8\n", codes=(0, -9))
-    print("source evaluated in the calling procedure on native Ziran and Limbo Dis")
+    print("source evaluated in the calling procedure on native Ziran and the guest tclsh")
 
     for script, diagnostic in (
         ('puts before; set v "unfinished', "missing close-quote"),
@@ -327,9 +338,9 @@ def main():
     print("Extension dispatch, interpreter isolation and recovery verified on ZX and Taiji")
     if args.stdin:
         stdin_suite(args.stdin)
-        expect(guest(f"zxrun {args.stdin} < /appl/cmd/tclsh_tests/expression.tcl"),
-               expression + "0\n", codes=(0, -9))
-        print("Hosted Tcl stdin matched the Limbo numeric script")
+        expect(run_file(args.stdin, "/appl/cmd/tclsh_tests/expression.tcl"),
+               expression + PROMPT + "0\n", codes=(0, -9))
+        print("Hosted Tcl shell matched the Limbo numeric script")
     headless_suite(shell, args.stdin)
     channel_suite(args.stdin)
     package_suite(shell, args.stdin)

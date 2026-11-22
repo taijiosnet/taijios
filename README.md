@@ -467,7 +467,7 @@ and [Tk applications guide](appl/cmd/tcltk/README.md) for launch and test comman
 ### ZX shell commands
 
 `cat`, `echo`, `basename`, `cleanname`, `wc`, `uniq`, `tr`, `tee`, `cp`,
-`test`, `ls` and `mkdir` are written in Ziran and installed only as
+`test`, `ls`, `mkdir` and `tclsh` are written in Ziran and installed only as
 executable ZX bundles. With `ziran`, `zi2zx`, `mk`, and `limbo` on `PATH`,
 build and install the hosted emulator as above, then install the commands.
 

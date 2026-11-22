@@ -1,0 +1,126 @@
+// tclsh [file ...]: the TaijiOS Tcl shell. It evaluates each file, then
+// reads commands from the guest's standard input as the Limbo tclsh did:
+// "tcl% " asks for a command and "tcl> " for the rest of an unfinished one.
+// A nonempty result is printed on its own line and an error is reported
+// with its command name. A file that cannot be read is skipped and a file
+// stops at its first error without a report. `exit` or the end of input
+// ends the shell.
+#import "std/vec"
+using Tcl :: #import "tcl/interpreter"
+using Packages :: #import "tcl/packages"
+using Args :: #import "taijios_args"
+using Stdin :: #import "taijios_stdin"
+using Clock :: #import "taijios_clock"
+using Files :: #import "taijios_files"
+using Guest :: #import "taijios_io"
+using Io :: #import "tcl/io"
+using Types :: #import "tcl/types"
+using Lines :: #import "tclsh_lines"
+
+SCRIPT_LIMIT :: 1048576;
+PROMPT :: "tcl% ";
+CONTINUE :: "tcl> ";
+
+GuestMillis :: (context: s64) -> s64 { return Clock.Millis() }
+
+GuestOpen :: (context: s64, path: string, mode: s32) -> s32 { return Guest.OpenFile(path, mode) }
+GuestCreate :: (context: s64, path: string, mode: s32, permissions: s32) -> s32 { return Guest.CreateFile(path, mode, permissions) }
+GuestRead :: (context: s64, handle: s32, buffer: []u8) -> s32 { return Guest.ReadBytes(handle, buffer) }
+GuestWrite :: (context: s64, handle: s32, data: string) -> s32 { return Guest.WriteBytes(handle, data) }
+GuestClose :: (context: s64, handle: s32) -> s32 { return Guest.CloseFile(handle) }
+GuestSeek :: (context: s64, handle: s32, offset: s64, origin: s32) -> s64 { return Guest.SeekFile(handle, offset, origin) }
+GuestStat :: (context: s64, path: string, metadata: []u8) -> s32 { return Guest.StatFile(path, metadata) }
+GuestError :: (context: s64) -> string { return Guest.LastError() }
+
+LoadScript :: (context: s64, path: string, result: *Types.Result) {
+    script: Text;
+    if Files.ReadFile(path, *script, SCRIPT_LIMIT) == 0 {
+        VecSwap(result.value.bytes, script.bytes);
+        return;
+    }
+    failure := Types.QuotedError("could not read Tcl script \"", path, "\"");
+    result.code = failure.code;
+    VecSwap(result.value.bytes, failure.value.bytes);
+}
+
+// Writes what the script printed so far.
+Flush :: (tcl: *Tcl.Interpreter) {
+    output: Text = Tcl.TakeOutput(tcl);
+    print("%", TextView(output));
+}
+
+// Runs one typed command; true when it was `exit`.
+Interact :: (tcl: *Tcl.Interpreter, command: string) -> bool {
+    result := Tcl.Eval(tcl, command);
+    Flush(tcl);
+    if result.code == .Exit { return true }
+    if result.code == .Error {
+        report: Text = Lines.ErrorReport(command, TextView(result.value));
+        print("%\n", TextView(report));
+    } else if result.value.bytes.count > 0 {
+        print("%\n", TextView(result.value));
+    }
+    return false;
+}
+
+// Closes the script's channels; a failure there is the shell's only error status.
+Finish :: (tcl: *Tcl.Interpreter) -> s32 {
+    closed := Tcl.CloseChannels(tcl);
+    Flush(tcl);
+    if closed.code != .OK {
+        print("tclsh: %\n", TextView(closed.value));
+        return 1;
+    }
+    return 0;
+}
+
+main :: () -> s32 {
+    tcl: Tcl.Interpreter;
+    Packages.Attach(*tcl);
+    Tcl.SetClock(*tcl, GuestMillis);
+    Tcl.SetSourceLoader(*tcl, LoadScript);
+    backend := Io.Backend.{open = GuestOpen, create = GuestCreate, read = GuestRead, write = GuestWrite, seek = GuestSeek, stat = GuestStat, close = GuestClose, error = GuestError, stdin = true};
+    unused Tcl.SetChannelBackend(*tcl, backend);
+
+    index: s32 = 0;
+    while index < Args.OperandCount() {
+        script: Text;
+        if Files.ReadFile(Args.Operand(index), *script, SCRIPT_LIMIT) == 0 {
+            result := Tcl.Eval(*tcl, TextView(script));
+            Flush(*tcl);
+            if result.code == .Exit { return Finish(*tcl) }
+        }
+        index += 1;
+    }
+
+    print("%", PROMPT);
+    command: Vec(u8);
+    chunk: [4096]u8;
+    while true {
+        count := Stdin.ReadBytes(chunk[:]);
+        if count <= 0 { break }
+        for chunk[:count] {
+            VecPush(command, it);
+            if it != #char "\n" { continue }
+            done := false;
+            {
+                text := TextView(command[:]);
+                if !Lines.Finished(text) { print("%", CONTINUE); continue }
+                done = Interact(*tcl, text);
+            }
+            if done { return Finish(*tcl) }
+            VecClear(command);
+            print("%", PROMPT);
+        }
+    }
+    // A last line without a newline still runs.
+    if command.count > 0 {
+        done := false;
+        {
+            text := TextView(command[:]);
+            if Lines.Finished(text) { done = Interact(*tcl, text) }
+        }
+        if !done { print("%", PROMPT) }
+    }
+    return Finish(*tcl);
+}

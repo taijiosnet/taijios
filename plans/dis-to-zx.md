@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **855** open rows = **833** on-disk `dis/` files (**149** top-level `dis/*.dis` + **684** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **854** open rows = **832** on-disk `dis/` files (**148** top-level `dis/*.dis` + **684** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -33,7 +33,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 
 ## Next ready order (independent, boot-ordered)
 
-1. `dis/tclsh.dis` (1 row, zx-twin): the ZX shell reads one whole script from stdin; the Limbo shell loads its file operands, then reads `tcl%` prompt lines and evaluates each. Add file operands and the line loop to the ZX shell, make `dis/tclsh.zx` executable, then delete `tclsh.dis` + `appl/cmd/tclsh.b`. The `dis/lib/tcl_*.dis` libraries go with it once nothing else loads them.
+1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (189 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, ida, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (115 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (96 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
@@ -253,7 +253,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 150 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 149 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -378,7 +378,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/styxmon.dis | appl/cmd/styxmon.b |  | - |  |
 | dis/sum.dis | appl/cmd/sum.b |  | - |  |
 | dis/tail.dis | appl/cmd/tail.b |  | - |  |
-| dis/tclsh.dis | appl/cmd/tclsh.b |  | - | zx-twin |
 | dis/tcs.dis | appl/cmd/tcs.b |  | - |  |
 | dis/telnet.dis | appl/cmd/telnet.b |  | - |  |
 | dis/time.dis | appl/cmd/time.b |  | - |  |

@@ -405,23 +405,19 @@ appl
 		avr
 			burn.b
 			mkfile
-		basename.b
 		bind.b
 		bit2gif.b
 		broke.b
 		bytes.b
 		cal.b
 		calc.b
-		cat.b
 		cd.b
 		cddb.b
 		chgrp.b
 		chmod.b
-		cleanname.b
 		cmp.b
 		comm.b
 		cook.b
-		cp.b
 		cprof.b
 		cpu.b
 		crypt.b
@@ -459,7 +455,6 @@ appl
 				prep.b
 		dossrv.b
 		du.b
-		echo.b
 		ed.b
 		emuinit.b
 		env.b
@@ -616,7 +611,6 @@ appl
 		lockfs.b
 		logfile.b
 		look.b
-		ls.b
 		lstar.b
 		m4.b
 		man2html.b
@@ -658,7 +652,6 @@ appl
 			mkconfig
 			mkfile
 			mksubdirs
-		mkdir.b
 		mkfile
 		mntgen.b
 		mount.b
@@ -748,24 +741,19 @@ appl
 		sum.b
 		tail.b
 		tarfs.b
-		tclsh.b
 		tcs.b
-		tee.b
 		telnet.b
-		test.b
 		time.b
 		timestamp.b
 		tkcmd.b
 		tokenize.b
 		touch.b
 		touchcal.b
-		tr.b
 		trfs.b
 		tsort.b
 		unicode.b
 		units.b
 		units.y
-		uniq.b
 		unmount.b
 		usb
 			usbd.b
@@ -776,7 +764,6 @@ appl
 		vacget.b
 		vacput.b
 		wav2iaf.b
-		wc.b
 		webgrab.b
 		wish.b
 		wmimport.b
@@ -1499,13 +1486,13 @@ dis
 		+
 	avr
 		+
-	basename.dis
+	basename.zx
 	bind.dis
 	broke.dis
 	bytes.dis
 	cal.dis
 	calc.dis
-	cat.dis
+	cat.zx
 	cd.dis
 	cddb.dis
 	charon
@@ -1513,13 +1500,13 @@ dis
 	charon.dis
 	chgrp.dis
 	chmod.dis
-	cleanname.dis
+	cleanname.zx
 	cmp.dis
 	collab
 		+
 	comm.dis
 	cook.dis
-	cp.dis
+	cp.zx
 	cprof.dis
 	cpu.dis
 	crypt.dis
@@ -1540,7 +1527,7 @@ dis
 	du.dis
 	ebook
 		*
-	echo.dis
+	echo.zx
 	ed.dis
 	emuinit.dis
 	env.dis
@@ -1758,7 +1745,7 @@ dis
 	logfile.dis
 	look.dis
 	lookman
-	ls.dis
+	ls.zx
 	lstar.dis
 	m4.dis
 	man
@@ -1773,7 +1760,7 @@ dis
 	memfs.dis
 	metamorph.dis
 	mk.dis
-	mkdir.dis
+	mkdir.zx
 	mntgen.dis
 	mount.dis
 	mouse.dis
@@ -1838,11 +1825,11 @@ dis
 		+
 	tail.dis
 	tarfs.dis
-	tclsh.dis
+	tclsh.zx
 	tcs.dis
-	tee.dis
+	tee.zx
 	telnet.dis
-	test.dis
+	test.zx
 	time.dis
 	timestamp.dis
 	tiny
@@ -1851,11 +1838,11 @@ dis
 	tokenize.dis
 	touch.dis
 	touchcal.dis
-	tr.dis
+	tr.zx
 	trfs.dis
 	tsort.dis
 	unicode.dis
-	uniq.dis
+	uniq.zx
 	unmount.dis
 	usb
 		usbd.dis
@@ -1865,7 +1852,7 @@ dis
 	vacget.dis
 	vacput.dis
 	wav2iaf.dis
-	wc.dis
+	wc.zx
 	webgrab.dis
 	wish.dis
 	wm
