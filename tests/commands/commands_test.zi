@@ -1,6 +1,6 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
-// ndb/csquery, ndb/dnsquery and ndb/regquery.
+// ndb/csquery, ndb/dnsquery, ndb/query and ndb/regquery.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -32,10 +32,12 @@ WORDS :: "one two  three\nfour\tfive\n";
 SQUEEZE :: "abczz\naabb\n";
 TCL_FILE :: "puts file-one\nset y 7\nnoSuch arg\nputs after-error\n";
 REGISTRY :: "service=tcp!alpha.example!1\n\tname=alpha owner='a b' kind=x\nservice=tcp!beta.example!2\n\tname=beta kind=y\nservice=tcp!gamma.example!3\n\tname=gamma kind=x\n";
+NDB_MAIN :: "database=\n\tfile=/build/tests/commands/work/ndb.main\n\tfile=/build/tests/commands/work/ndb.second\n\tfile=/build/tests/commands/work/ndb.missing\n\n# a comment line\nsys=alpha ip=10.0.0.1 ether=0011aa\n\tdom=alpha.example\n\tip=10.0.0.9   # second address\nsys=beta ip=10.0.0.2\n\tnote='it''s quoted' empty= bare\n\tdom=\"double q\"\nipnet=lan ip=10.0.0.0 ipmask=255.255.255.0\n\tdns=10.0.0.53 dns=10.0.0.54\n\tauth=alpha\nbad='unclosed\n\tsys=gamma\n";
+NDB_SECOND :: "sys=delta ip=10.1.0.1\n\tdom=delta.example\nsys=alpha ip=10.1.0.2\n";
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [94]Case = Case.[
+cases: [105]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -122,6 +124,17 @@ cases: [94]Case = Case.[
     .{args = "echo -n > dnsf; echo example.org | ndb/dnsquery -s dnsf", out = "> example.org ip\n> "},
     .{tool = "ndb/dnsquery", args = "-x /nonexist x", status = "open", err = "dnsquery: can't open /nonexist/dns: '/nonexist' file does not exist\n"},
     .{tool = "ndb/dnsquery", args = "-s", status = "usage", err = "usage: dnsquery [-x /net] [-s server] [address ...]\n"},
+    .{tool = "ndb/query", args = "-f /build/tests/commands/work/ndb.main sys alpha", out = "sys=alpha ip=10.0.0.1 ether=0011aa dom=alpha.example ip=10.0.0.9\n"},
+    .{tool = "ndb/query", args = "-a -f /build/tests/commands/work/ndb.main sys alpha", out = "sys=alpha ip=10.0.0.1 ether=0011aa dom=alpha.example ip=10.0.0.9\nsys=alpha ip=10.1.0.2\n"},
+    .{tool = "ndb/query", args = "-f /build/tests/commands/work/ndb.main sys beta note", out = "'it''s quoted'\n"},
+    .{tool = "ndb/query", args = "-f /build/tests/commands/work/ndb.main sys beta empty", out = "bare\n"},
+    .{tool = "ndb/query", args = "-a -f /build/tests/commands/work/ndb.main ipnet lan dns", out = "10.0.0.53\n10.0.0.54\n"},
+    .{tool = "ndb/query", args = "-a -f /build/tests/commands/work/ndb.main sys alpha ip", out = "10.0.0.1\n10.0.0.9\n10.1.0.2\n"},
+    .{tool = "ndb/query", args = "-f /build/tests/commands/work/ndb.main dom 'double q'", out = "sys=beta ip=10.0.0.2 note='it''s quoted' empty=bare dom='double q'\n"},
+    .{tool = "ndb/query", args = "-f /build/tests/commands/work/ndb.main sys gamma", out = "sys=gamma\n"},
+    .{tool = "ndb/query", args = "-af /build/tests/commands/work/ndb.main database", out = "database='' file=/build/tests/commands/work/ndb.main file=/build/tests/commands/work/ndb.second file=/build/tests/commands/work/ndb.missing\n"},
+    .{tool = "ndb/query", args = "-f /nonexist sys", status = "error", err = "query: can't open /nonexist: '/nonexist' file does not exist\n"},
+    .{tool = "ndb/query", status = "usage", err = "usage: query [-a] [-f dbfile] attr [value [rattr]]\n"},
     .{args = "mount -c {ndb/registry -f reg.db} mnt"},
     .{tool = "ndb/regquery", args = "-m mnt name alpha", out = "tcp!alpha.example!1 kind x owner 'a b' name alpha\n"},
     .{tool = "ndb/regquery", args = "-m mnt -n kind x", out = "tcp!alpha.example!1\ntcp!gamma.example!3\n"},
@@ -178,7 +191,7 @@ Prepare :: (binary: string) -> bool {
         Write("empty", "") && Write("bin", binary) && Write("-dash", "dash\n") &&
         Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("file.tcl", TCL_FILE) && Write("two.tcl", "puts file-two\n") && Write("lines.tcl", TCL_LINES) &&
-        Write("reg.db", REGISTRY) && Directory("work/mnt") &&
+        Write("reg.db", REGISTRY) && Write("ndb.main", NDB_MAIN) && Write("ndb.second", NDB_SECOND) && Directory("work/mnt") &&
         Write("fake/date.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
         SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755
 }

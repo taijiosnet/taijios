@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **849** open rows = **827** on-disk `dis/` files (**148** top-level `dis/*.dis` + **679** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **848** open rows = **826** on-disk `dis/` files (**148** top-level `dis/*.dis` + **678** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -35,7 +35,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (187 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
-3. Services (112 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
+3. Services (111 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (96 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
 6. WM apps with zx-twins (7 rows) and the rest of dis/wm (59 rows total): delete or port through the desktop-core owner.
@@ -405,7 +405,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/yacc.dis | appl/cmd/yacc.b |  | - |  |
 | dis/zeros.dis | appl/cmd/zeros.b |  | - |  |
 
-### 4. Services - storage, network, name, auth, collab, usb and aux daemons - 112 rows
+### 4. Services - storage, network, name, auth, collab, usb and aux daemons - 111 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -492,7 +492,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/ndb/cs.dis | appl/cmd/ndb/cs.b |  | - |  |
 | dis/ndb/dns.dis | appl/cmd/ndb/dns.b |  | - |  |
 | dis/ndb/mkhash.dis | appl/cmd/ndb/mkhash.b |  | - |  |
-| dis/ndb/query.dis | appl/cmd/ndb/query.b |  | - |  |
 | dis/ndb/registry.dis | appl/cmd/ndb/registry.b |  | - |  |
 | dis/plumber.dis | appl/cmd/plumber.b |  | - |  |
 | dis/ramfile.dis | appl/cmd/ramfile.b |  | - |  |

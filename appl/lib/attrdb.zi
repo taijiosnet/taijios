@@ -1,0 +1,267 @@
+// Attribute databases in the ndb(6) format, read as the Limbo Attrdb
+// module read them. An entry starts at a line that does not begin with
+// white space or '#' and continues over the indented lines after it. Each
+// line holds attr=value pairs; a value may be quoted with ' or " and a
+// doubled quote stands for itself. An entry with database= can list more
+// files with file=, which are searched in order.
+
+Attr :: struct {
+    attr: Text;
+    val: Text;
+}
+
+Tuples :: struct {
+    n: s64; // line number given to the parser
+    pairs: Vec(Attr);
+}
+
+Dbentry :: struct {
+    lines: Vec(Tuples);
+}
+
+// Reads a whole database file into text, or explains in error why not.
+Reader :: #type (path: string, text: *Text, error: *Text) -> bool;
+
+Db :: struct {
+    texts: Vec(Text); // the contents of each file, in search order
+}
+
+// Where the next search starts: a file and a byte offset in it.
+Dbptr :: struct {
+    file: s64;
+    offset: s64;
+}
+
+PushAttr :: (tuples: *Tuples, attr: string, val: string) {
+    a: Attr;
+    BuilderAppend(a.attr.bytes, attr);
+    BuilderAppend(a.val.bytes, val);
+    VecPush(tuples.pairs, a);
+}
+
+// Parses one line into out. The result is "" or "empty name" or "missing
+// quote"; out has no pairs for a blank or comment line or an error.
+ParseLine :: (s: string, line: s64, out: *Tuples) -> string {
+    out.n = line;
+    VecClear(out.pairs);
+    quote: u8 = 0;
+    word: Vec(u8);
+    last: Vec(u8);
+    name: Vec(u8);
+    i: s64 = 0;
+    while i < s.count {
+        c := s[i];
+        i += 1;
+        if quote != 0 {
+            if c == quote {
+                if i >= s.count || s[i] != quote { quote = 0; continue }
+                i += 1;
+            }
+            VecPush(word, c);
+            continue;
+        }
+        if c == #char "'" || c == #char "\"" {
+            quote = c;
+        } else if c == #char "#" {
+            break;
+        } else if c == #char " " || c == #char "\t" || c == #char "\n" {
+            if word.count == 0 { continue }
+            if last.count > 0 { PushAttr(out, TextView(last[:]), "") }
+            VecSwap(last, word);
+            VecClear(word);
+            if name.count > 0 {
+                PushAttr(out, TextView(name[:]), TextView(last[:]));
+                VecClear(name);
+                VecClear(last);
+            }
+        } else if c == #char "=" {
+            if last.count == 0 {
+                VecSwap(last, word);
+                VecClear(word);
+            }
+            if word.count > 0 {
+                PushAttr(out, TextView(last[:]), "");
+                VecSwap(last, word);
+                VecClear(word);
+            }
+            if last.count == 0 { VecClear(out.pairs); return "empty name" }
+            VecSwap(name, last);
+            VecClear(last);
+        } else {
+            VecPush(word, c);
+        }
+    }
+    if quote != 0 { VecClear(out.pairs); return "missing quote" }
+    if last.count == 0 {
+        VecSwap(last, word);
+        VecClear(word);
+    }
+    if name.count == 0 {
+        VecSwap(name, last);
+        VecClear(last);
+    }
+    if name.count > 0 { PushAttr(out, TextView(name[:]), TextView(last[:])) }
+    return "";
+}
+
+HasAttr :: (tuples: *Tuples, attr: string) -> bool {
+    for i: 0..tuples.pairs.count - 1 { if TextView(tuples.pairs[i].attr) == attr { return true } }
+    return false;
+}
+
+HasPair :: (tuples: *Tuples, attr: string, value: string) -> bool {
+    for i: 0..tuples.pairs.count - 1 {
+        if TextView(tuples.pairs[i].attr) == attr && TextView(tuples.pairs[i].val) == value { return true }
+    }
+    return false;
+}
+
+// A line of an entry and the positions of the pairs found on it.
+Match :: struct {
+    line: s64;
+    pairs: Vec(s64);
+}
+
+// The lines with attr=value and rattr, then the lines with rattr alone,
+// each with its rattr pairs in order, as Dbentry.findbyattr returned them.
+FindByAttr :: (entry: *Dbentry, attr: string, value: string, rattr: string) -> Vec(Match) {
+    out: Vec(Match);
+    for pass: 0..1 {
+        for l: 0..entry.lines.count - 1 {
+            match := HasPair(*entry.lines[l], attr, value);
+            if (pass == 0) != match { continue }
+            m: Match;
+            m.line = l;
+            for p: 0..entry.lines[l].pairs.count - 1 {
+                if TextView(entry.lines[l].pairs[p].attr) == rattr { VecPush(m.pairs, p) }
+            }
+            if m.pairs.count > 0 { VecPush(out, m) }
+        }
+    }
+    return out;
+}
+
+// True when some line of the entry has attr.
+EntryHas :: (entry: *Dbentry, attr: string) -> bool {
+    for l: 0..entry.lines.count - 1 { if HasAttr(*entry.lines[l], attr) { return true } }
+    return false;
+}
+
+IsEntry :: (line: string) -> bool {
+    return line.count > 0 && line[0] != #char "\t" && line[0] != #char "\n" && line[0] != #char " " && line[0] != #char "#";
+}
+
+// The end of the line that starts at offset, after its newline.
+LineEnd :: (text: string, offset: s64) -> s64 {
+    end := offset;
+    while end < text.count && text[end] != #char "\n" { end += 1 }
+    return ifx end < text.count then end + 1 else end;
+}
+
+// Reads from offset to the next entry that matches, as Dbf.readentry did:
+// with use_value the entry needs attr=value, otherwise attr, and an empty
+// attr matches every entry. Returns whether one matched and where the
+// following entry starts.
+ReadEntry :: (text: string, offset: s64, attr: string, value: string, use_value: bool, entry: *Dbentry) -> (matched: bool, next: s64) {
+    at := offset;
+    while at < text.count {
+        line_end := LineEnd(text, at);
+        if !IsEntry(text[at:line_end]) { at = line_end; continue }
+        VecClear(entry.lines);
+        match := attr == "";
+        while true {
+            tuples: Tuples;
+            unused ParseLine(text[at:line_end], 0, *tuples);
+            at = line_end;
+            if tuples.pairs.count > 0 {
+                if !match {
+                    match = ifx use_value then HasPair(*tuples, attr, value) else HasAttr(*tuples, attr);
+                }
+                VecPush(entry.lines, tuples);
+            }
+            if at >= text.count { break }
+            line_end = LineEnd(text, at);
+            if IsEntry(text[at:line_end]) { break }
+        }
+        if match && entry.lines.count > 0 { return true, at }
+    }
+    VecClear(entry.lines);
+    return false, at;
+}
+
+// The next entry after ptr that matches, searching each file in turn.
+Next :: (db: *Db, ptr: *Dbptr, attr: string, value: string, use_value: bool, entry: *Dbentry) -> bool {
+    while ptr.file < db.texts.count {
+        matched, next := ReadEntry(TextView(db.texts[ptr.file]), ptr.offset, attr, value, use_value, entry);
+        if matched { ptr.offset = next; return true }
+        ptr.file += 1;
+        ptr.offset = 0;
+    }
+    return false;
+}
+
+// Entries with attr, attr=value, or attr=value and rattr.
+Find :: (db: *Db, ptr: *Dbptr, attr: string, entry: *Dbentry) -> bool {
+    return Next(db, ptr, attr, "", false, entry);
+}
+
+FindPair :: (db: *Db, ptr: *Dbptr, attr: string, value: string, entry: *Dbentry) -> bool {
+    return Next(db, ptr, attr, value, true, entry);
+}
+
+FindEntryByAttr :: (db: *Db, ptr: *Dbptr, attr: string, value: string, rattr: string, entry: *Dbentry) -> bool {
+    while Next(db, ptr, attr, value, true, entry) {
+        if EntryHas(entry, rattr) { return true }
+    }
+    return false;
+}
+
+// Opens the database at path and the files its database= entry lists.
+// False, with error set, when path itself cannot be read.
+Open :: (db: *Db, path: string, read: Reader, error: *Text) -> bool {
+    VecClear(db.texts);
+    first: Text;
+    if !read(path, *first, error) { return false }
+    VecPush(db.texts, first);
+    entry: Dbentry;
+    ptr: Dbptr;
+    if !FindPair(db, *ptr, "database", "", *entry) { return true }
+    files: Vec(Text);
+    for l: 0..entry.lines.count - 1 {
+        for p: 0..entry.lines[l].pairs.count - 1 {
+            if TextView(entry.lines[l].pairs[p].attr) != "file" { continue }
+            name: Text;
+            BuilderAppend(name.bytes, TextView(entry.lines[l].pairs[p].val));
+            VecPush(files, name);
+        }
+    }
+    if files.count == 0 { return true }
+    main: Text;
+    VecSwap(main.bytes, db.texts[0].bytes);
+    VecClear(db.texts);
+    used := false;
+    for i: 0..files.count - 1 {
+        if TextView(files[i]) == path && !used {
+            used = true;
+            listed: Text;
+            BuilderAppend(listed.bytes, TextView(main));
+            VecPush(db.texts, listed);
+            continue;
+        }
+        text: Text;
+        ignored: Text;
+        if read(TextView(files[i]), *text, *ignored) { VecPush(db.texts, text) }
+    }
+    if !used {
+        // The opened file is searched first when the list leaves it out.
+        rest: Vec(Text);
+        VecPush(rest, main);
+        for i: 0..db.texts.count - 1 {
+            moved: Text;
+            VecSwap(moved.bytes, db.texts[i].bytes);
+            VecPush(rest, moved);
+        }
+        VecSwap(db.texts, rest);
+    }
+    return true;
+}

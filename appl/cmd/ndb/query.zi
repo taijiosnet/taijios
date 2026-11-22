@@ -1,0 +1,106 @@
+// query [-a] [-f dbfile] attr [value [rattr]]: prints the first database
+// entry with attr, or with attr=value, as quoted attr=value pairs. With
+// rattr it prints that entry's rattr values instead. -a prints every
+// match. The database is /lib/ndb/local unless -f names another.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Quote :: #import "taijios_quote";
+using Db :: #import "attrdb";
+
+USAGE :: "usage: query [-a] [-f dbfile] attr [value [rattr]]\n";
+
+ReadGuest :: (path: string, text: *Text, error: *Text) -> bool {
+    fd := Io.OpenFile(path, 0);
+    if fd < 0 {
+        BuilderAppend(error.bytes, Io.LastError());
+        return false;
+    }
+    chunk: [8192]u8;
+    count := Io.ReadBytes(fd, chunk[:]);
+    while count > 0 {
+        BuilderAppend(text.bytes, TextView(chunk[:count]));
+        count = Io.ReadBytes(fd, chunk[:]);
+    }
+    unused Io.CloseFile(fd);
+    return true;
+}
+
+PrintEntry :: (entry: *Db.Dbentry) {
+    out: Vec(u8);
+    for l: 0..entry.lines.count - 1 {
+        for p: 0..entry.lines[l].pairs.count - 1 {
+            if out.count > 0 { VecPush(out, #char " ") }
+            Quote.Quote(*out, TextView(entry.lines[l].pairs[p].attr));
+            VecPush(out, #char "=");
+            Quote.Quote(*out, TextView(entry.lines[l].pairs[p].val));
+        }
+    }
+    Cli.PrintLine(TextView(out[:]));
+}
+
+main :: () -> s32 {
+    path := "/lib/ndb/local";
+    all := false;
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "f" {
+            value, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            path = value;
+        } else if letter == #char "a" {
+            all = true;
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+    count := Args.OperandCount();
+    if scan.next >= count { return Cli.Usage(USAGE) }
+    attr := Args.Operand(scan.next);
+    has_value := scan.next + 1 < count;
+    value := ifx has_value then Args.Operand(scan.next + 1) else "";
+    rattr := ifx scan.next + 2 < count then Args.Operand(scan.next + 2) else "";
+
+    db: Db.Db;
+    problem: Text;
+    if !Db.Open(*db, path, ReadGuest, *problem) {
+        message: Vec(u8);
+        BuilderPrint(*message, "query: can't open %: %\n", path, TextView(problem));
+        unused Cli.WriteAll(2, BuilderFinish(message));
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    ptr: Db.Dbptr;
+    entry: Db.Dbentry;
+    while true {
+        found := false;
+        if rattr != "" {
+            found = Db.FindEntryByAttr(*db, *ptr, attr, value, rattr, *entry);
+        } else if has_value {
+            found = Db.FindPair(*db, *ptr, attr, value, *entry);
+        } else {
+            found = Db.Find(*db, *ptr, attr, *entry);
+        }
+        if !found { break }
+        if rattr == "" {
+            PrintEntry(*entry);
+        } else {
+            matches := Db.FindByAttr(*entry, attr, value, rattr);
+            for m: 0..matches.count - 1 {
+                for i: 0..matches[m].pairs.count - 1 {
+                    quoted: Vec(u8);
+                    Quote.Quote(*quoted, TextView(entry.lines[matches[m].line].pairs[matches[m].pairs[i]].val));
+                    Cli.PrintLine(TextView(quoted[:]));
+                    if !all { break }
+                }
+                if !all { return 0 }
+            }
+        }
+        if !all { break }
+    }
+    return 0;
+}
