@@ -23,8 +23,9 @@ Digest :: (path: string) -> Text {
     return TextCopy(line[0:64])
 }
 
+// Pages answers /index.html with a redirect to its directory, so follow it.
 Download :: (url: string, target: string) -> bool {
-    arguments: [9]string = .["curl", "-fsS", "--max-time", "120", "-H", "Cache-Control: no-cache", "-o", target, url]
+    arguments: [9]string = .["curl", "-fsSL", "--max-time", "120", "-H", "Cache-Control: no-cache", "-o", target, url]
     run: ProcessRun
     return RunProcess(.{arguments = arguments[:]}, *run) && run.code == 0
 }
