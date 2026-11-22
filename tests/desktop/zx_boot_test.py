@@ -16,6 +16,33 @@ PROBE = '''
 using Args :: #import "taijios_args";
 using Io :: #import "taijios_io";
 using Process :: #import "taijios_process";
+Tasks :: #import "taijios_tasks";
+
+// Start a spinning and a blocked child and wait until both reached their loops.
+StartPair :: (spinning: *Process.Launch, blocked: *Process.Launch) -> bool {
+    unused Io.Remove("/spin-ready");
+    unused Io.Remove("/block-ready");
+    spin_arg: [1]string = .{"spin"};
+    block_arg: [1]string = .{"block"};
+    spinning.* = Process.Start("/probe.zx", spin_arg[:]);
+    blocked.* = Process.Start("/probe.zx", block_arg[:]);
+    if spinning.id <= 0 || blocked.id <= spinning.id { return false }
+    for attempt: 0 .. 200000 {
+        spin_ready := Io.OpenFile("/spin-ready", 0);
+        block_ready := Io.OpenFile("/block-ready", 0);
+        if spin_ready >= 0 { unused Io.CloseFile(spin_ready) }
+        if block_ready >= 0 { unused Io.CloseFile(block_ready) }
+        if spin_ready >= 0 && block_ready >= 0 { return true }
+    }
+    return false;
+}
+
+Named :: (bytes: []u8, name: string) -> bool {
+    for i: 0 .. name.count - 1 {
+        if bytes[i] != name[i] { return false }
+    }
+    return bytes[name.count] == 0;
+}
 
 main :: () -> s64 {
     input_bytes: [8]u8;
@@ -45,22 +72,12 @@ main :: () -> s64 {
         return 0;
     }
     if Args.Operand(0) == "kill" {
-        spin_arg: [1]string = .{"spin"};
-        block_arg: [1]string = .{"block"};
         sibling_arg: [1]string = .{"sibling"};
-        spinning := Process.Start("/probe.zx", spin_arg[:]);
-        blocked := Process.Start("/probe.zx", block_arg[:]);
+        spinning: Process.Launch;
+        blocked: Process.Launch;
+        if !StartPair(*spinning, *blocked) { return 51 }
         sibling := Process.Start("/probe.zx", sibling_arg[:]);
-        if spinning.id <= 0 || blocked.id <= spinning.id || sibling.id <= blocked.id { return 50 }
-        ready := false;
-        for attempt: 0 .. 200000 {
-            spin_ready := Io.OpenFile("/spin-ready", 0);
-            block_ready := Io.OpenFile("/block-ready", 0);
-            if spin_ready >= 0 { unused Io.CloseFile(spin_ready) }
-            if block_ready >= 0 { unused Io.CloseFile(block_ready) }
-            if spin_ready >= 0 && block_ready >= 0 { ready = true; break }
-        }
-        if !ready { return 51 }
+        if sibling.id <= blocked.id { return 50 }
         // Give the blocked child time to sleep in its pipe read.
         for settle: 0 .. 50000 {
             if Process.Poll(blocked.id).status != -2 { return 56 }
@@ -74,6 +91,31 @@ main :: () -> s64 {
         survivor := Process.Wait(sibling.id);
         if survivor.status != 1 || survivor.value != 7 { return 55 }
         print("ZX_KILL_OK\\n");
+        return 0;
+    }
+    if Args.Operand(0) == "tasks" {
+        spinning: Process.Launch;
+        blocked: Process.Launch;
+        if !StartPair(*spinning, *blocked) { return 70 }
+        count := Tasks.Capture();
+        if count != 2 || Tasks.SampleNanos() <= 0 { return 71 }
+        fields: [7]s64;
+        module: [64]u8;
+        user: [64]u8;
+        pids: [2]s64;
+        for i: 0 .. 1 {
+            if Tasks.TaskAt(cast(s32)i, fields[:], module[:], user[:]) != 0 || !Named(module[:], "probe") ||
+               fields[0] <= 0 || fields[2] != 4 || fields[5] != fields[0] || fields[4] < 0 || fields[6] < 0 { return 72 }
+            pids[i] = fields[0];
+        }
+        pool: [3]s64;
+        if pids[0] >= pids[1] || Tasks.PoolAt(0, pool[:]) != 0 || pool[1] <= 0 { return 73 }
+        if Tasks.Terminate(cast(s32)pids[0]) != 0 { return 74 }
+        spun := Process.Wait(spinning.id);
+        if spun.status != -1 || spun.error != "killed" || Tasks.Terminate(cast(s32)pids[0]) != -2 { return 75 }
+        if Tasks.Capture() != 1 || Tasks.Terminate(12345) != -1 { return 76 }
+        if !Process.Kill(blocked.id) || Process.Wait(blocked.id).error != "killed" || Tasks.Capture() != 0 { return 77 }
+        print("ZX_TASKS_OK\\n");
         return 0;
     }
     if Args.Operand(0) == "spin" {
@@ -438,7 +480,7 @@ def main():
         subprocess.run([
             'ziran', 'bundle', '--root', root, '--module-path', ROOT / 'appl/cmd',
             '--bind-host', 'taijios_args', '--bind-host', 'taijios_io',
-            '--bind-host', 'taijios_process',
+            '--bind-host', 'taijios_process', '--bind-host', 'taijios_tasks',
             '--entry', 'probe:main', '-o', root / 'probe.zx', probe,
         ], env=env, check=True, timeout=60)
         plain = root / 'plain.zi'
@@ -505,6 +547,9 @@ def main():
         print('Direct ZX runner launched child bundles with inherited streams and preserved scalar and named results')
         check_async(emulator, root, env)
         check_kill(emulator, root, env)
+        tasks = boot('/probe.zx', 'tasks')
+        assert tasks.returncode == 0 and 'ZX_TASKS_OK' in tasks.stdout and not tasks.stderr, tasks
+        print('Without Dis, the task list showed running ZX processes and terminated one through the kill path')
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)

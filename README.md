@@ -362,6 +362,11 @@ core as 100%. Ending a task uses the guest `/prog` device's permissions and
 native kill operation. The menu falls back to `wm/task` when the ZX bundle
 is absent.
 
+In a guest started directly in ZX, without Dis, `taijios_tasks` lists the
+running ZX processes instead, named after their bundles, with CPU time from
+each process's thread clock. Process memory is not estimated there. Ending
+one uses the same stop request as `taijios_process.Kill`.
+
 The integration test uses Xvfb, `xdotool`, ImageMagick, Pillow, and Tesseract
 to read and interact with the private guest display.
 

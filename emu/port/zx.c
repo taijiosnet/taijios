@@ -17,6 +17,7 @@
 #include "drawif.h"
 #include "zxmod.h"
 #ifdef __linux__
+#include <pthread.h>
 #include "zxwindow.h"
 #endif
 
@@ -1096,10 +1097,16 @@ struct ZxProcess {
 	ZxCommand command;
 	ZxResult result;
 	char path[ZxGuestPathBytes + 1];
+	/* Task list entry while the worker runs, under zxprocesslock. */
+	ZxProcess *listed;
+	int pid, hasclock;
+	clockid_t cpuclock;
+	char user[ZxTaskNameBytes];
 };
 
 static Lock zxprocesslock;
-static int zxprocessactive;
+static int zxprocessactive, zxprocesspid;
+static ZxProcess *zxprocesslist;
 static Rendez zxactivity;
 
 void
@@ -1147,10 +1154,23 @@ zxprocessworker(void *arg)
 {
 	ZxProcess *process = arg;
 	ZxSurface surface = {.win = H, .pointermillis = -1};
+	ZxProcess **link;
 
 	up->env->fgrp = process->files;
 	process->files = nil;
+	lock(&zxprocesslock);
+	process->pid = ++zxprocesspid;
+	process->hasclock = pthread_getcpuclockid(pthread_self(), &process->cpuclock) == 0;
+	for(link = &zxprocesslist; *link != nil; link = &(*link)->listed)
+		;
+	*link = process;
+	unlock(&zxprocesslock);
 	process->result = zxexecute(process->path, &surface, &process->command);
+	lock(&zxprocesslock);
+	for(link = &zxprocesslist; *link != process; link = &(*link)->listed)
+		;
+	*link = process->listed;
+	unlock(&zxprocesslock);
 	closefgrp(up->env->fgrp);
 	up->env->fgrp = nil;
 	zxprocessretire();
@@ -1222,6 +1242,7 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 	}
 	process->ref.ref = 1;
 	process->command.depth = command->depth + 1;
+	utfecpy(process->user, process->user+sizeof(process->user), up->env->user);
 	if(!zxiopath(args, process->path) || process->path[0] == 0)
 		problem = "invalid ZX program path";
 	else if(!zxprocessargs(&process->command, args+1))
@@ -1322,28 +1343,123 @@ zxprocesscollect(ZxCommand *command, int id, int wait)
  * blocked device read or Sleep return, and disconnecting its window ends a
  * wait for window events. The child's outcome then reports "killed". */
 static int
+zxprocessstop(ZxProcess *process)
+{
+	int done;
+
+	lock(&process->wait.l);
+	done = process->done;
+	unlock(&process->wait.l);
+	if(done)
+		return 0;
+	ZxRunControlRequest(process->command.control);
+	zxwindowdisconnect(process->command.window);
+	lock(&process->command.runlock);
+	if(process->command.runner != nil)
+		swiproc(process->command.runner, 0);
+	unlock(&process->command.runlock);
+	return 1;
+}
+
+static int
 zxprocesskill(ZxCommand *command, int id)
 {
 	ZxProcess *process;
-	int done;
 
-	for(process = command->children; process != nil; process = process->next){
-		if(process->id != id)
-			continue;
-		lock(&process->wait.l);
-		done = process->done;
-		unlock(&process->wait.l);
-		if(done)
-			return 0;
-		ZxRunControlRequest(process->command.control);
-		zxwindowdisconnect(process->command.window);
-		lock(&process->command.runlock);
-		if(process->command.runner != nil)
-			swiproc(process->command.runner, 0);
-		unlock(&process->command.runlock);
-		return 1;
-	}
+	for(process = command->children; process != nil; process = process->next)
+		if(process->id == id)
+			return zxprocessstop(process);
 	return 0;
+}
+
+static vlong zxmonotonicnanos(void);
+
+/* Without Dis, the task list is the running ZX processes in start order. */
+static int
+zxnativetaskcapture(ZxCommand *command)
+{
+	ZxProcess *process;
+	ZxTask *row, *rows;
+	struct timespec cpu;
+	char *leaf, *end;
+	int count, index;
+	vlong before, after;
+
+	for(;;){
+		lock(&zxprocesslock);
+		count = 0;
+		for(process = zxprocesslist; process != nil; process = process->listed)
+			count++;
+		if(count > ZxTaskLimit || count <= command->taskcap)
+			break;
+		unlock(&zxprocesslock);
+		rows = realloc(command->tasks, count * sizeof(*rows));
+		if(rows == nil)
+			return -1;
+		command->tasks = rows;
+		command->taskcap = count;
+	}
+	if(count > ZxTaskLimit){
+		unlock(&zxprocesslock);
+		return -2;
+	}
+	before = zxmonotonicnanos();
+	for(index = 0, process = zxprocesslist; process != nil; index++, process = process->listed){
+		row = &command->tasks[index];
+		row->pid = process->pid;
+		row->group = 0;
+		row->state = Pready;
+		row->kib = -1;
+		row->cpunanos = -1;
+		if(process->hasclock && clock_gettime(process->cpuclock, &cpu) == 0)
+			row->cpunanos = (vlong)cpu.tv_sec * 1000000000LL + cpu.tv_nsec;
+		leaf = utfrrune(process->path, '/');
+		leaf = leaf == nil ? process->path : leaf+1;
+		utfecpy(row->module, row->module+sizeof(row->module), leaf);
+		end = strrchr(row->module, '.');
+		if(end != nil && strcmp(end, ".zx") == 0)
+			*end = 0;
+		utfecpy(row->user, row->user+sizeof(row->user), process->user);
+	}
+	after = zxmonotonicnanos();
+	unlock(&zxprocesslock);
+	command->tasksample = -1;
+	command->taskskew = -1;
+	if(before >= 0 && after >= before){
+		command->tasksample = before + (after - before)/2;
+		command->taskskew = after - command->tasksample;
+	}
+	for(index = 0; index < nelem(command->pools); index++)
+		poolusage(index, command->pools[index]);
+	command->ntask = count;
+	command->tasksvalid = 1;
+	return count;
+}
+
+static int
+zxnativeterminate(ZxCommand *command, int pid)
+{
+	ZxProcess *process;
+	int i, status;
+
+	status = -1;
+	for(i = 0; i < command->ntask; i++)
+		if(command->tasks[i].pid == pid)
+			status = -2;
+	if(status == -1)
+		return -1;
+	lock(&zxprocesslock);
+	for(process = zxprocesslist; process != nil; process = process->listed){
+		if(process->pid != pid)
+			continue;
+		if(&process->command == command)
+			status = -1;
+		else if(zxprocessstop(process))
+			status = 0;
+		break;
+	}
+	unlock(&zxprocesslock);
+	return status;
 }
 
 static void
@@ -1740,6 +1856,10 @@ zxtaskcapture(ZxCommand *command)
 	vlong before, after;
 
 	command->tasksvalid = 0;
+#ifdef __linux__
+	if(!command->hosted)
+		return zxnativetaskcapture(command);
+#endif
 	if(!progdevbound())
 		return -1;
 	acquire();
@@ -2373,6 +2493,10 @@ zxtaskterminate(ZxCommand *command, int pid)
 
 	Prog *self = up->iprog;
 
+#ifdef __linux__
+	if(!command->hosted)
+		return pid <= 0 ? -1 : zxnativeterminate(command, pid);
+#endif
 	if(pid <= 0 || (self != nil && self->pid == pid))
 		return -1;
 	for(i = 0; i < command->ntask; i++)
@@ -2576,7 +2700,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 				bindings[count++] = (HostBinding){abi.module, abi.function, zximage, surface};
 			continue;
 		}
-		if(command->hosted && zxmodule(abi.module, "taijios_tasks")){
+		if((command->hosted || !usesdis()) && zxmodule(abi.module, "taijios_tasks")){
 			if(strcmp(abi.function, "Capture") == 0 || strcmp(abi.function, "TaskAt") == 0 ||
 			   strcmp(abi.function, "PoolAt") == 0 || strcmp(abi.function, "Terminate") == 0 ||
 		   strcmp(abi.function, "SampleNanos") == 0)
