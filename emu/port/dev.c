@@ -17,6 +17,9 @@ devno(int c, int user)
 {
 	int i;
 
+	/* These devices use the Dis scheduler or Dis channels. */
+	if(user && (c == 'p' || c == 'P' || c == 's') && !usesdis())
+		return -1;
 	for(i = 0; devtab[i] != nil; i++) {
 		if(devtab[i]->dc == c)
 			return i;

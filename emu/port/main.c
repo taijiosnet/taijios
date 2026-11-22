@@ -9,7 +9,13 @@
 
 int		rebootargc = 0;
 char**		rebootargv;
-static	char	*imod = "/dis/emuinit.dis";
+static	char	defaultimod[] = "/dis/emuinit.dis";
+static	char	*imod = defaultimod;
+#ifdef __linux__
+static	char	*bootfile;
+static	char	**bootargs;
+static	int	bootargc;
+#endif
 extern	char*	hosttype;
 extern char*	tkfont;	/* for libtk/utils.c */
 extern int	tkstylus;	/* libinterp/tk.c */
@@ -30,10 +36,10 @@ char *cputype;
 static void
 usage(void)
 {
-	fprint(2, "Usage: emu [options...] [file.dis [args...]]\n"
+	fprint(2, "Usage: emu [options...] [file [args...]]\n"
 		"\t-gXxY\n"
 		"\t-c[0-9]\n"
-		"\t-d file.dis\n"
+		"\t-d file\n"
 		"\t-s\n"
 		"\t-v\n"
 		"\t-p<poolname>=maxsize[K|M] (main defaults to 128M)\n"
@@ -124,7 +130,7 @@ poolopt(char *str)
 	return ok;
 }
 
-static void
+static char **
 option(int argc, char *argv[], void (*badusage)(void))
 {
 	char *cp;
@@ -197,6 +203,7 @@ option(int argc, char *argv[], void (*badusage)(void))
 		vflag++;	/* print startup messages */
 		break;
 	} ARGEND
+	return argv;
 }
 
 static void
@@ -265,7 +272,19 @@ main(int argc, char *argv[])
 		enva[envc] = 0;
 		option(envc, enva, envusage);
 	}
+#ifdef __linux__
+	bootargs = option(argc, argv, usage);
+	bootargc = argc - (bootargs - argv);
+	if(imod != defaultimod){
+		if(zxbootable(imod))
+			bootfile = imod;
+	}else if(bootargc > 0 && zxbootable(bootargs[0])){
+		bootfile = *bootargs++;
+		bootargc--;
+	}
+#else
 	option(argc, argv, usage);
+#endif
 	eve = strdup("inferno");
 
 	opt = "interp";
@@ -278,11 +297,30 @@ main(int argc, char *argv[])
 	libinit(imod);
 }
 
+int
+usesdis(void)
+{
+#ifdef __linux__
+	return bootfile == nil;
+#else
+	return 1;
+#endif
+}
+
+#ifdef __linux__
+static void
+startzx(void *path)
+{
+	exit(zxboot(path, bootargc, bootargs));
+}
+#endif
+
 void
-emuinit(void *imod)
+emuinit(void *initmod)
 {
 	Osenv *e;
 	char *wdir;
+	void (*start)(void*) = disinit;
 
 	e = up->env;
 	e->pgrp = newpgrp();
@@ -306,10 +344,16 @@ emuinit(void *imod)
 
 	strcpy(up->text, "main");
 
-	if(kopen("#c/cons", OREAD) != 0)
-		fprint(2, "failed to make fd0 from #c/cons: %r\n");
-	kopen("#c/cons", OWRITE);
-	kopen("#c/cons", OWRITE);
+	if(usesdis()){
+		if(kopen("#c/cons", OREAD) != 0)
+			fprint(2, "failed to make fd0 from #c/cons: %r\n");
+		kopen("#c/cons", OWRITE);
+		kopen("#c/cons", OWRITE);
+	}else if(kopen("#c/hoststdin", OREAD) != 0 || kopen("#c/hoststdout", OWRITE) != 1 ||
+	    kopen("#c/hoststderr", OWRITE) != 2){
+		fprint(2, "emu: cannot open ZX standard streams: %r\n");
+		exits("ZX standard streams");
+	}
 
 	/* the setid cannot precede the bind of #U */
 	kbind("#U", "/", MAFTER|MCREATE);
@@ -318,7 +362,8 @@ emuinit(void *imod)
 	kbind("#^", "/chan", MBEFORE);
 	kbind("#m", "/dev", MBEFORE);	/* pointer */
 	kbind("#c", "/dev", MBEFORE);
-	kbind("#p", "/prog", MREPL);
+	if(usesdis())
+		kbind("#p", "/prog", MREPL);
 	kbind("#d", "/fd", MREPL);
 	kbind("#I", "/net", MAFTER);	/* will fail on Plan 9 */
 
@@ -339,7 +384,13 @@ emuinit(void *imod)
 		free(wdir);
 	}
 
-	kproc("main", disinit, imod, KPDUPFDG|KPDUPPG|KPDUPENVG);
+#ifdef __linux__
+	if(bootfile != nil){
+		start = startzx;
+		initmod = bootfile;
+	}
+#endif
+	kproc("main", start, initmod, KPDUPFDG|KPDUPPG|KPDUPENVG);
 
 	for(;;)
 		ospause(); 

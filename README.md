@@ -15,6 +15,20 @@ output and error descriptors, including shell redirections and pipes. A scalar
 entry result is printed as a signed Limbo `big`. Dis commands can run alongside
 ZX programs.
 
+A ZX-enabled Linux emulator can also start a console bundle directly. Pass its
+absolute guest path and operands to `emu`, for example
+`Linux/386/bin/emu -r "$PWD" /hello.zx operand`. This starts the bundle in the
+emulator's initial guest namespace without loading Dis. The path is also
+accepted by `-d` for daemon mode. The guest's standard streams inherit the
+host process's standard streams. A void or zero result exits with status 0.
+Positive results through 255 are returned as process exit statuses. Other
+results and loader errors exit with status 1. A direct bundle can access guest
+Draw and input devices. Window-manager services and Dis task inspection remain
+available through the normal desktop runner.
+Run `python3 tests/desktop/zx_boot_test.py` to verify direct startup in a guest
+root containing only ZX programs. Add `--graphics` to test drawing and keyboard
+input on a private Xvfb display.
+
 The emulator defaults to a 128 MiB `main` pool for native allocations, including
 the ZX runtime. Use `-p main=64M` or `-p main=32M` before the guest command to set
 a smaller limit. The full Rill desktop uses the 128 MiB default. `/dev/memory`

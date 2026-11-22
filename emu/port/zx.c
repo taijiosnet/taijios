@@ -885,6 +885,7 @@ struct ZxTask {
 typedef struct ZxCommand ZxCommand;
 struct ZxCommand {
 	ZxSurface *surface;
+	int hosted;
 	HostValue *args;
 	int argc;
 	int *fd;
@@ -1903,7 +1904,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 				bindings[count++] = (HostBinding){abi.module, abi.function, zximage, surface};
 			continue;
 		}
-		if(zxmodule(abi.module, "taijios_tasks")){
+		if(command->hosted && zxmodule(abi.module, "taijios_tasks")){
 			if(strcmp(abi.function, "Capture") == 0 || strcmp(abi.function, "TaskAt") == 0 ||
 			   strcmp(abi.function, "PoolAt") == 0 || strcmp(abi.function, "Terminate") == 0 ||
 		   strcmp(abi.function, "SampleNanos") == 0)
@@ -2147,11 +2148,9 @@ ZX_wmcall(void *fp)
 }
 
 static ZxResult
-zxrun(String *s, List *args, ZX_Window *win)
+zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 {
 	static const char *const roots[] = {"/dis/lib"};
-	ZxSurface surface = {.pointermillis = -1};
-	ZxCommand command = {0};
 	HostBinding *bindings;
 	size_t count;
 	int i, ran;
@@ -2159,7 +2158,6 @@ zxrun(String *s, List *args, ZX_Window *win)
 	Bundle *bundle;
 	ZxModuleLoader *loader;
 	ZxModuleProgram *program;
-	char *path;
 	const char *problem;
 	ZxModuleLoaderConfig config = {
 		.roots = roots,
@@ -2170,19 +2168,8 @@ zxrun(String *s, List *args, ZX_Window *win)
 		.write = zxwrite,
 	};
 
-	path = strdup(string2c(s));
-	if(path == nil)
-		error("out of memory copying ZX path");
-	if(!zxcopyargs(&command, args)){
-		free(path);
-		zxfreeargs(&command);
-		error("out of memory copying ZX arguments");
-	}
-	surface.win = win;
-	command.surface = &surface;
-	release();
+	command->surface = surface;
 	bundle = zxopen(path, result.problem);
-	free(path);
 	if(bundle != nil){
 		count = BundleCapabilityCount(bundle);
 		bindings = nil;
@@ -2196,7 +2183,7 @@ zxrun(String *s, List *args, ZX_Window *win)
 #if defined(__linux__) && defined(__i386__)
 			fenv_t saved;
 #endif
-			count = zxbindings(bundle, &surface, &command, bindings);
+			count = zxbindings(bundle, surface, command, bindings);
 #if defined(__linux__) && defined(__i386__)
 			ready = zxfpbegin(&saved);
 #endif
@@ -2236,7 +2223,7 @@ zxrun(String *s, List *args, ZX_Window *win)
 					program == nil ? "cannot initialize ZX program" : "ZX execution failed");
 			result.status = -1;
 		}else if(result.status > 0 && result.value != 0)
-			strecpy(result.problem, result.problem+sizeof(result.problem), command.failure);
+			strecpy(result.problem, result.problem+sizeof(result.problem), command->failure);
 		else
 			result.problem[0] = '\0';
 		if(program != nil)
@@ -2246,12 +2233,34 @@ zxrun(String *s, List *args, ZX_Window *win)
 		free(bindings);
 		BundleClose(bundle);
 	}
-	for(i = 0; i < command.nfd; i++)
-		if(command.fd[i] >= 0)
-			kclose(command.fd[i]);
-	free(command.fd);
-	free(command.fdpath);
-	free(command.tasks);
+	for(i = 0; i < command->nfd; i++)
+		if(command->fd[i] >= 0)
+			kclose(command->fd[i]);
+	free(command->fd);
+	free(command->fdpath);
+	free(command->tasks);
+	return result;
+}
+
+static ZxResult
+zxrun(String *s, List *args, ZX_Window *win)
+{
+	ZxSurface surface = {.win = win, .pointermillis = -1};
+	ZxCommand command = {.hosted = 1};
+	ZxResult result;
+	char *path;
+
+	path = strdup(string2c(s));
+	if(path == nil)
+		error("out of memory copying ZX path");
+	if(!zxcopyargs(&command, args)){
+		free(path);
+		zxfreeargs(&command);
+		error("out of memory copying ZX arguments");
+	}
+	release();
+	result = zxexecute(path, &surface, &command);
+	free(path);
 	zxfreeargs(&command);
 	acquire();
 	return result;
@@ -2305,6 +2314,60 @@ ZX_runwindowargs(void *fp)
 	retstr(result.problem, &f->ret->t2);
 }
 
+#endif
+
+#ifdef __linux__
+int
+zxbootable(const char *path)
+{
+#ifdef TAIJI_ZX
+	size_t length = strlen(path);
+	return path[0] == '/' && length >= 4 && strcmp(path+length-3, ".zx") == 0;
+#else
+	USED(path);
+	return 0;
+#endif
+}
+
+int
+zxboot(const char *path, int argc, char **argv)
+{
+#ifdef TAIJI_ZX
+	extern int vflag;
+	ZxSurface surface = {.win = H, .pointermillis = -1};
+	ZxCommand command = {.argc = argc};
+	ZxResult result;
+	int i;
+
+	if(vflag)
+		print("Initial ZX: \"%s\"\n", path);
+	if(argc != 0){
+		command.args = calloc(argc, sizeof(*command.args));
+		if(command.args == nil){
+			fprint(2, "emu: out of memory copying ZX arguments\n");
+			return 1;
+		}
+		for(i = 0; i < argc; i++)
+			command.args[i] = (HostValue){.kind = HOST_STRING, .type = "string",
+				.data = (uchar*)argv[i], .length = strlen(argv[i])};
+	}
+	kbind("#e", "/env", MREPL|MCREATE);
+	result = zxexecute(path, &surface, &command);
+	free(command.args);
+	if(result.problem[0] != '\0')
+		fprint(2, "emu: %s: %s\n", path, result.problem);
+	if(result.status < 0)
+		return 1;
+	if(result.status == 0 || result.value == 0)
+		return 0;
+	return result.value > 0 && result.value <= 255 ? result.value : 1;
+#else
+	USED(path);
+	USED(argc);
+	USED(argv);
+	return 1;
+#endif
+}
 #endif
 
 void

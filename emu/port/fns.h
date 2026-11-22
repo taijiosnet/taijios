@@ -200,6 +200,7 @@ long		unionread(Chan*, void*, long);
 void		unlock(Lock*);
 Uqid*	uqidalloc(Uqidtab*, Chan*);
 void		uqidinit(Uqidtab*);
+int		usesdis(void);
 void		freeuqid(Uqidtab*, Uqid*);
 void		validname(char*, int);
 void		validstat(uchar*, int);
@@ -207,6 +208,10 @@ void		validwstatname(char*);
 void		vmachine(void*);
 int		walk(Chan**, char**, int, int, int*);
 void		cleanexit(int);
+#ifdef __linux__
+int		zxbootable(const char*);
+int		zxboot(const char*, int, char**);
+#endif
 void		oshostintr(Proc*);
 void		osenter(void);
 void		osleave(void);

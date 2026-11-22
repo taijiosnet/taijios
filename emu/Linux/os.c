@@ -139,7 +139,7 @@ cleanexit(int x)
 		return;
 	}
 
-	if(dflag == 0)
+	if(dflag == 0 && usesdis())
 		termrestore();
 
 	kill(0, SIGKILL);
@@ -149,7 +149,7 @@ cleanexit(int x)
 void
 osreboot(char *file, char **argv)
 {
-	if(dflag == 0)
+	if(dflag == 0 && usesdis())
 		termrestore();
 	execvp(file, argv);
 	error("reboot failure");
@@ -173,7 +173,7 @@ libinit(char *imod)
 		gidnobody = pw->pw_gid;
 	}
 
-	if(dflag == 0)
+	if(dflag == 0 && usesdis())
 		termset();
 
 	memset(&act, 0, sizeof(act));

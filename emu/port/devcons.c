@@ -214,7 +214,7 @@ consattach(char *spec)
 {
 	static int kp;
 
-	if(kp == 0 && !dflag) {
+	if(kp == 0 && !dflag && usesdis()) {
 		kp = 1;
 		kproc("kbd", kbdslave, 0, 0);
 	}
@@ -383,6 +383,8 @@ consread(Chan *c, void *va, long n, vlong offset)
 		return readnum(offset, va, n, osmillisec(), NUMSIZE);
 
 	case Qcons:
+		if(!usesdis() && !dflag)
+			return read(0, va, n);
 		qlock(&kbd.q);
 		if(waserror()){
 			qunlock(&kbd.q);

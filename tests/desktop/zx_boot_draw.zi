@@ -1,0 +1,80 @@
+#import "std/vec";
+#import "std/number_text";
+using Io :: #import "taijios_io";
+using Args :: #import "taijios_args";
+
+SetWord :: (message: []u8, offset: s32, value: u32) {
+    message[offset] = cast(u8)(value & 255);
+    message[offset+1] = cast(u8)((value >> 8) & 255);
+    message[offset+2] = cast(u8)((value >> 16) & 255);
+    message[offset+3] = cast(u8)(value >> 24);
+}
+
+ReadField :: (info: []u8, index: s32) -> s32 {
+    start := index * 12;
+    end := start + 11;
+    while start < end && info[start] == 32 { start += 1 }
+    value, used := IntegerPrefix(TextView(info[start:end]));
+    if used == 0 { return -1 }
+    return cast(s32)(value);
+}
+
+Fail :: (operation: string) -> s32 {
+    print("%: %\n", operation, Io.LastError());
+    unused Args.SetFailure(operation);
+    return 1;
+}
+
+AllocateSolid :: (fd: s32, id: u32, channel: u32, rgba: u32) -> bool {
+    msg: [51]u8;
+    msg[0] = #char "b";
+    SetWord(msg[:], 1, id);
+    SetWord(msg[:], 10, channel);
+    msg[14] = 1;
+    SetWord(msg[:], 23, 1);
+    SetWord(msg[:], 27, 1);
+    SetWord(msg[:], 31, cast(u32)(0xc0000001));
+    SetWord(msg[:], 35, cast(u32)(0xc0000001));
+    SetWord(msg[:], 39, cast(u32)(0x3fffffff));
+    SetWord(msg[:], 43, cast(u32)(0x3fffffff));
+    SetWord(msg[:], 47, rgba);
+    return Io.WriteBytes(fd, TextView(msg[:])) == msg.count;
+}
+
+main :: () -> s32 {
+    ctl := Io.OpenFile("#i/draw/new", 2);
+    if ctl < 0 { return Fail("open Draw") }
+    info: [145]u8;
+    if Io.ReadBytes(ctl, info[:]) != 144 { return Fail("read Draw control") }
+    id := ReadField(info[:], 0);
+    x0 := ReadField(info[:], 4);
+    y0 := ReadField(info[:], 5);
+    x1 := ReadField(info[:], 6);
+    y1 := ReadField(info[:], 7);
+    if id < 0 || x1 <= x0 || y1 <= y0 { return Fail("invalid Draw bounds") }
+    path: Vec(u8);
+    defer VecFree(path);
+    BuilderPrint(*path, "#i/draw/%/data", id);
+    fd := Io.OpenFile(TextView(path[:]), 2);
+    if fd < 0 { return Fail("open Draw data") }
+    if !AllocateSolid(fd, 1, 0x081828, 0x183858ff) { return Fail("allocate colour") }
+    if !AllocateSolid(fd, 2, 0x31, 0xffffffff) { return Fail("allocate mask") }
+    msg: [46]u8;
+    msg[0] = #char "d";
+    SetWord(msg[:], 5, 1);
+    SetWord(msg[:], 9, 2);
+    SetWord(msg[:], 13, cast(u32)(x0));
+    SetWord(msg[:], 17, cast(u32)(y0));
+    SetWord(msg[:], 21, cast(u32)(x1));
+    SetWord(msg[:], 25, cast(u32)(y1));
+    msg[45] = #char "v";
+    if Io.WriteBytes(fd, TextView(msg[:])) != msg.count { return Fail("paint") }
+    keyboard := Io.OpenFile("/dev/keyboard", 0);
+    if keyboard < 0 { return Fail("open keyboard") }
+    print("ZX_DRAW_READY %x%\n", x1-x0, y1-y0);
+    key: [16]u8;
+    n := Io.ReadBytes(keyboard, key[:]);
+    if n <= 0 || key[0] != #char "a" { return Fail("read keyboard") }
+    print("ZX_DRAW_KEY_OK\n");
+    return 0;
+}
