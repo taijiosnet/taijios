@@ -1,0 +1,6 @@
+host_api :: #system_library "host_api";
+
+// Sample the guest drawable under the pointer during a primary drag that
+// started in this window, or once at release. Return 0xRRGGBB or -1.
+#scope_export
+SampleGuestPointer :: () -> s32 #foreign host_api;

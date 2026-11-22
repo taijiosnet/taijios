@@ -40,7 +40,9 @@ y.debug
 /appl/cmd/ls.zx
 /appl/cmd/mkdir.zx
 /appl/wm/clock.zx
+/appl/wm/colors.zx
 /appl/wm/counter.zx
+/appl/wm/date.zx
 /appl/wm/stopwatch.zx
 /appl/cmd/coffee.zx
 /appl/cmd/logwindow.zx
@@ -75,6 +77,8 @@ y.debug
 /dis/math/graph0.zx
 /dis/wm/stopwatch.zx
 /dis/wm/clock.zx
+/dis/wm/date.zx
+/dis/wm/colors.zx
 /dis/wm/counter.zx
 /dis/wm/taskmgr.zx
 /dis/wm/logwindow.zx

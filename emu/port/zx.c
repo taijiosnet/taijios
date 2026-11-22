@@ -961,6 +961,34 @@ zxs32(HostValue *result, int value)
 }
 
 static int
+zxdraw(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxSurface *surface = context;
+	ZX_Window *win = surface->win;
+	int rgb = -1;
+
+	USED(module);
+	USED(function);
+	USED(args);
+	if(n != 0)
+		return 0;
+	if(!surface->opened)
+		return zxs32(result, -1);
+	acquire();
+	if(waserror()){
+		release();
+		return 0;
+	}
+	win->input.key = -1;
+	if(zxrequest(win, ZX_SampleGuestPointer))
+		rgb = win->input.key;
+	poperror();
+	release();
+	return zxs32(result, rgb);
+}
+
+static int
 zxisindex(const HostValue *value)
 {
 	return value->kind == HOST_INTEGER && value->type != nil &&
@@ -1863,6 +1891,10 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		}
 		if(zxmodule(abi.module, "taijios_files") && strcmp(abi.function, "ReadAt") == 0){
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxfilereadat, nil};
+			continue;
+		}
+		if(surface->win != H && zxmodule(abi.module, "taijios_draw") && strcmp(abi.function, "SampleGuestPointer") == 0){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxdraw, surface};
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_image")){

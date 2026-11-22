@@ -265,12 +265,17 @@ python3 -u appl/lib/winplace_test.py
 
 ### Open Kryon apps from the guest desktop
 
-Build and install the three apps with `(cd appl/wm && mk install-kryon-zx)`.
+Build and install the Kryon apps with `(cd appl/wm && mk install-kryon-zx)`.
 Start TaijiOS with `Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm` and choose
-**Clock**, **Stopwatch**, or **Counter** under **Utilities** in the toolbar menu.
+**Clock**, **Stopwatch**, **Counter**, **Colours**, or **Date and Time** under **Utilities** in the toolbar menu.
 Counter uses the Kryon buttons and text widgets for decreasing, resetting, and
 increasing its value. Its image is `/dis/wm/counter.zx` and can also be launched
 with `zxrun -w /dis/wm/counter.zx` from a guest shell.
+
+Colours displays Draw's 256-color palette. Click a cell to read its index and
+RGB value. Drag from the palette to sample elsewhere in the TaijiOS guest. The
+legacy Colors entry opens the ZX app when available and can still display the
+original Dis palette. `mk install-colors-zx` installs both entry points.
 
 The menu smoke test runs the installed Linux/386 emulator with a 32 MiB guest
 heap in a private Xvfb display.
@@ -501,7 +506,7 @@ signature without invoking each program.
 | 1 | `echo`, `basename`, `cleanname` (ported) | Argument handling, text output, path-string operations |
 | 2 | `wc`, `uniq`, `tr` (ported) | Guest stdin, stdout, and sequential file access |
 | 3 | `test`, `tee`, `cp`, `ls` (ported) | File metadata, directory reads, and file creation |
-| 4 | `wm/about`, `wm/clock`, `wm/colors` | Guest surfaces and input, wall-clock time, and display sampling as needed |
+| 4 | `wm/about`, `wm/clock` (ported), `wm/colors` (ported) | Guest surfaces and input, wall-clock time, and guest display sampling |
 | 5 | `sh`, `wm/wm`, compiler and service commands | Process control, namespaces, window management, and service-specific APIs |
 
 ### Verify the hosted runner

@@ -1,0 +1,26 @@
+// Port of the shipped Date window. Subject to the Lucent Public License 1.02.
+Surface :: #import "kryon/host/surface";
+Label :: #import "kryon/text";
+Calendar :: #import "std/calendar";
+Civil :: #import "std/date_parse";
+Types :: #import "std/date_time_types";
+GuestTime :: #import "taijios_time";
+#import "kryon/session"
+#import "kryon/tree"
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    civil := Civil.CivilFromUnix(GuestTime.LocalSeconds())
+    reading := Types.LocalDateTime.{.year = civil.year, .month = civil.month, .day = civil.day,
+        .hour = civil.hour, .minute = civil.minute, .second = civil.second, .valid = civil.year > 0}
+    bytes: [32]u8
+    value := Calendar.FormatDateTime(reading, "%a %b %d %T", bytes[:])
+    Label.Draw(session, .{.key = 1, .bounds = TreeRootBounds(session), .text = value, .size = 14,
+        .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+}
+
+#program_export
+main :: () -> s32 {
+    GuestTime.LoadZone()
+    return Surface.Run(.{.title = "Date", .width = 176, .height = 26}, Draw, 1000)
+}

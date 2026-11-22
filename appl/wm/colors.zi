@@ -1,0 +1,72 @@
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Text :: #import "kryon/text";
+Map :: #import "color_map";
+Guest :: #import "taijios_draw";
+#import "kryon/session"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+
+StatusHeight :: 24
+selected: s32 = -1;
+selected_rgb: Map.RGB;
+exact: bool;
+drag: bool;
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    width := cast(s32)bounds.width
+    height := cast(s32)bounds.height - StatusHeight
+
+    if width > 0 && height > 0 {
+        pointer := PointerSample(session)
+        index := Map.IndexAt(cast(s32)pointer.x, cast(s32)pointer.y - StatusHeight, width, height)
+        if pointer.pressed {
+            drag = index >= 0
+            if drag {
+                selected = index
+                selected_rgb = Map.At(index)
+                exact = true
+            }
+        }
+        if drag && index < 0 && (pointer.down || pointer.released) {
+            sample := Guest.SampleGuestPointer()
+            if sample >= 0 {
+                selected_rgb = Map.Unpack(sample)
+                selected, exact = Map.Nearest(selected_rgb)
+            }
+        }
+        if !pointer.down { drag = false }
+
+        for row: cast(s32)0..Map.Size-1 {
+            top := Map.CellEdge(row, height)
+            bottom := Map.CellEdge(row + 1, height)
+            if top == bottom { continue }
+            for column: cast(s32)0..Map.Size-1 {
+                left := Map.CellEdge(column, width)
+                right := Map.CellEdge(column + 1, width)
+                if left == right { continue }
+                index := row * Map.Size + column
+                rgb := Map.At(index)
+                Box.Draw(session, .{.key = cast(u64)(index + 2),
+                    .bounds = .{cast(float32)left, cast(float32)(top + StatusHeight),
+                        cast(float32)(right - left), cast(float32)(bottom - top)},
+                    .fill = .{cast(u8)rgb.red, cast(u8)rgb.green, cast(u8)rgb.blue, 255}})
+            }
+        }
+    }
+
+    status: Vec(u8)
+    defer VecFree(status)
+    if selected < 0 { BuilderAppend(status, "col:") }
+    else { Map.Describe(*status, selected, selected_rgb, exact) }
+    Text.Draw(session, .{.key = 1, .bounds = .{6.0, 0.0, bounds.width - 12.0, cast(float32)StatusHeight},
+        .text = TextView(status[:]), .size = 14})
+}
+
+#program_export
+main :: () -> s32 {
+    return Surface.RunRetained(.{.title = "Colors", .width = 256, .height = 256 + StatusHeight}, Draw, 0)
+}

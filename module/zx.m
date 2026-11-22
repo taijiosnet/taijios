@@ -16,6 +16,7 @@ ZX: module
 	Open, Event, Buffer, Present, Close, Poll, SetTasked, OpaqueBuffer, SetTitle, Launch, ResizeWindow, SetCursor, PanelPopup, PanelChoose, PanelPaint, PanelFlush: con iota;
 	DesktopBind, DesktopCapture, DesktopLaunch, DesktopWindowAction, DesktopAction, DesktopTimezone, DesktopChrome: con PanelFlush+1+iota;
 	StripBuffer, PresentStrip: con DesktopChrome+1+iota;
+	SampleGuestPointer: con PresentStrip+1;
 	# Events returned to the program.
 	Idle, Closed, Redraw, Resize, Move, Down, Up, Key, Keyup, Text, Visibility, Wheel: con iota;
 	Maxside: con 4096;

@@ -7,6 +7,9 @@
 - Start the installed Rill desktop by default and give the emulator a 128 MiB main memory pool so multiple guest apps can run together.
 
 - Run the panel, window placement and chrome, Task Manager, Explorer, Clock, Stopwatch, and Counter through ZX while keeping compatible Dis fallbacks.
+- Port Colours to ZX with the 256-color Draw palette, resizable cells, and sampling within the guest display.
+- Open the existing ZX About Inferno and Memory Monitor from the System menu when installed.
+- Port the Date window to ZX with the guest timezone and live second updates.
 - Lock TaijiOS Tcl and Tk to the canonical source packages so each ZX application can select the Tk features it uses.
 
 - Avoid redundant pointer-motion events on stationary ZX button presses and releases.

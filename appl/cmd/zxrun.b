@@ -244,6 +244,10 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 	buttons := 0;
 	pointerpos := Point(0, 0);
 	pointerknown := 0;
+	contentpress := 0;
+	contentrelease := 0;
+	releasepos: Point;
+	sample: ref Image;
 	waiting := 0;
 	closed := 0;
 	tasked := 0;
@@ -472,8 +476,10 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 					if(bridge.tasked)
 						c = "task";
 					ok = w.wmctl(c) == nil;
-					if(ok)
+					if(ok){
 						tasked = visibility(queue, w.image.r, bridge.tasked);
+						contentpress = contentrelease = 0;
+					}
 				}
 			ZX->SetTitle =>
 				ok = !closed && w != nil;
@@ -499,6 +505,28 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 				spec := bridge.input.text;
 				bridge.input.text = nil;
 				ok = !closed && w != nil && w.image != nil && w.wmctl(spec) == nil;
+			ZX->SampleGuestPointer =>
+				# A drag must start inside this window. The release sample is consumed once.
+				ok = !closed && !tasked && panelstate == nil && w != nil && w.image != nil && (contentpress || contentrelease);
+				if(ok){
+					screen := w.display.image;
+					point := pointerpos;
+					if(!contentpress){
+						point = releasepos;
+						contentrelease = 0;
+					}
+					ok = screen != nil && point.in(screen.r);
+					if(ok){
+						if(sample == nil)
+							sample = w.display.newimage(((0, 0), (1, 1)), Draw->RGB24, 0, Draw->Nofill);
+						if(sample != nil){
+							sample.draw(sample.r, screen, nil, point);
+							pixel := array[3] of byte;
+							if(sample.readpixels(sample.r, pixel) == len pixel)
+								bridge.input.key = (int pixel[2] << 16) | (int pixel[1] << 8) | int pixel[0];
+						}
+					}
+				}
 			ZX->PanelPopup =>
 				ok = !closed && panelstate != nil && w != nil && w.image != nil;
 				if(ok){
@@ -641,14 +669,23 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 					bounds = reshapeevent(w, presented, queue, bounds);
 				continue;
 			}
-			if(c == "task" && !tasked)
+			if(c == "task" && !tasked){
 				tasked = visibility(queue, bounds, 1);
-			else if(c == "untask" && tasked)
+				contentpress = contentrelease = 0;
+			}else if(c == "untask" && tasked)
 				tasked = visibility(queue, bounds, 0);
 			if(w.image != nil && (c == "raise" || (c != nil && c[0] == '!')))
 				bounds = reshapeevent(w, presented, queue, bounds);
 		p := <-ptr =>
 			if(!w.pointer(*p)){
+				if((p.buttons & 1) == 0 && (buttons & 1) != 0){
+					contentrelease = contentpress;
+					releasepos = p.xy;
+					contentpress = 0;
+				}else if((p.buttons & 1) != 0 && (buttons & 1) == 0){
+					contentpress = p.xy.in(bounds);
+					contentrelease = 0;
+				}
 				e := event(ZX->Move, bounds);
 				e.x = p.xy.x - bounds.min.x;
 				e.y = p.xy.y - bounds.min.y;

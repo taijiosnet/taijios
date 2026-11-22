@@ -2,71 +2,14 @@
 Surface :: #import "kryon/host/surface";
 Box :: #import "kryon/box";
 Shape :: #import "kryon/shape";
-Files :: #import "taijios_files";
+GuestTime :: #import "taijios_time";
 Math :: #import "std/math";
 #import "kryon/geometry"
 #import "kryon/session"
 #import "kryon/tree"
-#import "std/number_text"
-
-zone: [2048]u8;
-zone_length: s32;
-
-ZoneSpace :: (byte: u8) -> bool {
-    return byte == 32 || byte == 9 || byte == 10 || byte == 13
-}
-
-ZoneWord :: (text: string, at: *s64) -> string {
-    while at.* < text.count && ZoneSpace(cast(u8)text[at.*]) { at.* += 1 }
-    start := at.*
-    while at.* < text.count && !ZoneSpace(cast(u8)text[at.*]) { at.* += 1 }
-    return text[start:at.*]
-}
-
-ZoneOffset :: (text: string, utc: s64) -> s64 {
-    at: s64
-    unused ZoneWord(text, *at)
-    standard := ZoneWord(text, *at)
-    unused ZoneWord(text, *at)
-    daylight := ZoneWord(text, *at)
-    base, base_count := IntegerPrefix(standard)
-    summer, summer_count := IntegerPrefix(daylight)
-    if base_count == 0 || base_count != standard.count || base < -86400 || base > 86400 ||
-        summer_count == 0 || summer_count != daylight.count || summer < -86400 || summer > 86400 { return 0 }
-    wall := utc + base
-    while at < text.count {
-        start := ZoneWord(text, *at)
-        end := ZoneWord(text, *at)
-        lower, lower_count := IntegerPrefix(start)
-        upper, upper_count := IntegerPrefix(end)
-        if lower_count == 0 || lower_count != start.count || upper_count == 0 || upper_count != end.count { break }
-        if wall >= lower && wall < upper { return summer }
-    }
-    return base
-}
-
-LoadZone :: () {
-    zone_length = Files.ReadBytesAt("/env/timezone", 0, zone[:])
-    if zone_length <= 0 { zone_length = Files.ReadBytesAt("/locale/timezone", 0, zone[:]) }
-    if zone_length <= 0 { return }
-    if zone[0] == 47 || zone[0] == 35 {
-        path: [2048]u8
-        count := zone_length
-        if zone[count - 1] == 10 { count -= 1 }
-        for i: 0..count - 1 { path[i] = zone[i] }
-        zone_length = Files.ReadBytesAt(TextView(path[:count]), 0, zone[:])
-    }
-}
 
 LocalMinute :: () -> s64 {
-    time: [32]u8
-    size := Files.ReadBytesAt("/dev/time", 0, time[:])
-    if size <= 0 { return 0 }
-    micros, count := IntegerPrefix(TextView(time[:size]))
-    if count != size { return 0 }
-    seconds := micros / 1000000
-    if zone_length > 0 { seconds += ZoneOffset(TextView(zone[:zone_length]), seconds) }
-    day := seconds % 86400
+    day := GuestTime.LocalSeconds() % 86400
     if day < 0 { day += 86400 }
     return day / 60
 }
@@ -101,6 +44,6 @@ Draw :: (frame: Surface.Frame) {
 
 #program_export
 main :: () -> s32 {
-    LoadZone()
+    GuestTime.LoadZone()
     return Surface.Run(.{.title = "clock", .width = 100, .height = 100}, Draw, 1000)
 }

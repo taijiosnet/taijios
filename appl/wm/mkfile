@@ -103,13 +103,14 @@ DISBIN=$ROOT/dis/wm
 
 wm.dis: $MODDIR/zx.m $MODDIR/toolbar.m
 toolbar.dis: $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/toolbar.m
+colors.dis: $MODDIR/zx.m $MODDIR/zxrun.m
 
 desktop_panel.zx: desktop_panel.zi ../cmd/taijios_panel.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_panel --entry desktop_panel:main -o $target desktop_panel.zi
 
 install-desktop-zx:V: $DISBIN/toolbar.dis $DISBIN/desktop_panel.zx
 
-clock.zx: clock.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
+clock.zx: clock.zi ../cmd/taijios_time.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry clock:main -o $target clock.zi
 
 install-clock-zx:V: $DISBIN/clock.zx
@@ -125,9 +126,19 @@ stopwatch.zx: stopwatch.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
 counter.zx: counter.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --bind-host kryon/pixmap --entry counter:main -o $target counter.zi
 
+colors.zx: colors.zi color_map.zi ../cmd/taijios_draw.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_draw --entry colors:main -o $target colors.zi
+
+install-colors-zx:V: $DISBIN/colors.dis $DISBIN/colors.zx
+
+date.zx: date.zi ../cmd/taijios_time.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry date:main -o $target date.zi
+
+install-date-zx:V: $DISBIN/date.zx
+
 install-stopwatch-zx:V: $DISBIN/stopwatch.zx
 
-install-kryon-zx:V: $DISBIN/clock.zx $DISBIN/stopwatch.zx $DISBIN/counter.zx $DISBIN/view.zx
+install-kryon-zx:V: $DISBIN/clock.zx $DISBIN/stopwatch.zx $DISBIN/counter.zx $DISBIN/view.zx install-colors-zx install-date-zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

@@ -9,6 +9,8 @@ include "tk.m";
 	tk: Tk;
 include	"tkclient.m";
 	tkclient: Tkclient;
+include "zx.m";
+include "zxrun.m";
 
 Colors: module {
 	init:	fn(ctxt: ref Draw->Context, argv: list of string);
@@ -17,6 +19,7 @@ Colors: module {
 display: ref Display;
 top: ref Tk->Toplevel;
 tmpi: ref Image;
+ZXPalette: con "/dis/wm/colors.zx";
 
 task_cfg := array[] of {
 	"panel .c",
@@ -35,6 +38,8 @@ init(ctxt: ref Draw->Context, nil: list of string)
 init1(ctxt: ref Draw->Context)
 {
 	sys = load Sys Sys->PATH;
+	if(runpalette(ctxt))
+		return;
 	draw = load Draw Draw->PATH;
 	tk = load Tk Tk->PATH;
 	tkclient = load Tkclient Tkclient->PATH;
@@ -76,6 +81,22 @@ init1(ctxt: ref Draw->Context)
 	press := <-cmdch =>
 		(nil, toks) := sys->tokenize(press, " ");
 		color((int hd toks, int hd tl toks));
+	}
+}
+
+runpalette(ctxt: ref Draw->Context): int
+{
+	(ok, dir) := sys->stat(ZXPalette);
+	if(ok < 0 || (dir.mode & Sys->DMDIR) != 0)
+		return 0;
+	run := load Zxrun Zxrun->PATH;
+	if(run == nil)
+		return 0;
+	{
+		run->init(ctxt, "zxrun" :: "-c" :: "-w" :: ZXPalette :: nil);
+		return 1;
+	} exception {
+		"fail:zx" => return 0;
 	}
 }
 

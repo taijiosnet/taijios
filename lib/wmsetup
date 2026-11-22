@@ -45,12 +45,28 @@ if {ftest -f /dis/wm/taskmgr.zx} {
 } {
 	menu System 'Task Manager' {wmrun wm/task}
 }
-menu System 'Memory Monitor' {wmrun wm/memory}
-menu System About           {wmrun wm/about}
+if {ftest -f /dis/wm/memory.zx} {
+	menu System 'Memory Monitor' {wmrun zxrun -p -w /dis/wm/memory.zx}
+} {
+	menu System 'Memory Monitor' {wmrun wm/memory}
+}
+if {ftest -f /dis/wm/about.zx} {
+	menu System About         {wmrun zxrun -w /dis/wm/about.zx}
+} {
+	menu System About         {wmrun wm/about}
+}
 menu Utilities Manual       {wmrun wm/man}
 menu Utilities Coffee       {wmrun wm/coffee}
-menu Utilities Colours      {wmrun wm/colors}
-menu Utilities 'Date and Time' {wmrun wm/date}
+if {ftest -f /dis/wm/colors.zx} {
+	menu Utilities Colours  {wmrun zxrun -w /dis/wm/colors.zx}
+} {
+	menu Utilities Colours  {wmrun wm/colors}
+}
+if {ftest -f /dis/wm/date.zx} {
+	menu Utilities 'Date and Time' {wmrun zxrun -w /dis/wm/date.zx}
+} {
+	menu Utilities 'Date and Time' {wmrun wm/date}
+}
 if {ftest -f /dis/wm/clock.zx} {
 	menu Utilities Clock    {wmrun zxrun -w /dis/wm/clock.zx}
 } {

@@ -228,7 +228,7 @@ def exercise_desktop(env, emu, overlay, legacy, chrome, resize):
         child.stderr.close()
 
 
-def exercise_catalog(env, emu, runtime_overlay, legacy):
+def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
     # Keep the shipped shell script and menu registrations. Record launches
     # instead of opening browsers or a series of unrelated heavyweight apps.
     setup = (ROOT / 'lib/wmsetup').read_text()
@@ -307,7 +307,22 @@ def exercise_catalog(env, emu, runtime_overlay, legacy):
             )
             catalog = legacy_catalog if legacy else tuple((*coords, item[2]) for coords, item in
                                                           zip(positions, legacy_catalog, strict=True))
+            def has_bundle(name):
+                local = overlay_path / name if overlay_path else None
+                if local and local.exists():
+                    return local.is_file()
+                return (ROOT / 'dis/wm' / name).is_file()
+
+            guest_apps = (
+                ('wm/colors', 'colors.zx', '-w'),
+                ('wm/about', 'about.zx', '-w'),
+                ('wm/memory', 'memory.zx', '-p -w'),
+                ('wm/date', 'date.zx', '-w'),
+            )
+            zx_routes = {entry: f'zxrun {options} /dis/wm/{bundle}' for entry, bundle, options in guest_apps
+                         if has_bundle(bundle)}
             for category, point, command in catalog:
+                command = zx_routes.get(command, command)
                 if command == 'wm/ftree':
                     if (ROOT / 'dis/wm/explorer.zx').is_file():
                         command = 'zxrun -w /dis/wm/explorer.zx'
@@ -344,7 +359,7 @@ def main():
         guest_lib.mkdir(parents=True)
         shutil.copyfile(ROOT / 'usr/inferno/lib/plumbing', guest_lib / 'plumbing')
         overlay += f'bind -b /{users.relative_to(ROOT).as_posix()} /usr; '
-        exercise_catalog(env, args.emu.resolve(), overlay, args.legacy_menu)
+        exercise_catalog(env, args.emu.resolve(), overlay, args.legacy_menu, args.guest_overlay)
         exercise_desktop(env, args.emu.resolve(), overlay, args.legacy_menu,
                          args.require_window_chrome, args.require_window_resize)
 

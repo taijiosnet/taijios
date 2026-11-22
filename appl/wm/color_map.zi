@@ -1,0 +1,71 @@
+#import "std/vec"
+
+Size :: 16
+
+RGB :: struct {
+    red: s32
+    green: s32
+    blue: s32
+}
+
+// The 256 entries follow Draw's CMAP8 indexing in libdraw/rgb.c.
+At :: (index: s32) -> RGB {
+    red := index >> 6
+    value := (index >> 4) & 3
+    shifted := (index - value + red) & 15
+    green := shifted >> 2
+    blue := shifted & 3
+    largest := red
+    if green > largest { largest = green }
+    if blue > largest { largest = blue }
+    if largest == 0 {
+        gray := 17 * value
+        return .{gray, gray, gray}
+    }
+    scale := 17 * (4 * largest + value)
+    return .{red * scale / largest, green * scale / largest, blue * scale / largest}
+}
+
+// The first cell to contain a pixel is the same one that paints it.
+IndexAt :: (x: s32, y: s32, width: s32, height: s32) -> s32 {
+    if x < 0 || y < 0 || x >= width || y >= height { return -1 }
+    return (y * Size / height) * Size + x * Size / width
+}
+
+CellEdge :: (cell: s32, span: s32) -> s32 {
+    return (cell * span + Size - 1) / Size
+}
+
+Unpack :: (rgb: s32) -> RGB {
+    return .{rgb >> 16, (rgb >> 8) & 255, rgb & 255}
+}
+
+Nearest :: (rgb: RGB) -> (index: s32, exact: bool) {
+    best: s32
+    distance := 3 * 255 * 255 + 1
+    for index: cast(s32)0..Size*Size-1 {
+        color := At(index)
+        red := color.red - rgb.red
+        green := color.green - rgb.green
+        blue := color.blue - rgb.blue
+        squared := red * red + green * green + blue * blue
+        if squared == 0 { return index, true }
+        if squared < distance {
+            best = index
+            distance = squared
+        }
+    }
+    return best, false
+}
+
+Describe :: (out: *Vec(u8), index: s32, rgb: RGB, exact: bool) {
+    digits := "0123456789ABCDEF"
+    packed := (rgb.red << 16) | (rgb.green << 8) | rgb.blue
+    hex: [6]u8
+    for i: cast(s32)0..5 {
+        hex[i] = digits[(packed >> ((5 - i) * 4)) & 15]
+    }
+    BuilderAppend(out.*, "col:")
+    if !exact { BuilderAppend(out.*, "~") }
+    BuilderPrint(out, "% #% r% g% b%", index, TextView(hex[:]), rgb.red, rgb.green, rgb.blue)
+}
