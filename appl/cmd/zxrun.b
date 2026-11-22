@@ -23,8 +23,9 @@ Wm: module
 };
 
 Zxresult: type (big, int, string);
-Deadline: adt {
-	pid: int;
+# Only the runner records process IDs, after each helper reports its PID.
+WindowWorkers: adt {
+	reader, deadline: int;
 };
 Stdin: type (int, array of byte);
 QueueSize: con 64;
@@ -141,17 +142,17 @@ runwindow(zx: ZX, ctxt: ref Draw->Context, path: string, args: list of string, s
 	done := chan[1] of Zxresult;
 	spawn engine(zx, path, args, bridge, pid, done);
 	worker := <-pid;
-	deadline := ref Deadline(0);
+	workers := ref WindowWorkers(0, 0);
 	{
-		result := serve(ctxt, bridge, done, deadline);
-		stopreader(bridge);
-		kill(deadline.pid);
+		result := serve(ctxt, bridge, done, workers);
+		stopreader(workers);
+		kill(workers.deadline);
 		return result;
 	} exception e {
 	"*" =>
 		kill(worker);
-		stopreader(bridge);
-		kill(deadline.pid);
+		stopreader(workers);
+		kill(workers.deadline);
 		return (big 0, -1, e);
 	}
 }
@@ -176,10 +177,11 @@ kill(pid: int)
 		sys->fprint(fd, "kill");
 }
 
-stopreader(bridge: ref ZX->Window)
+stopreader(workers: ref WindowWorkers)
 {
-	kill(bridge.reader);
-	bridge.reader = 0;
+	pid := workers.reader;
+	workers.reader = 0;
+	kill(pid);
 }
 
 readstdin(out: chan of Stdin, pid: chan of int)
@@ -206,7 +208,7 @@ waitdeadline(delay: int, timeout, pid: chan of int)
 	timeout <-= 1;
 }
 
-serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, deadline: ref Deadline): Zxresult
+serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, workers: ref WindowWorkers): Zxresult
 {
 	w: ref Wmclient->Window;
 	presented, popup, stripimage: ref Draw->Image;
@@ -257,8 +259,8 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 
 	for(;;){
 		if(waiting && (queue.count != 0 || closed)){
-			kill(deadline.pid);
-			deadline.pid = 0;
+			kill(workers.deadline);
+			workers.deadline = 0;
 			timeout = notimeout;
 			if(closed)
 				bridge.input = event(ZX->Closed, bounds);
@@ -439,7 +441,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 						timeout = chan[1] of int;
 						pid := chan of int;
 						spawn waitdeadline(bridge.wait, timeout, pid);
-						deadline.pid = <-pid;
+						workers.deadline = <-pid;
 					}
 					continue;
 				}
@@ -452,7 +454,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 						bridge.stdin = array[ZX->StdinChunk] of byte;
 						pid := chan of int;
 						spawn readstdin(stream, pid);
-						bridge.reader = <-pid;
+						workers.reader = <-pid;
 						stdin = stream;
 					}
 					n := min(bridge.stdinlen, readcount - offset);
@@ -598,7 +600,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 				title = notitle;
 				presented = stripimage = bridge.image = nil;
 				stdin = nostdin;
-				stopreader(bridge);
+				stopreader(workers);
 				closed = 1;
 				ok = 1;
 			}
@@ -606,9 +608,9 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 		(readcount, data) = <-stdin =>
 			stdin = nostdin;
 			if(readcount <= 0)
-				bridge.reader = 0;
+				workers.reader = 0;
 		<-timeout =>
-			deadline.pid = 0;
+			workers.deadline = 0;
 			timeout = notimeout;
 			waiting = 0;
 			bridge.input = event(ZX->Idle, bounds);
@@ -629,7 +631,7 @@ serve(ctxt: ref Draw->Context, bridge: ref ZX->Window, done: chan of Zxresult, d
 				ctl = noctl;
 				title = notitle;
 				stdin = nostdin;
-				stopreader(bridge);
+				stopreader(workers);
 				closed = 1;
 				continue;
 			}

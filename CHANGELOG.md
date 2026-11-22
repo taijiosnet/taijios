@@ -10,6 +10,7 @@
 - Port Colours to ZX with the 256-color Draw palette, resizable cells, and sampling within the guest display.
 - Open the existing ZX About Inferno and Memory Monitor from the System menu when installed.
 - Port the Date window to ZX with the guest timezone and live second updates.
+- Keep the desktop responsive when closing ZX windows that never read stdin.
 - Lock TaijiOS Tcl and Tk to the canonical source packages so each ZX application can select the Tk features it uses.
 
 - Avoid redundant pointer-motion events on stationary ZX button presses and releases.
