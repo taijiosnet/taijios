@@ -3,6 +3,7 @@ using Args :: #import "taijios_args";
 Draw :: #import "guest_draw";
 Compositor :: #import "compositor";
 Input :: #import "guest_input";
+Windows :: #import "desktop_windows";
 
 Fail :: (operation: string) -> s32 {
     print("%: %\n", operation, Io.LastError());
@@ -40,7 +41,68 @@ Paint :: (display: *Draw.Display) -> bool {
     };
     if !Compositor.Repaint(display, background, layers[:], screen.bounds) { return false }
     // Clear a single pixel of the bottom layer while retaining its neighbors.
-    return Compositor.Repaint(display, background, layers[:0], .{10, 10, 11, 11});
+    if !Compositor.Repaint(display, background, layers[:0], .{10, 10, 11, 11}) { return false }
+    return CheckWindows(display, background);
+}
+
+CheckWindows :: (display: *Draw.Display, background: Draw.Image) -> bool {
+    state := Windows.New(true, true);
+    bounds: Draw.Rect = .{0, 0, 20, 20};
+    red := Draw.Buffer(display, bounds, 0xb42828ff);
+    defer Draw.Release(display, *red);
+    green := Draw.Buffer(display, bounds, 0x28b428ff);
+    defer Draw.Release(display, *green);
+    blue := Draw.Buffer(display, bounds, 0x2828b4ff);
+    defer Draw.Release(display, *blue);
+    panel := Draw.Buffer(display, .{0, 0, 4, 4}, 0xfacd14ff);
+    defer Draw.Release(display, *panel);
+
+    first: Compositor.Layer = .{red, bounds, 31, 31};
+    second: Compositor.Layer = .{green, bounds, 40, 40};
+    third: Compositor.Layer = .{blue, bounds, 60, 60};
+    chrome: [1]Compositor.Layer = .{.{panel, panel.bounds, 46, 46}};
+
+    if state.workspace_count != 4 || Windows.ConfigureWorkspaces(*state, 0) ||
+       Windows.ConfigureWorkspaces(*state, 33) || Windows.SwitchWorkspace(*state, 4) { return false }
+    if !Windows.Add(*state, 1, first, true, true) || !Windows.Add(*state, 2, second, true, true) ||
+       Windows.Add(*state, 2, second, true, true) || state.keyboard_focus != 2 { return false }
+    if Windows.Hit(*state, chrome[:], 44, 44) != 2 ||
+       Windows.Hit(*state, chrome[:], 48, 48) != Windows.Desktop { return false }
+
+    down: Input.Event = .{kind = Input.Pointer, x = 32, y = 32, buttons = 1};
+    up: Input.Event = .{kind = Input.Pointer, x = 48, y = 48};
+    if Windows.PointerTarget(*state, chrome[:], down) != 1 || state.keyboard_focus != 1 ||
+       Windows.PointerTarget(*state, chrome[:], up) != 1 ||
+       Windows.Hit(*state, chrome[:], 44, 44) != 1 { return false }
+    if Windows.PointerTarget(*state, chrome[:], down) != 1 ||
+       !Windows.SwitchWorkspace(*state, 1) || state.keyboard_focus != Windows.Desktop ||
+       Windows.PointerTarget(*state, chrome[:], down) != Windows.NoTarget ||
+       Windows.PointerTarget(*state, chrome[:], up) != Windows.NoTarget { return false }
+    if !Windows.Add(*state, 3, third, true, false) || Windows.Focus(*state, 1) ||
+       Windows.Hit(*state, chrome[:], 44, 44) != Windows.Desktop { return false }
+
+    if !Windows.SwitchWorkspace(*state, 0) || state.keyboard_focus != 1 ||
+       !Windows.Minimize(*state, 1) || state.keyboard_focus != 2 ||
+       Windows.Hit(*state, chrome[:], 32, 32) != Windows.Desktop ||
+       !Windows.Focus(*state, 1) || state.keyboard_focus != 1 { return false }
+
+    // Ctrl+Alt+Shift+Left moves the focused window and wraps from the first workspace.
+    left: Input.Event = .{kind = Input.KeyDown, code = 263, modifiers = 7};
+    if !Windows.WorkspaceKey(*state, left) || state.workspace != 3 || state.keyboard_focus != 1 ||
+       !Windows.WorkspaceKey(*state, left) || state.workspace != 3 { return false }
+    left.kind = Input.KeyUp;
+    if !Windows.WorkspaceKey(*state, left) || Windows.WorkspaceKey(*state, left) { return false }
+    if !Windows.ConfigureWorkspaces(*state, 2) || state.workspace != 1 || state.keyboard_focus != 3 ||
+       !Windows.Remove(*state, 3) || state.keyboard_focus != 1 || Windows.Remove(*state, 3) { return false }
+
+    // Both visible windows overlap again. The hidden window has a region of its own.
+    first.x = 30;
+    first.y = 30;
+    if !Windows.SetLayer(*state, 1, first) || !Windows.MoveToWorkspace(*state, 1, 0) ||
+       !Windows.SwitchWorkspace(*state, 0) || state.keyboard_focus != 2 ||
+       !Windows.Focus(*state, 1) || !Windows.Add(*state, 4, third, false, false) ||
+       !Windows.Minimize(*state, 4) { return false }
+    return Windows.Repaint(*state, display, background, chrome[:], .{30, 30, 80, 80});
 }
 
 main :: () -> s32 {
@@ -61,9 +123,13 @@ main :: () -> s32 {
     down := false;
     up := false;
     text := false;
-    while !(released && up && text) {
+    switched := false;
+    workspace := Windows.New(true, true);
+    while !(released && up && text && switched) {
         event := Input.Next(input);
         if event.kind == 0 { return Fail("read input") }
+        handled := Windows.WorkspaceKey(*workspace, event);
+        if handled && event.kind == Input.KeyUp && workspace.workspace == 1 { switched = true }
         if event.kind == Input.Pointer && event.x == 120 && event.y == 160 {
             if event.buttons == 1 { pressed = true }
             if pressed && event.buttons == 0 { released = true }

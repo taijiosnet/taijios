@@ -1,0 +1,260 @@
+#import "std/vec";
+Draw :: #import "guest_draw";
+Compositor :: #import "compositor";
+Input :: #import "guest_input";
+
+NoTarget :: 0;
+Desktop :: -1;
+MaxWorkspaces :: 32;
+
+Window :: struct {
+    id: s32;
+    workspace: s32;
+    layer: Compositor.Layer;
+    keyboard: bool;
+    pointer: bool;
+    minimized: bool;
+}
+
+State :: struct {
+    windows: Vec(Window); // Back to front. Desktop and chrome are separate.
+    workspace: s32;
+    workspace_count: s32;
+    keyboard_focus: s32;
+    desktop_keyboard: bool;
+    desktop_pointer: bool;
+    remembered: [MaxWorkspaces]s32;
+    pointer_focus: s32;
+    buttons: s32;
+    discard_pointer: bool;
+    workspace_keys: [2]bool;
+    layers: Vec(Compositor.Layer);
+}
+
+New :: (desktop_keyboard: bool, desktop_pointer: bool) -> State {
+    focus: s32 = ifx desktop_keyboard then Desktop else NoTarget;
+    return .{workspace_count = 4, keyboard_focus = focus,
+             desktop_keyboard = desktop_keyboard, desktop_pointer = desktop_pointer};
+}
+
+// The caller owns Draw images and keeps them alive while attached to a window.
+Add :: (state: *State, id: s32, layer: Compositor.Layer, keyboard: bool, pointer: bool) -> bool {
+    if id <= 0 || Find(state, id) >= 0 { return false }
+    if !VecPush(state.windows, Window.{id, state.workspace, layer, keyboard, pointer, false}) { return false }
+    if keyboard { SetFocus(state, state.windows.count - 1) }
+    return true;
+}
+
+SetLayer :: (state: *State, id: s32, layer: Compositor.Layer) -> bool {
+    index := Find(state, id);
+    if index < 0 { return false }
+    state.windows[index].layer = layer;
+    return true;
+}
+
+Remove :: (state: *State, id: s32) -> bool {
+    index := Find(state, id);
+    if index < 0 { return false }
+    for i: index .. state.windows.count - 2 { state.windows[i] = state.windows[i + 1] }
+    unused VecResize(state.windows, state.windows.count - 1);
+    Forget(state, id);
+    if state.pointer_focus == id { ClearPointer(state) }
+    if state.keyboard_focus == id { RestoreFocus(state) }
+    return true;
+}
+
+// Focusing a task restores a minimized window in the current workspace.
+Focus :: (state: *State, id: s32) -> bool {
+    index := Find(state, id);
+    if index < 0 || state.windows[index].workspace != state.workspace { return false }
+    state.windows[index].minimized = false;
+    FocusWindow(state, index);
+    return true;
+}
+
+Minimize :: (state: *State, id: s32) -> bool {
+    index := Find(state, id);
+    if index < 0 || state.windows[index].workspace != state.workspace { return false }
+    state.windows[index].minimized = true;
+    if state.pointer_focus == id { ClearPointer(state) }
+    if state.keyboard_focus == id { RestoreFocus(state) }
+    return true;
+}
+
+MoveToWorkspace :: (state: *State, id: s32, workspace: s32) -> bool {
+    index := Find(state, id);
+    if index < 0 || workspace < 0 || workspace >= state.workspace_count { return false }
+    if state.windows[index].workspace == workspace { return true }
+    state.windows[index].workspace = workspace;
+    Forget(state, id);
+    if state.pointer_focus == id { ClearPointer(state) }
+    if state.keyboard_focus == id { RestoreFocus(state) }
+    return true;
+}
+
+SwitchWorkspace :: (state: *State, workspace: s32) -> bool {
+    if workspace < 0 || workspace >= state.workspace_count { return false }
+    if workspace != state.workspace { ClearPointer(state) }
+    state.workspace = workspace;
+    RestoreFocus(state);
+    return true;
+}
+
+ConfigureWorkspaces :: (state: *State, count: s32) -> bool {
+    if count < 1 || count > MaxWorkspaces { return false }
+    for i: 0 .. state.windows.count - 1 {
+        if state.windows[i].workspace >= count { state.windows[i].workspace = count - 1 }
+    }
+    for i: count .. state.workspace_count - 1 { state.remembered[i] = NoTarget }
+    state.workspace_count = count;
+    if state.workspace >= count { return SwitchWorkspace(state, count - 1) }
+    return true;
+}
+
+// The persistent panel and any popups are passed in back-to-front order.
+Repaint :: (state: *State, display: *Draw.Display, background: Draw.Image,
+            chrome: []Compositor.Layer, damage: Draw.Rect) -> bool {
+    VecClear(state.layers);
+    for window: state.windows[:] {
+        if Visible(state, window) && !VecPush(state.layers, window.layer) { return false }
+    }
+    for layer: chrome {
+        if !VecPush(state.layers, layer) { return false }
+    }
+    return Compositor.Repaint(display, background, state.layers[:], damage);
+}
+
+Hit :: (state: *State, chrome: []Compositor.Layer, x: s32, y: s32) -> s32 {
+    for layer: chrome {
+        if Compositor.Contains(layer, x, y) { return Desktop }
+    }
+    count := state.windows.count;
+    for i: 0 .. count - 1 {
+        window := state.windows[count - 1 - i];
+        if Visible(state, window) && Compositor.Contains(window.layer, x, y) { return window.id }
+    }
+    return Desktop;
+}
+
+// Pointer capture follows a pressed button through motion and release. A
+// hidden or removed window loses capture and its pending release is discarded.
+PointerTarget :: (state: *State, chrome: []Compositor.Layer, event: Input.Event) -> s32 {
+    if state.discard_pointer {
+        state.discard_pointer = event.buttons != 0;
+        return NoTarget;
+    }
+    if state.buttons == 0 {
+        hit := Hit(state, chrome, event.x, event.y);
+        if event.buttons != 0 {
+            state.pointer_focus = hit;
+            if hit == Desktop {
+                if state.desktop_keyboard { state.keyboard_focus = Desktop }
+            } else {
+                FocusWindow(state, Find(state, hit));
+            }
+        } else if hit == Desktop {
+            state.pointer_focus = Desktop;
+        }
+    }
+    target := state.pointer_focus;
+    if target == Desktop && state.desktop_pointer {
+        state.buttons = event.buttons;
+        return target;
+    }
+    index := Find(state, target);
+    if index >= 0 && Visible(state, state.windows[index]) && state.windows[index].pointer {
+        state.buttons = event.buttons;
+        return target;
+    }
+    state.buttons = 0;
+    return NoTarget;
+}
+
+// Return true for intercepted key presses, repeats and their matching releases.
+WorkspaceKey :: (state: *State, event: Input.Event) -> bool {
+    if event.kind == Input.KeyReset {
+        state.workspace_keys = .{};
+        return false;
+    }
+    if event.kind != Input.KeyDown && event.kind != Input.KeyUp { return false }
+    if event.code != RawLeft && event.code != RawRight { return false }
+    slot := event.code - RawRight;
+    captured := state.workspace_keys[slot];
+    if event.kind == Input.KeyUp {
+        state.workspace_keys[slot] = false;
+        return captured;
+    }
+    if captured { return true }
+    if (event.modifiers & RawCtrlAlt) != RawCtrlAlt { return false }
+    state.workspace_keys[slot] = true;
+    direction: s32 = ifx event.code == RawLeft then -1 else 1;
+    next := (state.workspace + state.workspace_count + direction) % state.workspace_count;
+    if (event.modifiers & RawShift) != 0 && state.keyboard_focus > 0 {
+        unused MoveToWorkspace(state, state.keyboard_focus, next);
+    }
+    unused SwitchWorkspace(state, next);
+    return true;
+}
+
+#scope_file
+
+RawRight :: 262;
+RawLeft :: 263;
+RawShift :: 1;
+RawCtrlAlt :: 6;
+
+Find :: (state: *State, id: s32) -> s64 {
+    if id <= 0 { return -1 }
+    for i: 0 .. state.windows.count - 1 {
+        if state.windows[i].id == id { return i }
+    }
+    return -1;
+}
+
+Visible :: (state: *State, window: Window) -> bool {
+    return window.workspace == state.workspace && !window.minimized;
+}
+
+SetFocus :: (state: *State, index: s64) {
+    id := state.windows[index].id;
+    state.keyboard_focus = id;
+    state.remembered[state.workspace] = id;
+}
+
+FocusWindow :: (state: *State, index: s64) {
+    window := state.windows[index];
+    last := state.windows.count - 1;
+    for i: index .. last - 1 { state.windows[i] = state.windows[i + 1] }
+    state.windows[last] = window;
+    if window.keyboard { SetFocus(state, last) }
+}
+
+RestoreFocus :: (state: *State) {
+    index := Find(state, state.remembered[state.workspace]);
+    if index >= 0 && Visible(state, state.windows[index]) {
+        FocusWindow(state, index);
+        return;
+    }
+    count := state.windows.count;
+    for i: 0 .. count - 1 {
+        candidate := count - 1 - i;
+        window := state.windows[candidate];
+        if window.keyboard && Visible(state, window) {
+            FocusWindow(state, candidate);
+            return;
+        }
+    }
+    state.keyboard_focus = ifx state.desktop_keyboard then Desktop else NoTarget;
+}
+
+Forget :: (state: *State, id: s32) {
+    for i: 0 .. MaxWorkspaces - 1 {
+        if state.remembered[i] == id { state.remembered[i] = NoTarget }
+    }
+}
+
+ClearPointer :: (state: *State) {
+    state.pointer_focus = NoTarget;
+    if state.buttons != 0 { state.discard_pointer = true }
+    state.buttons = 0;
+}

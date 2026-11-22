@@ -7,6 +7,12 @@ Layer :: struct {
     y: s32;
 }
 
+Contains :: (layer: Layer, x: s32, y: s32) -> bool {
+    return x >= layer.x && y >= layer.y &&
+           cast(s64)x - layer.x < cast(s64)layer.source.right - layer.source.left &&
+           cast(s64)y - layer.y < cast(s64)layer.source.bottom - layer.source.top;
+}
+
 // Paint the damaged screen rectangle, in back-to-front order, then present it.
 // Each layer's x and y locate the first pixel of its source rectangle.
 Repaint :: (display: *Draw.Display, background: Draw.Image, layers: []Layer, damage: Draw.Rect) -> bool {

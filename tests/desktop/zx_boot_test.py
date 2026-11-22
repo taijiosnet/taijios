@@ -99,9 +99,15 @@ def check_draw(emulator, root, env):
             assert frame.getpixel((12, 10)) == (10, 30, 230)
             assert frame.getpixel((12, 11)) == (250, 205, 20)
             assert frame.getpixel((12, 12)) == (10, 80, 230)
+            assert frame.getpixel((32, 32)) == (180, 40, 40)
+            assert frame.getpixel((44, 44)) == (180, 40, 40)
+            assert frame.getpixel((48, 48)) == (250, 205, 20)
+            assert frame.getpixel((56, 56)) == (40, 180, 40)
+            assert frame.getpixel((66, 66)) == (24, 56, 88)
             desktop('xdotool', 'windowfocus', window)
             desktop('xdotool', 'mousemove', '--window', window, '120', '160', 'click', '1')
             desktop('xdotool', 'key', 'a')
+            desktop('xdotool', 'key', 'ctrl+alt+Right')
             until(lambda: received(b'ZX_DRAW_INPUT_OK'), 'guest did not receive pointer and keyboard events')
             assert app.wait(timeout=5) == 0
         except (AssertionError, subprocess.SubprocessError) as error:
@@ -109,7 +115,7 @@ def check_draw(emulator, root, env):
         finally:
             stop(app)
             app.stdout.close()
-    print('Private ZX-only guest composited a frame and received pointer and keyboard events')
+    print('Private ZX-only guest composited its workspace and received pointer and keyboard events')
 
 
 def main():

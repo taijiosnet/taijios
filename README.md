@@ -27,8 +27,9 @@ Draw and input devices. Window-manager services and Dis task inspection remain
 available through the normal desktop runner.
 Run `python3 tests/desktop/zx_boot_test.py` to verify direct startup in a guest
 root containing only ZX programs. Add `--graphics` to test compositing, clipped
-updates, pointer input, and keyboard input on a private Xvfb display. Direct
-graphical bundles can import `guest_draw` and `guest_input` from `appl/lib`.
+updates, workspace and focus policy, pointer input, and keyboard input on a
+private Xvfb display. Direct graphical bundles can import `guest_draw` and
+`guest_input` from `appl/lib`.
 The input module receives pointer motion and buttons, key transitions, and
 composed text from one blocking device stream.
 

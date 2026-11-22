@@ -15,6 +15,7 @@
 - Let the Linux emulator boot directly into a console ZX bundle without loading Dis.
 - Add Ziran layer compositing and a combined pointer and keyboard stream for direct ZX guests.
 - Run console ZX child commands with inherited guest streams and no Dis scheduler.
+- Add Ziran workspace, focus, window stacking, and pointer capture for the native compositor.
 - Lock TaijiOS Tcl and Tk to the canonical source packages so each ZX application can select the Tk features it uses.
 
 - Avoid redundant pointer-motion events on stationary ZX button presses and releases.
