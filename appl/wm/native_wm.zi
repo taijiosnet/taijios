@@ -50,6 +50,8 @@ Application :: struct {
     title: string;
     app_id: string;
     normal: Draw.Rect;
+    cursor: [272]u8;
+    cursor_size: s64;
     maximized: bool;
     open: bool;
 }
@@ -57,6 +59,7 @@ Application :: struct {
 Manager :: struct {
     display: Draw.Display;
     background: Draw.Image;
+    sample: Draw.Image;
     bounds: Draw.Rect;
     windows: Windows.State;
     apps: Vec(Application);
@@ -67,6 +70,14 @@ Manager :: struct {
     buttons: s32;
     pointer_tick: u32;
     pointer_epoch: s64;
+    pointer_x: s32;
+    pointer_y: s32;
+    pointer_known: bool;
+    cursor_target: s32;
+    sample_owner: s32;
+    sample_x: s32;
+    sample_y: s32;
+    sample_release: bool;
     dirty: bool;
 }
 
@@ -107,6 +118,45 @@ WorkArea :: (manager: *Manager) -> Draw.Rect {
 DesktopChanged :: (manager: *Manager) {
     manager.generation += 1;
     manager.dirty = true;
+}
+
+ApplyCursor :: (manager: *Manager, id: s32) -> bool {
+    index := Find(manager, id);
+    if index >= 0 && manager.apps[index].open {
+        app := *manager.apps[index];
+        return Link.ApplyCursor(app.cursor[:app.cursor_size]);
+    }
+    empty: [0]u8;
+    return Link.ApplyCursor(empty[:]);
+}
+
+SetCursor :: (manager: *Manager, app: *Application, size: s32) -> bool {
+    if size < 0 || size > app.cursor.count { return false }
+    if size != 0 && Link.Payload(app.id, 0, app.cursor[:size]) != size { return false }
+    app.cursor_size = size;
+    return app.id != manager.cursor_target || ApplyCursor(manager, app.id);
+}
+
+RefreshCursor :: (manager: *Manager, chrome: []Compositor.Layer) {
+    if !manager.pointer_known { return }
+    hover := Windows.Hit(*manager.windows, chrome, manager.pointer_x, manager.pointer_y);
+    if hover == Windows.Desktop { hover = manager.shell }
+    if hover != manager.cursor_target {
+        manager.cursor_target = hover;
+        unused ApplyCursor(manager, hover);
+    }
+}
+
+SamplePointer :: (manager: *Manager, id: s32) -> s32 {
+    if id != manager.sample_owner { return -1 }
+    if manager.sample_release { manager.sample_owner = 0 }
+    for i: 0 .. manager.windows.windows.count - 1 {
+        window := Windows.At(*manager.windows, i);
+        if window.id != id || window.workspace != manager.windows.workspace || window.minimized { continue }
+        if manager.sample.id == 0 { manager.sample = Draw.Buffer(*manager.display, .{0, 0, 1, 1}, 0x000000ff) }
+        return Draw.ScreenRGB(*manager.display, manager.sample, manager.sample_x, manager.sample_y);
+    }
+    return -1;
 }
 
 Capture :: (manager: *Manager, id: s32) -> bool {
@@ -283,6 +333,7 @@ WindowAction :: (manager: *Manager, action: string, request: []s32) -> bool {
 Paint :: (manager: *Manager) -> bool {
     chrome: [8]Compositor.Layer;
     count := ChromeLayers(manager, chrome[:]);
+    RefreshCursor(manager, chrome[:count]);
     background := manager.background;
     index := Find(manager, manager.shell);
     if index >= 0 && manager.apps[index].open { background = manager.apps[index].image }
@@ -303,6 +354,10 @@ Run :: (manager: *Manager, input: s32) -> s32 {
             id := Link.Request(cursor, request[:]);
             if id <= 0 { break }
             cursor = id;
+            if request[0] == Link.Sample {
+                unused Link.ReplySample(id, SamplePointer(manager, id));
+                continue;
+            }
             index := Find(manager, id);
             ok := false;
             if index >= 0 { ok = Service(manager, *manager.apps[index], request[:]) }
@@ -367,6 +422,18 @@ Service :: (manager: *Manager, app: *Application, request: []s32) -> bool {
     if request[0] == Link.Chrome { return SetChrome(manager, app.id) }
     if request[0] == Link.DesktopAction { return DesktopAction(manager, Link.Text(app.id), request[5]) }
     if request[0] == Link.WindowAction { return WindowAction(manager, Link.Text(app.id), request) }
+    if request[0] == Link.Resize {
+        if app.id == manager.shell || app.maximized { return false }
+        bounds := app.bounds;
+        bounds.right = bounds.left + request[1];
+        bounds.bottom = bounds.top + request[2];
+        for i: 0 .. manager.windows.windows.count - 1 {
+            window := Windows.At(*manager.windows, i);
+            if window.id == app.id && !window.minimized { return SetBounds(manager, app, FitBounds(bounds, WorkArea(manager))) }
+        }
+        return false;
+    }
+    if request[0] == Link.Cursor { return SetCursor(manager, app, request[6]) }
     if request[0] == Link.Launch {
         app_id := AppID(Link.Text(app.id));
         id := Link.LaunchWindow(app.id);
@@ -409,6 +476,11 @@ RemoveWindow :: (manager: *Manager, app: *Application) {
     unused Draw.Release(*manager.display, *app.pending);
     unused Draw.Release(*manager.display, *app.image);
     app.open = false;
+    if app.id == manager.sample_owner { manager.sample_owner = 0 }
+    if app.id == manager.cursor_target {
+        manager.cursor_target = 0;
+        unused ApplyCursor(manager, 0);
+    }
     manager.dirty = true;
 }
 
@@ -469,7 +541,7 @@ UploadPixels :: (display: *Draw.Display, image: Draw.Image, id: s32,
             offset := (y * width + x) * 4;
             pixels := buffer[:size];
             bounds: Draw.Rect = .{x, first + y, x + columns, first + y + lines};
-            if Link.Pixels(id, offset, pixels) != size || !Draw.Upload(display, image, bounds, pixels) { return false }
+            if Link.Payload(id, offset, pixels) != size || !Draw.Upload(display, image, bounds, pixels) { return false }
             x += columns;
         }
         y += lines;
@@ -489,7 +561,23 @@ HandleInput :: (manager: *Manager, event: Input.Event) {
         focus := manager.windows.keyboard_focus;
         target := Windows.PointerTarget(*manager.windows, chrome[:count], event);
         id := ifx target == Windows.Desktop then manager.shell else target;
+        manager.pointer_x = event.x;
+        manager.pointer_y = event.y;
+        manager.pointer_known = true;
+        RefreshCursor(manager, chrome[:count]);
         changed := manager.buttons ^ event.buttons;
+        if (changed & event.buttons & 1) != 0 {
+            manager.sample_owner = ifx id != manager.shell then id else 0;
+            manager.sample_release = false;
+        }
+        if manager.sample_owner > 0 && !manager.sample_release {
+            manager.sample_x = event.x;
+            manager.sample_y = event.y;
+            if (event.buttons & 1) == 0 {
+                if id != manager.sample_owner { manager.sample_owner = 0 }
+                manager.sample_release = true;
+            }
+        }
         if manager.buttons == 0 && event.buttons != 0 && id > 0 && id != manager.shell { manager.dirty = true }
         if focus != manager.windows.keyboard_focus { manager.generation += 1 }
         manager.buttons = event.buttons;

@@ -11,6 +11,9 @@ enum {
 	ZxnDesktopAction,
 	ZxnWindowAction,
 	ZxnLaunch,
+	ZxnResize,
+	ZxnCursor,
+	ZxnSample,
 };
 
 enum { ZxnPublish = 1, ZxnStaged = 2 };

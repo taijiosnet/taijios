@@ -187,7 +187,8 @@ def check_window_manager(emulator, root, env):
         source.write_text(fixture.replace('Color :: 37;', f'Color :: {red};'), encoding='utf-8')
         subprocess.run([
             'ziran', 'bundle', '--root', root, '--module-path', surfaces, '--module-path', ROOT / 'appl/cmd',
-            '--bind-host', 'zx_surface', '--bind-host', 'taijios_args',
+            '--bind-host', 'zx_surface', '--bind-host', 'taijios_args', '--bind-host', 'taijios_wm',
+            '--bind-host', 'taijios_draw',
             '--entry', 'zx_window_app:main', '-o', root / f'window{red}.zx', source,
         ], env=env, check=True, timeout=60)
     assert not any(root.rglob('*.dis'))

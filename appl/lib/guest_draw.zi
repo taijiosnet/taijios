@@ -143,6 +143,23 @@ Upload :: (display: *Display, image: Image, area: Rect, pixels: []u8) -> bool {
     return true;
 }
 
+// Read a guest screen pixel through a 1x1 RGBA buffer owned by the caller.
+ScreenRGB :: (display: *Display, sample: Image, x: s32, y: s32) -> s32 {
+    screen := Screen(display);
+    if !sample.rgba || cast(s64)sample.bounds.right - sample.bounds.left != 1 ||
+       cast(s64)sample.bounds.bottom - sample.bounds.top != 1 || x < screen.bounds.left || y < screen.bounds.top ||
+       x >= screen.bounds.right || y >= screen.bounds.bottom { return -1 }
+    if !Composite(display, sample, screen, sample.bounds, x, y) { return -1 }
+    message: [21]u8;
+    message[0] = #char "r";
+    Word(message[:], 1, sample.id);
+    Rectangle(message[:], 5, sample.bounds);
+    if !Send(display, message[:]) { return -1 }
+    bytes: [4]u8;
+    if Io.ReadBytes(display.data, bytes[:]) != bytes.count { return -1 }
+    return cast(s32)bytes[0] * 65536 + cast(s32)bytes[1] * 256 + cast(s32)bytes[2];
+}
+
 Flush :: (display: *Display) -> bool {
     return display.data != 0 && Io.WriteBytes(display.data, "v") == 1;
 }

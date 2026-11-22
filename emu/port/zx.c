@@ -702,6 +702,14 @@ zxresize(ZX_Window *win, const HostValue *args, int n)
 }
 
 static int
+zxcursorvalid(vlong x, vlong y, vlong width, vlong height, size_t length)
+{
+	return width > 0 && width <= ZxCursorSide && width % 8 == 0 &&
+		height > 0 && height <= 2 * ZxCursorSide && height % 2 == 0 &&
+		x <= 0 && x > -width && y <= 0 && y > -(height/2) && length == (size_t)(width/8*height);
+}
+
+static int
 zxcursor(ZX_Window *win, const HostValue *args, int n)
 {
 	static const char hex[] = "0123456789abcdef";
@@ -719,10 +727,7 @@ zxcursor(ZX_Window *win, const HostValue *args, int n)
 	height = args[3].integer;
 	if(width == 0 && height == 0 && args[4].length == 0)
 		return zxtextrequest(win, ZX_SetCursor, "cursor", sizeof("cursor")-1);
-	if(width <= 0 || width > ZxCursorSide || width % 8 != 0 ||
-	   height <= 0 || height > 2 * ZxCursorSide || height % 2 != 0 ||
-	   x > 0 || x <= -width || y > 0 || y <= -(height/2) ||
-	   args[4].data == nil || args[4].length != (size_t)(width/8*height))
+	if(args[4].data == nil || !zxcursorvalid(x, y, width, height, args[4].length))
 		return 0;
 	length = snprint(request, sizeof request, "cursor %d %d %d %d ", (int)x, (int)y, (int)width, (int)height);
 	bytes = args[4].data;
@@ -1830,6 +1835,89 @@ zxnativelaunchrequest(ZxCommand *command, ZxNativeRequest *request)
 	return zxprocessregister(command, args, &command->outcome, ZxnApplication);
 }
 
+enum { ZxCursorHeader = 16, ZxCursorBytes = ZxCursorHeader + 2*ZxCursorSide*ZxCursorSide/8 };
+
+static int
+zxnativetools(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxNativeRequest request;
+	uchar buffer[ZxCursorBytes];
+	vlong width, height, x, y;
+	unsigned int i;
+
+	USED(module);
+	if(strcmp(function, "Resize") == 0){
+		request = (ZxNativeRequest){.kind = ZxnResize};
+		if(n != 2 || !zxsize(args)){
+			zxbool(result, 0);
+			return 1;
+		}
+		request.width = args[0].integer;
+		request.height = args[1].integer;
+	}else{
+		if(n != 5 || !zxisindex(args) || !zxisindex(args+1) || !zxisindex(args+2) || !zxisindex(args+3) ||
+		   args[4].kind != HOST_STRING)
+			return 0;
+		request = (ZxNativeRequest){.kind = ZxnCursor};
+		x = args[0].integer;
+		y = args[1].integer;
+		width = args[2].integer;
+		height = args[3].integer;
+		if(width != 0 || height != 0 || args[4].length != 0){
+			if(args[4].data == nil || !zxcursorvalid(x, y, width, height, args[4].length)){
+				zxbool(result, 0);
+				return 1;
+			}
+			for(i = 0; i < 4; i++){
+				uint v = args[i].integer;
+				uchar *p = buffer + i*4;
+				BPLONG(p, v);
+			}
+			memmove(buffer + ZxCursorHeader, args[4].data, args[4].length);
+			request.data = buffer;
+			request.length = ZxCursorHeader + args[4].length;
+		}
+	}
+	zxbool(result, zxwindowsubmit(context, request));
+	return 1;
+}
+
+static int
+zxnativesetcursor(const HostValue *value)
+{
+	uchar buffer[ZxCursorBytes];
+	size_t i;
+	int fd, written;
+
+	if(!zxioslice(value) || value->length > sizeof(buffer))
+		return 0;
+	for(i = 0; i < value->length; i++)
+		buffer[i] = value->elements[i].bits;
+	if(value->length != 0 && (value->length < ZxCursorHeader ||
+	   !zxcursorvalid((int)BGLONG(buffer), (int)BGLONG(buffer+4), (int)BGLONG(buffer+8),
+		(int)BGLONG(buffer+12), value->length - ZxCursorHeader)))
+		return 0;
+	fd = kopen("#m/cursor", OWRITE);
+	if(fd < 0)
+		return 0;
+	written = kwrite(fd, buffer, value->length);
+	kclose(fd);
+	return written == (int)value->length;
+}
+
+static int
+zxnativesample(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	USED(module);
+	USED(function);
+	USED(args);
+	if(n != 0)
+		return 0;
+	return zxs32(result, zxwindowsubmit(context, (ZxNativeRequest){.kind = ZxnSample}) - 1);
+}
+
 static int
 zxnativemanager(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
@@ -1863,6 +1951,12 @@ zxnativemanager(void *context, const char *module, const char *function,
 		poperror();
 		BundleHostRenewSteps();
 		zxbool(result, 1);
+		return 1;
+	}
+	if(strcmp(function, "ApplyCursor") == 0){
+		if(n != 1)
+			return 0;
+		zxbool(result, zxnativesetcursor(args));
 		return 1;
 	}
 	if(strcmp(function, "Request") == 0){
@@ -1920,10 +2014,11 @@ zxnativemanager(void *context, const char *module, const char *function,
 			return 0;
 		return zxs32(result, zxwindowrequest(window, &request) == ZxnLaunch ? zxnativelaunchrequest(command, &request) : 0);
 	}
-	if(strcmp(function, "Pixels") == 0){
+	if(strcmp(function, "Payload") == 0){
 		if(n != 3 || !zxisindex(args+1) || !zxioslice(args+2) || args[1].integer < 0)
 			return 0;
-		if(zxwindowrequest(window, &request) != ZxnFrame ||
+		kind = zxwindowrequest(window, &request);
+		if((kind != ZxnFrame && kind != ZxnCursor) ||
 		   args[1].integer > request.length || args[2].length > request.length - args[1].integer ||
 		   args[2].length > ZxIoBytes)
 			return zxs32(result, 0);
@@ -1935,6 +2030,12 @@ zxnativemanager(void *context, const char *module, const char *function,
 		if(n != 2 || args[1].kind != HOST_INTEGER || args[1].type == nil || strcmp(args[1].type, "bool") != 0)
 			return 0;
 		zxbool(result, zxwindowreply(window, args[1].integer != 0));
+		return 1;
+	}
+	if(strcmp(function, "ReplySample") == 0){
+		if(n != 2 || !zxisindex(args+1) || args[1].integer < -1 || args[1].integer > 0xffffff)
+			return 0;
+		zxbool(result, zxwindowrequest(window, nil) == ZxnSample && zxwindowreply(window, args[1].integer + 1));
 		return 1;
 	}
 	if(strcmp(function, "Disconnect") == 0){
@@ -2464,8 +2565,9 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			   strcmp(abi.function, "WaitActivity") == 0 || strcmp(abi.function, "LaunchWindow") == 0 ||
 			   strcmp(abi.function, "Request") == 0 || strcmp(abi.function, "Text") == 0 ||
 			   strcmp(abi.function, "Snapshot") == 0 || strcmp(abi.function, "ChromeRegions") == 0 ||
-			   strcmp(abi.function, "Pixels") == 0 ||
-			   strcmp(abi.function, "Reply") == 0 || strcmp(abi.function, "Disconnect") == 0 ||
+			   strcmp(abi.function, "Payload") == 0 || strcmp(abi.function, "ApplyCursor") == 0 ||
+			   strcmp(abi.function, "Reply") == 0 || strcmp(abi.function, "ReplySample") == 0 ||
+			   strcmp(abi.function, "Disconnect") == 0 ||
 			   strcmp(abi.function, "Dispatch") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxnativemanager, command};
 			continue;
@@ -2478,8 +2580,15 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 				}
 			continue;
 		}
-		if(command->window != nil && zxmodule(abi.module, "taijios_wm") && strcmp(abi.function, "Launch") == 0){
-			bindings[count++] = (HostBinding){abi.module, abi.function, zxnativelaunch, command->window};
+		if(command->window != nil && zxmodule(abi.module, "taijios_wm")){
+			if(strcmp(abi.function, "Launch") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxnativelaunch, command->window};
+			else if(strcmp(abi.function, "Resize") == 0 || strcmp(abi.function, "SetCursor") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxnativetools, command->window};
+			continue;
+		}
+		if(command->window != nil && zxmodule(abi.module, "taijios_draw") && strcmp(abi.function, "SampleGuestPointer") == 0){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxnativesample, command->window};
 			continue;
 		}
 		if(command->window != nil && zxmodule(abi.module, "zx_surface")){

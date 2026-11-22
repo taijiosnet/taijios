@@ -10,6 +10,9 @@ Chrome :: 7;
 DesktopAction :: 8;
 WindowAction :: 9;
 Launch :: 10;
+Resize :: 11;
+Cursor :: 12;
+Sample :: 13;
 Publish :: 1;
 Staged :: 2;
 
@@ -21,11 +24,13 @@ StartDesktop :: (path: string, operands: []string) -> s32 #foreign host_api;
 // flag, and payload byte length. Reply once after using its borrowed payload.
 Request :: (before_id: s32, fields: []s32) -> s32 #foreign host_api;
 Text :: (id: s32) -> string #foreign host_api;
-Pixels :: (id: s32, offset: s32, bytes: []u8) -> s32 #foreign host_api;
+Payload :: (id: s32, offset: s32, bytes: []u8) -> s32 #foreign host_api;
 Reply :: (id: s32, accepted: bool) -> bool #foreign host_api;
+ReplySample :: (id: s32, rgb: s32) -> bool #foreign host_api;
 Snapshot :: (id: s32, desktop: []s32, windows: []s32, labels: []string) -> bool #reads #foreign host_api;
 ChromeRegions :: (id: s32, regions: []s32) -> s32 #foreign host_api;
 LaunchWindow :: (id: s32) -> s32 #foreign host_api;
+ApplyCursor :: (bytes: []u8) -> bool #reads #foreign host_api;
 
 // Events use zx_surface.SurfaceEvent order. The last field is the text rune.
 Dispatch :: (id: s32, fields: []s32, pointer_millis: s64) -> bool #reads #foreign host_api;

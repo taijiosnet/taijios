@@ -44,6 +44,11 @@ main :: () -> s32 {
     if !Desktop.WindowAction(id, "minimize", 0, 0, 0, 0) || Desktop.Capture(state[:]) != 0 || state[2] != 0 ||
        !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[7] != 1 ||
        !Desktop.WindowAction(id, "restore", 0, 0, 0, 0) { return Fail("minimize and restore window") }
+    for i: 0 .. 40 {
+        if Desktop.Capture(state[:]) == 0 && Desktop.WindowAt(0, window[:], title[:], app_id[:]) && window[3] == 56 { break }
+        unused Surface.Event(50);
+    }
+    if window[3] != 56 || window[4] != 40 { return Fail("application resize request") }
     if !Desktop.DesktopAction("configure_workspaces", 5) || !Desktop.WindowAction(id, "move_to_workspace", 4, 0, 0, 0) ||
        !Desktop.DesktopAction("switch_workspace", 4) || Desktop.Capture(state[:]) != 0 || state[5] != 5 || state[6] != 4 ||
        !Desktop.WindowAt(0, window[:], title[:], app_id[:]) || window[5] != 4 { return Fail("desktop workspace state") }
