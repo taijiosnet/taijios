@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaijiOS</title>
+  <meta name="description" content="TaijiOS is a fork of Inferno: Limbo and Dis, a Ziran ZX runtime and the Kryon-built Rill desktop. Run it in your browser.">
+  <meta name="theme-color" content="#11131c" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f4fa" media="(prefers-color-scheme: light)">
+  <meta property="og:title" content="TaijiOS">
+  <meta property="og:description" content="An Inferno fork with the Rill desktop, moving from Limbo to Ziran ZX. Boots in the browser.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://taijios.net/">
+  <meta property="og:image" content="https://taijios.net/assets/taijios-logo.png">
+  <meta property="og:image:alt" content="The TaijiOS capybara yin-yang logo">
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/site.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="TaijiOS home">
+      <img src="assets/taijios-logo.png" width="36" height="36" alt="">
+      <span>TaijiOS</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#try" data-run>Run</a>
+      <a href="#inside">Inside</a>
+      <a href="#desktop">Desktop</a>
+      <a href="#get">Get it</a>
+    </nav>
+    <button class="icon-button" id="theme" type="button" aria-label="Switch between light and dark">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9A9 9 0 0 1 12 3Zm0 16a7 7 0 0 1 0-14v14Z"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">An Inferno operating system</p>
+        <h1>Inferno, rebuilt with a modern desktop.</h1>
+        <p class="lead">TaijiOS is our fork of Inferno. Programs see every resource as a file, Limbo code runs on the Dis virtual machine, and new applications ship as Ziran ZX bundles on the Rill desktop. It boots right here in your browser.</p>
+        <div class="actions">
+          <a class="button primary" href="#try" data-run>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            Run in browser
+          </a>
+          <a class="button" href="https://git.waozi.xyz/taijios/taijios">Source code</a>
+        </div>
+        <p class="note">The real emulator, compiled to WebAssembly: about 7 MB to start, applications load as you open them.</p>
+      </div>
+      <figure class="hero-shot">
+        <img src="assets/desktop-apps.webp" width="1280" height="800" alt="Files, Clock and Task Manager open on the Rill desktop">
+      </figure>
+    </section>
+
+    <section class="stage-section" id="try" aria-label="TaijiOS in your browser">
+      <div class="stage" id="stage">
+        <div class="stage-bar">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="stage-title">TaijiOS &middot; Rill</span>
+          <span class="stage-status" id="boot-status" role="status">Ready to boot</span>
+          <button class="icon-button small" id="fullscreen" type="button" aria-label="Full screen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5v2H6v3zm11-5h5v5h-2V6h-3zM6 15v3h3v2H4v-5zm12 3v-3h2v5h-5v-2z"/></svg>
+          </button>
+        </div>
+        <div class="screen">
+          <canvas id="taiji-screen" width="1024" height="640" aria-label="TaijiOS screen"></canvas>
+          <div class="poster">
+            <img src="assets/desktop-apps.webp" width="1280" height="800" alt="">
+            <button class="run-button" id="run" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              <span>Run TaijiOS</span>
+            </button>
+            <div class="progress" id="boot-progress" aria-hidden="true"><div id="boot-bar"></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="stage-hint">Click the screen to type. The menu is at the top left; switch workspaces with Ctrl+Alt+Left and Right.</p>
+    </section>
+
+    <section class="inside" id="inside">
+      <div class="section-head">
+        <p class="eyebrow">What TaijiOS is now</p>
+        <h2>Inferno underneath, Ziran on top</h2>
+      </div>
+      <div class="cards">
+        <article class="card">
+          <span class="card-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4zm0 5h16v4H4zm0 5h16v4H4z"/></svg>
+          </span>
+          <h3>An Inferno fork</h3>
+          <p>Every device, service and window is a file in a per-process namespace, shared over the Styx protocol. The hosted emulator runs on Linux and, now, in the browser.</p>
+        </article>
+        <article class="card">
+          <span class="card-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 12l6 8h3l-6-8 6-8zm6 0h-3l6 8-6 8h3l6-8z"/></svg>
+          </span>
+          <h3>Limbo moving to Ziran ZX</h3>
+          <p>Limbo programs keep running on Dis while applications move to Ziran. Each one compiles to a portable ZX bundle that the emulator's ZX runtime verifies and runs.</p>
+        </article>
+        <article class="card">
+          <span class="card-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v3H3zm0 5h8v11H3zm10 0h8v5h-8zm0 7h8v4h-8z"/></svg>
+          </span>
+          <h3>The Kryon and Rill desktop</h3>
+          <p>Rill is the desktop: panel, menu, task list and workspaces, drawn with Kryon in the Sweet-Dark style. Dis and ZX applications open side by side.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="feature" id="desktop">
+      <div class="feature-copy">
+        <p class="eyebrow">Rill desktop</p>
+        <h2>A panel, a menu and four workspaces</h2>
+        <p>The applications menu groups every program by category and searches as you type. The panel keeps a task for each window, the workspace switcher and the clock.</p>
+      </div>
+      <figure class="shot"><img src="assets/desktop-menu.webp" width="720" height="400" loading="lazy" alt="The applications menu listing every application"></figure>
+    </section>
+
+    <section class="feature flip">
+      <div class="feature-copy">
+        <p class="eyebrow">ZX applications</p>
+        <h2>Ziran apps next to classic Limbo tools</h2>
+        <p>Files, Clock, Task Manager and About are Ziran programs drawn with Kryon. Shell, Edit, Tetris and dozens more are the Limbo programs Inferno has always shipped.</p>
+      </div>
+      <figure class="shot"><img src="assets/desktop-zx.webp" width="640" height="540" loading="lazy" alt="The Clock and Task Manager ZX applications"></figure>
+    </section>
+
+    <section class="get" id="get">
+      <div class="section-head">
+        <p class="eyebrow">Get it</p>
+        <h2>Build and run it on Linux</h2>
+      </div>
+      <div class="get-grid">
+        <div class="code-card">
+          <pre><code>git clone https://git.waozi.xyz/taijios/taijios
+cd taijios/emu/Linux &amp;&amp; mk install
+cd ../.. &amp;&amp; Linux/386/bin/emu -r "$PWD" -g 1280x800 wm/wm</code></pre>
+        </div>
+        <ul class="links">
+          <li><a href="https://git.waozi.xyz/taijios/taijios">TaijiOS source <span>git.waozi.xyz/taijios/taijios</span></a></li>
+          <li><a href="https://git.waozi.xyz/taijios/taijios/src/branch/master/emu/Web">Browser emulator <span>emu/Web</span></a></li>
+          <li><a href="https://ziran-lang.org">Ziran <span>the language behind ZX</span></a></li>
+          <li><a href="https://git.waozi.xyz/kryonlabs/kryon">Kryon <span>the UI toolkit behind Rill</span></a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <img src="assets/taijios-logo.png" width="24" height="24" alt="">
+    <span>TaijiOS</span>
+    <a href="https://git.waozi.xyz/taijios/taijios">Source</a>
+    <a href="https://kryonlabs.com">Kryon Labs</a>
+    <span class="muted">&copy; 2026 Kryon Labs</span>
+  </footer>
+</body>
+</html>

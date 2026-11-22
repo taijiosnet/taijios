@@ -1,0 +1,92 @@
+// Runs commands several at a time. Each command's standard output and
+// error go to its own log, printed when the command fails.
+#import "std/file"
+#import "std/process_run_linux"
+#import "std/stdio_linux"
+#import "std/timer_linux"
+
+Command :: struct {
+    arguments: Vec(string)
+    directory: string
+    environment: Vec(string)
+    log: string
+    label: string
+}
+
+#scope_file
+Slot :: struct {
+    run: ProcessRun
+    command: s64
+    busy: bool
+}
+
+Report :: (command: *Command, code: s32) {
+    out: Vec(u8)
+    BuilderPrint(*out, "failed (%): %\n", code, command.label)
+    text, ok := ReadEntireFile(command.log)
+    if ok { BuilderAppend(out, text) }
+    unused PrintError(BuilderFinish(out))
+}
+
+Launch :: (command: *Command, run: *ProcessRun) -> bool {
+    options: ProcessOptions
+    options.arguments = command.arguments[:]
+    options.directory = command.directory
+    options.environment = command.environment[:]
+    options.output_path = command.log
+    options.merge_error = true
+    return StartProcess(options, run)
+}
+
+#scope_export
+// Runs every command with at most `width` at once; false when any failed.
+RunAll :: (commands: []Command, width: s64) -> bool {
+    slots: Vec(Slot)
+    for 1..width { slot: Slot; VecPush(slots, slot) }
+    next: s64 = 0
+    running: s64 = 0
+    failed := false
+    while next < commands.count || running > 0 {
+        progressed := false
+        for * slots {
+            if it.busy && PollProcess(*it.run) {
+                it.busy = false
+                running -= 1
+                progressed = true
+                if it.run.code != 0 {
+                    failed = true
+                    Report(*commands[it.command], it.run.code)
+                }
+            }
+            if !it.busy && next < commands.count && !failed {
+                it.run.started = false
+                it.run.finished = false
+                it.run.code = 0
+                if Launch(*commands[next], *it.run) {
+                    it.busy = true
+                    it.command = next
+                    running += 1
+                } else {
+                    unused PrintError("cannot start a build command\n")
+                    failed = true
+                }
+                next += 1
+                progressed = true
+            }
+        }
+        if failed { next = commands.count }
+        if !progressed { unused SleepMilliseconds(15) }
+    }
+    return !failed
+}
+
+// Runs one command and waits; false when it could not start or failed.
+RunOne :: (command: *Command) -> bool {
+    run: ProcessRun
+    if !Launch(command, *run) || !WaitProcess(*run) {
+        unused PrintError("cannot run a build command\n")
+        return false
+    }
+    if run.code != 0 { Report(command, run.code); return false }
+    return true
+}

@@ -1,0 +1,148 @@
+// A static file server for testing the built site on 127.0.0.1. It sends the
+// cross-origin isolation headers Cloudflare Pages adds from site/_headers,
+// answers HEAD and single byte-range requests, and serves one connection at
+// a time until killed.
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/socket_linux"
+#import "std/text_tools"
+
+#scope_file
+libc :: #system_library "libc";
+BindRaw :: (fd: s32, address: *LinuxSocketAddress, length: u32) -> s32 #foreign libc "bind";
+ListenRaw :: (fd: s32, backlog: s32) -> s32 #foreign libc "listen";
+AcceptRaw :: (fd: s32, address: *void, length: *void) -> s32 #foreign libc "accept";
+NameRaw :: (fd: s32, address: *LinuxSocketAddress, length: *u32) -> s32 #foreign libc "getsockname";
+OptionRaw :: (fd: s32, level: s32, option: s32, value: *s32, length: u32) -> s32 #foreign libc "setsockopt";
+OpenSocketRaw :: (domain: s32, kind: s32, protocol: s32) -> s32 #foreign libc "socket";
+
+// 127.0.0.1 in network byte order.
+LOOPBACK :: 16777343;
+
+Swap16 :: (value: u16) -> u16 { return cast(u16)(((value & 255) << 8) | (value >> 8)) }
+
+ContentType :: (path: string) -> string {
+    suffix := PathSuffix(path)
+    if suffix == ".html" { return "text/html; charset=utf-8" }
+    if suffix == ".css" { return "text/css; charset=utf-8" }
+    if suffix == ".js" { return "text/javascript; charset=utf-8" }
+    if suffix == ".json" { return "application/json" }
+    if suffix == ".wasm" { return "application/wasm" }
+    if suffix == ".png" { return "image/png" }
+    if suffix == ".webp" { return "image/webp" }
+    if suffix == ".svg" { return "image/svg+xml" }
+    if suffix == ".ico" { return "image/x-icon" }
+    if suffix == ".gz" { return "application/gzip" }
+    return "application/octet-stream"
+}
+
+Answer :: (client: LinuxSocket, status: string, kind: string, body: string, total: s64, first: s64, head: bool) -> bool {
+    out: Vec(u8)
+    BuilderPrint(*out, "HTTP/1.1 %\r\nContent-Type: %\r\nContent-Length: %\r\n", status, kind, body.count)
+    if status == "206 Partial Content" {
+        BuilderPrint(*out, "Content-Range: bytes %-%/%\r\n", first, first + body.count - 1, total)
+    }
+    BuilderAppend(out, "Accept-Ranges: bytes\r\nCache-Control: no-store\r\nConnection: close\r\n")
+    BuilderAppend(out, "Cross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Embedder-Policy: require-corp\r\n")
+    BuilderAppend(out, "Cross-Origin-Resource-Policy: same-origin\r\n\r\n")
+    if !head { BuilderAppend(out, body) }
+    return SocketSendAll(client, out[:], 10000) == out.count
+}
+
+// "bytes=A-B" or "bytes=A-": the first and last byte, clamped to the file.
+ParseRange :: (value: string, total: s64) -> (first: s64, last: s64, ok: bool) {
+    if !TextHasPrefix(value, "bytes=") { return 0, 0, false }
+    dash := TextFind(value, "-")
+    if dash < 0 { return 0, 0, false }
+    first, first_ok := TextInteger(value[6:dash])
+    if !first_ok || first < 0 || first >= total { return 0, 0, false }
+    last := total - 1
+    if dash + 1 < value.count {
+        end, end_ok := TextInteger(value[dash + 1:])
+        if !end_ok { return 0, 0, false }
+        if end < last { last = end }
+    }
+    if last < first { return 0, 0, false }
+    return first, last, true
+}
+
+Handle :: (client: LinuxSocket, root: string) {
+    request: Vec(u8)
+    chunk: [4096]u8
+    while request.count < 65536 {
+        count := SocketReceive(client, chunk[:], 5000)
+        if count <= 0 { return }
+        for 0..count - 1 { VecPush(request, chunk[it]) }
+        text := TextFromBytes(request[:])
+        if TextFind(text, "\r\n\r\n") >= 0 { break }
+    }
+    text := TextFromBytes(request[:])
+    lines := TextLines(text)
+    if lines.count == 0 { return }
+    words := TextSplit(TextTrim(lines[0]), " ")
+    if words.count < 2 { return }
+    head := words[0] == "HEAD"
+    target := words[1]
+    query := TextFind(target, "?")
+    if query >= 0 { target = target[0:query] }
+    if TextFind(target, "..") >= 0 || target.count == 0 || target[0] != #char "/" {
+        unused Answer(client, "400 Bad Request", "text/plain", "bad path\n", 0, 0, head)
+        return
+    }
+    path_bytes: Vec(u8)
+    BuilderAppend(path_bytes, root)
+    BuilderAppend(path_bytes, target)
+    if target[target.count - 1] == #char "/" { BuilderAppend(path_bytes, "index.html") }
+    path := BuilderFinish(path_bytes)
+    if IsDirectory(path) {
+        more: Vec(u8)
+        BuilderAppend(more, path)
+        BuilderAppend(more, "/index.html")
+        path = BuilderFinish(more)
+    }
+    body, found := ReadEntireFile(path)
+    if !found {
+        unused Answer(client, "404 Not Found", "text/plain", "not found\n", 0, 0, head)
+        return
+    }
+    range := ""
+    for lines {
+        line := TextTrim(it)
+        if line.count > 6 && (TextHasPrefix(line, "Range:") || TextHasPrefix(line, "range:")) { range = TextTrim(line[6:]) }
+    }
+    if range != "" {
+        first, last, ok := ParseRange(range, body.count)
+        if ok {
+            unused Answer(client, "206 Partial Content", ContentType(path), body[first:last + 1], body.count, first, head)
+            return
+        }
+    }
+    unused Answer(client, "200 OK", ContentType(path), body, body.count, 0, head)
+}
+
+#scope_export
+// Serves ROOT on an unused loopback port, writing the port number to PORT_FILE.
+Serve :: (root: string, port_file: string) -> s32 {
+    fd := OpenSocketRaw(2, 1, 0)
+    if fd < 0 { return 1 }
+    yes: s32 = 1
+    unused OptionRaw(fd, 1, 2, *yes, 4)
+    address := LinuxSocketAddress.{family = 2, port = 0, address = cast(u32)LOOPBACK}
+    if BindRaw(fd, *address, 16) != 0 || ListenRaw(fd, 64) != 0 { return 1 }
+    bound: LinuxSocketAddress
+    size: u32 = 16
+    if NameRaw(fd, *bound, *size) != 0 { return 1 }
+    out: Vec(u8)
+    BuilderPrint(*out, "%\n", cast(s64)Swap16(bound.port))
+    if !WriteEntireFile(port_file, BuilderFinish(out)) { return 1 }
+    while true {
+        accepted := AcceptRaw(fd, null, null)
+        if accepted < 0 { continue }
+        client := LinuxSocket.{fd = accepted, valid = true}
+        Handle(client, root)
+        unused SocketClose(*client)
+    }
+    return 0
+}

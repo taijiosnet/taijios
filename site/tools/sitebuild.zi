@@ -1,0 +1,123 @@
+// sitebuild: assembles taijios.net in OUTPUT from site/ and the web emulator.
+//
+//   sitebuild OUTPUT EMULATOR_DIR
+//
+// Run it from the TaijiOS root. The pages, styles, scripts and images in
+// site/ are copied as they are. OUTPUT/emu receives the emulator script, the
+// gzip-compressed wasm, the guest root bundle packed from site/root.list,
+// and manifest.json with each file's size and SHA-256. The build fails when
+// the published text mentions the retired Plan 9 fork or its v86 image.
+#import "retired"
+#import "rootpack"
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/stdio_linux"
+#import "std/text_tools"
+
+#scope_file
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8)
+    BuilderAppend(out, a)
+    BuilderAppend(out, b)
+    return BuilderFinish(out)
+}
+
+Fail :: (message: string, detail: string = "") -> s32 {
+    out: Vec(u8)
+    BuilderAppend(out, "sitebuild: ")
+    BuilderAppend(out, message)
+    BuilderAppend(out, detail)
+    BuilderAppend(out, "\n")
+    unused PrintError(BuilderFinish(out))
+    return 1
+}
+
+// Site sources that are tools rather than published files.
+Private :: (name: string) -> bool {
+    return name == "tools" || name == "root.list" || name == "Makefile" || name == "README.md"
+}
+
+// Compresses SOURCE to TARGET with gzip -9, without a name or time stamp.
+Gzip :: (source: string, target: string) -> bool {
+    arguments: [5]string = .["gzip", "-9", "-n", "-c", source]
+    run: ProcessRun
+    return RunProcess(.{arguments = arguments[:], output_path = target}, *run) && run.code == 0
+}
+
+Digest :: (path: string) -> Text {
+    arguments: [2]string = .["sha256sum", path]
+    run: ProcessRun
+    if !RunProcess(.{arguments = arguments[:], capture_output = true}, *run) || run.code != 0 { return TextCopy("") }
+    line := BuilderFinish(run.output)
+    return TextCopy(line[0:64])
+}
+
+ManifestEntry :: (out: *Vec(u8), directory: string, name: string, last: bool) -> bool {
+    path := Join(Join(directory, "/"), name)
+    digest: Text = Digest(path)
+    if TextView(digest).count != 64 { return false }
+    BuilderPrint(out, "    {\"name\": \"%\", \"size\": %, \"sha256\": \"%\"}", name, PathStatus(path).size, TextView(digest))
+    if last { BuilderAppend(<<out, "\n") } else { BuilderAppend(<<out, ",\n") }
+    return true
+}
+
+#scope_export
+main :: (argc: s32, argv: **u8) -> s32 {
+    if argc != 3 { unused PrintError("usage: sitebuild OUTPUT EMULATOR_DIR\n"); return 2 }
+    output := TextFromCString(argv[1])
+    emulator := TextFromCString(argv[2])
+    if !IsFile("site/root.list") { return Fail("run sitebuild from the TaijiOS root") }
+    unused RemoveTree(output)
+    if !CreateDirectories(output) { return Fail("cannot create ", output) }
+    sources: Vec(string)
+    if !ListDirectory("site", *sources) { return Fail("cannot list site") }
+    for sources {
+        if Private(it) { continue }
+        from := Join("site/", it)
+        to := Join(Join(output, "/"), it)
+        copied := ifx IsDirectory(from) then CopyTree(from, to) else CopyFile(from, to)
+        if !copied { return Fail("cannot copy ", from) }
+    }
+    problem: Text = RetiredContent(output)
+    if TextView(problem) != "" { return Fail(TextView(problem)) }
+
+    emu := Join(output, "/emu")
+    if !CreateDirectories(emu) { return Fail("cannot create ", emu) }
+    if !CopyFile(Join(emulator, "/taijios.js"), Join(emu, "/taijios.js")) { return Fail("missing taijios.js in ", emulator) }
+    if !Gzip(Join(emulator, "/taijios.wasm"), Join(emu, "/taijios.wasm.gz")) { return Fail("cannot compress taijios.wasm in ", emulator) }
+
+    bundle: Vec(u8)
+    lazy: Vec(string)
+    files, packed := PackRoot("site/root.list", *bundle, *lazy)
+    if !packed { return 1 }
+    raw := Join(emu, "/root.tjr")
+    if !WriteEntireFile(raw, TextFromBytes(bundle[:])) || !Gzip(raw, Join(emu, "/root.tjr.gz")) { return Fail("cannot compress the root bundle") }
+    unused RemoveFile(raw)
+
+    // Files fetched on first open, gzip-compressed under emu/lazy.
+    lazy_json: Vec(u8)
+    for lazy {
+        target := Join(Join(emu, "/lazy/"), Join(it, ".gz"))
+        if !CreateDirectories(PathParent(target)) || !Gzip(it, target) { return Fail("cannot compress ", it) }
+        BuilderPrint(*lazy_json, "    {\"path\": \"%\", \"size\": %}", it, PathStatus(it).size)
+        if it_index + 1 < lazy.count { BuilderAppend(lazy_json, ",\n") } else { BuilderAppend(lazy_json, "\n") }
+    }
+
+    manifest: Vec(u8)
+    BuilderAppend(manifest, "{\n  \"files\": [\n")
+    entries: [3]string = .["taijios.js", "taijios.wasm.gz", "root.tjr.gz"]
+    for entries {
+        if !ManifestEntry(*manifest, emu, it, it_index == 2) { return Fail("cannot hash ", it) }
+    }
+    BuilderPrint(*manifest, "  ],\n  \"root_files\": %,\n  \"root_bytes\": %,\n  \"lazy\": [\n", files, bundle.count)
+    BuilderAppend(manifest, TextFromBytes(lazy_json[:]))
+    BuilderAppend(manifest, "  ]\n}\n")
+    if !WriteEntireFile(Join(emu, "/manifest.json"), BuilderFinish(manifest)) { return Fail("cannot write manifest.json") }
+    out: Vec(u8)
+    BuilderPrint(*out, "sitebuild: % guest files (% bytes) and % fetched on demand in %\n", files, bundle.count, lazy.count, output)
+    unused WriteOutput(BuilderFinish(out))
+    return 0
+}

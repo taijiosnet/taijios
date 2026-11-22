@@ -1,0 +1,59 @@
+// The site no longer carries the retired Plan 9 based TaijiOS: no mention of
+// it in published text, no v86 emulator and no disk image.
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_tree_linux"
+#import "std/text_tools"
+
+#scope_file
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8)
+    BuilderAppend(out, a)
+    BuilderAppend(out, b)
+    return BuilderFinish(out)
+}
+
+Retired :: (text: string) -> string {
+    lowered: Vec(u8)
+    for 0..text.count - 1 {
+        c := text[it]
+        if c >= #char "A" && c <= #char "Z" { c += 32 }
+        VecPush(lowered, c)
+    }
+    plain := TextFromBytes(lowered[:])
+    words: [7]string = .["plan 9", "plan9", "v86", "9front", "seabios", "vgabios", "glenda"]
+    for words { if TextFind(plain, it) >= 0 { return it } }
+    return ""
+}
+
+Published :: (name: string) -> bool {
+    suffix := PathSuffix(name)
+    return suffix == ".html" || suffix == ".css" || suffix == ".js" || suffix == ".json" || suffix == ".txt" ||
+        suffix == ".svg" || suffix == ".webmanifest" || name == "_headers"
+}
+
+#scope_export
+// A description of the first retired file or word under DIRECTORY, or "".
+// The guest's own files inside emu/root.tjr.gz are not site content.
+RetiredContent :: (directory: string) -> Text {
+    names: Vec(string)
+    if !ListDirectory(directory, *names) { return TextCopy(Join("cannot list ", directory)) }
+    for names {
+        path := Join(Join(directory, "/"), it)
+        suffix := PathSuffix(it)
+        if it == "v86" || suffix == ".raw" || suffix == ".img" || suffix == ".iso" || suffix == ".ini" {
+            return TextCopy(Join("retired emulator file ", path))
+        }
+        if IsDirectory(path) {
+            nested: Text = RetiredContent(path)
+            if TextView(nested) != "" { return nested }
+            continue
+        }
+        if !Published(it) { continue }
+        text, ok := ReadEntireFile(path)
+        if !ok { return TextCopy(Join("cannot read ", path)) }
+        word := Retired(text)
+        if word != "" { return TextCopy(Join(Join(Join("retired word \"", word), "\" in "), path)) }
+    }
+    return TextCopy("")
+}

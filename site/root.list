@@ -1,0 +1,63 @@
+# Guest files in the browser's root bundle (site/tools/rootpack.zi).
+# The Rill desktop, its window manager, every Dis program and the ZX
+# commands load at boot. The large graphical ZX applications below stay on
+# the server until first opened.
+
+dis
+- .sbl
+
+lazy dis/wm/about.zx
+lazy dis/wm/clock.zx
+lazy dis/wm/counter.zx
+lazy dis/wm/stopwatch.zx
+lazy dis/wm/memory.zx
+lazy dis/wm/logwindow.zx
+lazy dis/wm/dir.zx
+lazy dis/wm/taskmgr.zx
+lazy dis/wm/view.zx
+lazy dis/wm/explorer.zx
+lazy dis/tclsh.zx
+lazy dis/tcltk.zx
+lazy dis/coffee.zx
+lazy dis/man.zx
+lazy dis/math/linbench.zx
+lazy dis/math/graph0.zx
+
+lib/apps
+lib/rill
+lib/wmsetup
+lib/sh
+lib/ndb
+lib/keyboard
+lib/mimeapps.list
+lib/mimetype
+lib/tbsetup
+lib/emptydirs
+lib/icons/hicolor/index.theme
+lib/icons/hicolor/16x16
+lib/icons/hicolor/22x22
+lib/icons/hicolor/24x24
+lib/icons/hicolor/32x32
+lib/icons/hicolor/48x48
+lib/icons/hicolor/64x64
+- .png
+
+icons
+icons/taijios/22.png
+icons/taijios/48.png
+icons/taijios/64.png
+icons/taijios/128.png
+icons/taijios/logo.png
+
+fonts/lucidasans
+fonts/pelm
+fonts/misc
+
+locale
+module
+
+mkdir tmp
+mkdir n
+mkdir mnt
+mkdir usr/taiji/lib
+mkdir usr/taiji/tmp

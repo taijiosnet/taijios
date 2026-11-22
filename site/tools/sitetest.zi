@@ -1,0 +1,310 @@
+// sitetest: checks a built taijios.net in private headless browsers.
+//
+//   sitetest SITE_DIR [CHROMIUM [URL]]
+//
+// Run it from the TaijiOS root. It checks that the site carries nothing of
+// the retired Plan 9 based TaijiOS, serves SITE_DIR on 127.0.0.1, and in
+// Chromium presses Run, waits for the Rill desktop to paint its panel clock
+// and workspace switcher, types "about" into the applications menu search,
+// opens About TaijiOS and closes its window from the panel's task menu. It
+// then boots again at phone width, and in Firefox when one is installed.
+// Screens it reads are kept in build/site-test.
+//
+// With URL (a deployed copy such as https://taijios.net/) it first checks
+// that every file there has the SHA-256 of the file in SITE_DIR, then runs
+// the same browser checks against URL instead of a local server.
+#import "browser"
+#import "firefox"
+#import "live"
+#import "ocr"
+#import "retired"
+#import "serve"
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_tree_linux"
+#import "std/json_document"
+#import "std/process_run_linux"
+#import "std/stdio_linux"
+#import "std/text_tools"
+#import "std/timer_linux"
+
+#scope_file
+SCRATCH :: "build/site-test";
+
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8)
+    BuilderAppend(out, a)
+    BuilderAppend(out, b)
+    return BuilderFinish(out)
+}
+
+Say :: (text: string) { unused WriteOutput(Join(text, "\n")) }
+
+Fail :: (text: string) -> s32 {
+    unused PrintError(Join(Join("sitetest: FAIL: ", text), "\n"))
+    return 1
+}
+
+// Fails after saving the emulator screen for inspection.
+FailShowing :: (browser: *Browser, text: string) -> s32 {
+    path := Join(SCRATCH, "/failure.png")
+    if SaveScreen(browser, path) { Say(Join("sitetest: screen saved in ", path)) }
+    return Fail(text)
+}
+
+// The emulator screen's place on the page and its size in guest pixels.
+Screen :: struct { x: s64; y: s64; width: s64; height: s64; pixels_wide: s64; pixels_high: s64; }
+
+Number :: (document: *JsonDocument, node: s32, key: string) -> s64 {
+    value, ok := JsonInteger(document, JsonMember(document, node, key))
+    return ifx ok then value else -1
+}
+
+Locate :: (browser: *Browser, screen: *Screen) -> bool {
+    reply: JsonDocument
+    value := BrowserEval(browser, "(() => { const c = document.getElementById('taiji-screen'); const r = c.getBoundingClientRect(); return {x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height), w: c.width, h: c.height}; })()", *reply)
+    if value < 0 { return false }
+    <<screen = Screen.{x = Number(*reply, value, "x"), y = Number(*reply, value, "y"),
+        width = Number(*reply, value, "width"), height = Number(*reply, value, "height"),
+        pixels_wide = Number(*reply, value, "w"), pixels_high = Number(*reply, value, "h")}
+    return screen.width > 0 && screen.pixels_wide > 0
+}
+
+// Clicks guest pixel (x, y), finding the canvas on the page first.
+ClickGuest :: (browser: *Browser, x: s64, y: s64, button: string = "left") -> bool {
+    screen: Screen
+    if !Locate(browser, *screen) { return false }
+    return BrowserClick(browser, screen.x + x * screen.width / screen.pixels_wide,
+        screen.y + y * screen.height / screen.pixels_high, button)
+}
+
+shots: s64;
+
+// The first word in REGION equal to WORD (or a clock time when WORD is
+// "clock"), polled until TIMEOUT milliseconds pass.
+FindWord :: (browser: *Browser, region: Region, word: string, timeout: s64, found: *Word) -> bool {
+    deadline := MonotonicMilliseconds() + timeout
+    while MonotonicMilliseconds() < deadline {
+        shots += 1
+        image: Vec(u8)
+        BuilderPrint(*image, "%/shot-%.png", SCRATCH, shots)
+        words: Vec(Word)
+        if ReadWords(browser, region, BuilderFinish(image), *words) {
+            for words {
+                if it.text == word || (word == "clock" && ClockText(it.text)) {
+                    found.x = it.x
+                    found.y = it.y
+                    found.text = TextDetach(TextCopy(it.text))
+                    return true
+                }
+            }
+        }
+        unused SleepMilliseconds(700)
+    }
+    return false
+}
+
+// Polls until WORD is no longer in REGION.
+WordGone :: (browser: *Browser, region: Region, word: string, timeout: s64) -> bool {
+    deadline := MonotonicMilliseconds() + timeout
+    while MonotonicMilliseconds() < deadline {
+        seen: Word
+        if !FindWord(browser, region, word, 1, *seen) { return true }
+        unused SleepMilliseconds(500)
+    }
+    return false
+}
+
+WaitFor :: (browser: *Browser, expression: string, wanted: string, timeout: s64) -> string {
+    deadline := MonotonicMilliseconds() + timeout
+    last := ""
+    while MonotonicMilliseconds() < deadline {
+        last = BrowserText(browser, expression, 10000)
+        if last == wanted || TextHasPrefix(last, "error") { return last }
+        for browser.console { if TextHasPrefix(it, "exception") { return "error" } }
+        unused SleepMilliseconds(250)
+    }
+    return last
+}
+
+// Counts pixels of the active workspace marker in the switcher left of the clock.
+SwitcherPixels :: (browser: *Browser, clock: Word) -> s64 {
+    guest_x := clock.x
+    out: Vec(u8)
+    BuilderPrint(*out, "(() => { const c = document.getElementById('taiji-screen'); const d = c.getContext('2d').getImageData(%, 0, 90, 34).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 150 && d[i + 2] > 150 && d[i + 1] < 110) n++; return String(n); })()", guest_x - 130)
+    count, ok := TextInteger(BrowserText(browser, BuilderFinish(out)))
+    return ifx ok then count else -1
+}
+
+Run :: (site: string, chromium: string, live_url: string) -> s32 {
+    problem: Text = RetiredContent(site)
+    if TextView(problem) != "" { return Fail(TextView(problem)) }
+    if !IsFile(Join(site, "/emu/root.tjr.gz")) || !IsFile(Join(site, "/emu/taijios.wasm.gz")) { return Fail("the site has no web emulator") }
+    Say("sitetest: site content has no Plan 9 fork text, v86 or disk image")
+
+    unused RemoveTree(SCRATCH)
+    if !CreateDirectories(SCRATCH) { return Fail("cannot create build/site-test") }
+    if live_url != "" {
+        matched := CompareLive(site, live_url, Join(SCRATCH, "/live"))
+        if matched < 0 { return Fail("the deployed site differs from the tested build") }
+        out: Vec(u8)
+        BuilderPrint(*out, "sitetest: all % deployed files match the tested build by SHA-256", matched)
+        Say(BuilderFinish(out))
+    }
+    port_file := Join(SCRATCH, "/port")
+    self := TextDetach(ResolvePath("/proc/self/exe"))
+    serve_arguments: [4]string = .[self, "serve", site, port_file]
+    server: ProcessRun
+    if !StartProcess(.{arguments = serve_arguments[:], output_path = Join(SCRATCH, "/serve.log"), merge_error = true}, *server) { return Fail("cannot start the test server") }
+    defer { unused SignalProcess(*server, 9); unused WaitProcess(*server) }
+    port := ""
+    for 1..100 {
+        if live_url != "" { break }
+        text, ok := ReadEntireFile(port_file)
+        if ok && text.count > 1 { port = TextTrim(text); break }
+        unused SleepMilliseconds(50)
+    }
+    if port == "" && live_url == "" { return Fail("the test server did not start") }
+
+    browser: Browser
+    if !BrowserStart(*browser, chromium, "build/st") { BrowserClose(*browser); return Fail("cannot start private headless Chromium") }
+    defer BrowserClose(*browser)
+    reply: JsonDocument
+    url: Vec(u8)
+    if live_url != "" {
+        BuilderPrint(*url, "{\"url\":\"%\"}", live_url)
+    } else {
+        BuilderPrint(*url, "{\"url\":\"http://127.0.0.1:%/\"}", port)
+    }
+    if BrowserCall(*browser, "Page.navigate", BuilderFinish(url), *reply) < 0 { return Fail("cannot open the site") }
+    if WaitFor(*browser, "document.readyState", "complete", 20000) != "complete" { return Fail("the page did not load") }
+    if BrowserText(*browser, "String(crossOriginIsolated)") != "true" { return Fail("the page is not cross-origin isolated") }
+
+    started := MonotonicMilliseconds()
+    if BrowserText(*browser, "document.getElementById('run').click(), 'pressed'") != "pressed" { return Fail("no Run button") }
+    state := WaitFor(*browser, "document.documentElement.dataset.taiji || ''", "running", 180000)
+    if state != "running" {
+        return Fail(Join("the emulator did not start: ", BrowserText(*browser, "document.getElementById('boot-status').textContent")))
+    }
+    painted := MonotonicMilliseconds() - started
+    screen: Screen
+    if !Locate(*browser, *screen) { return Fail("no emulator screen") }
+
+    clock: Word
+    if !FindWord(*browser, Region.{x = screen.pixels_wide - 110, y = 0, width = 110, height = 34}, "clock", 120000, *clock) {
+        return FailShowing(*browser, "the Rill panel clock did not appear")
+    }
+    desktop := MonotonicMilliseconds() - started
+    switcher := SwitcherPixels(*browser, clock)
+    if switcher < 3 { return FailShowing(*browser, "the workspace switcher left of the clock did not appear") }
+    out: Vec(u8)
+    BuilderPrint(*out, "sitetest: Rill desktop painted: first frame % ms, clock % after % ms, switcher marker % px",
+        painted, clock.text, desktop, switcher)
+    Say(BuilderFinish(out))
+
+    // Search the applications menu by typing, then open About TaijiOS.
+    if !ClickGuest(*browser, 16, 16) { return Fail("cannot click the menu") }
+    search: Word
+    if !FindWord(*browser, Region.{x = 0, y = 70, width = 480, height = 50}, "search", 30000, *search) { return FailShowing(*browser, "the applications menu did not open") }
+    if !ClickGuest(*browser, search.x, search.y) || !BrowserType(*browser, "about") { return Fail("cannot type into the menu search") }
+    entry: Word
+    if !FindWord(*browser, Region.{x = 0, y = 110, width = 340, height = 260}, "taijios", 30000, *entry) { return FailShowing(*browser, "typing did not find About TaijiOS") }
+    if !ClickGuest(*browser, entry.x, entry.y) { return Fail("cannot click About TaijiOS") }
+    tasks := Region.{x = 36, y = 0, width = screen.pixels_wide - 400, height = 32}
+    task: Word
+    if !FindWord(*browser, tasks, "about", 90000, *task) { return FailShowing(*browser, "About did not open a window") }
+    opened := MonotonicMilliseconds() - started
+    if !ClickGuest(*browser, task.x, task.y, "right") { return Fail("cannot open the task menu") }
+    close: Word
+    if !FindWord(*browser, Region.{x = 0, y = 32, width = 800, height = 300}, "close", 20000, *close) { return FailShowing(*browser, "the task menu has no Close") }
+    if !ClickGuest(*browser, close.x, close.y) { return Fail("cannot click Close") }
+    if !WordGone(*browser, tasks, "about", 30000) { return FailShowing(*browser, "the About window did not close") }
+    for browser.console { if TextHasPrefix(it, "exception") { return Fail(Join("page error: ", it)) } }
+    done: Vec(u8)
+    BuilderPrint(*done, "sitetest: About opened at % ms and closed; Rill stayed up", opened)
+    Say(BuilderFinish(done))
+
+    page_url := ifx live_url != "" then live_url else Join(Join("http://127.0.0.1:", port), "/")
+    phone := PhoneBoot(*browser, page_url)
+    if phone < 0 { return FailShowing(*browser, "the desktop did not boot at phone width") }
+    phone_out: Vec(u8)
+    BuilderPrint(*phone_out, "sitetest: phone width (390 px): clock after % ms", phone)
+    Say(BuilderFinish(phone_out))
+    firefox := FirefoxBoot(page_url)
+    if firefox < 0 { return Fail("the desktop did not boot in Firefox") }
+    if firefox > 0 {
+        firefox_out: Vec(u8)
+        BuilderPrint(*firefox_out, "sitetest: Firefox: clock after % ms", firefox)
+        Say(BuilderFinish(firefox_out))
+    }
+    Say("sitetest: PASS")
+    return 0
+}
+
+// Boots again in a phone-sized viewport; the screen scales to fit.
+PhoneBoot :: (browser: *Browser, url: string) -> s64 {
+    reply: JsonDocument
+    if BrowserCall(browser, "Emulation.setDeviceMetricsOverride", "{\"width\":390,\"height\":844,\"deviceScaleFactor\":3,\"mobile\":true}", *reply) < 0 { return -1 }
+    target: Vec(u8)
+    BuilderPrint(*target, "{\"url\":\"%\"}", url)
+    if BrowserCall(browser, "Page.navigate", BuilderFinish(target), *reply) < 0 { return -1 }
+    if WaitFor(browser, "document.readyState", "complete", 20000) != "complete" { return -1 }
+    started := MonotonicMilliseconds()
+    if BrowserText(browser, "document.getElementById('run').click(), 'pressed'") != "pressed" { return -1 }
+    if WaitFor(browser, "document.documentElement.dataset.taiji || ''", "running", 180000) != "running" { return -1 }
+    screen: Screen
+    if !Locate(browser, *screen) { return -1 }
+    clock: Word
+    if !FindWord(browser, Region.{x = screen.pixels_wide - 110, y = 0, width = 110, height = 34}, "clock", 120000, *clock) { return -1 }
+    return MonotonicMilliseconds() - started
+}
+
+// Boots in private headless Firefox when it is installed: 0 when it is not,
+// the milliseconds until the panel clock reads, or -1 on failure.
+FirefoxBoot :: (url: string) -> s64 {
+    version: [2]string = .["firefox", "--version"]
+    probe: ProcessRun
+    if !RunProcess(.{arguments = version[:], capture_output = true, error_path = "/dev/null"}, *probe) || probe.code != 0 { return 0 }
+    firefox: Firefox
+    defer FirefoxClose(*firefox)
+    if !FirefoxStart(*firefox, "firefox", "build/st") { Say("sitetest: cannot start headless Firefox"); return -1 }
+    if !FirefoxNavigate(*firefox, url) { Say("sitetest: Firefox cannot open the site"); return -1 }
+    if FirefoxText(*firefox, "String(crossOriginIsolated)") != "true" { Say("sitetest: Firefox: not cross-origin isolated"); return -1 }
+    started := MonotonicMilliseconds()
+    if FirefoxText(*firefox, "(document.getElementById('run').click(), 'pressed')") != "pressed" { return -1 }
+    deadline := started + 180000
+    state := ""
+    while MonotonicMilliseconds() < deadline && state != "running" {
+        state = FirefoxText(*firefox, "document.documentElement.dataset.taiji || ''")
+        if state == "error" { Say(Join("sitetest: Firefox: ", FirefoxText(*firefox, "document.getElementById('boot-status').textContent"))); return -1 }
+        unused SleepMilliseconds(250)
+    }
+    if state != "running" { return -1 }
+    width, ok := TextInteger(FirefoxText(*firefox, "String(document.getElementById('taiji-screen').width)"))
+    if !ok { return -1 }
+    region := Region.{x = width - 110, y = 0, width = 110, height = 34}
+    while MonotonicMilliseconds() < deadline {
+        shots += 1
+        image: Vec(u8)
+        BuilderPrint(*image, "%/firefox-%.png", SCRATCH, shots)
+        words: Vec(Word)
+        if WordsFromCrop(FirefoxText(*firefox, CropScript(region)), region, BuilderFinish(image), *words) {
+            for words { if ClockText(it.text) { return MonotonicMilliseconds() - started } }
+        }
+        unused SleepMilliseconds(700)
+    }
+    return -1
+}
+
+#scope_export
+main :: (argc: s32, argv: **u8) -> s32 {
+    if argc == 4 && TextFromCString(argv[1]) == "serve" {
+        return Serve(TextFromCString(argv[2]), TextFromCString(argv[3]))
+    }
+    if argc < 2 || argc > 4 { unused PrintError("usage: sitetest SITE_DIR [CHROMIUM [URL]]\n"); return 2 }
+    chromium := ifx argc >= 3 then TextFromCString(argv[2]) else "chromium"
+    live_url := ifx argc == 4 then TextFromCString(argv[3]) else ""
+    site := TextDetach(ResolvePath(TextFromCString(argv[1])))
+    if site == "" { return Fail("no such site directory") }
+    return Run(site, chromium, live_url)
+}

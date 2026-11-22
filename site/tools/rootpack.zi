@@ -1,0 +1,121 @@
+// Packs guest files for the browser's /taiji root.
+//
+// The list names one entry per line, relative to the TaijiOS root:
+//   PATH         a file, or a directory and everything below it
+//   - SUFFIX     skip files found inside listed directories that end in SUFFIX
+//   mkdir PATH   an empty directory
+//   lazy PATH    a file left on the server and fetched on first open; it is
+//                skipped when its directory is packed
+// Blank lines and lines starting with # are ignored. A file named on its own
+// line is always packed, even when a "-" line would skip it.
+//
+// The bundle is "TJR1", a u32 entry count, then per entry a u8 kind
+// (0 file, 1 directory), a u16 path length, the path, a u32 size and the
+// file's bytes, little-endian. site/js/taiji-emu.js unpacks it.
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_tree_linux"
+#import "std/stdio_linux"
+#import "std/text_tools"
+
+#scope_file
+Pack :: struct {
+    out: *Vec(u8)
+    skips: Vec(string)
+    count: s64
+}
+
+PutU16 :: (out: *Vec(u8), value: s64) {
+    VecPush(<<out, cast(u8)(value & 255))
+    VecPush(<<out, cast(u8)((value >> 8) & 255))
+}
+
+PutU32 :: (out: *Vec(u8), value: s64) {
+    for 0..3 { VecPush(<<out, cast(u8)((value >> (8 * it)) & 255)) }
+}
+
+Entry :: (pack: *Pack, kind: u8, path: string, bytes: string) -> bool {
+    if path.count > 65535 || bytes.count > 4294967295 { return false }
+    VecPush(<<pack.out, kind)
+    PutU16(pack.out, path.count)
+    BuilderAppend(<<pack.out, path)
+    PutU32(pack.out, bytes.count)
+    BuilderAppend(<<pack.out, bytes)
+    pack.count += 1
+    return true
+}
+
+AddFile :: (pack: *Pack, path: string) -> bool {
+    bytes, ok := ReadEntireFile(path)
+    if !ok || !Entry(pack, 0, path, bytes) {
+        out: Vec(u8)
+        BuilderPrint(*out, "rootpack: cannot pack %\n", path)
+        unused PrintError(BuilderFinish(out))
+        return false
+    }
+    return true
+}
+
+Skipped :: (pack: *Pack, path: string) -> bool {
+    for pack.skips {
+        if path.count >= it.count && path[path.count - it.count:] == it { return true }
+    }
+    return false
+}
+
+AddTree :: (pack: *Pack, directory: string) -> bool {
+    names: Vec(string)
+    if !ListDirectory(directory, *names) { return false }
+    for names {
+        out: Vec(u8)
+        BuilderAppend(out, directory)
+        BuilderAppend(out, "/")
+        BuilderAppend(out, it)
+        path := BuilderFinish(out)
+        if IsDirectory(path) {
+            if !AddTree(pack, path) { return false }
+        } else if IsFile(path) && !Skipped(pack, path) {
+            if !AddFile(pack, path) { return false }
+        }
+    }
+    return true
+}
+
+#scope_export
+// Packs the entries LIST names into BUNDLE and returns how many it packed;
+// LAZY receives the paths of "lazy" lines.
+PackRoot :: (list: string, bundle: *Vec(u8), lazy: *Vec(string)) -> (files: s64, ok: bool) {
+    text, read := ReadEntireFile(list)
+    if !read { return 0, false }
+    pack: Pack
+    pack.out = bundle
+    BuilderAppend(<<bundle, "TJR1")
+    PutU32(bundle, 0)
+    lines := TextLines(text)
+    for lines {
+        line := TextTrim(it)
+        if line.count > 2 && line[0:2] == "- " { VecPush(pack.skips, TextTrim(line[2:])) }
+        // A file left on the server is never also packed.
+        if TextHasPrefix(line, "lazy ") { VecPush(pack.skips, TextTrim(line[5:])) }
+    }
+    for lines {
+        line := TextTrim(it)
+        if line.count == 0 || line[0] == #char "#" || TextHasPrefix(line, "- ") { continue }
+        if TextHasPrefix(line, "lazy ") {
+            VecPush(<<lazy, TextDetach(TextCopy(TextTrim(line[5:]))))
+            continue
+        }
+        if TextHasPrefix(line, "mkdir ") {
+            if !Entry(*pack, 1, TextTrim(line[6:]), "") { return 0, false }
+            continue
+        }
+        if IsDirectory(line) {
+            if !AddTree(*pack, line) { return 0, false }
+        } else if !AddFile(*pack, line) {
+            return 0, false
+        }
+    }
+    count := pack.count
+    for 0..3 { bundle.*[4 + it] = cast(u8)((count >> (8 * it)) & 255) }
+    return count, true
+}

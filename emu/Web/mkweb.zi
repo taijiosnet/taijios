@@ -1,0 +1,361 @@
+// mkweb: builds the TaijiOS hosted emulator for the browser with Emscripten.
+//
+//   mkweb OUTPUT ZIRAN_INCLUDE ZIRAN_ARCHIVE [JOBS]
+//
+// Run it from the TaijiOS root with emcc on PATH. OUTPUT receives
+// taijios.js and taijios.wasm; objects and generated headers stay in
+// OUTPUT/obj and OUTPUT/gen. The device, module and port lists come from
+// emu/Web/emu through the emulator's own mkdevlist, mkdevc and mkroot.
+#import "jobs"
+#import "std/byte_text_linux"
+#import "std/environment_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/stdio_linux"
+#import "std/text_tools"
+
+Library :: struct {
+    name: string
+    // Directories searched for each object's .c source, after the library's own.
+    search: string
+    flags: string
+    objects: string
+}
+
+Build :: struct {
+    root: string
+    web: string
+    out: string
+    gen: string
+    obj: string
+    zx_include: string
+    zx_archive: string
+    stamp: s64
+    compiles: Vec(Command)
+    objects: Vec(string)
+    // One archive per library, in link order, with the objects it holds.
+    archives: Vec(Archive)
+}
+
+Archive :: struct {
+    path: string
+    members: Vec(string)
+}
+
+#scope_file
+Libraries :: () -> Vec(Library) {
+    list: Vec(Library)
+    VecPush(list, Library.{name = "libinterp", search = "", flags = "", objects = "alt conv crypt dec dlm-Posix draw freetype gc geom heap heapaudit ipint link load loader math raise readmod runt sign stack tk validstk xec keyring string"})
+    VecPush(list, Library.{name = "libtk", search = "", flags = "", objects = "ebind grids image packr panel parse utils varbl windw xdata canvs canvu carcs cbits cimag cline coval cpoly crect ctext cwind colrs entry extns frame buton label listb menus scale scrol textu textw tindx tmark ttags twind wmchrome"})
+    VecPush(list, Library.{name = "libfreetype", search = "libfreetype/src/autofit libfreetype/src/base libfreetype/src/cff libfreetype/src/cid libfreetype/src/gzip libfreetype/src/pcf libfreetype/src/pfr libfreetype/src/psaux libfreetype/src/pshinter libfreetype/src/psnames libfreetype/src/raster libfreetype/src/sfnt libfreetype/src/smooth libfreetype/src/truetype libfreetype/src/type1 libfreetype/src/type42 libfreetype/src/winfonts", flags = "-DFT2_BUILD_LIBRARY -I$/libfreetype/libfreetype/include", objects = "freetype autofit cff ftbase ftbitmap ftdebug ftgzip ftinit ftsystem_inf pcf pfr psaux pshinter psnames raster sfnt smooth truetype type1 type42 type1cid winfnt"})
+    VecPush(list, Library.{name = "libmath", search = "fdlibm", flags = "-I$/libmath/fdlibm", objects = "blas dtoa fdim FPcontrol-Linux gemm g_fmt gfltconv pow10 e_acos e_acosh e_asin e_atan2 e_atanh e_cosh e_exp e_fmod e_hypot e_j0 e_j1 e_jn e_lgamma_r e_log e_log10 e_pow e_rem_pio2 e_remainder e_sinh e_sqrt k_cos k_rem_pio2 k_sin k_tan s_asinh s_atan s_cbrt s_ceil s_copysign s_cos s_erf s_expm1 s_fabs s_finite s_floor s_ilogb s_log1p s_nextafter s_rint s_scalbn s_sin s_tan s_tanh"})
+    VecPush(list, Library.{name = "libdraw", search = "", flags = "", objects = "alloc allocimagemix arith bezier border buildfont bytesperline chan cloadimage computil creadimage defont draw drawrepl ellipse font freesubfont getdefont getsubfont init line mkfont openfont poly loadimage readcolmap readimage readsubfont rectclip replclipr rgb string stringbg stringsubfont stringwidth subfont subfontcache subfontname unloadimage window writecolmap writeimage writesubfont"})
+    VecPush(list, Library.{name = "libmemlayer", search = "", flags = "", objects = "draw layerop ldelete lhide line load lorigin lsetrefresh ltofront ltorear unload lalloc"})
+    VecPush(list, Library.{name = "libmemdraw", search = "", flags = "", objects = "arc cmap cread defont ellipse fillpoly hwdraw icossin icossin2 iprint line openmemsubfont poly read string subfont write alloc cload draw load unload"})
+    VecPush(list, Library.{name = "libkeyring", search = "", flags = "", objects = "dsaalg egalg rsaalg"})
+    VecPush(list, Library.{name = "libsec/port", search = "", flags = "-I$/libmp/port", objects = "des desmodes desECB desCBC des3ECB des3CBC aes blowfish idea hmac md5 md5block md4 sha1 sha1block sha2 sha256block sha512block sha1pickle md5pickle rc4 genrandom prng fastrand nfastrand probably_prime smallprimetest genprime dsaprimes gensafeprime genstrongprime rsagen rsafill rsaencrypt rsadecrypt rsaalloc rsaprivtopub eggen egencrypt egdecrypt egalloc egprivtopub egsign egverify dsagen dsaalloc dsaprivtopub dsasign dsaverify"})
+    VecPush(list, Library.{name = "libmp/port", search = "", flags = "", objects = "mpaux mpfmt strtomp mptobe mptole betomp letomp mpadd mpsub mpcmp mpfactorial mpmul mpleft mpright mpvecadd mpvecsub mpvecdigmuladd mpveccmp mpdigdiv mpdiv mpexp mpmod mpextendedgcd mpinvert mprand crt mptoi mptoui mptov mptouv"})
+    VecPush(list, Library.{name = "lib9", search = "", flags = "", objects = "convD2M convM2D convM2S convS2M fcallfmt runestrchr runestrlen runetype strtoll strtoull rune argv0 charstod cistrcmp cistrncmp cistrstr cleanname create dirwstat dofmt dorfmt errfmt exits fmt fmtfd fmtlock fmtprint fmtquote fmtrune fmtstr fmtvprint fprint getfields nulldir pow10 print qsort readn rerrstr runeseprint runesmprint runesnprint runevseprint seek seprint smprint snprint sprint strdup strecpy sysfatal tokenize u16 u32 u64 utflen utfnlen utfrrune utfrune utfecpy vfprint vseprint vsmprint vsnprint dirstat-posix errstr-posix getuser-posix getwd-posix sbrk-posix isnan-posix"})
+    return list
+}
+
+// Code generation for wasm32 with shared memory, wasm exceptions for
+// setjmp/longjmp and the Linux/386 ILP32 Inferno headers.
+CommonFlags :: (build: *Build, arguments: *Vec(string)) {
+    words := TextSplit("-c -O2 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm -fno-strict-aliasing -w", " ")
+    for words { VecPush(<<arguments, it) }
+    VecPush(<<arguments, Join(build.web, "/include", "-I"))
+    VecPush(<<arguments, Join(build.root, "/Linux/386/include", "-I"))
+    VecPush(<<arguments, Join(build.root, "/include", "-I"))
+}
+
+Join :: (base: string, rest: string, prefix: string = "") -> string {
+    out: Vec(u8)
+    BuilderAppend(out, prefix)
+    BuilderAppend(out, base)
+    BuilderAppend(out, rest)
+    return BuilderFinish(out)
+}
+
+Modified :: (path: string) -> s64 {
+    info := PathStatus(path)
+    if info.kind == .Missing { return -1 }
+    return info.modified
+}
+
+Fail :: (message: string) -> bool {
+    out: Vec(u8)
+    BuilderPrint(*out, "mkweb: %\n", message)
+    unused PrintError(BuilderFinish(out))
+    return false
+}
+
+// Queues one compile unless the object is newer than its source and the
+// stamp, and returns the object's path.
+Compile :: (build: *Build, source: string, group: string, name: string, extra: []string) -> string {
+    directory := Join(build.obj, "/", "")
+    directory = Join(directory, group)
+    unused CreateDirectories(directory)
+    object := Join(directory, Join("/", name), "")
+    object = Join(object, ".o")
+    built := Modified(object)
+    if built >= 0 && built >= Modified(source) && built >= build.stamp { return object }
+    command: Command
+    VecPush(command.arguments, "emcc")
+    CommonFlags(build, *command.arguments)
+    for extra { VecPush(command.arguments, it) }
+    VecPush(command.arguments, "-o")
+    VecPush(command.arguments, object)
+    VecPush(command.arguments, source)
+    command.log = Join(object, ".log")
+    command.label = source
+    VecPush(build.compiles, command)
+    return object
+}
+
+// The first existing NAME.c among the library directory and its search list.
+Locate :: (build: *Build, library: *Library, name: string) -> (path: string, ok: bool) {
+    base := Join(build.root, Join("/", library.name), "")
+    candidate := Join(base, Join("/", name), "")
+    candidate = Join(candidate, ".c")
+    if IsFile(candidate) { return candidate, true }
+    directories := TextSplit(library.search, " ")
+    for directories {
+        if it.count == 0 { continue }
+        directory := Join(base, Join("/", it), "")
+        path := Join(directory, Join("/", name), "")
+        path = Join(path, ".c")
+        if IsFile(path) { return path, true }
+    }
+    return "", false
+}
+
+QueueLibraries :: (build: *Build) -> bool {
+    libraries: Vec(Library) = Libraries()
+    for * libraries {
+        extra: Vec(string)
+        library := it
+        flags := TextSplit(library.flags, " ")
+        for flags {
+            if it.count == 0 { continue }
+            VecPush(extra, TextDetach(TextReplace(it, "$", build.root)))
+        }
+        group := TextDetach(TextReplace(library.name, "/", "-"))
+        archive: Archive
+        archive.path = Join(build.obj, Join(Join("/", group), ".a", ""), "")
+        names := TextSplit(library.objects, " ")
+        for names {
+            source, found := Locate(build, library, it)
+            if !found { return Fail(Join("no source for ", it)) }
+            VecPush(archive.members, Compile(build, source, group, it, extra[:]))
+        }
+        VecPush(build.archives, archive)
+    }
+    return true
+}
+
+// Runs a generator from the emulator's port directory with OUTPUT/gen as
+// its working directory, writing standard output to `output` when given.
+Generate :: (build: *Build, arguments: []string, output: string) -> bool {
+    command: Command
+    for arguments { VecPush(command.arguments, it) }
+    command.directory = build.gen
+    VecPush(command.environment, "AWK=awk")
+    VecPush(command.environment, Join("ROOT=", build.root))
+    VecPush(command.environment, "INIT=emuinit")
+    VecPush(command.environment, Join(Join("DATA2C=", build.root), "/Linux/386/bin/data2c"))
+    command.log = ifx output.count > 0 then output else Join(build.gen, "/generate.log")
+    command.label = arguments[arguments.count - 1]
+    return RunOne(*command)
+}
+
+// errstr.h defines each error string that error.h declares.
+WriteErrorStrings :: (build: *Build) -> bool {
+    text, ok := ReadEntireFile(Join(build.root, "/emu/port/error.h"))
+    if !ok { return Fail("cannot read emu/port/error.h") }
+    out: Vec(u8)
+    lines := TextLines(text)
+    for lines {
+        line := it
+        if !TextHasPrefix(line, "extern ") { continue }
+        open := TextFind(line, "/* ")
+        close := TextFind(line, " */")
+        semicolon := TextFind(line, ";")
+        if open < 0 || close < open || semicolon < 0 { continue }
+        BuilderAppend(out, line[7:semicolon])
+        BuilderAppend(out, " = \"")
+        BuilderAppend(out, line[open + 3:close])
+        BuilderAppend(out, "\";\n")
+    }
+    if !WriteEntireFile(Join(build.gen, "/errstr.h"), BuilderFinish(out)) { return Fail("cannot write errstr.h") }
+    return true
+}
+
+// Values of NAME= lines printed by mkdevlist.
+ListValue :: (listing: string, name: string) -> Text {
+    lines := TextLines(listing)
+    for lines {
+        line := it
+        if TextHasPrefix(line, name) { return TextCopy(TextTrim(line[name.count:])) }
+    }
+    return TextCopy("")
+}
+
+QueueEmulator :: (build: *Build) -> bool {
+    config := Join(build.gen, "/emu")
+    source, read := ReadEntireFile(Join(build.web, "/emu"))
+    if !read || !WriteEntireFile(config, source) { return Fail("cannot copy emu/Web/emu") }
+    port := Join(build.root, "/emu/port")
+    listing := Join(build.gen, "/devlist")
+    devlist: [3]string = .["sh", Join(port, "/mkdevlist"), "emu"]
+    if !Generate(build, devlist[:], listing) { return false }
+    devc: [3]string = .["sh", Join(port, "/mkdevc"), "emu"]
+    if !Generate(build, devc[:], Join(build.gen, "/emu.c")) { return false }
+    mkroot: [3]string = .["sh", Join(port, "/mkroot"), "emu"]
+    if !Generate(build, mkroot[:], "") { return false }
+    limbo := Join(build.root, "/Linux/386/bin/limbo")
+    modules := Join(build.root, "/module", "-I")
+    builtin := Join(port, "/zxbuiltin.b")
+    runtime: [4]string = .[limbo, modules, "-a", builtin]
+    if !Generate(build, runtime[:], Join(build.gen, "/zxrunt.h")) { return false }
+    table: [5]string = .[limbo, modules, "-t", "ZX", builtin]
+    if !Generate(build, table[:], Join(build.gen, "/zxmod.h")) { return false }
+    if !WriteErrorStrings(build) { return false }
+
+    devices, ok := ReadEntireFile(listing)
+    if !ok { return Fail("cannot read the device list") }
+    flags: Vec(string)
+    VecPush(flags, "-DEMU")
+    VecPush(flags, Join("-DROOT=\"/taiji\"", ""))
+    VecPush(flags, Join("-I", build.gen))
+    VecPush(flags, Join("-I", port))
+    VecPush(flags, Join(build.root, "/libinterp", "-I"))
+    VecPush(flags, "-DTAIJI_ZX")
+    VecPush(flags, Join("-I", build.zx_include))
+    names: Vec(string)
+    port_list: Text = ListValue(devices, "PORT=")
+    ports := TextSplit(TextView(port_list), " ")
+    for ports { if it.count > 0 { VecPush(names, it) } }
+    dev_list: Text = ListValue(devices, "DEVS=")
+    devs := TextSplit(TextView(dev_list), " ")
+    for devs { if it.count > 0 { VecPush(names, it) } }
+    extras := TextSplit("kproc-pthreads. lock. zx. zxwindow.", " ")
+    for extras { VecPush(names, it) }
+    for names {
+        name := it[0:it.count - 1]
+        path := Join(port, Join("/", name), "")
+        path = Join(path, ".c")
+        if name == "win-web" || name == "devfs" {
+            path = Join(build.web, Join("/", name), "")
+            path = Join(path, ".c")
+        }
+        if name == "main" {
+            // The port's main returns void; wasm needs int (see emu/Web/os.c).
+            renamed: Vec(string)
+            for flags { VecPush(renamed, it) }
+            VecPush(renamed, "-Dmain=emumain")
+            VecPush(build.objects, Compile(build, path, "emu", name, renamed[:]))
+            continue
+        }
+        VecPush(build.objects, Compile(build, path, "emu", name, flags[:]))
+    }
+    VecPush(build.objects, Compile(build, Join(build.web, "/os.c"), "emu", "os", flags[:]))
+    VecPush(build.objects, Compile(build, Join(build.web, "/arch.c"), "emu", "arch", flags[:]))
+    zlib: Vec(string)
+    for flags { VecPush(zlib, it) }
+    VecPush(zlib, "-sUSE_ZLIB=1")
+    VecPush(build.objects, Compile(build, Join(build.web, "/lazy.c"), "emu", "lazy", zlib[:]))
+    VecPush(build.objects, Compile(build, Join(build.gen, "/emu.root.c"), "emu", "emu.root", flags[:]))
+    stamped: Vec(string)
+    for flags { VecPush(stamped, it) }
+    out: Vec(u8)
+    BuilderPrint(*out, "-DKERNDATE=%", build.stamp)
+    VecPush(stamped, BuilderFinish(out))
+    VecPush(build.objects, Compile(build, Join(build.gen, "/emu.c"), "emu", "emu", stamped[:]))
+    return true
+}
+
+// Libraries link as archives so the emulator's own definitions win, as
+// they do in the Linux build.
+MakeArchives :: (build: *Build) -> bool {
+    for * build.archives {
+        unused RemoveFile(it.path)
+        command: Command
+        VecPush(command.arguments, "emar")
+        VecPush(command.arguments, "rcs")
+        VecPush(command.arguments, it.path)
+        for it.members { VecPush(command.arguments, it) }
+        command.log = Join(it.path, ".log")
+        command.label = it.path
+        if !RunOne(*command) { return false }
+    }
+    return true
+}
+
+// Emscripten settings: main() on a proxied pthread so the page thread only
+// draws, an in-memory WASMFS root shared by every thread, growable memory.
+// As with the Linux build's shared libc, the emulator's strtod and strtoll
+// take precedence over the C library's.
+Link :: (build: *Build) -> bool {
+    command: Command
+    VecPush(command.arguments, "emcc")
+    settings := TextSplit("-O2 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sUSE_ZLIB=1 -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=12 -sWASMFS=1 -sFORCE_FILESYSTEM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=335544320 -sMAXIMUM_MEMORY=2147483648 -sSTACK_SIZE=1048576 -sDEFAULT_PTHREAD_STACK_SIZE=262144 -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=TaijiEmu -sENVIRONMENT=web,worker -sDYNAMIC_EXECUTION=0 -sEXIT_RUNTIME=0 -sEXPORTED_FUNCTIONS=_main,_taiji_web_shared,_taiji_web_paste,_malloc -sEXPORTED_RUNTIME_METHODS=FS,wasmMemory,stringToNewUTF8 -Wno-pthreads-mem-growth -Wl,--allow-multiple-definition", " ")
+    for settings { VecPush(command.arguments, it) }
+    // MKWEB_DEBUG=1 keeps function names and adds runtime assertions.
+    if EnvironmentText("MKWEB_DEBUG") == "1" {
+        VecPush(command.arguments, "--profiling-funcs")
+        VecPush(command.arguments, "-sASSERTIONS=1")
+    }
+    for build.objects { VecPush(command.arguments, it) }
+    for * build.archives { VecPush(command.arguments, it.path) }
+    VecPush(command.arguments, build.zx_archive)
+    VecPush(command.arguments, "-o")
+    VecPush(command.arguments, Join(build.out, "/taijios.js"))
+    command.log = Join(build.out, "/link.log")
+    command.label = "link taijios.js"
+    return RunOne(*command)
+}
+
+#scope_export
+main :: (argc: s32, argv: **u8) -> s32 {
+    if argc < 4 || argc > 5 {
+        unused PrintError("usage: mkweb OUTPUT ZIRAN_INCLUDE ZIRAN_ARCHIVE [JOBS]\n")
+        return 2
+    }
+    build: Build
+    build.root = TextDetach(WorkingDirectory())
+    build.out = TextDetach(ResolvePath(TextFromCString(argv[1])))
+    if build.out.count == 0 {
+        unused CreateDirectories(TextFromCString(argv[1]))
+        build.out = TextDetach(ResolvePath(TextFromCString(argv[1])))
+    }
+    build.zx_include = TextFromCString(argv[2])
+    build.zx_archive = TextFromCString(argv[3])
+    jobs: s64 = 8
+    if argc == 5 {
+        value, ok := TextInteger(TextFromCString(argv[4]))
+        if ok && value > 0 { jobs = value }
+    }
+    build.web = Join(build.root, "/emu/Web")
+    build.gen = Join(build.out, "/gen")
+    build.obj = Join(build.out, "/obj")
+    if !IsFile(Join(build.web, "/emu")) { unused Fail("run mkweb from the TaijiOS root"); return 2 }
+    if !IsFile(build.zx_archive) { unused Fail("the Ziran wasm archive is missing"); return 2 }
+    unused CreateDirectories(build.gen)
+    unused CreateDirectories(build.obj)
+    // Platform headers and the configuration rebuild everything they reach.
+    stamps: [3]string = .["/include/emu.h", "/emu", "/mkweb.zi"]
+    for stamps {
+        changed := Modified(Join(build.web, it))
+        if changed > build.stamp { build.stamp = changed }
+    }
+    if !QueueEmulator(*build) || !QueueLibraries(*build) { return 1 }
+    out: Vec(u8)
+    BuilderPrint(*out, "mkweb: % objects to compile\n", build.compiles.count)
+    unused WriteOutput(BuilderFinish(out))
+    if !RunAll(build.compiles[:], jobs) { return 1 }
+    if !MakeArchives(*build) || !Link(*build) { return 1 }
+    unused WriteOutput("mkweb: linked taijios.js and taijios.wasm\n")
+    return 0
+}

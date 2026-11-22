@@ -1,0 +1,84 @@
+// Reads words from a region of the emulator screen with tesseract, as the
+// Linux desktop tests do, so the site test can find the clock, menu items
+// and tasks. The page hands over the pixels as a base64 PNG, so any browser
+// driver can supply them.
+#import "browser"
+#import "std/base64"
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/process_run_linux"
+#import "std/text_tools"
+#import "std/unicode"
+
+Word :: struct {
+    text: string
+    // Centre of the word in guest screen coordinates.
+    x: s64
+    y: s64
+}
+
+Region :: struct { x: s64; y: s64; width: s64; height: s64; }
+
+SCALE :: 3;
+
+#scope_export
+// A page expression giving REGION of the emulator canvas, scaled SCALE
+// times, as base64 PNG.
+CropScript :: (region: Region) -> string {
+    script: Vec(u8)
+    BuilderPrint(*script, "(() => { const c = document.getElementById('taiji-screen'); const o = document.createElement('canvas'); o.width = % * %; o.height = % * %; const g = o.getContext('2d'); g.imageSmoothingEnabled = true; g.drawImage(c, %, %, %, %, 0, 0, o.width, o.height); return o.toDataURL('image/png').slice(22); })()",
+        region.width, SCALE, region.height, SCALE, region.x, region.y, region.width, region.height)
+    return BuilderFinish(script)
+}
+
+// The words tesseract finds in ENCODED, a CropScript result for REGION,
+// lower-cased, with guest coordinates. IMAGE receives the PNG it read.
+WordsFromCrop :: (encoded: string, region: Region, image: string, words: *Vec(Word)) -> bool {
+    png: Vec(u8)
+    if encoded == "" || !Base64DecodeInto(encoded, *png) { return false }
+    if !WriteEntireFile(image, TextFromBytes(png[:])) { return false }
+    arguments: [6]string = .["tesseract", image, "stdout", "--psm", "11", "tsv"]
+    run: ProcessRun
+    if !RunProcess(.{arguments = arguments[:], capture_output = true, error_path = "/dev/null"}, *run) || run.code != 0 { return false }
+    table := BuilderFinish(run.output)
+    rows := TextLines(table)
+    for rows {
+        if it_index == 0 { continue }
+        cells := TextSplit(it, "\t")
+        if cells.count < 12 || TextTrim(cells[11]) == "" { continue }
+        left, left_ok := TextInteger(cells[6])
+        top, top_ok := TextInteger(cells[7])
+        width, width_ok := TextInteger(cells[8])
+        height, height_ok := TextInteger(cells[9])
+        if !left_ok || !top_ok || !width_ok || !height_ok { continue }
+        lowered: Text = Lower(TextTrim(cells[11]))
+        word := Word.{text = TextDetach(lowered),
+            x = region.x + (2 * left + width) / (2 * SCALE), y = region.y + (2 * top + height) / (2 * SCALE)}
+        VecPush(<<words, word)
+    }
+    return true
+}
+
+// The words in REGION of the emulator screen in Chromium.
+ReadWords :: (browser: *Browser, region: Region, image: string, words: *Vec(Word)) -> bool {
+    return WordsFromCrop(BrowserText(browser, CropScript(region)), region, image, words)
+}
+
+// Saves the whole emulator screen as a PNG at PATH.
+SaveScreen :: (browser: *Browser, path: string) -> bool {
+    encoded := BrowserText(browser, "document.getElementById('taiji-screen').toDataURL('image/png').slice(22)")
+    png: Vec(u8)
+    if encoded == "" || !Base64DecodeInto(encoded, *png) { return false }
+    return WriteEntireFile(path, TextFromBytes(png[:]))
+}
+
+// Whether TEXT has the h:mm or hh:mm shape of the panel clock.
+ClockText :: (text: string) -> bool {
+    colon := TextFind(text, ":")
+    if colon < 1 || colon > 2 || text.count != colon + 3 { return false }
+    for 0..text.count - 1 {
+        if it == colon { continue }
+        if text[it] < #char "0" || text[it] > #char "9" { return false }
+    }
+    return true
+}

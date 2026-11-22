@@ -1,0 +1,142 @@
+// Private headless Firefox over Marionette, its automation protocol: JSON
+// frames prefixed with their length and a colon, on a loopback port the
+// browser picks and writes into its fresh profile. No display variables and
+// no existing profile or session are used.
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_tree_linux"
+#import "std/json_document"
+#import "std/process_run_linux"
+#import "std/socket_linux"
+#import "std/text_tools"
+#import "std/timer_linux"
+
+Firefox :: struct {
+    run: ProcessRun
+    socket: LinuxSocket
+    pending: Vec(u8)
+    sequence: s64
+    profile: string
+}
+
+#scope_file
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8)
+    BuilderAppend(out, a)
+    BuilderAppend(out, b)
+    return BuilderFinish(out)
+}
+
+PREFERENCES :: "user_pref(\"marionette.port\", 0);\nuser_pref(\"browser.shell.checkDefaultBrowser\", false);\nuser_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\nuser_pref(\"toolkit.telemetry.reportingpolicy.firstRun\", false);\nuser_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");\nuser_pref(\"app.update.disabledForTesting\", true);\n";
+
+// Removes and returns the next complete frame, or "" when none has arrived.
+NextFrame :: (firefox: *Firefox) -> string {
+    colon: s64 = -1
+    for index: cast(s64)0..firefox.pending.count - 1 { if firefox.pending[index] == cast(u8)58 { colon = index; break } }
+    if colon < 0 { return "" }
+    length, ok := TextInteger(TextFromBytes(firefox.pending[0:colon]))
+    if !ok || firefox.pending.count < colon + 1 + length { return "" }
+    frame := TextDetach(TextCopy(TextFromBytes(firefox.pending[colon + 1:colon + 1 + length])))
+    remaining := firefox.pending.count - (colon + 1 + length)
+    for index: cast(s64)0..remaining - 1 { firefox.pending[index] = firefox.pending[index + colon + 1 + length] }
+    unused VecResize(firefox.pending, remaining)
+    return frame
+}
+
+Receive :: (firefox: *Firefox, timeout: s64) -> string {
+    deadline := MonotonicMilliseconds() + timeout
+    chunk: [65536]u8
+    while MonotonicMilliseconds() < deadline {
+        frame := NextFrame(firefox)
+        if frame != "" { return frame }
+        count := SocketReceive(firefox.socket, chunk[:], 200)
+        if count == 0 { return "" }
+        if count > 0 { for 0..count - 1 { VecPush(firefox.pending, chunk[it]) } }
+    }
+    return ""
+}
+
+#scope_export
+// Sends COMMAND with PARAMS (a JSON object); REPLY holds the answer and the
+// result node is returned, or -1 when Firefox reports an error.
+FirefoxCall :: (firefox: *Firefox, command: string, params: string, reply: *JsonDocument, timeout: s64 = 30000) -> s32 {
+    firefox.sequence += 1
+    body: Vec(u8)
+    BuilderPrint(*body, "[0,%,\"%\",%]", firefox.sequence, command, params)
+    frame: Vec(u8)
+    BuilderPrint(*frame, "%:", body.count)
+    BuilderAppend(frame, TextFromBytes(body[:]))
+    if SocketSendAll(firefox.socket, frame[:], 5000) != frame.count { return -1 }
+    deadline := MonotonicMilliseconds() + timeout
+    while MonotonicMilliseconds() < deadline {
+        raw := Receive(firefox, deadline - MonotonicMilliseconds())
+        if raw == "" { return -1 }
+        JsonReset(reply)
+        if !JsonRead(reply, raw) { continue }
+        id, ok := JsonInteger(reply, JsonElement(reply, reply.root, 1))
+        if !ok || id != firefox.sequence { continue }
+        if JsonKindOf(reply, JsonElement(reply, reply.root, 2)) != .Null { return -1 }
+        return JsonElement(reply, reply.root, 3)
+    }
+    return -1
+}
+
+// The string value of the page expression EXPRESSION (promises are awaited), or "".
+FirefoxText :: (firefox: *Firefox, expression: string, timeout: s64 = 30000) -> string {
+    script: Vec(u8)
+    BuilderAppend(script, "return (")
+    BuilderAppend(script, expression)
+    BuilderAppend(script, ");")
+    quoted: Text = JsonQuote(BuilderFinish(script))
+    params: Vec(u8)
+    BuilderPrint(*params, "{\"script\":%,\"args\":[]}", TextView(quoted))
+    reply: JsonDocument
+    result := FirefoxCall(firefox, "WebDriver:ExecuteScript", BuilderFinish(params), *reply, timeout)
+    if result < 0 { return "" }
+    value := JsonMember(*reply, result, "value")
+    if JsonKindOf(*reply, value) != .String { return "" }
+    return TextDetach(JsonString(*reply, value))
+}
+
+FirefoxStart :: (firefox: *Firefox, binary: string, scratch: string) -> bool {
+    if !CreateDirectories(scratch) { return false }
+    firefox.profile = TextDetach(CreateTemporaryDirectory(scratch, "f"))
+    home := Join(firefox.profile, "/home")
+    if firefox.profile == "" || !CreateDirectories(home) { return false }
+    if !WriteEntireFile(Join(firefox.profile, "/user.js"), PREFERENCES) { return false }
+    arguments: [15]string = .["env", "-u", "DISPLAY", "-u", "WAYLAND_DISPLAY", "-u", "DBUS_SESSION_BUS_ADDRESS",
+        Join("HOME=", home), Join("TMPDIR=", home), binary, "--headless", "--marionette", "--no-remote", "--profile", firefox.profile]
+    if !StartProcess(.{arguments = arguments[:], output_path = Join(firefox.profile, "/firefox.log"), merge_error = true, new_session = true}, *firefox.run) { return false }
+    port_file := Join(firefox.profile, "/MarionetteActivePort")
+    port: s64 = 0
+    for 1..300 {
+        text, ok := ReadEntireFile(port_file)
+        if ok {
+            value, number := TextInteger(TextTrim(text))
+            if number && value > 0 { port = value; break }
+        }
+        unused SleepMilliseconds(100)
+    }
+    if port <= 0 || port > 65535 { return false }
+    loopback: [4]u8 = .[127, 0, 0, 1]
+    firefox.socket = OpenTCPv4(loopback, cast(u16)port, 5000)
+    if !firefox.socket.valid || Receive(firefox, 10000) == "" { return false }
+    reply: JsonDocument
+    return FirefoxCall(firefox, "WebDriver:NewSession", "{\"capabilities\":{}}", *reply, 60000) >= 0
+}
+
+FirefoxNavigate :: (firefox: *Firefox, url: string) -> bool {
+    params: Vec(u8)
+    BuilderPrint(*params, "{\"url\":\"%\"}", url)
+    reply: JsonDocument
+    return FirefoxCall(firefox, "WebDriver:Navigate", BuilderFinish(params), *reply, 60000) >= 0
+}
+
+FirefoxClose :: (firefox: *Firefox) {
+    if firefox.socket.valid { unused SocketClose(*firefox.socket) }
+    if firefox.run.started {
+        unused SignalProcess(*firefox.run, 9, true)
+        unused WaitProcess(*firefox.run)
+    }
+    if firefox.profile != "" { unused RemoveTree(firefox.profile) }
+}

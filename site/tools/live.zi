@@ -1,0 +1,71 @@
+// Compares a deployed site with the build it came from: every published file
+// is downloaded with curl and must have the same SHA-256 as the local copy.
+#import "std/file"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/stdio_linux"
+#import "std/text_tools"
+
+#scope_file
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8)
+    BuilderAppend(out, a)
+    BuilderAppend(out, b)
+    return BuilderFinish(out)
+}
+
+Digest :: (path: string) -> Text {
+    arguments: [2]string = .["sha256sum", path]
+    run: ProcessRun
+    if !RunProcess(.{arguments = arguments[:], capture_output = true}, *run) || run.code != 0 { return TextCopy("") }
+    line := BuilderFinish(run.output)
+    if line.count < 64 { return TextCopy("") }
+    return TextCopy(line[0:64])
+}
+
+Download :: (url: string, target: string) -> bool {
+    arguments: [9]string = .["curl", "-fsS", "--max-time", "120", "-H", "Cache-Control: no-cache", "-o", target, url]
+    run: ProcessRun
+    return RunProcess(.{arguments = arguments[:]}, *run) && run.code == 0
+}
+
+// Files below DIRECTORY, relative to it, that Pages publishes.
+Collect :: (directory: string, prefix: string, files: *Vec(string)) -> bool {
+    names: Vec(string)
+    if !ListDirectory(directory, *names) { return false }
+    for names {
+        path := Join(Join(directory, "/"), it)
+        relative := ifx prefix == "" then TextDetach(TextCopy(it)) else Join(Join(prefix, "/"), it)
+        if IsDirectory(path) {
+            if !Collect(path, relative, files) { return false }
+        } else if it != "_headers" {
+            VecPush(<<files, relative)
+        }
+    }
+    return true
+}
+
+#scope_export
+// Checks every file of SITE against BASE (ending in "/"); SCRATCH holds the
+// downloads. Returns the number of matching files, or -1 after a mismatch.
+CompareLive :: (site: string, base: string, scratch: string) -> s64 {
+    files: Vec(string)
+    if !Collect(site, "", *files) { return -1 }
+    if !CreateDirectories(scratch) { return -1 }
+    target := Join(scratch, "/download")
+    for files {
+        url := Join(base, it)
+        if !Download(url, target) {
+            unused PrintError(Join(Join("live: cannot download ", url), "\n"))
+            return -1
+        }
+        local: Text = Digest(Join(Join(site, "/"), it))
+        remote: Text = Digest(target)
+        if TextView(local) == "" || TextView(local) != TextView(remote) {
+            unused PrintError(Join(Join("live: hash differs for ", url), "\n"))
+            return -1
+        }
+    }
+    unused RemoveFile(target)
+    return files.count
+}

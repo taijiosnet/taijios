@@ -1,0 +1,206 @@
+// Private headless Chromium over its DevTools pipe. The browser gets its own
+// profile, HOME and runtime directory, no display variables and no access to
+// an existing browser session.
+#import "std/byte_text_linux"
+#import "std/file_tree_linux"
+#import "std/json_document"
+#import "std/process_channel_linux"
+#import "std/stdio_linux"
+#import "std/text_tools"
+#import "std/timer_linux"
+
+Browser :: struct {
+    channel: ProcessChannel
+    pending: Vec(u8)
+    sequence: s64
+    session: string
+    profile: string
+    // Console lines and page exceptions, printed as they arrive.
+    console: Vec(string)
+}
+
+#scope_file
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8)
+    BuilderAppend(out, a)
+    BuilderAppend(out, b)
+    return BuilderFinish(out)
+}
+
+Consume :: (browser: *Browser, count: s64) {
+    remaining := browser.pending.count - count
+    for index: cast(s64)0..remaining - 1 { browser.pending[index] = browser.pending[index + count] }
+    unused VecResize(browser.pending, remaining)
+}
+
+Field :: (document: *JsonDocument, node: s32, key: string) -> string {
+    member := JsonMember(document, node, key)
+    if member < 0 || JsonKindOf(document, member) != .String { return "" }
+    return TextDetach(JsonString(document, member))
+}
+
+// Keeps console output and exceptions from event messages.
+Event :: (browser: *Browser, document: *JsonDocument) {
+    method := Field(document, document.root, "method")
+    params := JsonMember(document, document.root, "params")
+    line := ""
+    if method == "Runtime.exceptionThrown" {
+        details := JsonMember(document, params, "exceptionDetails")
+        line = Field(document, JsonMember(document, details, "exception"), "description")
+        if line == "" { line = Field(document, details, "text") }
+        line = Join("exception: ", line)
+    } else if method == "Runtime.consoleAPICalled" {
+        arguments := JsonMember(document, params, "args")
+        out: Vec(u8)
+        BuilderAppend(out, Field(document, params, "type"))
+        BuilderAppend(out, ":")
+        for index: cast(s32)0..JsonCount(document, arguments) - 1 {
+            argument := JsonElement(document, arguments, index)
+            text := Field(document, argument, "value")
+            if text == "" { text = Field(document, argument, "description") }
+            BuilderAppend(out, " ")
+            BuilderAppend(out, text)
+        }
+        line = BuilderFinish(out)
+    } else if method == "Inspector.targetCrashed" {
+        line = "exception: the page crashed"
+    }
+    if line != "" {
+        VecPush(browser.console, line)
+        unused WriteOutput(Join(Join("  page ", line), "\n"))
+    }
+}
+
+#scope_export
+// Sends one command; on success REPLY holds the answer and the result node
+// is returned, otherwise -1.
+BrowserCall :: (browser: *Browser, method: string, params: string, reply: *JsonDocument, timeout: s64 = 30000) -> s32 {
+    browser.sequence += 1
+    request: Vec(u8)
+    BuilderPrint(*request, "{\"id\":%,\"method\":\"%\",\"params\":%", browser.sequence, method, params)
+    if browser.session != "" { BuilderPrint(*request, ",\"sessionId\":\"%\"", browser.session) }
+    BuilderAppend(request, "}")
+    VecPush(request, cast(u8)0)
+    if ChannelSend(browser.channel, request[:], 5000) != request.count { return -1 }
+    deadline := MonotonicMilliseconds() + timeout
+    chunk: [65536]u8
+    while MonotonicMilliseconds() < deadline {
+        separator: s64 = -1
+        for index: cast(s64)0..browser.pending.count - 1 { if browser.pending[index] == cast(u8)0 { separator = index; break } }
+        if separator >= 0 {
+            raw := TextDetach(TextCopy(TextFromBytes(browser.pending[0:separator])))
+            Consume(browser, separator + 1)
+            JsonReset(reply)
+            if raw == "" || !JsonRead(reply, raw) { continue }
+            id, has_id := JsonInteger(reply, JsonMember(reply, reply.root, "id"))
+            if !has_id { Event(browser, reply); continue }
+            if id != browser.sequence { continue }
+            if JsonMember(reply, reply.root, "error") >= 0 { return -1 }
+            return JsonMember(reply, reply.root, "result")
+        }
+        // A timeout reads nothing; zero bytes means Chromium exited.
+        count := ChannelReceive(browser.channel, chunk[:], 200)
+        if count == 0 { return -1 }
+        if count > 0 { for 0..count - 1 { VecPush(browser.pending, chunk[it]) } }
+    }
+    return -1
+}
+
+// Evaluates EXPRESSION in the page, awaiting a promise; returns the value node.
+BrowserEval :: (browser: *Browser, expression: string, reply: *JsonDocument, timeout: s64 = 30000) -> s32 {
+    quoted: Text = JsonQuote(expression)
+    params: Vec(u8)
+    BuilderPrint(*params, "{\"expression\":%,\"returnByValue\":true,\"awaitPromise\":true}", TextView(quoted))
+    result := BrowserCall(browser, "Runtime.evaluate", BuilderFinish(params), reply, timeout)
+    if result < 0 || JsonMember(reply, result, "exceptionDetails") >= 0 { return -1 }
+    return JsonMember(reply, JsonMember(reply, result, "result"), "value")
+}
+
+// The string value of EXPRESSION, or "" when it fails or is not a string.
+BrowserText :: (browser: *Browser, expression: string, timeout: s64 = 30000) -> string {
+    reply: JsonDocument
+    value := BrowserEval(browser, expression, *reply, timeout)
+    if value < 0 || JsonKindOf(*reply, value) != .String { return "" }
+    return TextDetach(JsonString(*reply, value))
+}
+
+// Starts CHROMIUM headless with a fresh profile under SCRATCH and attaches
+// to its first page.
+BrowserStart :: (browser: *Browser, chromium: string, scratch: string) -> bool {
+    if !CreateDirectories(scratch) { return false }
+    browser.profile = TextDetach(CreateTemporaryDirectory(scratch, "p"))
+    home := Join(browser.profile, "/home")
+    runtime := Join(browser.profile, "/run")
+    if browser.profile == "" || !CreateDirectories(home) || !CreateDirectories(runtime) || !SetPathMode(runtime, 448) { return false }
+    // File descriptors 3 and 4 carry the DevTools protocol over the channel.
+    launch := "home=$1; runtime=$2; log=$3; shift 3; unset DISPLAY WAYLAND_DISPLAY WAYLAND_SOCKET XAUTHORITY DBUS_SESSION_BUS_ADDRESS SESSION_MANAGER; exec 3<&0 4>&1 env HOME=\"$home\" TMPDIR=\"$home\" XDG_CONFIG_HOME=\"$home/config\" XDG_CACHE_HOME=\"$home/cache\" XDG_RUNTIME_DIR=\"$runtime\" HARMONY_DESKTOP_RECOVERY=0 \"$@\" </dev/null >/dev/null 2>\"$log\""
+    arguments: [22]string = .["sh", "-c", launch, "chromium", home, runtime, Join(browser.profile, "/chromium.log"), chromium,
+        "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking",
+        "--disable-breakpad", "--no-first-run", "--no-default-browser-check", "--hide-scrollbars", "--mute-audio",
+        "--window-size=1440,1000", "--remote-debugging-pipe", Join("--user-data-dir=", browser.profile), "about:blank"]
+    browser.channel = StartChannel(arguments[:], false)
+    if browser.channel.pid <= 0 { return false }
+    reply: JsonDocument
+    result := BrowserCall(browser, "Target.getTargets", "{}", *reply)
+    if result < 0 { return false }
+    targets := JsonMember(*reply, result, "targetInfos")
+    target := ""
+    for index: cast(s32)0..JsonCount(*reply, targets) - 1 {
+        item := JsonElement(*reply, targets, index)
+        if Field(*reply, item, "type") == "page" { target = Field(*reply, item, "targetId"); break }
+    }
+    if target == "" { return false }
+    params: Vec(u8)
+    BuilderPrint(*params, "{\"targetId\":\"%\",\"flatten\":true}", target)
+    attached := BrowserCall(browser, "Target.attachToTarget", BuilderFinish(params), *reply)
+    if attached < 0 { return false }
+    browser.session = Field(*reply, attached, "sessionId")
+    if browser.session == "" { return false }
+    domains: [2]string = .["Runtime.enable", "Page.enable"]
+    for domains { if BrowserCall(browser, it, "{}", *reply) < 0 { return false } }
+    return true
+}
+
+BrowserClose :: (browser: *Browser) {
+    unused CancelChannel(*browser.channel)
+    if browser.profile != "" { unused RemoveTree(browser.profile) }
+}
+
+// Presses and releases BUTTON ("left" or "right") at page coordinates.
+BrowserClick :: (browser: *Browser, x: s64, y: s64, button: string = "left") -> bool {
+    reply: JsonDocument
+    kinds: [3]string = .["mouseMoved", "mousePressed", "mouseReleased"]
+    for kinds {
+        params: Vec(u8)
+        buttons := ifx it == "mousePressed" then (ifx button == "left" then 1 else 2) else 0
+        BuilderPrint(*params, "{\"type\":\"%\",\"x\":%,\"y\":%,\"button\":\"%\",\"buttons\":%,\"clickCount\":1}", it, x, y, button, buttons)
+        if BrowserCall(browser, "Input.dispatchMouseEvent", BuilderFinish(params), *reply) < 0 { return false }
+        unused SleepMilliseconds(60)
+    }
+    return true
+}
+
+// Types lower-case letters, digits and spaces as key presses.
+BrowserType :: (browser: *Browser, text: string) -> bool {
+    reply: JsonDocument
+    for 0..text.count - 1 {
+        c := text[it]
+        upper := ifx c >= #char "a" && c <= #char "z" then c - 32 else c
+        code := ""
+        if c >= #char "a" && c <= #char "z" { code = "Key" } else if c >= #char "0" && c <= #char "9" { code = "Digit" } else { code = "Space" }
+        letter: [1]u8 = .[c]
+        named: [1]u8 = .[upper]
+        key := TextFromBytes(letter[:])
+        suffix := ifx code == "Space" then "" else TextFromBytes(named[:])
+        kinds: [2]string = .["keyDown", "keyUp"]
+        for kinds {
+            params: Vec(u8)
+            BuilderPrint(*params, "{\"type\":\"%\",\"key\":\"%\",\"code\":\"%\",\"windowsVirtualKeyCode\":%", it, key, Join(code, suffix), cast(s64)upper)
+            if it == "keyDown" { BuilderPrint(*params, ",\"text\":\"%\"", key) }
+            BuilderAppend(params, "}")
+            if BrowserCall(browser, "Input.dispatchKeyEvent", BuilderFinish(params), *reply) < 0 { return false }
+        }
+        unused SleepMilliseconds(80)
+    }
+    return true
+}
