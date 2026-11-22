@@ -416,7 +416,9 @@ while continuing to process window events. A call copies up to 4096 bytes,
 returns `-2` while input is pending, `0` at EOF, or `-1` on error. An empty
 buffer returns `0` without starting a read. The runner cancels a pending
 read when the window closes or the bundle exits. A windowed app can wait
-with `zx_surface.Event` between polls to keep input responsive.
+with `zx_surface.Event` between polls to keep input responsive. Windows of
+the native ZX window manager get the same call without Dis: a reader thread
+holds one chunk of fd 0 at a time and stops when the app exits.
 
 `zxrun -w file.zx [args ...]` passes operands through `taijios_args`.
 `zxrun -c -w file.zx [args ...]` reports the returned value as shell status.

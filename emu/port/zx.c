@@ -895,6 +895,7 @@ struct ZxTask {
 
 typedef struct ZxCommand ZxCommand;
 typedef struct ZxProcess ZxProcess;
+typedef struct ZxStdinPump ZxStdinPump;
 struct ZxResult {
 	long long value;
 	int status;
@@ -929,11 +930,157 @@ struct ZxCommand {
 #ifdef __linux__
 	ZxProcess *children;
 	ZxNativeWindow *window;
+	ZxStdinPump *stdinpump;
 	int childid, nchild;
 #endif
 };
 
 static ZxResult zxexecute(const char *, ZxSurface *, ZxCommand *);
+
+static int zxs32(HostValue *, int);
+
+#ifdef __linux__
+/* A windowed ZX process without Dis polls fd 0 through a reader kproc that
+ * holds one chunk at a time. count is the bytes held, -2 while a read is
+ * pending, 0 at end of input, and -1 after an error. */
+struct ZxStdinPump {
+	Ref ref;
+	Lock l;
+	Rendez taken;
+	Proc *reader;
+	int closed, offset;
+	long count;
+	uchar data[ZX_StdinChunk];
+};
+
+static void
+zxstdinrelease(ZxStdinPump *pump)
+{
+	if(decref(&pump->ref) == 0)
+		free(pump);
+}
+
+static int
+zxstdintaken(void *arg)
+{
+	ZxStdinPump *pump = arg;
+
+	return pump->count == -2 || pump->closed;
+}
+
+static void
+zxstdinreader(void *arg)
+{
+	ZxStdinPump *pump = arg;
+	uchar bytes[ZX_StdinChunk];
+	long n;
+	int closed;
+
+	lock(&pump->l);
+	pump->reader = up;
+	closed = pump->closed;
+	unlock(&pump->l);
+	while(!closed){
+		n = kread(0, bytes, sizeof(bytes));
+		lock(&pump->l);
+		closed = pump->closed;
+		if(!closed){
+			if(n > 0)
+				memmove(pump->data, bytes, n);
+			pump->offset = 0;
+			pump->count = n < 0 ? -1 : n;
+		}
+		unlock(&pump->l);
+		if(closed || n <= 0)
+			break;
+		if(waserror())
+			break;
+		Sleep(&pump->taken, zxstdintaken, pump);
+		poperror();
+		lock(&pump->l);
+		closed = pump->closed;
+		unlock(&pump->l);
+	}
+	lock(&pump->l);
+	pump->reader = nil;
+	unlock(&pump->l);
+	zxstdinrelease(pump);
+}
+
+static int
+zxnativestdin(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	ZxStdinPump *pump;
+	size_t length;
+	long count, i;
+	int taken;
+
+	USED(module);
+	USED(function);
+	if(n != 1 || args[0].kind != HOST_SLICE || args[0].type == nil ||
+	   strcmp(args[0].type, "[]u8") != 0 || (args[0].length != 0 && args[0].elements == nil))
+		return 0;
+	length = args[0].length;
+	if(length > ZX_StdinChunk)
+		length = ZX_StdinChunk;
+	if(length == 0)
+		return zxs32(result, 0);
+	pump = command->stdinpump;
+	if(pump == nil){
+		pump = calloc(1, sizeof(*pump));
+		if(pump == nil)
+			return zxs32(result, -1);
+		pump->ref.ref = 2;
+		pump->count = -2;
+		if(waserror()){
+			free(pump);
+			return zxs32(result, -1);
+		}
+		kproc("ZX stdin", zxstdinreader, pump, KPDUPPG|KPDUPFDG|KPDUPENVG);
+		poperror();
+		command->stdinpump = pump;
+	}
+	taken = 0;
+	lock(&pump->l);
+	count = pump->count;
+	if(count > 0){
+		if(count - pump->offset < (long)length)
+			length = count - pump->offset;
+		for(i = 0; i < (long)length; i++)
+			args[0].elements[i].bits = pump->data[pump->offset+i];
+		pump->offset += length;
+		if(pump->offset == count){
+			pump->count = -2;
+			taken = 1;
+		}
+		count = length;
+	}
+	unlock(&pump->l);
+	if(taken)
+		Wakeup(&pump->taken);
+	return zxs32(result, count);
+}
+
+/* Interrupt a pending read and drop the command's reference. */
+static void
+zxstdinclose(ZxCommand *command)
+{
+	ZxStdinPump *pump = command->stdinpump;
+
+	if(pump == nil)
+		return;
+	command->stdinpump = nil;
+	lock(&pump->l);
+	pump->closed = 1;
+	if(pump->reader != nil)
+		swiproc(pump->reader, 0);
+	unlock(&pump->l);
+	Wakeup(&pump->taken);
+	zxstdinrelease(pump);
+}
+#endif
 
 static int
 zxcopyargs(ZxCommand *command, List *args)
@@ -2684,6 +2831,10 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		if(zxmodule(abi.module, "taijios_stdin")){
 			if(strcmp(abi.function, "Read") == 0 || (surface->win != H && strcmp(abi.function, "Poll") == 0))
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxstdin, surface};
+#ifdef __linux__
+			else if(command->window != nil && strcmp(abi.function, "Poll") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxnativestdin, command};
+#endif
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_files") && strcmp(abi.function, "ReadAt") == 0){
@@ -3104,6 +3255,7 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 	free(command->fdpath);
 	free(command->tasks);
 #ifdef __linux__
+	zxstdinclose(command);
 	zxprocessforget(command);
 #endif
 	return result;

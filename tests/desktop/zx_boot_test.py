@@ -309,7 +309,7 @@ def check_window_manager(emulator, root, env):
         subprocess.run([
             'ziran', 'bundle', '--root', root, '--module-path', surfaces, '--module-path', ROOT / 'appl/cmd',
             '--bind-host', 'zx_surface', '--bind-host', 'taijios_args', '--bind-host', 'taijios_wm',
-            '--bind-host', 'taijios_draw',
+            '--bind-host', 'taijios_draw', '--bind-host', 'taijios_stdin',
             '--entry', 'zx_window_app:main', '-o', root / f'window{red}.zx', source,
         ], env=env, check=True, timeout=60)
     assert not any(root.rglob('*.dis'))
@@ -317,8 +317,10 @@ def check_window_manager(emulator, root, env):
     with private_display() as display:
         env = env | {'DISPLAY': display['DISPLAY']}
         app = launch(env, emulator, '-v', '-r', root, '-g', '640x480', '/wm.zx',
-                     '/window37.zx', '/window108.zx', stdin=subprocess.DEVNULL,
+                     '/window37.zx', '/window108.zx', stdin=subprocess.PIPE,
                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        app.stdin.write(b'LOG\n')
+        app.stdin.close()
 
         def desktop(*args, check=True):
             return subprocess.run(args, env=env, capture_output=True, check=check, timeout=5).stdout

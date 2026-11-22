@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let System Log and other ZX windows poll stdin under the native window manager, so all installed ZX app bundles run without Dis.
+
 - List and end running ZX processes in Task Manager when the guest runs without Dis.
 
 - Let a ZX guest stop a running child with `taijios_process.Kill`, using Ziran's run stop requests, including a child blocked in a device read or window wait.

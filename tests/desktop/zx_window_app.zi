@@ -2,6 +2,7 @@ Surface :: #import "zx_surface";
 Args :: #import "taijios_args";
 WM :: #import "taijios_wm";
 Draw :: #import "taijios_draw";
+Stdin :: #import "taijios_stdin";
 
 Color :: 37;
 Width :: 48;
@@ -40,8 +41,21 @@ main :: () -> s32 {
     key := false;
     text := false;
     requested_resize := false;
-    while !(up && key && text) {
-        event := Surface.Event(1000);
+    // Without Dis, the first window also polls its inherited stdin.
+    logged := Color != 37 || desktop_probe;
+    log: [4]u8;
+    log_count: s64 = 0;
+    while !(up && key && text && logged) {
+        if !logged {
+            count := Stdin.PollBytes(log[log_count:]);
+            if count > 0 { log_count += count }
+            else if count != -2 { return 16 }
+            if log_count == log.count {
+                if log[0] != #char "L" || log[1] != #char "O" || log[2] != #char "G" || log[3] != 10 { return 17 }
+                logged = true;
+            }
+        }
+        event := Surface.Event(ifx logged then 1000 else 50);
         if event.kind == Surface.Closed {
             if desktop_probe { print("ZX_DESKTOP_CHILD_CLOSED\n"); return 0 }
             return 6;
