@@ -1,0 +1,78 @@
+// The command line shared by csquery and dnsquery: [-x net] [-s server]
+// [query ...]. Each operand is a query; without operands each line read
+// after a "> " prompt is one.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Lines :: #import "zx_lines";
+
+// Sends one query to server; false ends the command with its status set.
+Query :: #type (server: string, query: string) -> bool;
+
+// Opens the server file for a query, or reports why it cannot be opened.
+OpenServer :: (command: string, server: string) -> s32 {
+    fd := Io.OpenFile(server, 2);
+    if fd < 0 {
+        message: Vec(u8);
+        BuilderPrint(*message, "%: can't open %: %\n", command, server, Io.LastError());
+        unused Cli.WriteAll(2, BuilderFinish(message));
+        unused Args.SetFailure("open");
+    }
+    return fd;
+}
+
+// Prints the server's replies to the query just written, one per line.
+// False when a read fails.
+PrintReplies :: (fd: s32) -> bool {
+    unused Io.SeekFile(fd, 0, 0);
+    reply: [256]u8;
+    count := Io.ReadBytes(fd, reply[:]);
+    while count > 0 {
+        Cli.PrintLine(TextView(reply[:count]));
+        count = Io.ReadBytes(fd, reply[:]);
+    }
+    return count == 0;
+}
+
+// Runs the command; file names the server under the network directory.
+Run :: (usage: string, file: string, query: Query) -> s32 {
+    net := "/net";
+    server := "";
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        value, ok := Arg.Value(*scan);
+        if !ok { return Cli.Usage(usage) }
+        if letter == #char "x" {
+            net = value;
+        } else if letter == #char "s" {
+            server = value;
+        } else {
+            return Cli.Usage(usage);
+        }
+        letter = Arg.Option(*scan);
+    }
+    path: Vec(u8);
+    if server == "" {
+        BuilderPrint(*path, "%/%", net, file);
+        server = BuilderFinish(path);
+    }
+    if scan.next < Args.OperandCount() {
+        while scan.next < Args.OperandCount() {
+            if !query(server, Args.Operand(scan.next)) { return 1 }
+            scan.next += 1;
+        }
+        return 0;
+    }
+    reader: Lines.LineReader;
+    line: Vec(u8);
+    while true {
+        unused Cli.WriteAll(1, "> ");
+        if !Lines.ReadLine(*reader, *line) { break }
+        // Like the Limbo commands, drop the last character, newline or not.
+        if !query(server, TextView(line[0:line.count - 1])) { return 1 }
+    }
+    return 0;
+}

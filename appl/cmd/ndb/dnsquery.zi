@@ -1,0 +1,96 @@
+// dnsquery [-x net] [-s server] [query ...]: asks the DNS server for each
+// "name [type]" query, or each line read after a "> " prompt, and prints
+// every reply on its own line. A name alone asks for its address, or for
+// the name of an IPv4 address; a ptr query for an address is rewritten to
+// its in-addr.arpa name.
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Client :: #import "ndb_client";
+
+// The ndb attribute the name looks like, as the Limbo command decided it.
+Kind :: (name: string) -> string {
+    digit := false; dot := false; alpha := false; hex := false; colon := false;
+    for name {
+        if it >= #char "0" && it <= #char "9" {
+            digit = true;
+        } else if (it >= #char "a" && it <= #char "f") || (it >= #char "A" && it <= #char "F") {
+            hex = true;
+        } else if it == #char "." {
+            dot = true;
+        } else if it == #char ":" {
+            colon = true;
+        } else if (it >= #char "a" && it <= #char "z") || (it >= #char "A" && it <= #char "Z") || it == #char "-" || it == #char "&" {
+            alpha = true;
+        }
+    }
+    if alpha { return ifx dot then "dom" else "sys" }
+    if colon { return "ip" }
+    if dot { return ifx hex then "dom" else "ip" }
+    return "sys";
+}
+
+EndsWith :: (text: string, tail: string) -> bool {
+    return text.count >= tail.count && text[text.count - tail.count:] == tail;
+}
+
+// Appends the in-addr.arpa name of an IPv4 address: its fields reversed.
+AppendArpa :: (out: *Vec(u8), address: string) {
+    end := address.count;
+    first := true;
+    while end > 0 {
+        start := end;
+        while start > 0 && address[start - 1] != #char "." { start -= 1 }
+        if start < end {
+            if !first { VecPush(<<out, #char ".") }
+            BuilderAppend(<<out, address[start:end]);
+            first = false;
+        }
+        end = start - 1;
+    }
+    BuilderAppend(<<out, ".in-addr.arpa");
+}
+
+// The query sent for what was typed.
+Request :: (typed: string) -> Text {
+    out: Vec(u8);
+    BuilderAppend(out, typed);
+    space := typed.count - 1;
+    while space >= 0 && typed[space] != #char " " { space -= 1 }
+    if space < 0 {
+        space = typed.count;
+        BuilderAppend(out, ifx Kind(typed) == "ip" then " ptr" else " ip");
+    }
+    arpa: Vec(u8);
+    {
+        text := TextView(out[:]);
+        if text[space + 1:] == "ptr" {
+            end := space;
+            while end > 0 && text[end - 1] == #char " " { end -= 1 }
+            name := text[0:end];
+            if !EndsWith(name, ".in-addr.arpa") && !EndsWith(name, ".IN-ADDR.ARPA") {
+                AppendArpa(*arpa, name);
+                BuilderAppend(arpa, " ptr");
+            }
+        }
+    }
+    request: Text;
+    if arpa.count > 0 { VecSwap(request.bytes, arpa) } else { VecSwap(request.bytes, out) }
+    return request;
+}
+
+Query :: (server: string, typed: string) -> bool {
+    dns := Client.OpenServer("dnsquery", server);
+    if dns < 0 { return false }
+    defer Io.CloseFile(dns);
+    request: Text = Request(typed);
+    if Io.WriteBytes(dns, TextView(request)) > 0 && Client.PrintReplies(dns) { return true }
+    failure: Vec(u8);
+    BuilderPrint(*failure, "!%\n", Io.LastError());
+    unused Cli.WriteAll(1, BuilderFinish(failure));
+    return true;
+}
+
+main :: () -> s32 {
+    return Client.Run("usage: dnsquery [-x /net] [-s server] [address ...]\n", "dns", Query);
+}

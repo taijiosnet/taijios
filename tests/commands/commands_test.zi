@@ -1,6 +1,6 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
-// ndb/csquery and ndb/regquery.
+// ndb/csquery, ndb/dnsquery and ndb/regquery.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -35,7 +35,7 @@ REGISTRY :: "service=tcp!alpha.example!1\n\tname=alpha owner='a b' kind=x\nservi
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [86]Case = Case.[
+cases: [94]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -113,6 +113,15 @@ cases: [86]Case = Case.[
     .{args = "kill Cs > /dev/null"},
     .{tool = "ndb/csquery", args = "-s /nonexist x", status = "open", err = "csquery: can't open /nonexist: '/nonexist' file does not exist\n"},
     .{tool = "ndb/csquery", args = "-q", status = "usage", err = "usage: csquery [-x /net] [-s server] [address ...]\n"},
+    // A plain file as the DNS server reads back the request dnsquery wrote.
+    .{args = "echo -n > dnsf; ndb/dnsquery -s dnsf www.example.com", out = "www.example.com ip\n"},
+    .{args = "echo -n > dnsf; ndb/dnsquery -s dnsf '1.2.3.4   ptr'", out = "4.3.2.1.in-addr.arpa ptr\n"},
+    .{args = "echo -n > dnsf; ndb/dnsquery -s dnsf 4.3.2.1.in-addr.arpa", out = "4.3.2.1.in-addr.arpa ip\n"},
+    .{args = "echo -n > dnsf; ndb/dnsquery -s dnsf 1:2:3:4 cafe.babe", out = "1:2:3:4.in-addr.arpa ptr\ncafe.babe ipddr.arpa ptr\n"},
+    .{args = "echo -n > dnsf; ndb/dnsquery -s dnsf '10..1.'", out = "1.10.in-addr.arpa ptr\n"},
+    .{args = "echo -n > dnsf; echo example.org | ndb/dnsquery -s dnsf", out = "> example.org ip\n> "},
+    .{tool = "ndb/dnsquery", args = "-x /nonexist x", status = "open", err = "dnsquery: can't open /nonexist/dns: '/nonexist' file does not exist\n"},
+    .{tool = "ndb/dnsquery", args = "-s", status = "usage", err = "usage: dnsquery [-x /net] [-s server] [address ...]\n"},
     .{args = "mount -c {ndb/registry -f reg.db} mnt"},
     .{tool = "ndb/regquery", args = "-m mnt name alpha", out = "tcp!alpha.example!1 kind x owner 'a b' name alpha\n"},
     .{tool = "ndb/regquery", args = "-m mnt -n kind x", out = "tcp!alpha.example!1\ntcp!gamma.example!3\n"},
