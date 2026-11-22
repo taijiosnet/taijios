@@ -1,0 +1,39 @@
+// Option scanning over the guest operands, as the Limbo Arg module did it:
+// letters cluster after one "-", Value takes the rest of the cluster or else
+// the next operand, and "--", "-" or a word without a leading "-" ends the
+// options.
+using Args :: #import "taijios_args";
+
+Scan :: struct {
+    next: s32; // first operand not yet consumed
+    cluster: string; // option letters left in the current word
+}
+
+// The next option letter, or 0 when the options end.
+Option :: (scan: *Scan) -> u8 {
+    if scan.cluster.count > 0 {
+        letter := scan.cluster[0];
+        scan.cluster = scan.cluster[1:];
+        return letter;
+    }
+    if scan.next >= Args.OperandCount() { return 0 }
+    word := Args.Operand(scan.next);
+    if word.count < 2 || word[0] != #char "-" { return 0 }
+    scan.next += 1;
+    if word == "--" { return 0 }
+    scan.cluster = word[2:];
+    return word[1];
+}
+
+// The value of the option just read; ok is false when none is left.
+Value :: (scan: *Scan) -> (value: string, ok: bool) {
+    if scan.cluster.count > 0 {
+        value := scan.cluster;
+        scan.cluster = "";
+        return value, true;
+    }
+    if scan.next >= Args.OperandCount() { return "", false }
+    value := Args.Operand(scan.next);
+    scan.next += 1;
+    return value, true;
+}

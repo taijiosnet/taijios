@@ -2,7 +2,6 @@
 
 TARG=\
 	cs.dis\
-	csquery.dis\
 	dns.dis\
 	dnsquery.dis\
 	mkhash.dis\
@@ -26,3 +25,17 @@ MODULES=\
 DISBIN=$ROOT/dis/ndb
 
 <$ROOT/mkfiles/mkdis
+
+# Commands that exist only as ZX bundles.
+ZXCOMMANDS=csquery
+ZXUTIL=../zx_cli.zi ../zx_arg.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

@@ -1,5 +1,6 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
-// basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir and tclsh.
+// basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh and
+// ndb/csquery.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -33,7 +34,7 @@ TCL_FILE :: "puts file-one\nset y 7\nnoSuch arg\nputs after-error\n";
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [74]Case = Case.[
+cases: [79]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -105,6 +106,12 @@ cases: [74]Case = Case.[
     // A file stops at its first error without a report; its variables stay set.
     .{tool = "tclsh", args = "file.tcl missing.tcl two.tcl", input = "lines.tcl", out = "file-one\nfile-two\ntcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% 7\ntcl% "},
     .{tool = "tclsh", args = "missing.tcl", out = "tcl% "},
+    .{args = "ndb/cs; ndb/csquery 'tcp!127.0.0.1!80' 'bogus!x'", out = "/net/tcp/clone 127.0.0.1!80\nbogus!x: network unavailable bogus\n"},
+    .{args = "echo 'tcp!127.0.0.1!7' | ndb/csquery", out = "> /net/tcp/clone 127.0.0.1!7\n> "},
+    // The emulator cannot exit while the connection server runs.
+    .{args = "kill Cs > /dev/null"},
+    .{tool = "ndb/csquery", args = "-s /nonexist x", status = "open", err = "csquery: can't open /nonexist: '/nonexist' file does not exist\n"},
+    .{tool = "ndb/csquery", args = "-q", status = "usage", err = "usage: csquery [-x /net] [-s server] [address ...]\n"},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},

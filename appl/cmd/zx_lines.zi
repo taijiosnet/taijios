@@ -1,0 +1,29 @@
+// Line reading from a guest file handle, like the Limbo Bufio gets('\n').
+using Io :: #import "taijios_io";
+
+LineReader :: struct {
+    handle: s32;
+    buffer: Vec(u8);
+    start: s64;
+}
+
+// Reads the next line into line, with its newline when it has one. False at
+// the end of input with nothing read, or on a read error.
+ReadLine :: (reader: *LineReader, line: *Vec(u8)) -> bool {
+    VecClear(<<line);
+    chunk: [4096]u8;
+    while true {
+        while reader.start < reader.buffer.count {
+            byte := reader.buffer[reader.start];
+            reader.start += 1;
+            VecPush(<<line, byte);
+            if byte == #char "\n" { return true }
+        }
+        VecClear(reader.buffer);
+        reader.start = 0;
+        count := Io.ReadBytes(reader.handle, chunk[:]);
+        if count <= 0 { return line.count > 0 }
+        for chunk[:count] { VecPush(reader.buffer, it) }
+    }
+    return false;
+}
