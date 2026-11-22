@@ -39,6 +39,10 @@ ZX command from another in a guest without Dis, start the emulator with
 and namespace. A scalar is printed by default. `-c` returns the scalar as
 command status, and `-s` also reports the child's named failure when present.
 Windowed execution and Dis process groups still use the existing Dis runner.
+In a direct ZX guest, `taijios_process.Start` launches a concurrent console
+child. `Poll` and `Wait` collect its result using the returned ID. Children
+inherit the guest namespace and standard streams. Other open descriptors stay
+with the caller.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including
 the ZX runtime. Use `-p main=64M` or `-p main=32M` before the guest command to set

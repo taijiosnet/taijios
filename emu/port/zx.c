@@ -28,6 +28,7 @@ enum {
 	ZxIoBytes = 8192,
 	ZxInitialFiles = 32,
 	ZxProcessDepth = 32,
+	ZxProcessLimit = 32,
 	ZxTaskLimit = 1024,
 	ZxTaskNameBytes = 64,
 	ZxPanelLabelBytes = 160,
@@ -884,6 +885,7 @@ struct ZxTask {
 };
 
 typedef struct ZxCommand ZxCommand;
+typedef struct ZxProcess ZxProcess;
 struct ZxResult {
 	long long value;
 	int status;
@@ -910,6 +912,10 @@ struct ZxCommand {
 	uvlong pools[3][3];
 	ZxResult outcome;
 	HostField outfields[3];
+#ifdef __linux__
+	ZxProcess *children;
+	int childid, nchild;
+#endif
 };
 
 static ZxResult zxexecute(const char *, ZxSurface *, ZxCommand *);
@@ -1067,16 +1073,40 @@ zxiopath(const HostValue *name, char *path)
 }
 
 #ifdef __linux__
-typedef struct ZxProcess ZxProcess;
 struct ZxProcess {
 	Ref ref;
 	Rendez wait;
-	int done;
+	int done, id;
+	ZxProcess *next;
 	Fgrp *files;
 	ZxCommand command;
 	ZxResult result;
 	char path[ZxGuestPathBytes + 1];
 };
+
+static Lock zxprocesslock;
+static int zxprocessactive;
+
+static int
+zxprocessadmit(void)
+{
+	int ok;
+
+	lock(&zxprocesslock);
+	ok = zxprocessactive < ZxProcessLimit;
+	if(ok)
+		zxprocessactive++;
+	unlock(&zxprocesslock);
+	return ok;
+}
+
+static void
+zxprocessretire(void)
+{
+	lock(&zxprocesslock);
+	zxprocessactive--;
+	unlock(&zxprocesslock);
+}
 
 static void
 zxprocessrelease(ZxProcess *process)
@@ -1099,6 +1129,7 @@ zxprocessworker(void *arg)
 	process->result = zxexecute(process->path, &surface, &process->command);
 	closefgrp(up->env->fgrp);
 	up->env->fgrp = nil;
+	zxprocessretire();
 	lock(&process->wait.l);
 	process->done = 1;
 	unlock(&process->wait.l);
@@ -1146,43 +1177,126 @@ zxprocessargs(ZxCommand *command, const HostValue *operands)
 	return 1;
 }
 
-static ZxResult
-zxprocessrun(ZxCommand *command, const HostValue *args)
+static ZxProcess *
+zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result)
 {
 	ZxProcess *process;
-	ZxResult result = {0, -1, ""};
-	const char *problem;
+	Fgrp *parent;
+	const char *problem = nil;
+	int i;
 
-	if(command->depth >= ZxProcessDepth)
-		return (ZxResult){0, -1, "ZX command nesting limit reached"};
+	if(command->depth >= ZxProcessDepth){
+		snprint(result->problem, sizeof(result->problem), "ZX command nesting limit reached");
+		return nil;
+	}
 	process = calloc(1, sizeof(*process));
-	if(process == nil)
-		return (ZxResult){0, -1, "cannot allocate ZX process"};
+	if(process == nil){
+		snprint(result->problem, sizeof(result->problem), "cannot allocate ZX process");
+		return nil;
+	}
 	process->ref.ref = 1;
 	process->command.depth = command->depth + 1;
 	if(!zxiopath(args, process->path) || process->path[0] == 0)
 		problem = "invalid ZX program path";
 	else if(!zxprocessargs(&process->command, args+1))
 		problem = "cannot copy ZX process arguments";
-	else{
+	else if(!zxprocessadmit())
+		problem = "too many active ZX processes";
+	if(problem != nil){
+		snprint(result->problem, sizeof(result->problem), "%s", problem);
+		zxprocessrelease(process);
+		return nil;
+	}
+	if(waserror()){
+		kgerrstr(result->problem, sizeof(result->problem));
+		poperror();
+		zxprocessretire();
+		zxprocessrelease(process);
+		return nil;
+	}
+	/* A child inherits the standard streams, without retaining the manager's
+	 * Draw connection, exclusive input channel, or other private descriptors. */
+	process->files = newfgrp(nil);
+	parent = up->env->fgrp;
+	lock(&parent->l);
+	for(i = 0; i < 3 && i <= parent->maxfd; i++){
+		if(parent->fd[i] == nil)
+			continue;
+		incref(&parent->fd[i]->r);
+		process->files->fd[i] = parent->fd[i];
+		process->files->maxfd = i;
+	}
+	unlock(&parent->l);
+	incref(&process->ref);
+	kproc("ZX command", zxprocessworker, process, KPDUPPG|KPDUPENVG);
+	poperror();
+	return process;
+}
+
+static int
+zxprocessresult(ZxProcess *process, int wait, ZxResult *result)
+{
+	int done;
+
+	if(wait){
 		if(waserror()){
-			kgerrstr(result.problem, sizeof(result.problem));
+			*result = (ZxResult){0, -1, ""};
+			kgerrstr(result->problem, sizeof(result->problem));
 			poperror();
-			zxprocessrelease(process);
-			return result;
+			return 0;
 		}
-		process->files = dupfgrp(up->env->fgrp);
-		incref(&process->ref);
-		kproc("ZX command", zxprocessworker, process, KPDUPPG|KPDUPENVG);
 		Sleep(&process->wait, zxprocessdone, process);
 		poperror();
-		result = process->result;
+	}
+	lock(&process->wait.l);
+	done = process->done;
+	unlock(&process->wait.l);
+	*result = done ? process->result : (ZxResult){0, -2, ""};
+	return done;
+}
+
+static ZxResult
+zxprocessrun(ZxCommand *command, const HostValue *args)
+{
+	ZxProcess *process;
+	ZxResult result = {0, -1, ""};
+
+	process = zxprocessstart(command, args, &result);
+	if(process != nil){
+		zxprocessresult(process, 1, &result);
 		zxprocessrelease(process);
+	}
+	return result;
+}
+
+static ZxResult
+zxprocesscollect(ZxCommand *command, int id, int wait)
+{
+	ZxProcess **link, *process;
+	ZxResult result;
+
+	for(link = &command->children; (process = *link) != nil; link = &process->next){
+		if(process->id != id)
+			continue;
+		if(zxprocessresult(process, wait, &result)){
+			*link = process->next;
+			command->nchild--;
+			zxprocessrelease(process);
+		}
 		return result;
 	}
-	snprint(result.problem, sizeof(result.problem), "%s", problem);
-	zxprocessrelease(process);
-	return result;
+	return (ZxResult){0, -1, "unknown ZX process"};
+}
+
+static void
+zxprocessforget(ZxCommand *command)
+{
+	ZxProcess *process;
+
+	while((process = command->children) != nil){
+		command->children = process->next;
+		zxprocessrelease(process);
+	}
 }
 
 static int
@@ -1192,12 +1306,37 @@ zxprocess(void *context, const char *module, const char *function,
 	ZxCommand *command = context;
 	ZxResult *outcome = &command->outcome;
 	HostField *fields = command->outfields;
+	ZxProcess *process;
+	int id;
 
 	USED(module);
-	USED(function);
-	if(n != 2 || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE)
-		return 0;
-	*outcome = zxprocessrun(command, args);
+	if(strcmp(function, "Run") == 0 || strcmp(function, "Start") == 0){
+		if(n != 2 || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE)
+			return 0;
+		if(strcmp(function, "Start") == 0){
+			*outcome = (ZxResult){0, -1, ""};
+			id = 0;
+			if(command->nchild >= ZxProcessLimit || command->childid == INT32_MAX)
+				snprint(outcome->problem, sizeof(outcome->problem), "too many outstanding ZX processes");
+			else if((process = zxprocessstart(command, args, outcome)) != nil){
+				id = process->id = ++command->childid;
+				process->next = command->children;
+				command->children = process;
+				command->nchild++;
+			}
+			fields[0] = (HostField){"id", {.kind = HOST_INTEGER, .type = "s32", .integer = id}};
+			fields[1] = (HostField){"error", {.kind = HOST_STRING, .type = "string",
+				.data = (uchar*)outcome->problem, .length = strlen(outcome->problem)}};
+			*result = (HostValue){.kind = HOST_RECORD, .type = "taijios_process.Launch", .fields = fields,
+				.field_count = 2};
+			return 1;
+		}
+		*outcome = zxprocessrun(command, args);
+	}else{
+		if(n != 1 || !zxisindex(args))
+			return 0;
+		*outcome = zxprocesscollect(command, args[0].integer, strcmp(function, "Wait") == 0);
+	}
 	fields[0] = (HostField){"status", {.kind = HOST_INTEGER, .type = "s32", .integer = outcome->status}};
 	fields[1] = (HostField){"value", {.kind = HOST_INTEGER, .type = "s64", .integer = outcome->value}};
 	fields[2] = (HostField){"error", {.kind = HOST_STRING, .type = "string", .data = (uchar*)outcome->problem,
@@ -2078,8 +2217,10 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 #ifdef __linux__
-		if(!usesdis() && zxmodule(abi.module, "taijios_process") && strcmp(abi.function, "Run") == 0){
-			bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
+		if(!usesdis() && zxmodule(abi.module, "taijios_process")){
+			if(strcmp(abi.function, "Run") == 0 || strcmp(abi.function, "Start") == 0 ||
+			   strcmp(abi.function, "Poll") == 0 || strcmp(abi.function, "Wait") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
 			continue;
 		}
 #endif
@@ -2393,6 +2534,9 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 	free(command->fd);
 	free(command->fdpath);
 	free(command->tasks);
+#ifdef __linux__
+	zxprocessforget(command);
+#endif
 	return result;
 }
 

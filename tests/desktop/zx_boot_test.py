@@ -6,6 +6,7 @@ import os
 import select
 import subprocess
 import sys
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,6 +19,31 @@ using Process :: #import "taijios_process";
 
 main :: () -> s64 {
     input_bytes: [8]u8;
+    if Args.Operand(0) == "async" {
+        noargs: [0]string;
+        rejected := Process.Start("", noargs[:]);
+        if rejected.id != 0 || rejected.error == "" { return 34 }
+        private_fd := Io.OpenFile("/input", 0);
+        if private_fd < 0 { return 40 }
+        defer Io.CloseFile(private_fd);
+        duplicate := Io.OpenFile("#d/3", 0);
+        if duplicate < 0 || Io.CloseFile(duplicate) != 0 { return 41 }
+        stream_arg: [1]string = .{"async streams"};
+        reading := Process.Start("/probe.zx", stream_arg[:]);
+        failed := Process.Start("/missing.zx", noargs[:]);
+        if reading.id <= 0 || failed.id <= reading.id || Process.Poll(reading.id).status != -2 { return 35 }
+        load_error := Process.Wait(failed.id);
+        if load_error.status != -1 || load_error.error == "" { return 36 }
+        if Process.Poll(failed.id).error != "unknown ZX process" { return 37 }
+        other := Process.Start("/plain.zx", noargs[:]);
+        if other.id <= failed.id || Process.Wait(other.id).status != 0 { return 38 }
+        print("ZX_ASYNC_READY\\n");
+        if Process.Wait(reading.id).status != 1 || Process.Wait(reading.id).error != "unknown ZX process" {
+            return 39;
+        }
+        print("ZX_ASYNC_OK\\n");
+        return 0;
+    }
     if Args.Operand(0) == "children" {
         noargs: [0]string;
         outcome := Process.Run("/missing.zx", noargs[:]);
@@ -28,7 +54,8 @@ main :: () -> s64 {
         if Process.Run("/plain.zx", noargs[:]).status != 0 { return 33 }
         return 0;
     }
-    if Args.Operand(0) == "streams" {
+    if Args.Operand(0) == "streams" || Args.Operand(0) == "async streams" {
+        if Args.Operand(0) == "async streams" && Io.OpenFile("#d/3", 0) >= 0 { return 42 }
         if Io.ReadBytes(0, input_bytes[:]) != 2 || input_bytes[0] != 88 ||
            input_bytes[1] != 10 || Io.ReadBytes(0, input_bytes[:]) != 0 { return 18 }
         if Io.WriteBytes(1, "out\\n") != 4 || Io.WriteBytes(2, "err\\n") != 4 { return 19 }
@@ -55,6 +82,28 @@ main :: () -> s64 {
     return 0;
 }
 '''
+
+
+def check_async(emulator, root, env):
+    with subprocess.Popen([emulator, '-v', '-r', root, '/probe.zx', 'async'], env=env,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          start_new_session=True) as app:
+        transcript = bytearray()
+        deadline = time.monotonic() + 10
+        try:
+            while b'ZX_ASYNC_READY\n' not in transcript:
+                assert select.select([app.stdout], [], [], max(0, deadline - time.monotonic()))[0], transcript
+                data = os.read(app.stdout.fileno(), 1024)
+                assert data and len(transcript) < 8192, transcript
+                transcript.extend(data)
+            assert b'ZX_VOID_OK\n' in transcript and b'out\n' not in transcript, transcript
+            stdout, stderr = app.communicate(b'X\n', timeout=10)
+            assert app.returncode == 0 and b'out\nZX_ASYNC_OK\n' in stdout, (stdout, stderr)
+            assert stderr == b'err\n', stderr
+        finally:
+            if app.poll() is None:
+                app.kill()
+    print('Concurrent ZX children retained separate outcomes while one waited on inherited input')
 
 
 def check_draw(emulator, root, env):
@@ -207,6 +256,7 @@ def main():
         command = boot('/zxrun.zx', '/missing.zx')
         assert command.returncode == 1 and 'zxrun: /missing.zx:' in command.stderr, command
         print('Direct ZX runner launched child bundles with inherited streams and preserved scalar and named results')
+        check_async(emulator, root, env)
         if args.graphics:
             check_draw(emulator, root, env)
 

@@ -1,7 +1,7 @@
 host_api :: #system_library "host_api";
 
 Outcome :: struct {
-    // -1 means the bundle could not run, 0 means void, 1 means a scalar.
+    // -2 means still running, -1 means failed, 0 means void, 1 means a scalar.
     status: s32;
     value: s64;
     error: string;
@@ -10,3 +10,17 @@ Outcome :: struct {
 // Start a console bundle in the caller's guest namespace and wait for it.
 // The child inherits the guest standard streams and receives only the operands.
 Run :: (path: string, operands: []string) -> Outcome #foreign host_api;
+
+Launch :: struct {
+    id: s32; // Positive and local to the caller, or zero if launch failed.
+    error: string;
+}
+
+// Start without waiting. The child runs in the guest and inherits the same
+// streams as Run. Exiting the caller discards its handles.
+Start :: (path: string, operands: []string) -> Launch #foreign host_api;
+
+// Both calls collect a finished child's result once and invalidate its ID.
+// Poll returns a pending Outcome if the child is still running.
+Poll :: (id: s32) -> Outcome #foreign host_api;
+Wait :: (id: s32) -> Outcome #foreign host_api;
