@@ -11,6 +11,7 @@
 - Open the existing ZX About Inferno and Memory Monitor from the System menu when installed.
 - Port the Date window to ZX with the guest timezone and live second updates.
 - Keep the desktop responsive when closing ZX windows that never read stdin.
+- Use the Ziran window placement service in the desktop and remove Winplace Dis.
 - Lock TaijiOS Tcl and Tk to the canonical source packages so each ZX application can select the Tk features it uses.
 
 - Avoid redundant pointer-motion events on stationary ZX button presses and releases.

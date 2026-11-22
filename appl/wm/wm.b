@@ -13,8 +13,6 @@ include "wmclient.m";
 include "string.m";
 	str: String;
 include "sh.m";
-include "winplace.m";
-	winplace: Winplace;
 include "zx.m";
 	zx: ZX;
 include "toolbar.m";
@@ -57,6 +55,7 @@ DesktopClient: adt {
 	id, workspace: int;
 	title: string;
 	rect, saved: Rect;
+	resizemin: Point;
 	haswindow, minimized, maximized, restorefocus: int;
 };
 desk: ref ZX->Desktop;
@@ -93,10 +92,6 @@ init(ctxt: ref Draw->Context, argv: list of string)
 		badmodule(Wmclient->PATH);
 	wmclient->init();
 
-	winplace = load Winplace Winplace->PATH;
-	if(winplace == nil)
-		badmodule(Winplace->PATH);
-	winplace->init();
 	zx = load ZX ZX->PATH;
 
 	sys->pctl(Sys->NEWPGRP|Sys->FORKNS, nil);
@@ -226,11 +221,12 @@ init(ctxt: ref Draw->Context, argv: list of string)
 		}else
 			controlevent("newclient " + string c.id);
 		c.cursor = "cursor";
-		if(desk != nil){
-			noarea := Rect((0, 0), (0, 0));
-			d := ref DesktopClient(c, ++desktopid, desk.currentworkspace, "Window", noarea, noarea, 0, 0, 0, 0);
-			desktopclients = d :: desktopclients;
-		}
+		workspace := 0;
+		if(desk != nil)
+			workspace = desk.currentworkspace;
+		noarea := Rect((0, 0), (0, 0));
+		d := ref DesktopClient(c, ++desktopid, workspace, "Window", noarea, noarea, (0, 0), 0, 0, 0, 0);
+		desktopclients = d :: desktopclients;
 	(io, op, reply) := <-desktopreq =>
 		reply <-= desktoprequest(win, io, op);
 	(c, data, rc) := <-req =>
@@ -246,8 +242,8 @@ init(ctxt: ref Draw->Context, argv: list of string)
 				kbdfocus = nil;
 			if(c == controller)
 				controller = nil;
+			desktopremove(c);
 			if(desk != nil){
-				desktopremove(c);
 				forgetworkspacefocus(c);
 				if(c == desktoplayer){
 					desktoplayer = nil;
@@ -444,7 +440,10 @@ handlerequest(win: ref Wmclient->Window, wmctxt: ref Wmcontext, c: ref Client, r
 			minsz.x = Minwidth;
 		if(minsz.y < Minheight)
 			minsz.y = Minheight;
-		c.resizemin = minsz;
+		d := desktopfind(c);
+		if(d == nil)
+			return "unknown client";
+		d.resizemin = minsz;
 	"!move" or
 	"!size" =>
 		if(!desktopvisible(c))
@@ -614,13 +613,14 @@ dragwin(ptr: chan of ref Pointer, c: ref Client, w: ref Window, off: Point): str
 
 cornerresize(ptr: chan of ref Pointer, c: ref Client, press: Point): int
 {
-	if(c.resizemin.x == 0 || c.wins == nil)
+	d := desktopfind(c);
+	if(d == nil || d.resizemin.x == 0 || c.wins == nil)
 		return 0;
 	w := hd c.wins;
 	if(w.tag != "." || !press.in(w.r) || press.x < w.r.max.x - Resizecorner ||
 	    press.y < w.r.max.y - Resizecorner)
 		return 0;
-	lo := w.r.min.add(c.resizemin);
+	lo := w.r.min.add(d.resizemin);
 	hi := desktopworkarea().max;
 	if(lo.x > hi.x || lo.y > hi.y)
 		return 0;
@@ -905,11 +905,10 @@ newrect(w, r: Rect): Rect
 placewindow(wins: list of Rect, screenrect, last: Rect, size: Point): Rect
 {
 	if(zx == nil)
-		return winplace->place(wins, screenrect, last, size);
+		return fitrect((last.min, last.min.add(size)), screenrect);
 	request := array[11+4*len wins] of int;
 	request[0:] = array[] of {len wins, screenrect.min.x, screenrect.min.y, screenrect.max.x, screenrect.max.y,
 		last.min.x, last.min.y, last.max.x, last.max.y, size.x, size.y};
-	original := wins;
 	for(i := 11; wins != nil; i += 4){
 		r := hd wins;
 		(request[i], request[i+1], request[i+2], request[i+3]) = (r.min.x, r.min.y, r.max.x, r.max.y);
@@ -918,7 +917,8 @@ placewindow(wins: list of Rect, screenrect, last: Rect, size: Point): Rect
 	reply := array[4] of int;
 	if(zx->wmcall(ZX->PlacePolicy, request, reply))
 		return ((reply[0], reply[1]), (reply[2], reply[3]));
-	return winplace->place(original, screenrect, last, size);
+	# Keep windows usable if the hosted service fails to place a request.
+	return fitrect((last.min, last.min.add(size)), screenrect);
 }
 
 bufferproc(in, out: chan of string)
@@ -1253,14 +1253,14 @@ desktopaction(win: ref Wmclient->Window, d: ref DesktopClient, req: ZX->Input): 
 		c.ctl <-= "exit";
 		return 1;
 	"maximize" =>
-		if(d.minimized || c.resizemin.x == 0)
+		if(d.minimized || d.resizemin.x == 0)
 			return 0;
 		if(d.maximized)
 			return 1;
 		d.saved = r;
 		r = area;
 	"move" or "resize" =>
-		if(d.minimized || d.maximized || (action == "resize" && c.resizemin.x == 0))
+		if(d.minimized || d.maximized || (action == "resize" && d.resizemin.x == 0))
 			return 0;
 		scr := screen.image.r;
 		if(!Point(req.x, req.y).in(((0, 0), scr.size())))
@@ -1268,7 +1268,7 @@ desktopaction(win: ref Wmclient->Window, d: ref DesktopClient, req: ZX->Input): 
 		origin := scr.min.add((req.x, req.y));
 		size := r.size();
 		if(action == "resize"){
-			if(req.width < c.resizemin.x || req.height < c.resizemin.y ||
+			if(req.width < d.resizemin.x || req.height < d.resizemin.y ||
 			   req.width > area.dx() || req.height > area.dy())
 				return 0;
 			size = (req.width, req.height);

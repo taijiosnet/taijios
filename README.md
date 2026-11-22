@@ -250,8 +250,10 @@ The target installs `window_chrome.zx`, `winplace.zx`, and `wm_policy.zx` in
 `/dis/lib` with their callers. The typed `taijios_wm_call.Read` and `Reply`
 bindings pass the current request and its result as bounded `[]s32` slices.
 The emulator keeps one instance of each service and caches each caption's paint
-commands until its dimensions, focus, or controls change. The Dis title bar and
-placement remain available on guests without the service bundles.
+commands until its dimensions, focus, or controls change. The window manager
+uses `winplace.zx` for placement. `mk wm.install` also builds and installs this
+service. Guests without the ZX runtime use bounded placement at the previous
+window position and retain the Dis title bar.
 
 Drag the lower-right corner of a resizable window to change its size. The
 guest window manager keeps the top-left corner fixed and sends the new bounds

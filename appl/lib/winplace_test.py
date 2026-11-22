@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Compare exact Winplace rows and placement with the installed Dis module."""
+"""Compare Winplace results with the captured Dis oracle."""
 
 from contextlib import suppress
 from dataclasses import dataclass
-from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import os
@@ -16,9 +15,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / 'build/zx-smoke'
 EMU = ROOT / 'Linux/386/bin/emu'
-LIMBO = ROOT / 'Linux/386/bin/limbo'
-STOCK_SOURCE = ROOT / 'appl/lib/winplace.b'
-STOCK_DIS = ROOT / 'dis/lib/winplace.dis'
+# Ordered output from the stock Dis module before its removal (184 cases).
+EXPECTED = Path(__file__).with_name('winplace_expected.txt')
 SEED = 0x715ACE
 
 Rect = tuple[int, int, int, int]
@@ -79,53 +77,6 @@ def cases():
         size = (rng.choice((0, w, rng.randrange(w * 2))), rng.choice((0, h, rng.randrange(h * 2))))
         rows.append(Case(f'seeded {i}', tuple(windows), (x, y, x + w, y + h), windows[0] if windows else (0, 0, 0, 0), size))
     return rows
-
-
-DIS_PROBE = r'''
-implement Probe;
-include "sys.m";
-include "draw.m";
-    draw: Draw;
-    Rect: import draw;
-include "winplace.m";
-
-Probe: module { init: fn(ctx: ref Draw->Context, args: list of string); };
-
-rect(data: array of int, i: int): Rect
-{
-    return ((data[i], data[i+1]), (data[i+2], data[i+3]));
-}
-
-init(nil: ref Draw->Context, nil: list of string)
-{
-    sys := load Sys Sys->PATH;
-    winplace := load Winplace Winplace->PATH;
-    if(winplace == nil)
-        raise "fail:cannot load installed Winplace";
-    winplace->init();
-    data := array[] of { @DATA@ };
-    index := 0;
-    for(id := 0; index < len data; id++) {
-        screen := rect(data, index);
-        last := rect(data, index+4);
-        size := (data[index+8], data[index+9]);
-        n := data[index+10];
-        index += 11 + 4*n;
-        wins: list of Rect;
-        for(i := 1; i <= n; i++)
-            wins = rect(data, index-4*i) :: wins;
-        found := winplace->find(wins, screen);
-        p := winplace->place(wins, screen, last, size);
-        sys->print("C %d %d\n", id, len found);
-        for(; found != nil; found = tl found) {
-            r := hd found;
-            sys->print("R %d %d %d %d\n", r.min.x, r.min.y, r.max.x, r.max.y);
-        }
-        sys->print("P %d %d %d %d\n", p.min.x, p.min.y, p.max.x, p.max.y);
-    }
-    sys->print("WINPLACE_DONE\n");
-}
-'''
 
 
 ZI_PROBE = r'''
@@ -226,11 +177,6 @@ def compare(expected, actual, inputs, target):
     print(f'{target} matched {len(inputs)} cases and {sum(len(rows) for rows, _ in expected)} ordered Find rows')
 
 
-def digest(path):
-    with path.open('rb') as stream:
-        return file_digest(stream, 'sha256').hexdigest()
-
-
 def main():
     inputs = cases()
     data = '\n'.join('        ' + ', '.join(map(str, (*c.screen, *c.last, *c.size, len(c.wins),
@@ -240,22 +186,11 @@ def main():
     with TemporaryDirectory(dir=BUILD, prefix='winplace-') as folder:
         folder = Path(folder)
         guest_path = '/' + folder.relative_to(ROOT).as_posix()
-        compiled_stock = folder / 'stock.dis'
-        run([LIMBO, '-I', ROOT / 'module', '-o', compiled_stock, STOCK_SOURCE.relative_to(ROOT)])
-        stock_hash = digest(compiled_stock)
-        assert digest(STOCK_DIS) == stock_hash, f'{STOCK_DIS} differs from compiled stock Winplace'
-        print(f'Stock oracle SHA-256 {STOCK_SOURCE.relative_to(ROOT)} {digest(STOCK_SOURCE)}')
-        print(f'Stock oracle SHA-256 {STOCK_DIS.relative_to(ROOT)} {stock_hash}')
-        dis_source = folder / 'oracle.b'
-        dis_source.write_text(DIS_PROBE.replace('@DATA@', data.rstrip(',')), encoding='utf-8')
-        run([LIMBO, '-I', ROOT / 'module', '-o', folder / 'oracle.dis', dis_source])
-        expected = parse(guest_run(f'{guest_path}/oracle.dis'), inputs, 'stock Dis')
-        assert digest(STOCK_DIS) == stock_hash, f'{STOCK_DIS} changed during the oracle run'
+        expected = parse(EXPECTED.read_text(encoding='ascii'), inputs, 'stock Dis')
         assert expected[0][0] == (inputs[0].screen,) * 2, expected[0]
         for case, (_, placed) in zip(inputs, expected, strict=True):
             if case.placement is not None:
                 assert placed == case.placement, (case.name, case.placement, placed)
-        print(f'Stock Dis oracle ran {len(inputs)} cases with seed {SEED:#x}')
 
         source = folder / 'probe.zi'
         source.write_text(ZI_PROBE.replace('@DATA@', data.rstrip(',')).replace(

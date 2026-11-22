@@ -114,8 +114,7 @@ wm(ctlio: ref Sys->FileIO,
 				-1,
 				fid,
 				fid,			# token; XXX could be random integer + fid
-				newwmcontext(),
-				(0, 0)
+				newwmcontext()
 			);
 			clients = addclient(clients, c);
 		}

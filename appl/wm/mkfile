@@ -102,13 +102,21 @@ DISBIN=$ROOT/dis/wm
 <$ROOT/mkfiles/mksubdirs
 
 wm.dis: $MODDIR/zx.m $MODDIR/toolbar.m
+
+$DISBIN/wm.dis: $ROOT/dis/lib/winplace.zx $ROOT/dis/lib/wmsrv.dis
+
+$ROOT/dis/lib/wmsrv.dis: ../lib/wmsrv.b $MODDIR/wmsrv.m $MODDIR/zx.m ../lib/mkfile
+	cd ../lib && mk wmsrv.install
+
+$ROOT/dis/lib/winplace.zx: ../lib/winplace_service.zi ../lib/winplace.zi ../lib/taijios_wm_call.zi ../lib/mkfile
+	cd ../lib && mk install-winplace-zx
 toolbar.dis: $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/toolbar.m
 colors.dis: $MODDIR/zx.m $MODDIR/zxrun.m
 
 desktop_panel.zx: desktop_panel.zi ../cmd/taijios_panel.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_panel --entry desktop_panel:main -o $target desktop_panel.zi
 
-install-desktop-zx:V: $DISBIN/toolbar.dis $DISBIN/desktop_panel.zx
+install-desktop-zx:V: $ROOT/dis/lib/winplace.zx $DISBIN/toolbar.dis $DISBIN/desktop_panel.zx
 
 clock.zx: clock.zi ../cmd/taijios_time.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry clock:main -o $target clock.zi

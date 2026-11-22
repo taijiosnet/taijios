@@ -1152,7 +1152,9 @@ appl
 			xpointers.b
 		wait.b
 		watchvars.b
-		winplace.b
+		taijios_wm_call.zi
+		winplace.zi
+		winplace_service.zi
 		wmclient.b
 		wmlib.b
 		wmsrv.b
@@ -1743,7 +1745,7 @@ dis
 			+
 		wait.dis
 		watchvars.dis
-		winplace.dis
+		winplace.zx
 		wmclient.dis
 		wmlib.dis
 		wmsrv.dis
@@ -2375,7 +2377,6 @@ module
 	wait.m
 	watchvars.m
 	webget.m
-	winplace.m
 	wmclient.m
 	wmlib.m
 	wmsrv.m

@@ -148,7 +148,6 @@ TARG=\
 	volume.dis\
 	wait.dis\
 	watchvars.dis\
-	winplace.dis\
 	wmclient.dis\
 	wmlib.dis\
 	wmsrv.dis\
@@ -245,7 +244,7 @@ styxflush.dis:	$ROOT/module/styxflush.m
 msgio.dis:	$ROOT/module/msgio.m
 
 
-wmsrv.dis: $MODDIR/zx.m
+wmsrv.dis: $MODDIR/wmsrv.m $MODDIR/zx.m
 
 winplace.zx: winplace_service.zi winplace.zi taijios_wm_call.zi mkfile
 	ziran bundle --root . --bind-host taijios_wm_call --entry winplace_service:main -o $target winplace_service.zi
@@ -253,7 +252,9 @@ winplace.zx: winplace_service.zi winplace.zi taijios_wm_call.zi mkfile
 wm_policy.zx: wm_policy.zi taijios_wm_call.zi mkfile
 	ziran bundle --root . --bind-host taijios_wm_call --entry wm_policy:main -o $target wm_policy.zi
 
-install-wm-policy-zx:V: $DISBIN/wmsrv.dis $DISBIN/winplace.zx $DISBIN/wm_policy.zx
+install-winplace-zx:V: $DISBIN/winplace.zx
+
+install-wm-policy-zx:V: $DISBIN/wmsrv.dis install-winplace-zx $DISBIN/wm_policy.zx
 
 $DISBIN/%.zx: %.zx
 	staged=$(mktemp "$target.XXXXXX") &&
