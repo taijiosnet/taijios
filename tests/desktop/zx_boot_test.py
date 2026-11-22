@@ -44,6 +44,64 @@ main :: () -> s64 {
         print("ZX_ASYNC_OK\\n");
         return 0;
     }
+    if Args.Operand(0) == "kill" {
+        spin_arg: [1]string = .{"spin"};
+        block_arg: [1]string = .{"block"};
+        sibling_arg: [1]string = .{"sibling"};
+        spinning := Process.Start("/probe.zx", spin_arg[:]);
+        blocked := Process.Start("/probe.zx", block_arg[:]);
+        sibling := Process.Start("/probe.zx", sibling_arg[:]);
+        if spinning.id <= 0 || blocked.id <= spinning.id || sibling.id <= blocked.id { return 50 }
+        ready := false;
+        for attempt: 0 .. 200000 {
+            spin_ready := Io.OpenFile("/spin-ready", 0);
+            block_ready := Io.OpenFile("/block-ready", 0);
+            if spin_ready >= 0 { unused Io.CloseFile(spin_ready) }
+            if block_ready >= 0 { unused Io.CloseFile(block_ready) }
+            if spin_ready >= 0 && block_ready >= 0 { ready = true; break }
+        }
+        if !ready { return 51 }
+        // Give the blocked child time to sleep in its pipe read.
+        for settle: 0 .. 50000 {
+            if Process.Poll(blocked.id).status != -2 { return 56 }
+        }
+        if !Process.Kill(spinning.id) || !Process.Kill(blocked.id) { return 52 }
+        spun := Process.Wait(spinning.id);
+        read := Process.Wait(blocked.id);
+        if spun.status != -1 || spun.error != "killed" || read.status != -1 || read.error != "killed" { return 53 }
+        if Process.Kill(spinning.id) || Process.Poll(sibling.id).status != -2 { return 54 }
+        print("ZX_KILLED\\n");
+        survivor := Process.Wait(sibling.id);
+        if survivor.status != 1 || survivor.value != 7 { return 55 }
+        print("ZX_KILL_OK\\n");
+        return 0;
+    }
+    if Args.Operand(0) == "spin" {
+        input := Io.OpenFile("/input", 0);
+        marker := Io.CreateFile("/spin-ready", 1, 438);
+        if input < 0 || marker < 0 || Io.CloseFile(marker) != 0 { return 60 }
+        byte: [1]u8;
+        total: s64 = 0;
+        // Each successful read renews the step budget, so only a kill ends this loop.
+        while total >= 0 {
+            for i: 0 .. 100000 { total += i & 1 }
+            unused Io.SeekFile(input, 0, 0);
+            if Io.ReadBytes(input, byte[:]) != 1 { return 61 }
+        }
+        return 62;
+    }
+    if Args.Operand(0) == "block" {
+        pipe := Io.OpenFile("#|/data", 2);
+        marker := Io.CreateFile("/block-ready", 1, 438);
+        if pipe < 0 || marker < 0 || Io.CloseFile(marker) != 0 { return 63 }
+        byte: [1]u8;
+        unused Io.ReadBytes(pipe, byte[:]);
+        return 64;
+    }
+    if Args.Operand(0) == "sibling" {
+        if Io.ReadBytes(0, input_bytes[:]) != 2 || input_bytes[0] != 83 { return 65 }
+        return 7;
+    }
     if Args.Operand(0) == "children" {
         noargs: [0]string;
         outcome := Process.Run("/missing.zx", noargs[:]);
@@ -104,6 +162,27 @@ def check_async(emulator, root, env):
             if app.poll() is None:
                 app.kill()
     print('Concurrent ZX children retained separate outcomes while one waited on inherited input')
+
+
+def check_kill(emulator, root, env):
+    with subprocess.Popen([emulator, '-v', '-r', root, '/probe.zx', 'kill'], env=env,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          start_new_session=True) as app:
+        transcript = bytearray()
+        deadline = time.monotonic() + 20
+        try:
+            while b'ZX_KILLED\n' not in transcript:
+                assert select.select([app.stdout], [], [], max(0, deadline - time.monotonic()))[0], transcript
+                data = os.read(app.stdout.fileno(), 1024)
+                assert data and len(transcript) < 8192, transcript
+                transcript.extend(data)
+            stdout, stderr = app.communicate(b'S\n', timeout=10)
+            assert app.returncode == 0 and b'ZX_KILL_OK\n' in stdout, (transcript, stdout, stderr)
+            assert not stderr, stderr
+        finally:
+            if app.poll() is None:
+                app.kill()
+    print('A spinning ZX child and one blocked in a device read were killed while a sibling and the host kept running')
 
 
 def check_draw(emulator, root, env):
@@ -425,6 +504,7 @@ def main():
         assert command.returncode == 1 and 'zxrun: /missing.zx:' in command.stderr, command
         print('Direct ZX runner launched child bundles with inherited streams and preserved scalar and named results')
         check_async(emulator, root, env)
+        check_kill(emulator, root, env)
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)

@@ -920,6 +920,11 @@ struct ZxCommand {
 	uvlong pools[3][3];
 	ZxResult outcome;
 	HostField outfields[3];
+	/* A child's stop request and the kproc running its guest code. The runner
+	 * is set only while zxexecute owns the program, under runlock. */
+	ZxRunControl *control;
+	Lock runlock;
+	Proc *runner;
 #ifdef __linux__
 	ZxProcess *children;
 	ZxNativeWindow *window;
@@ -1132,6 +1137,8 @@ zxprocessrelease(ZxProcess *process)
 	closefgrp(process->files);
 	zxfreeargs(&process->command);
 	zxwindowfree(process->command.window);
+	if(process->command.control != nil)
+		ZxRunControlFree(process->command.control);
 	free(process);
 }
 
@@ -1221,6 +1228,8 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 		problem = "cannot copy ZX process arguments";
 	else if(windowed != ZxnNoWindow && (process->command.window = zxwindownew(windowed)) == nil)
 		problem = "cannot create ZX window channel";
+	else if((process->command.control = ZxRunControlCreate()) == nil)
+		problem = "cannot create ZX run control";
 	else if(!zxprocessadmit())
 		problem = "too many active ZX processes";
 	if(problem != nil){
@@ -1309,6 +1318,34 @@ zxprocesscollect(ZxCommand *command, int id, int wait)
 	return (ZxResult){0, -1, "unknown ZX process"};
 }
 
+/* The child stops at its next engine checkpoint. Waking its kproc makes a
+ * blocked device read or Sleep return, and disconnecting its window ends a
+ * wait for window events. The child's outcome then reports "killed". */
+static int
+zxprocesskill(ZxCommand *command, int id)
+{
+	ZxProcess *process;
+	int done;
+
+	for(process = command->children; process != nil; process = process->next){
+		if(process->id != id)
+			continue;
+		lock(&process->wait.l);
+		done = process->done;
+		unlock(&process->wait.l);
+		if(done)
+			return 0;
+		ZxRunControlRequest(process->command.control);
+		zxwindowdisconnect(process->command.window);
+		lock(&process->command.runlock);
+		if(process->command.runner != nil)
+			swiproc(process->command.runner, 0);
+		unlock(&process->command.runlock);
+		return 1;
+	}
+	return 0;
+}
+
 static void
 zxprocessforget(ZxCommand *command)
 {
@@ -1364,6 +1401,11 @@ zxprocess(void *context, const char *module, const char *function,
 			return 1;
 		}
 		*outcome = zxprocessrun(command, args);
+	}else if(strcmp(function, "Kill") == 0){
+		if(n != 1 || !zxisindex(args))
+			return 0;
+		zxbool(result, zxprocesskill(command, args[0].integer));
+		return 1;
 	}else{
 		if(n != 1 || !zxisindex(args))
 			return 0;
@@ -2556,7 +2598,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 #ifdef __linux__
 		if(!usesdis() && zxmodule(abi.module, "taijios_process")){
 			if(strcmp(abi.function, "Run") == 0 || strcmp(abi.function, "Start") == 0 ||
-			   strcmp(abi.function, "Poll") == 0 || strcmp(abi.function, "Wait") == 0)
+			   strcmp(abi.function, "Poll") == 0 || strcmp(abi.function, "Wait") == 0 ||
+			   strcmp(abi.function, "Kill") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
 			continue;
 		}
@@ -2817,6 +2860,14 @@ ZX_wmcall(void *fp)
 		    (int*)reply->data, reply->len);
 }
 
+static void
+zxrunner(ZxCommand *command, Proc *runner)
+{
+	lock(&command->runlock);
+	command->runner = runner;
+	unlock(&command->runlock);
+}
+
 static ZxResult
 zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 {
@@ -2824,6 +2875,7 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 	HostBinding *bindings;
 	size_t count;
 	int i, ran;
+	ZxRunStatus status = ZX_RUN_ERROR;
 	ZxResult result = {0, -1, ""};
 	Bundle *bundle;
 	ZxModuleLoader *loader;
@@ -2839,6 +2891,7 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 	};
 
 	command->surface = surface;
+	zxrunner(command, up);
 	bundle = zxopen(path, result.problem);
 	if(bundle != nil){
 		count = BundleCapabilityCount(bundle);
@@ -2858,7 +2911,8 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 			ready = zxfpbegin(&saved);
 #endif
 			if(ready){
-				program = ZxModuleProgramOpen(loader, bundle, bindings, count);
+				program = ZxModuleProgramOpenControlled(loader, bundle, bindings, count,
+				    command->control, &status);
 				if(program != nil){
 					/* Present consumes the pixels within the host call. */
 					for(size_t i = 0; i < count; i++){
@@ -2879,7 +2933,9 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 							ZxModuleProgramBorrowHostSlice(program, bindings[i].module,
 							    bindings[i].function, 3);
 					}
-					ran = ZxModuleProgramRun(program, &result.value, &result.status);
+					status = ZxModuleProgramRunControlled(program, &result.value,
+					    &result.status, command->control);
+					ran = status == ZX_RUN_OK;
 				}
 #if defined(__linux__) && defined(__i386__)
 				fesetenv(&saved);
@@ -2906,6 +2962,16 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 			ZxModuleLoaderClose(loader);
 		free(bindings);
 		BundleClose(bundle);
+	}
+	/* After this no kill can interrupt the kproc, so clear any interrupt
+	 * that arrived while the guest was not blocked. */
+	zxrunner(command, nil);
+	if(command->control != nil && ZxRunControlRequested(command->control)){
+		notkilled();
+		if(status == ZX_RUN_CANCELLED || result.status < 0){
+			result = (ZxResult){0, -1, ""};
+			strecpy(result.problem, result.problem+sizeof(result.problem), "killed");
+		}
 	}
 	for(i = 0; i < command->nfd; i++)
 		if(command->fd[i] >= 0)

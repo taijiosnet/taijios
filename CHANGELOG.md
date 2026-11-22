@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let a ZX guest stop a running child with `taijios_process.Kill`, using Ziran's run stop requests, including a child blocked in a device read or window wait.
+
 - Draw native title bars for ZX windows under the Rill desktop, with move, maximize, restore, hide and close, and keep windows below the panel when it changes size.
 
 - Give each game and demo a distinct transparent icon, classify Brutus as an editor, and remove the repeated TaijiOS prefix from catalog descriptions.

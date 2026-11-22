@@ -42,7 +42,9 @@ The regular `zxrun` command manages Dis process groups in the normal desktop.
 In a direct ZX guest, `taijios_process.Start` launches a concurrent console
 child. `Poll` and `Wait` collect its result using the returned ID. Children
 inherit the guest namespace and standard streams. Other open descriptors stay
-with the caller.
+with the caller. `Kill` stops a running child: the Ziran engine ends it at its
+next checkpoint, and a device read, sleep or window wait it is blocked in
+returns first. Its outcome then has status -1 and the error `killed`.
 
 Build the direct ZX window manager with `(cd appl/wm && mk native_wm.zx)`.
 To run an existing ZX GUI app under it with the current Linux build, use
@@ -73,11 +75,16 @@ zi2zx --root . --entry hello:main -o hello.zx hello.zi
 ```
 
 For the Linux/386 emulator, use Ziran revision
-`920c86a10d87d8fdab07df94dade7ab935d4915d` for the hosted runtime. It provides
-the borrowed-slice interface used to upload packed Rill pixel rows and the
-packed instruction engine used to execute ZX. The GUI package dependencies
+`c3ef9fb291fc1a4469c60fbbd8b4b888f508ad77` for the hosted runtime. It provides
+the borrowed-slice interface used to upload packed Rill pixel rows, the
+packed instruction engine used to execute ZX, and the `ZxRunControl` stop
+requests behind `taijios_process.Kill`. The GUI package dependencies
 are pinned separately in `appl/wm/ziran.lock`.
-Build `libziran.a` in the canonical Ziran checkout with a Linux/i386 C toolchain.
+To get that exact source, run `ziran lock` and `ziran fetch` in a scratch
+package whose `[toolchain]` ref is that revision; the package cache then holds
+the checkout. Build `libziran.a` there with a Linux/i386 C toolchain, which
+needs the i386 C library headers (for example `gcc -m32` with Debian's
+`libc6-dev:i386`).
 Use a host-built `zi2c` for code generation and keep the target objects in
 their own build directory.
 
