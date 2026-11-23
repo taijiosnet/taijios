@@ -108,5 +108,4 @@ after sending this message.
 .B /module/filter.m
 .SH SEE ALSO
 .IR gzip (1),
-.IR filter-deflate (2),
-.IR filter-slip (2)
+.IR filter-deflate (2)

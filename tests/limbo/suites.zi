@@ -5,19 +5,21 @@ using Bloom :: #import "bloomfilter_cases"
 using Complete :: #import "complete_cases"
 using Csv :: #import "csv_cases"
 using Rabin :: #import "rabin_cases"
+using Slip :: #import "slip_cases"
 using Uris :: #import "uris_cases"
 using Pointers :: #import "xpointers_cases"
 using Golden :: #import "golden"
 
-NAMES: [6]string = .["bloomfilter", "complete", "csv", "rabin", "uris", "xpointers"];
+NAMES: [7]string = .["bloomfilter", "complete", "csv", "rabin", "slip", "uris", "xpointers"];
 
 Lines :: (suite: s64, out: *Vec(u8)) {
     if suite == 0 { Bloom.Lines(out) }
     if suite == 1 { Complete.Lines(out) }
     if suite == 2 { Csv.Lines(out) }
     if suite == 3 { Rabin.Lines(out) }
-    if suite == 4 { Uris.Lines(out) }
-    if suite == 5 { Pointers.Lines(out) }
+    if suite == 4 { Slip.Lines(out) }
+    if suite == 5 { Uris.Lines(out) }
+    if suite == 6 { Pointers.Lines(out) }
 }
 
 // Appends "DIR/NAME.limbo.txt", the file a suite is compared with.

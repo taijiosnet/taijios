@@ -1,0 +1,95 @@
+// The cases of the SLIP test: each one printed as the Limbo probe printed
+// it from the slip filter, for comparison with slip.limbo.txt.
+using Slip :: #import "slip"
+
+Hex :: (out: *Vec(u8), bytes: string) {
+    digits := "0123456789abcdef"
+    for bytes {
+        VecPush(<<out, digits[it >> 4])
+        VecPush(<<out, digits[it & 15])
+    }
+}
+
+Unhex :: (text: string) -> Vec(u8) {
+    bytes: Vec(u8)
+    value: u8 = 0
+    for text {
+        digit := ifx it >= #char "a" then it - #char "a" + 10 else it - #char "0"
+        value = value * 16 + digit
+        if it_index % 2 == 1 { VecPush(bytes, value); value = 0 }
+    }
+    return bytes
+}
+
+// The packets found in a stream that arrives piece bytes at a time.
+Decode :: (out: *Vec(u8), label: string, index: s64, stream: string, piece: s64) {
+    BuilderPrint(out, "% % decode %:", label, index, piece)
+    decoder: Slip.Decoder
+    start: s64 = 0
+    while start < stream.count {
+        end := ifx start + piece < stream.count then start + piece else stream.count
+        at: s64 = 0
+        while true {
+            next, whole := Slip.Next(*decoder, stream[start:end], at)
+            if !whole { break }
+            BuilderAppend(<<out, " ")
+            Hex(out, TextView(decoder.packet[:]))
+            at = next
+        }
+        start = end
+    }
+    BuilderAppend(<<out, "\n")
+}
+
+Lines :: (out: *Vec(u8)) {
+    packets := string.["00", "c0", "db", "dc", "dd", "c0db", "dbc0dcdd", "0102c003db04", "c0c0c0", "dbdbdb", "68656c6c6f", "ff00c0ffdb00"]
+    for packets {
+        packet := Unhex(it)
+        frame: Vec(u8)
+        Slip.Encode(*frame, TextView(packet[:]))
+        BuilderPrint(out, "packet % encode 8192: ", it_index)
+        Hex(out, TextView(frame[:]))
+        BuilderAppend(<<out, "\n")
+    }
+    // The filter framed each piece it was given as one packet.
+    split := Unhex("0102c003db0405")
+    BuilderAppend(<<out, "split encode 3:")
+    for start: 0..2 {
+        end := ifx start * 3 + 3 < split.count then start * 3 + 3 else split.count
+        frame: Vec(u8)
+        Slip.Encode(*frame, TextView(split[start * 3:end]))
+        BuilderAppend(<<out, " ")
+        Hex(out, TextView(frame[:]))
+    }
+    BuilderAppend(<<out, "\n")
+    streams := string.[
+        "c00102c0", "0102c0", "c0c0c00102c0c0", "c0dbdcc0", "c0dbddc0", "c0db41c0", "c0dbc0", "c001dbdc02dbdd03c0c004c0", "0102",
+        "c0", "", "c001c002c003", "dbdcdbddc0", "c0dbdb41c0", "c0dbdcdbddc0dbdc", "01c002dbc003c0", "c0dcddc0",
+    ]
+    pieces := s64.[8192, 1, 2, 3]
+    for stream: streams {
+        bytes := Unhex(stream)
+        stream_index := it_index
+        for pieces { Decode(out, "stream", stream_index, TextView(bytes[:]), it) }
+    }
+    long: Vec(u8)
+    for i: 0..2499 {
+        value := cast(u8)((i * 7) & 0xFF)
+        if value == 0xC0 || value == 0xDB { value = 1 }
+        if i == 0 || i == 2499 { value = 0xC0 }
+        VecPush(long, value)
+    }
+    BuilderAppend(<<out, "long decode 700:")
+    decoder: Slip.Decoder
+    start: s64 = 0
+    while start < long.count {
+        end := ifx start + 700 < long.count then start + 700 else long.count
+        next, whole := Slip.Next(*decoder, TextView(long[start:end]), 0)
+        if whole {
+            BuilderAppend(<<out, " ")
+            Hex(out, TextView(decoder.packet[:]))
+        }
+        start = end
+    }
+    BuilderAppend(<<out, "\n")
+}

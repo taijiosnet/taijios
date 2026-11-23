@@ -1271,7 +1271,6 @@ adds	/man/10/panic
 adds	/man/10/srclist
 adds	/man/2/dial
 adds	/man/2/dict
-adds	/man/2/filter-slip
 adds	/man/2/hash
 adds	/man/2/json
 adds	/man/2/popup
@@ -2629,7 +2628,6 @@ appl	/man/2/exception
 appl	/man/2/factotum
 appl	/man/2/filepat
 appl	/man/2/filter-deflate
-appl	/man/2/filter-slip
 appl	/man/2/format
 appl	/man/2/fsproto
 appl	/man/2/geodesy
@@ -5458,7 +5456,6 @@ block	/man/2/dbm
 block	/man/2/diskblocks
 block	/man/2/disks
 block	/man/2/draw-image
-block	/man/2/filter-slip
 block	/man/2/keyring-crypt
 block	/man/2/lock
 block	/man/2/security-0intro
@@ -6736,7 +6733,6 @@ bytes	/man/2/encoding
 bytes	/man/2/ether
 bytes	/man/2/factotum
 bytes	/man/2/filter
-bytes	/man/2/filter-slip
 bytes	/man/2/imagefile
 bytes	/man/2/ip
 bytes	/man/2/keyring-0intro
@@ -7495,7 +7491,6 @@ chan	/man/2/dividers
 chan	/man/2/draw-context
 chan	/man/2/filter
 chan	/man/2/filter-deflate
-chan	/man/2/filter-slip
 chan	/man/2/fsproto
 chan	/man/2/ir
 chan	/man/2/lists
@@ -7588,7 +7583,6 @@ channel	/man/2/draw-context
 channel	/man/2/draw-display
 channel	/man/2/draw-image
 channel	/man/2/filter
-channel	/man/2/filter-slip
 channel	/man/2/fsproto
 channel	/man/2/imagefile
 channel	/man/2/ir
@@ -7884,7 +7878,6 @@ characters	/man/2/encoding
 characters	/man/2/factotum
 characters	/man/2/filepat
 characters	/man/2/filter-deflate
-characters	/man/2/filter-slip
 characters	/man/2/json
 characters	/man/2/palmfile
 characters	/man/2/rfc822
@@ -12883,7 +12876,6 @@ data	/man/2/exception
 data	/man/2/factotum
 data	/man/2/filter
 data	/man/2/filter-deflate
-data	/man/2/filter-slip
 data	/man/2/format
 data	/man/2/hash
 data	/man/2/imagefile
@@ -13450,7 +13442,6 @@ declaring	/man/10/2c
 decls	/man/2/w3c-css
 decode	/man/1/uuencode
 decode	/man/2/asn1
-decode	/man/2/filter-slip
 decode	/man/2/palmfile
 decoded	/man/1/uuencode
 decoded	/man/10/rune
@@ -13467,7 +13458,6 @@ decoding	/man/1/stack
 decoding	/man/1/uuencode
 decoding	/man/2/asn1
 decoding	/man/2/encoding
-decoding	/man/2/filter-slip
 decoding	/man/2/json
 decoding	/man/2/ubfa
 decoding	/man/2/w3c-css
@@ -14501,7 +14491,6 @@ described	/man/2/draw-context
 described	/man/2/draw-display
 described	/man/2/draw-image
 described	/man/2/factotum
-described	/man/2/filter-slip
 described	/man/2/imagefile
 described	/man/2/json
 described	/man/2/keyring-0intro
@@ -14927,7 +14916,6 @@ details	/man/2/exception
 details	/man/2/factotum
 details	/man/2/filter
 details	/man/2/filter-deflate
-details	/man/2/filter-slip
 details	/man/2/plumbmsg
 details	/man/2/sh
 details	/man/2/spki
@@ -18383,7 +18371,6 @@ encode	/man/1/uuencode
 encode	/man/10/ms2
 encode	/man/2/asn1
 encode	/man/2/encoding
-encode	/man/2/filter-slip
 encode	/man/2/keyring-0intro
 encode	/man/2/palmfile
 encode	/man/3/tls
@@ -18442,7 +18429,6 @@ encoding	/man/2/convcs
 encoding	/man/2/draw-0intro
 encoding	/man/2/encoding
 encoding	/man/2/filter
-encoding	/man/2/filter-slip
 encoding	/man/2/json
 encoding	/man/2/keyring-0intro
 encoding	/man/2/keyring-getmsg
@@ -19482,7 +19468,6 @@ esc	/man/1/acme
 esc	/man/1/wm-sh
 escape	/man/1/xd
 escape	/man/10/acid
-escape	/man/2/filter-slip
 escape	/man/2/sexprs
 escape	/man/6/keyboard
 escape	/man/6/sexprs
@@ -22475,7 +22460,6 @@ filter	/man/1/gzip
 filter	/man/1/sh-alphabet
 filter	/man/2/filter
 filter	/man/2/filter-deflate
-filter	/man/2/filter-slip
 filter	/man/2/lists
 filter	/man/2/spree-allow
 filter	/man/2/tk
@@ -22485,7 +22469,6 @@ filter	/man/3/touch
 filter	/man/4/registry
 filter.m	/man/2/filter
 filter.m	/man/2/filter-deflate
-filter.m	/man/2/filter-slip
 filtered	/man/1/alphabet-fs
 filtered	/man/1/fs
 filtering	/man/1/alphabet-fs
@@ -22918,7 +22901,6 @@ fn	/man/2/factotum
 fn	/man/2/filepat
 fn	/man/2/filter
 fn	/man/2/filter-deflate
-fn	/man/2/filter-slip
 fn	/man/2/format
 fn	/man/2/fsproto
 fn	/man/2/geodesy
@@ -23615,7 +23597,6 @@ frame	/man/9/0intro
 frame	/man/9/frame
 frame	/man/9/pack
 frame.m	/man/1/mash-make
-framed	/man/2/filter-slip
 frames	/man/1/charon
 frames	/man/1/deb
 frames	/man/1/limbo
@@ -23630,7 +23611,6 @@ framework	/man/1/wm-sh
 framework	/man/2/prefab-environ
 framework	/man/2/styxservers
 framework	/man/5/0intro
-framing	/man/2/filter-slip
 framing	/man/3/ip
 france	/man/1/miniterm
 fred	/man/10/styxserver
@@ -26205,7 +26185,6 @@ implementation	/man/2/dis
 implementation	/man/2/draw-image
 implementation	/man/2/filter
 implementation	/man/2/filter-deflate
-implementation	/man/2/filter-slip
 implementation	/man/2/imagefile
 implementation	/man/2/ir
 implementation	/man/2/keyring-0intro
@@ -26521,7 +26500,6 @@ include	/man/2/factotum
 include	/man/2/filepat
 include	/man/2/filter
 include	/man/2/filter-deflate
-include	/man/2/filter-slip
 include	/man/2/format
 include	/man/2/fsproto
 include	/man/2/geodesy
@@ -27411,7 +27389,6 @@ init	/man/2/ether
 init	/man/2/factotum
 init	/man/2/filter
 init	/man/2/filter-deflate
-init	/man/2/filter-slip
 init	/man/2/format
 init	/man/2/fsproto
 init	/man/2/geodesy
@@ -28605,7 +28582,6 @@ interface	/man/2/env
 interface	/man/2/factotum
 interface	/man/2/filter
 interface	/man/2/filter-deflate
-interface	/man/2/filter-slip
 interface	/man/2/fsproto
 interface	/man/2/ip
 interface	/man/2/keyring-0intro
@@ -31080,7 +31056,6 @@ lib	/man/2/exception
 lib	/man/2/factotum
 lib	/man/2/filepat
 lib	/man/2/filter-deflate
-lib	/man/2/filter-slip
 lib	/man/2/format
 lib	/man/2/fsproto
 lib	/man/2/hash
@@ -32075,7 +32050,6 @@ load	/man/2/factotum
 load	/man/2/filepat
 load	/man/2/filter
 load	/man/2/filter-deflate
-load	/man/2/filter-slip
 load	/man/2/format
 load	/man/2/fsproto
 load	/man/2/geodesy
@@ -34107,7 +34081,6 @@ message	/man/2/dialog
 message	/man/2/factotum
 message	/man/2/filter
 message	/man/2/filter-deflate
-message	/man/2/filter-slip
 message	/man/2/itslib
 message	/man/2/keyring-0intro
 message	/man/2/keyring-auth
@@ -34206,7 +34179,6 @@ messages	/man/2/disks
 messages	/man/2/draw-context
 messages	/man/2/factotum
 messages	/man/2/filter
-messages	/man/2/filter-slip
 messages	/man/2/itslib
 messages	/man/2/keyring-0intro
 messages	/man/2/keyring-getmsg
@@ -34927,7 +34899,6 @@ module	/man/2/ether
 module	/man/2/exception
 module	/man/2/filter
 module	/man/2/filter-deflate
-module	/man/2/filter-slip
 module	/man/2/fsproto
 module	/man/2/geodesy
 module	/man/2/hash
@@ -37472,7 +37443,6 @@ obtained	/man/2/asn1
 obtained	/man/2/bufio
 obtained	/man/2/daytime
 obtained	/man/2/draw-screen
-obtained	/man/2/filter-slip
 obtained	/man/2/keyring-ipint
 obtained	/man/2/keyset
 obtained	/man/2/newns
@@ -38083,7 +38053,6 @@ operate	/man/9/grid
 operate	/man/9/menu
 operated	/man/6/colour
 operates	/man/1/du
-operates	/man/2/filter-slip
 operates	/man/2/sys-millisec
 operates	/man/3/fs
 operates	/man/6/plumbing
@@ -38131,7 +38100,6 @@ operation	/man/2/dis
 operation	/man/2/draw-image
 operation	/man/2/filter
 operation	/man/2/filter-deflate
-operation	/man/2/filter-slip
 operation	/man/2/fsproto
 operation	/man/2/json
 operation	/man/2/keyring-0intro
@@ -38843,7 +38811,6 @@ original	/man/2/disks
 original	/man/2/draw-context
 original	/man/2/draw-screen
 original	/man/2/filter-deflate
-original	/man/2/filter-slip
 original	/man/2/format
 original	/man/2/geodesy
 original	/man/2/msgio
@@ -39731,7 +39698,6 @@ parallel	/man/2/sh
 parallel	/man/3/lpt
 param	/man/2/filter
 param	/man/2/filter-deflate
-param	/man/2/filter-slip
 param	/man/2/styxservers
 param	/man/7/db
 paramaterized	/man/2/convcs
@@ -42862,7 +42828,6 @@ processed	/man/10/plan9.ini
 processed	/man/10/styxserver
 processed	/man/2/asn1
 processed	/man/2/filter
-processed	/man/2/filter-slip
 processed	/man/2/tkclient
 processed	/man/2/wmclient
 processed	/man/8/applylog
@@ -42936,7 +42901,6 @@ processing	/man/2/cfg
 processing	/man/2/exception
 processing	/man/2/filter
 processing	/man/2/filter-deflate
-processing	/man/2/filter-slip
 processing	/man/2/fsproto
 processing	/man/2/imagefile
 processing	/man/2/keyring-0intro
@@ -43414,7 +43378,6 @@ protocol	/man/10/styx
 protocol	/man/10/styxserver
 protocol	/man/2/dhcpclient
 protocol	/man/2/factotum
-protocol	/man/2/filter-slip
 protocol	/man/2/ip
 protocol	/man/2/keyring-0intro
 protocol	/man/2/keyring-auth
@@ -43721,7 +43684,6 @@ provides	/man/2/draw-screen
 provides	/man/2/env
 provides	/man/2/ether
 provides	/man/2/exception
-provides	/man/2/filter-slip
 provides	/man/2/format
 provides	/man/2/fsproto
 provides	/man/2/geodesy
@@ -43829,7 +43791,6 @@ providing	/man/1/sh-alphabet
 providing	/man/1/wm
 providing	/man/1/yacc
 providing	/man/2/diskblocks
-providing	/man/2/filter-slip
 providing	/man/2/format
 providing	/man/2/prefab-element
 providing	/man/2/sys-0intro
@@ -45775,7 +45736,6 @@ ref	/man/2/drawmux
 ref	/man/2/factotum
 ref	/man/2/filter
 ref	/man/2/filter-deflate
-ref	/man/2/filter-slip
 ref	/man/2/format
 ref	/man/2/fsproto
 ref	/man/2/hash
@@ -47553,7 +47513,6 @@ required	/man/2/dial
 required	/man/2/disks
 required	/man/2/encoding
 required	/man/2/factotum
-required	/man/2/filter-slip
 required	/man/2/geodesy
 required	/man/2/keyring-crypt
 required	/man/2/keyring-ipint
@@ -48041,7 +48000,6 @@ resulting	/man/2/disks
 resulting	/man/2/draw-image
 resulting	/man/2/draw-rect
 resulting	/man/2/factotum
-resulting	/man/2/filter-slip
 resulting	/man/2/keyring-certtostr
 resulting	/man/2/popup
 resulting	/man/2/prefab-compound
@@ -48149,7 +48107,6 @@ retrieve	/man/1/sh-file2chan
 retrieve	/man/10/devattach
 retrieve	/man/10/odbc
 retrieve	/man/10/styx
-retrieve	/man/2/filter-slip
 retrieve	/man/2/spree-objstore
 retrieve	/man/2/sys-stat
 retrieve	/man/2/tkclient
@@ -48570,7 +48527,6 @@ returns	/man/2/exception
 returns	/man/2/factotum
 returns	/man/2/filepat
 returns	/man/2/filter
-returns	/man/2/filter-slip
 returns	/man/2/format
 returns	/man/2/hash
 returns	/man/2/imagefile
@@ -48820,7 +48776,6 @@ rexec	/man/1/alphabet-grid
 rf	/man/1/tail
 rfc	/man/2/xml
 rfc	/man/6/json
-rfc1055	/man/2/filter-slip
 rfc1058	/man/8/rip
 rfc1123	/man/2/daytime
 rfc1361	/man/8/sntp
@@ -49201,16 +49156,13 @@ rproc	/man/3/dbg
 rptr	/man/10/atoi
 rq	/man/2/filter
 rq	/man/2/filter-deflate
-rq	/man/2/filter-slip
 rq	/man/2/wmsrv
 rq.error	/man/2/filter
 rq.fill	/man/2/filter
-rq.fill	/man/2/filter-slip
 rq.finished	/man/2/filter
 rq.info	/man/2/filter
 rq.info	/man/2/filter-deflate
 rq.result	/man/2/filter
-rq.result	/man/2/filter-slip
 rq.start	/man/2/filter
 rr	/man/9/types
 rread	/man/1/sh-file2chan
@@ -52594,9 +52546,6 @@ slightly	/man/1/grid-monitor
 slightly	/man/2/prof
 slightly	/man/9/scrollbar
 slip	/man/2/filter
-slip	/man/2/filter-slip
-slip.b	/man/2/filter-slip
-slippath	/man/2/filter-slip
 sloppier	/man/2/math-0intro
 slot	/man/1/grid-monitor
 slot	/man/1/mk
@@ -53044,7 +52993,6 @@ source	/man/2/factotum
 source	/man/2/filepat
 source	/man/2/filter
 source	/man/2/filter-deflate
-source	/man/2/filter-slip
 source	/man/2/format
 source	/man/2/fsproto
 source	/man/2/geodesy
@@ -55009,7 +54957,6 @@ stream	/man/2/draw-context
 stream	/man/2/drawmux
 stream	/man/2/filter
 stream	/man/2/filter-deflate
-stream	/man/2/filter-slip
 stream	/man/2/imagefile
 stream	/man/2/json
 stream	/man/2/keyring-rc4
@@ -55158,7 +55105,6 @@ string	/man/2/factotum
 string	/man/2/filepat
 string	/man/2/filter
 string	/man/2/filter-deflate
-string	/man/2/filter-slip
 string	/man/2/format
 string	/man/2/fsproto
 string	/man/2/geodesy
@@ -55364,7 +55310,6 @@ strings	/man/2/convcs
 strings	/man/2/dhcpclient
 strings	/man/2/dialog
 strings	/man/2/dis
-strings	/man/2/filter-slip
 strings	/man/2/json
 strings	/man/2/keyring-0intro
 strings	/man/2/keyring-getstring
@@ -57317,7 +57262,6 @@ takes	/man/2/dial
 takes	/man/2/disks
 takes	/man/2/draw-image
 takes	/man/2/ether
-takes	/man/2/filter-slip
 takes	/man/2/keyring-certtostr
 takes	/man/2/lists
 takes	/man/2/plumbmsg
@@ -59403,7 +59347,6 @@ type	/man/2/draw-point
 type	/man/2/draw-rect
 type	/man/2/filter
 type	/man/2/filter-deflate
-type	/man/2/filter-slip
 type	/man/2/format
 type	/man/2/fsproto
 type	/man/2/hash
@@ -62266,7 +62209,6 @@ via	/man/1/wm
 via	/man/10/allocb
 via	/man/10/plan9.ini
 via	/man/2/ether
-via	/man/2/filter-slip
 via	/man/2/itslib
 via	/man/2/newns
 via	/man/2/plumbmsg

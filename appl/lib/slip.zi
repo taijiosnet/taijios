@@ -1,0 +1,60 @@
+// SLIP framing (RFC 1055), as the Limbo slip filter did it: a packet is
+// sent between two End bytes, with End and Esc inside it written as Esc
+// and a substitute.
+#import "std/vec";
+
+END :: 0xC0;
+ESC :: 0xDB;
+ESCAPED_END :: 0xDC;
+ESCAPED_ESC :: 0xDD;
+
+// Appends the frame of one packet.
+Encode :: (out: *Vec(u8), packet: string) {
+    VecPush(<<out, END);
+    for packet {
+        if it == END || it == ESC {
+            VecPush(<<out, ESC);
+            VecPush(<<out, ifx it == END then ESCAPED_END else ESCAPED_ESC);
+        } else {
+            VecPush(<<out, it);
+        }
+    }
+    VecPush(<<out, END);
+}
+
+// Takes packets out of a stream given in pieces of any size.
+Decoder :: struct {
+    packet: Vec(u8); // the packet so far, whole once Next says so
+    escaped: bool;   // the last byte was Esc
+    whole: bool;
+}
+
+// Reads data from byte offset at until a packet ends or the data does.
+// Returns where to go on and whether decoder.packet is a whole packet;
+// the next call starts a new one. Empty packets are skipped, any byte
+// after Esc but its two substitutes stands for itself, and a packet the
+// stream never ends is never reported.
+Next :: (decoder: *Decoder, data: string, at: s64) -> (next: s64, whole: bool) {
+    if decoder.whole {
+        VecClear(decoder.packet);
+        decoder.whole = false;
+    }
+    i := at;
+    while i < data.count {
+        c := data[i];
+        i += 1;
+        if decoder.escaped {
+            decoder.escaped = false;
+            if c == ESCAPED_END { c = END } else if c == ESCAPED_ESC { c = ESC }
+        } else if c == ESC {
+            decoder.escaped = true;
+            continue;
+        } else if c == END {
+            if decoder.packet.count == 0 { continue }
+            decoder.whole = true;
+            return i, true;
+        }
+        VecPush(decoder.packet, c);
+    }
+    return i, false;
+}

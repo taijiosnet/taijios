@@ -2,7 +2,6 @@ Filter: module
 {
 	DEFLATEPATH: con "/dis/lib/deflate.dis";
 	INFLATEPATH: con "/dis/lib/inflate.dis";
-	SLIPPATH: con "/dis/lib/slip.dis";
 
 	Rq: adt {
 		pick {

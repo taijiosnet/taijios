@@ -117,8 +117,6 @@ filter filter
 deflate filter-deflate
 filter-deflate filter-deflate
 inflate filter-deflate
-filter-slip filter-slip
-slip filter-slip
 format format
 fsproto fsproto
 readprotofile fsproto

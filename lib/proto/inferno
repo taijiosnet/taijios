@@ -1048,7 +1048,7 @@ appl
 		sets32.b
 		sexprs.b
 		sha1.zi
-		slip.b
+		slip.zi
 		smtp.b
 		sort.b
 		spki
@@ -1652,7 +1652,6 @@ dis
 		sets.dis
 		sets32.dis
 		sexprs.dis
-		slip.dis
 		smtp.dis
 		sort.dis
 		spki
