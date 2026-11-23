@@ -130,7 +130,7 @@ NAMES = {
     'keyboard': 'Keyboard', 'logon': 'Login', 'logwindow': 'System Log', 'man': 'Manual',
     'mand': 'Manual Search', 'mash': 'Mash Shell', 'memory': 'Memory Monitor', 'mpeg': 'MPEG Player',
     'mprof': 'Memory Profiler', 'pen': 'Pen', 'polyhedra': 'Polyhedra', 'prof': 'Profiler',
-    'qt': 'QuickTime Player', 'readmail': 'Read Mail', 'remotelogon': 'Remote Login',
+    'readmail': 'Read Mail', 'remotelogon': 'Remote Login',
     'reversi': 'Reversi', 'rmtdir': 'Remote Files', 'rt': 'Module Manager', 'sendmail': 'Send Mail',
     'sh': 'Shell', 'snake': 'Snake', 'stopwatch': 'Stopwatch', 'sweeper': 'Minesweeper',
     'task': 'Task Manager', 'taskmgr': 'Task Manager', 'telnet': 'Telnet', 'tetris': 'Tetris',
@@ -143,7 +143,7 @@ def group(name):
     if name in GAMES:
         return 'Game', 'game-' + name
     for names, category, icon in (
-        ('avi mpeg qt wmplay', 'AudioVideo', 'media'),
+        ('avi mpeg wmplay', 'AudioVideo', 'media'),
         ('colors pen view', 'Graphics', 'graphics'),
         ('readmail remotelogon rmtdir sendmail telnet charon', 'Network', 'web'),
         ('acme edit deb cprof mprof prof wish', 'Development', 'development'),

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove the QuickTime Player, a stale Dis binary that failed to load and whose source no longer built.
+
 - Ship Mine Sweeper and Tetris only as ZX and remove their Dis versions.
 
 - Bring the ZX image viewer to the Dis viewer's features: animated GIFs, X bitmaps and PIC pictures, several files at once, files plumbed to the view port with -i, Save as an Inferno image, and -f.

@@ -23,7 +23,7 @@ Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window m
 
 Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
 
-Catalog applications that still need the legacy chain (36): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof qt readmail remotelogon reversi rmtdir rt sam sendmail sh telnet unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
+Catalog applications that still need the legacy chain (35): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof readmail remotelogon reversi rmtdir rt sam sendmail sh telnet unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
 
 ## Column legend
 
@@ -455,7 +455,7 @@ Catalog applications that still need the legacy chain (36): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 51 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 50 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -494,7 +494,6 @@ Catalog applications that still need the legacy chain (36): avi bounce brutus c4
 | dis/wm/pen.dis | appl/wm/pen.b |  | - |  |
 | dis/wm/polyhedra.dis | appl/wm/polyhedra.b | module/math/polyhedra.m | - |  |
 | dis/wm/prof.dis | appl/wm/prof.b |  | - |  |
-| dis/wm/qt.dis | appl/wm/qt.b |  | - |  |
 | dis/wm/readmail.dis | appl/wm/readmail.b |  | - |  |
 | dis/wm/remotelogon.dis | appl/wm/remotelogon.b |  | - |  |
 | dis/wm/reversi.dis | appl/wm/reversi.b |  | - |  |
