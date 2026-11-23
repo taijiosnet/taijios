@@ -2133,8 +2133,10 @@ executable(s: (int, Sys->Dir), mode: int): int
 commandzx(path: string): string
 {
 	if (len path < 3 || path[len path-3:] != ".zx") {
-		# While Dis runs, sh is this shell: sh.zx can start only ZX commands.
-		if (path == "sh" || (len path > 3 && path[len path-3:] == "/sh"))
+		# While its .dis exists, a Dis guest's sh stays Dis: sh.zx can
+		# start only ZX commands.
+		if ((path == "sh" || (len path > 3 && path[len path-3:] == "/sh")) &&
+				executable(sys->stat(path + ".dis"), 8r444))
 			return nil;
 		path += ".zx";
 	}

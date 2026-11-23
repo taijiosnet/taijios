@@ -1,0 +1,135 @@
+// Directory reading and filepat->expand of appl/lib/filepat.b, shared by
+// the shell and tiny/sh.
+#import "std/vec";
+Io :: #import "taijios_io";
+#import "shell_util";
+
+#scope_export
+
+// Directory entries.
+DirEntry :: struct {
+    name: Text;
+    mode: u32;
+}
+
+DMDIR :: 0x80000000;
+
+Uint :: (data: []u8, offset: s64, bytes: s64) -> u64 {
+    value: u64;
+    for i: 0..bytes - 1 { value |= cast(u64)data[offset + i] << cast(u64)(8 * i) }
+    return value;
+}
+
+// The entries of a directory in the order it lists them.
+ReadDir :: (path: string, entries: *Vec(DirEntry)) -> bool {
+    h := Io.Open(path, 0);
+    if h < 0 { return false }
+    buf: [8192]u8;
+    while true {
+        n := Io.Read(h, buf[:]);
+        if n <= 0 { break }
+        offset: s64;
+        while offset + 2 <= n {
+            size := cast(s64)Uint(buf[:], offset, 2) + 2;
+            if size < 49 || offset + size > n { break }
+            namelen := cast(s64)Uint(buf[:], offset + 41, 2);
+            if 43 + namelen > size { break }
+            e: DirEntry;
+            unused BuilderAppend(e.name.bytes, TextView(buf[offset + 43:offset + 43 + namelen]));
+            e.mode = cast(u32)Uint(buf[:], offset + 21, 4);
+            VecPush(<<entries, e);
+            offset += size;
+        }
+    }
+    unused Io.Close(h);
+    return true;
+}
+
+// Stat a path for its mode: false when it does not exist, with the reason
+// left for Io.Error.
+StatMode :: (path: string) -> (mode: u32, ok: bool) {
+    meta: [12]u8;
+    if Io.Stat(path, meta[:]) < 0 { return 0, false }
+    return cast(u32)Uint(meta[:], 8, 4), true;
+}
+
+Executable :: (path: string, mask: u32) -> bool {
+    mode, ok := StatMode(path);
+    return ok && (mode & DMDIR) == 0 && (mode & mask) != 0;
+}
+
+
+#scope_file
+
+JoinPath :: (dir: string, name: string) -> Text {
+    out: Vec(u8);
+    if dir == "/" || dir == "" {
+        unused BuilderAppend(out, dir);
+        unused BuilderAppend(out, name);
+    } else {
+        BuilderPrint(*out, "%/%", dir, name);
+    }
+    return BuilderFinish(out);
+}
+
+GreaterName :: (a: string, b: string) -> bool { return Compare(a, b) > 0 }
+
+// filepatdir: the names in dir that match, ascending.
+PatDir :: (pat: string, dir: string, mustbedir: bool, files: *Vec(Text)) {
+    if pat == "." || pat == ".." {
+        VecPush(<<files, JoinPath(dir, pat));
+        return;
+    }
+    dirname := ifx dir == "" then "." else dir;
+    entries: Vec(DirEntry);
+    if !ReadDir(dirname, *entries) { return }
+    // Sort by name, dropping duplicates.
+    for i: 1..entries.count - 1 {
+        j := i;
+        while j > 0 && GreaterName(TextView(entries[j - 1].name), TextView(entries[j].name)) {
+            VecSwap(entries[j - 1].name.bytes, entries[j].name.bytes);
+            m := entries[j - 1].mode;
+            entries[j - 1].mode = entries[j].mode;
+            entries[j].mode = m;
+            j -= 1;
+        }
+    }
+    for i: 0..entries.count - 1 {
+        if i > 0 && TextView(entries[i].name) == TextView(entries[i - 1].name) { continue }
+        name: Text = TextCopy(TextView(entries[i].name));
+        if Match(pat, TextView(name)) && (!mustbedir || (entries[i].mode & DMDIR) != 0) {
+            VecPush(<<files, JoinPath(dir, TextView(name)));
+        }
+    }
+}
+
+#scope_export
+
+// filepat->expand.
+Expand :: (pat: string) -> Vec(Text) {
+    elems := Tokenize(pat, "/");
+    files: Vec(Text);
+    if elems.count == 0 {
+        PatDir(pat, "", false, *files);
+        return files;
+    }
+    started := false;
+    if pat[0] == #char "/" { VecPush(files, TextCopy("/")); started = true }
+    for e: 0..elems.count - 1 {
+        next: Vec(Text);
+        more := e < elems.count - 1;
+        if !started {
+            PatDir(TextView(elems[e]), "", more, *next);
+            started = true;
+        } else {
+            for f: 0..files.count - 1 {
+                dir: Text = TextCopy(TextView(files[f]));
+                PatDir(TextView(elems[e]), TextView(dir), more, *next);
+            }
+        }
+        VecSwap(files, next);
+        if files.count == 0 { break }
+    }
+    return files;
+}
+

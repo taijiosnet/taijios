@@ -1,4 +1,9 @@
 # Script corpus for tests/sh/sh_test.zi. Each case starts with "=== name".
+# Scripts see $X too: .dis in the Limbo run and .zx in the ZX one, so
+# /dis/tiny/rm$X names the program under test. "guest: dis" runs the ZX
+# programs of a case in a Dis guest, for programs that read /prog.
+# "frozen:" marks a case whose Limbo program is deleted: its golden stays as
+# recorded.
 # "args:" puts words before the script path on the shell's command line, and
 # "noscript" leaves the path out. "input:" is the case's standard input, with
 # \n escapes. "gap:" names a known difference and what it waits for; the
@@ -661,3 +666,92 @@ script:
 x = outer
 {x = inner; echo pipeline sees $x} | cat
 sh -c 'echo child sees $x'
+
+=== mod-sexprs
+script:
+load sexprs
+echo ${els '(a b (c d) "e f")'}
+echo ${textels '(a "b c" #616263# |YWJjZA==|)'}
+echo ${text '"quoted\nline"'}
+echo ${text abc} ${text '(x)'}
+echo ${b64 '(a bc)'}
+echo ${els '{KDE6YTI6YmMp}'}
+echo ${mktext 'needs quoting'} ${mktext token}
+echo ${mklist a '(b c)' d} ${mklist}
+echo ${mktextlist a 'b c' 3d}
+islist '(a)' && echo list
+islist atom || echo atom $status
+echo ${els '[hint]value'} ${els '([h]v 3:raw #00ff# |AAECAwQF|)'}
+echo ${text '(unclosed'}
+echo unreached
+
+=== mod-sexprs-trailing
+script:
+load sexprs
+echo ${text 'a b'}
+
+=== mod-getsexprs
+input: (one two) atom "a string" (nested (deep)) 3:xyz [h]t (broken
+script:
+load std sexprs
+getsexprs {echo got $sexp}
+echo status $status
+
+=== lib-sh-sched
+script:
+run /lib/sh/sched
+whatis job ctl
+echo ${loaded}
+
+=== lib-sh-owen
+script:
+run /lib/sh/owen
+whatis start
+
+=== tiny-rm
+frozen: the Limbo tiny/rm and tiny/broke are removed
+script:
+echo x > $W/t1
+echo y > $W/t2
+/dis/tiny/rm$X $W/t1 $W/nonexistent $W/t2
+echo $status
+ls $W/t1 $W/t2
+
+=== tiny-sh
+frozen: the Limbo tiny/sh ran the removed Limbo tiny/rm
+script:
+echo a > $W/ta
+/dis/tiny/sh$X -c 'tiny/rm '$W'/ta'
+ls $W/ta
+/dis/tiny/sh$X -c 'nosuch arg'
+/dis/tiny/sh$X -c 'tiny/rm x |'
+/dis/tiny/sh$X -c 'tiny/rm | x'
+/dis/tiny/sh$X -c 'tiny/rm ''unterminated'
+/dis/tiny/sh$X -c 'tiny/rm < '$W'/missing'
+/dis/tiny/sh$X -c 'tiny/rm > /nonexistentdir/x'
+/dis/tiny/sh$X -c 'tiny/rm '$W'/q1 ; tiny/rm '$W'/q2 # comment'
+/dis/tiny/sh$X -q
+/dis/tiny/sh$X -c
+echo $status
+echo 'tiny/rm '$W'/tb' > $W/tscript
+echo 'nosuch' >> $W/tscript
+echo b > $W/tb
+/dis/tiny/sh$X $W/tscript
+ls $W/tb
+/dis/tiny/sh$X $W/nonexistentscript
+
+=== tiny-sh-stdin
+frozen: the Limbo tiny/sh ran the removed Limbo tiny/rm
+script:
+echo 'tiny/rm '$W'/s1' > $W/tin
+/dis/tiny/sh$X -n < $W/tin
+echo
+echo $status
+
+=== tiny-broke
+frozen: the Limbo tiny/rm and tiny/broke are removed
+guest: dis
+script:
+sh -n -c 'load std; pctl newfd 0 2; echo x; echo y' >[2] /dev/null
+/dis/tiny/broke$X
+echo $status

@@ -1,9 +1,7 @@
 <../../mkconfig
 
 TARG=\
-	broke.dis\
 	kill.dis\
-	rm.dis\
 	sh.dis\
 
 MODULES=\
@@ -18,3 +16,28 @@ SYSMODULES=\
 DISBIN=$ROOT/dis/tiny
 
 <$ROOT/mkfiles/mkdis
+
+# rm and broke are ZX programs; sh also has a ZX version.
+ZXCMD=../cmd
+ZXSH=../cmd/sh
+
+rm.zx:	rm.zi mkfile
+	zi2zx --root . --module-path $ZXCMD --bind-host taijios_args --bind-host taijios_io --entry rm:main -o $target rm.zi
+	chmod 755 $target
+
+broke.zx:	broke.zi mkfile
+	zi2zx --root . --module-path $ZXCMD --bind-host taijios_args --bind-host taijios_io --entry broke:main -o $target broke.zi
+	chmod 755 $target
+
+sh.zx:	sh.zi $ZXSH/shell_util.zi $ZXSH/shell_filepat.zi mkfile
+	zi2zx --root . --module-path $ZXCMD --module-path $ZXSH --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --entry sh:main -o $target sh.zi
+	chmod 755 $target
+
+install-zx:V:	$DISBIN/rm.zx $DISBIN/broke.zx $DISBIN/sh.zx
+
+install:V:	install-zx
+
+$DISBIN/%.zx:	%.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 $stem.zx "$staged" && mv "$staged" "$target"

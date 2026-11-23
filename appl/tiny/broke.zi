@@ -1,0 +1,94 @@
+// tiny/broke: kill every broken Dis process listed in /prog, as
+// appl/tiny/broke.b, and print the ones killed.
+#import "std/vec";
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+
+Fail :: (msg: string) -> s32 {
+    line: Vec(u8);
+    BuilderPrint(*line, "broke: %\n", msg);
+    unused Io.Write(2, TextView(line[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Uint :: (data: []u8, offset: s64, bytes: s64) -> u64 {
+    value: u64;
+    for i: 0..bytes - 1 { value |= cast(u64)data[offset + i] << cast(u64)(8 * i) }
+    return value;
+}
+
+// The fifth blank-separated field of /prog/n/status is the state.
+IsBroken :: (pid: string) -> bool {
+    path: Vec(u8);
+    BuilderPrint(*path, "/prog/%/status", pid);
+    h := Io.Open(TextView(path[:]), 0);
+    if h < 0 { return false }
+    buf: [256]u8;
+    n := Io.Read(h, buf[:]);
+    unused Io.Close(h);
+    if n < 0 { return false }
+    field: s64 = 0;
+    i: s64 = 0;
+    text := TextView(buf[:n]);
+    while i < text.count {
+        while i < text.count && text[i] == 32 { i += 1 }
+        if i >= text.count { break }
+        start := i;
+        while i < text.count && text[i] != 32 { i += 1 }
+        field += 1;
+        if field == 5 { return text[start:i] == "broken" }
+    }
+    return false;
+}
+
+Kill :: (pid: string) -> bool {
+    path: Vec(u8);
+    BuilderPrint(*path, "/prog/%/ctl", pid);
+    h := Io.Open(TextView(path[:]), 1);
+    if h < 0 || Io.Write(h, "kill") < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "broke: can't kill %: %\n", pid, Io.Error());
+        unused Io.Write(2, TextView(msg[:]));
+        if h >= 0 { unused Io.Close(h) }
+        return false;
+    }
+    unused Io.Close(h);
+    return true;
+}
+
+main :: () -> s32 {
+    h := Io.Open("/prog", 0);
+    if h < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open /prog: %", Io.Error());
+        return Fail(TextView(msg[:]));
+    }
+    killed: Vec(u8);
+    buf: [8192]u8;
+    while true {
+        n := Io.Read(h, buf[:]);
+        if n <= 0 {
+            if n < 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "error reading /prog: %", Io.Error());
+                return Fail(TextView(msg[:]));
+            }
+            break;
+        }
+        offset: s64;
+        while offset + 2 <= n {
+            size := cast(s64)Uint(buf[:], offset, 2) + 2;
+            if size < 49 || offset + size > n { break }
+            namelen := cast(s64)Uint(buf[:], offset + 41, 2);
+            name: Text = TextCopy(TextView(buf[offset + 43:offset + 43 + namelen]));
+            if IsBroken(TextView(name)) && Kill(TextView(name)) { BuilderPrint(*killed, " %", TextView(name)) }
+            offset += size;
+        }
+    }
+    if killed.count != 0 {
+        VecPush(killed, 10);
+        unused Io.Write(1, TextView(killed[:]));
+    }
+    return 0;
+}

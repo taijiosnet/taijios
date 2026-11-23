@@ -16,6 +16,7 @@ Ns :: #import "taijios_namespace";
 #import "shell_small";
 #import "shell_regex";
 #import "shell_csv";
+#import "shell_sexprs";
 
 main :: () -> s32 {
     unused RegisterModule("builtin", InitShellBuiltins, ShellRun, ShellSRun, ShellWhatis);
@@ -27,6 +28,7 @@ main :: () -> s32 {
     unused RegisterModule("arg", ArgInit, ArgRun, NoSRun, NoWhatis);
     unused RegisterModule("regex", RegexInit, RegexRun, RegexSRun, NoWhatis);
     unused RegisterModule("csv", CsvInit, CsvRun, CsvSRun, NoWhatis);
+    unused RegisterModule("sexprs", SexprsInit, SexprsRun, SexprsSRun, NoWhatis);
     count := Args.OperandCount();
     if count > 0 && Args.Operand(0) == "-%" { return Child(count) }
 

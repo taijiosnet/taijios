@@ -1,0 +1,224 @@
+// The sexprs builtin module of appl/cmd/sh/sexprs.b: getsexprs reads
+// S-expressions from standard input into $sexp; islist and the
+// substitution builtins take S-expressions apart and build them.
+#import "std/vec";
+#import "shell_util";
+#import "shell";
+#import "shell_sexpr";
+
+#scope_file
+
+MAXERRS :: 10;
+
+StdinRead :: (buffer: []u8) -> s32 { return ReadFd(0, buffer) }
+
+SUsage :: (s: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "usage: %", s);
+    Fail("usage", TextView(msg[:]));
+}
+
+// Parse a word as one S-expression, failing on an error or trailing text.
+ParseWord :: (args: *Items, i: s64) -> s32 {
+    w: Text = ItemText(args, i);
+    r: SReader;
+    r.last = -1;
+    unused BuilderAppend(r.data, TextView(w));
+    n := ParseItem(*r);
+    rest := TextView(w)[r.offset:];
+    for rest {
+        if it != 32 && it != 9 && it != 10 {
+            msg: Vec(u8);
+            unused BuilderAppend(msg, "extra text found at end of s-expression '");
+            for TextView(w) { if it == 39 { VecPush(msg, 39) } VecPush(msg, it) }
+            VecPush(msg, 39);
+            Fail("bad sexp", TextView(msg[:]));
+            return -2;
+        }
+    }
+    if r.failed {
+        e: Text = ReadError(*r);
+        Fail("bad sexp", TextView(e));
+        return -2;
+    }
+    return n;
+}
+
+GetsexprsText :: (args: *Items) -> Text {
+    if args.count != 2 || !IsBlock(args, 1) { SUsage("getsexprs {cmd}"); return TextCopy("") }
+    r: SReader;
+    r.last = -1;
+    r.usefd = true;
+    r.read = StdinRead;
+    status: Text;
+    nerrs: s32 = 0;
+    Push();
+    while true {
+        ResetSexps();
+        r.failed = false;
+        n := ParseItem(*r);
+        if r.failed {
+            e: Text = ReadError(*r);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "getsexprs: error on read: %\n", TextView(e));
+            unused PrintErr(TextView(msg[:]));
+            nerrs += 1;
+            if nerrs > MAXERRS { Pop(); Raise("fail:too many errors"); return TextCopy("") }
+            continue;
+        }
+        if n < 0 { break }
+        nerrs = 0;
+        text: Vec(u8);
+        SexpText(*text, n);
+        SetLocalWord("sexp", TextView(text[:]));
+        cmd: Items;
+        VecPush(cmd, CopyItem(args, 1));
+        star := Get("*");
+        for k: 0..star.count - 1 { VecPush(cmd, CopyItem(*star, k)) }
+        got: Text = Run(*cmd, false);
+        if raising {
+            if TextView(raised) == "fail:break" { ClearRaise(); Pop(); return status }
+            if TextView(raised) == "fail:continue" { ClearRaise(); Pop(); Push(); continue }
+            Pop();
+            return TextCopy("");
+        }
+        if exiting { Pop(); return TextCopy("") }
+        SetStatus(TextView(got));
+        VecSwap(status.bytes, got.bytes);
+    }
+    Pop();
+    return status;
+}
+
+IslistText :: (args: *Items) -> Text {
+    if args.count != 2 { SUsage("islist sexp"); return TextCopy("") }
+    w: Text = ItemText(args, 1);
+    if w.bytes.count != 0 && w.bytes[0] == #char "(" { return TextCopy("") }
+    ResetSexps();
+    n := ParseWord(args, 1);
+    if Unwinding() { return TextCopy("") }
+    if SexpIsList(n) { return TextCopy("") }
+    return TextCopy("not a list");
+}
+
+// The text of each element of a list, by SexpText or SexpAsText.
+Elements :: (args: *Items, name: string, astext: bool) -> Items {
+    if args.count != 2 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "% sexp", name);
+        SUsage(TextView(msg[:]));
+        return NoItems();
+    }
+    ResetSexps();
+    n := ParseWord(args, 1);
+    if Unwinding() { return NoItems() }
+    out: Items;
+    if n >= 0 && snodes[n].kind == LIST {
+        for i: 0..snodes[n].kids.count - 1 {
+            t: Vec(u8);
+            k := snodes[n].kids[i];
+            if astext { SexpAsText(*t, k) } else { SexpText(*t, k) }
+            PushWord(*out, TextView(t[:]));
+        }
+    }
+    return out;
+}
+
+One :: (args: *Items, name: string) -> s32 {
+    if args.count != 2 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "% sexp", name);
+        SUsage(TextView(msg[:]));
+        return -2;
+    }
+    ResetSexps();
+    return ParseWord(args, 1);
+}
+
+MakeList :: (args: *Items, text: bool) -> Items {
+    out: Items;
+    s: Vec(u8);
+    VecPush(s, #char "(");
+    for i: 1..args.count - 1 {
+        if i > 1 { VecPush(s, 32) }
+        w: Text = ItemText(args, i);
+        if text {
+            ResetSexps();
+            n := TextNode(TextView(w));
+            SexpText(*s, n);
+        } else {
+            unused BuilderAppend(s, TextView(w));
+        }
+    }
+    VecPush(s, #char ")");
+    PushWord(*out, TextView(s[:]));
+    return out;
+}
+
+SexprsSRunList :: (args: *Items) -> Items {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    w := TextView(name);
+    if w == "els" { return Elements(args, "els", false) }
+    if w == "textels" { return Elements(args, "textels", true) }
+    if w == "text" || w == "b64" {
+        n := One(args, w);
+        if Unwinding() { return NoItems() }
+        t: Vec(u8);
+        if w == "text" {
+            SexpAsText(*t, n);
+        } else {
+            packed: Vec(u8);
+            SexpPack(*packed, n);
+            VecPush(t, #char "{");
+            Base64Encode(*packed, *t);
+            VecPush(t, #char "}");
+        }
+        result: Items;
+        PushWord(*result, TextView(t[:]));
+        return result;
+    }
+    if w == "mktext" {
+        if args.count != 2 { SUsage("mktext sexp"); return NoItems() }
+        text: Text = ItemText(args, 1);
+        ResetSexps();
+        n := TextNode(TextView(text));
+        t: Vec(u8);
+        SexpText(*t, n);
+        result: Items;
+        PushWord(*result, TextView(t[:]));
+        return result;
+    }
+    if w == "mklist" { return MakeList(args, false) }
+    if w == "mktextlist" { return MakeList(args, true) }
+    return NoItems();
+}
+
+#scope_export
+
+SexprsInit :: (mod: s32, err: *Text) -> bool {
+    AddBuiltin("getsexprs", mod);
+    AddBuiltin("islist", mod);
+    names := string.["els", "text", "b64", "textels", "mktext", "mklist", "mktextlist"];
+    for names { AddSBuiltin(it, mod) }
+    return true;
+}
+
+SexprsRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    name := TextView(args.*[0].word);
+    result: Text;
+    if name == "getsexprs" {
+        got: Text = GetsexprsText(args);
+        VecSwap(result.bytes, got.bytes);
+    } else {
+        got: Text = IslistText(args);
+        VecSwap(result.bytes, got.bytes);
+    }
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+SexprsSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := SexprsSRunList(args);
+    VecSwap(<<out, result);
+    return true;
+}

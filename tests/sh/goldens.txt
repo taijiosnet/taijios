@@ -296,3 +296,39 @@ err:
 status: \n
 out: pipeline sees inner\nchild sees outer\n
 err: 
+=== mod-sexprs
+status: bad sexp\n
+out: a b (c d) "e f"\na b c abc abcd\nquoted\nline\nabc \n{KDE6YTI6YmMp}\na bc\n"needs quoting" token\n(a (b c) d) ()\n(a "b c" "3d")\n[h]v raw #00FF# |AAECAwQF|\n
+err: sh: and: './and' file does not exist\nsh: or: './or' file does not exist\nunclosed '(' at offset 0\n
+=== mod-sexprs-trailing
+status: bad sexp\n
+out: 
+err: extra text found at end of s-expression 'a b'\n
+=== mod-getsexprs
+status: \n
+out: got (one two)\ngot atom\ngot "a string"\ngot (nested (deep))\ngot xyz\ngot [h]t\nstatus \n
+err: getsexprs: error on read: unclosed '(' at offset 52\n
+=== lib-sh-sched
+status: \n
+out: load std; subfn job {{id:="{read};result=$id;or {echo load ${quote $*} >[1=0]} {raise 'load failed'}} $* <>/n/remote/admin/clone}\nload std; fn job {echo ${job $*}}\nload std; fn ctl {if {~ $#* 0 1} {echo usage: ctl job-id request... >[1=2];raise usage};(id args):=$*;echo ${quote $args} >/n/remote/admin/^$id^/ctl}\nstd sexprs\n
+err: 
+=== lib-sh-owen
+status: \n
+out: load std; fn start {id:=${job $*};ctl $id start;echo $id}\n
+err: 
+=== tiny-rm
+status: errors\n
+out: \n
+err: rm: $W/nonexistent: '$W/nonexistent' does not exist\nls: $W/t1: '$W/t1' does not exist\nls: $W/t2: '$W/t2' does not exist\n
+=== tiny-sh
+status: \n
+out: \n
+err: ls: $W/ta: '$W/ta' does not exist\nnosuch: '/dis/nosuch.dis' does not exist\nsh: syntax error\nx: '/dis/x.dis' does not exist\nsh: unmatched quote\nsh: can't open $W/missing: '$W/missing' does not exist\nsh: can't open /nonexistentdir/x: '/nonexistentdir' file does not exist\nrm: $W/q1: '$W/q1' does not exist\nrm: $W/q2: '$W/q2' does not exist\nUsage: sh [-n] [-c cmd] [file]\nUsage: sh [-n] [-c cmd] [file]\nnosuch: '/dis/nosuch.dis' does not exist\nls: $W/tb: '$W/tb' does not exist\nsh: open $W/nonexistentscript: '$W/nonexistentscript' does not exist\n
+=== tiny-sh-stdin
+status: \n
+out: omega$ omega$ \n\n
+err: rm: $W/s1: '$W/s1' does not exist\n
+=== tiny-broke
+status: \n
+out:  5\n\n
+err: 

@@ -10,7 +10,8 @@
 // `(cd appl/cmd/sh && mk install-zx)`:
 //     ziran run --target=c --root tests/sh tests/sh/sh_test.zi -- [--shell GUEST.zx] [--record] [--dis] [EMU]
 // --shell picks the ZX shell (default /dis/sh.zx). --record runs the Dis
-// shell instead and rewrites goldens.txt; --dis also checks the Dis shell
+// shell instead and rewrites goldens.txt, keeping the goldens of frozen
+// cases, whose Limbo programs are gone; --dis also checks the Dis shell
 // against the goldens. EMU defaults to emu/Linux/o.emu.
 #import "std/byte_text_linux"
 #import "std/file"
@@ -28,6 +29,10 @@ Case :: struct {
     script: Text;
     // A known difference and what it waits for; such a case must still differ.
     gap: Text;
+    // Run the ZX programs of this case in a Dis guest, through zxrun.
+    disguest: bool;
+    // The Limbo program is gone: --record keeps the golden it printed.
+    frozen: bool;
 }
 
 Golden :: struct {
@@ -119,6 +124,10 @@ LoadCorpus :: () -> bool {
             Unescape(TextTrim(line[6:]), *cases[k].input);
         } else if TextHasPrefix(line, "gap:") {
             SetTo(*cases[k].gap, TextTrim(line[4:]));
+        } else if line == "guest: dis" {
+            cases[k].disguest = true;
+        } else if TextHasPrefix(line, "frozen:") {
+            cases[k].frozen = true;
         }
     }
     // The blank lines between cases are not part of the scripts.
@@ -186,14 +195,20 @@ Prepare :: (kind: string, shell: string) -> bool {
         input: Text = Path(kind, "in", i);
         if !WriteEntireFile(TextView(script), TextView(cases[i].script)) { return false }
         if !WriteEntireFile(TextView(input), TextView(cases[i].input)) { return false }
+        // $X is the suffix of the programs under test: .dis, or .zx.
+        suffix := ifx kind == "dis" then ".dis" else ".zx";
         driver: Vec(u8);
-        BuilderPrint(*driver, "W = %/%\n", GUESTWORK, kind);
-        BuilderPrint(*driver, "% %", shell, TextView(cases[i].args));
+        BuilderPrint(*driver, "W = %/%\nX = %\n", GUESTWORK, kind, suffix);
+        if kind == "zx" && cases[i].disguest {
+            BuilderPrint(*driver, "/dis/sh.dis %", TextView(cases[i].args));
+        } else {
+            BuilderPrint(*driver, "% %", shell, TextView(cases[i].args));
+        }
         if !cases[i].noscript { BuilderPrint(*driver, " $W/case.%", i) }
         BuilderPrint(*driver, " < $W/in.% > $W/result/out.% >[2] $W/result/err.%\n", i, i, i);
         BuilderPrint(*driver, "echo $status > $W/result/status.%\n", i);
         // A Dis guest whose last command has ended can still fail to exit.
-        if kind == "dis" { unused BuilderAppend(driver, "echo halt > /dev/sysctl\n") }
+        if kind == "dis" || cases[i].disguest { unused BuilderAppend(driver, "echo halt > /dev/sysctl\n") }
         driverpath: Text = Path(kind, "driver", i);
         if !WriteEntireFile(TextView(driverpath), TextView(driver[:])) { return false }
     }
@@ -215,7 +230,10 @@ Boot :: (emu: string, kind: string, shell: string, index: s64) -> bool {
 }
 
 BootAll :: (emu: string, kind: string, shell: string) -> bool {
-    for i: 0..cases.count - 1 { if !Boot(emu, kind, shell, i) { return false } }
+    for i: 0..cases.count - 1 {
+        boot := ifx cases[i].disguest then "/dis/sh.dis" else shell;
+        if !Boot(emu, kind, boot, i) { return false }
+    }
     return true;
 }
 
@@ -246,6 +264,7 @@ gaps: s32;
 
 Compare :: (kind: string) {
     for i: 0..cases.count - 1 {
+        if kind == "dis" && cases[i].frozen { continue }
         gapdiffers = false;
         at: s64 = -1;
         for k: 0..goldens.count - 1 { if TextView(goldens[k].name) == TextView(cases[i].name) { at = k; break } }
@@ -275,6 +294,14 @@ Record :: () -> bool {
         status: Text = Result("dis", "status", i);
         o: Text = Result("dis", "out", i);
         e: Text = Result("dis", "err", i);
+        if cases[i].frozen {
+            at: s64 = -1;
+            for k: 0..goldens.count - 1 { if TextView(goldens[k].name) == TextView(cases[i].name) { at = k } }
+            if at < 0 { print("no recorded golden for frozen case %\n", TextView(cases[i].name)); return false }
+            SetTo(*status, TextView(goldens[at].status));
+            SetTo(*o, TextView(goldens[at].out));
+            SetTo(*e, TextView(goldens[at].err));
+        }
         BuilderPrint(*out, "=== %\nstatus: ", TextView(cases[i].name));
         Escape(*out, TextView(status));
         unused BuilderAppend(out, "\nout: ");
@@ -302,6 +329,8 @@ main :: (argc: s32, argv: **u8) -> s32 {
     }
     if !LoadCorpus() { print("cannot read tests/sh/corpus.txt\n"); return 1 }
     if record || dis {
+        // Frozen cases keep the goldens already recorded.
+        if record && !LoadGoldens() { print("cannot read tests/sh/goldens.txt\n"); return 1 }
         if !Prepare("dis", "/dis/sh.dis") || !BootAll(emu, "dis", "/dis/sh.dis") { return 1 }
         if record {
             if !Record() { print("cannot write tests/sh/goldens.txt\n"); return 1 }
@@ -309,8 +338,11 @@ main :: (argc: s32, argv: **u8) -> s32 {
             return 0;
         }
     }
-    if !LoadGoldens() { print("cannot read tests/sh/goldens.txt\n"); return 1 }
-    if dis { Compare("dis") }
+    if !dis && !LoadGoldens() { print("cannot read tests/sh/goldens.txt\n"); return 1 }
+    if dis {
+        if !LoadGoldens() { print("cannot read tests/sh/goldens.txt\n"); return 1 }
+        Compare("dis");
+    }
     if !Prepare("zx", shell) || !BootAll(emu, "zx", shell) { return 1 }
     Compare("zx");
     if failures != 0 { print("sh: % failures in % cases\n", failures, cases.count); return 1 }

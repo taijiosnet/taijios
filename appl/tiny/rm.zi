@@ -1,0 +1,19 @@
+// tiny/rm: remove each file named, as appl/tiny/rm.b. A file that cannot
+// be removed is reported and the rest are still tried; the status is
+// always success.
+#import "std/vec";
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+
+main :: () -> s32 {
+    n := Args.OperandCount();
+    for i: 0..n - 1 {
+        name := Args.Operand(i);
+        if Io.Remove(name) < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "rm: %: %\n", name, Io.Error());
+            unused Io.Write(2, TextView(msg[:]));
+        }
+    }
+    return 0;
+}
