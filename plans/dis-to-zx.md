@@ -222,11 +222,11 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 133 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 129 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh parity 73/74, gap: env isolation needs taijios_namespace ForkEnv; also open: ${pid} (Pid), pctl newns/newpgrp/nodevs. A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, tiny/sh, sh/mload |
+| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh parity 83/84, gap: env isolation needs taijios_namespace ForkEnv; also open: ${pid} (Pid), pctl newns/newpgrp/nodevs. A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, sh/mload |
 | dis/9win.dis | appl/cmd/9win.b |  | - |  |
 | dis/B.dis | appl/cmd/B.b |  | - |  |
 | dis/acme.dis | appl/acme/acme.b |  | - |  |
@@ -313,12 +313,12 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/sh/csv.dis | appl/cmd/sh/csv.b | module/csv.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_csv.zi); loaded only by sh.dis |
 | dis/sh/echo.dis | appl/cmd/sh/echo.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
 | dis/sh/expr.dis | appl/cmd/sh/expr.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_expr.zi); loaded only by sh.dis |
-| dis/sh/file2chan.dis | appl/cmd/sh/file2chan.b |  | - |  |
+| dis/sh/file2chan.dis | appl/cmd/sh/file2chan.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_file2chan.zi); loaded only by sh.dis |
 | dis/sh/mk.dis | appl/cmd/mk/mk.b |  | - |  |
 | dis/sh/mload.dis | appl/cmd/sh/mload.b |  | - |  |
 | dis/sh/mpexpr.dis | appl/cmd/sh/mpexpr.b |  | - |  |
 | dis/sh/regex.dis | appl/cmd/sh/regex.b | module/regex.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_regex.zi); loaded only by sh.dis |
-| dis/sh/sexprs.dis | appl/cmd/sh/sexprs.b | module/sexprs.m | - |  |
+| dis/sh/sexprs.dis | appl/cmd/sh/sexprs.b | module/sexprs.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_sexprs.zi); loaded only by sh.dis |
 | dis/sh/sh.dis | appl/cmd/sh/sh.b | module/sh.m | - |  |
 | dis/sh/std.dis | appl/cmd/sh/std.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_std.zi); loaded only by sh.dis |
 | dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_string.zi); loaded only by sh.dis |
@@ -337,9 +337,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/tcs.dis | appl/cmd/tcs.b |  | - |  |
 | dis/telnet.dis | appl/cmd/telnet.b |  | - |  |
 | dis/time.dis | appl/cmd/time.b |  | - |  |
-| dis/tiny/broke.dis | appl/tiny/broke.b |  | - |  |
-| dis/tiny/rm.dis | appl/tiny/rm.b |  | - |  |
-| dis/tiny/sh.dis | appl/tiny/sh.b | module/sh.m | - |  |
+| dis/tiny/sh.dis | appl/tiny/sh.b | module/sh.m | - | zx-twin /dis/tiny/sh.zx (appl/tiny/sh.zi), tests/sh tiny-sh cases match; stays until taijios_namespace has ForkEnv: without -e the Limbo tiny/sh copied its environment group. os/cerf1110/cerf, os/cerf250/cerf, os/gum/gum and os/ipaq1110/ipaq also name it as their root /dis/sh.dis |
 | dis/tkcmd.dis | appl/cmd/tkcmd.b |  | - |  |
 | dis/touchcal.dis | appl/cmd/touchcal.b |  | - |  |
 | dis/tsort.dis | appl/cmd/tsort.b |  | - |  |

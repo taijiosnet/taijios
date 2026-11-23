@@ -755,3 +755,21 @@ script:
 sh -n -c 'load std; pctl newfd 0 2; echo x; echo y' >[2] /dev/null
 /dis/tiny/broke$X
 echo $status
+
+=== mod-file2chan
+script:
+load std file2chan
+file2chan $W/chan {rreadone 'hello from read'} {echo got ${rget data} at ${rget offset} >[1=2]; rwrite} {echo closed >[1=2]}
+cat $W/chan
+echo written > $W/chan
+echo $status
+file2chan $W/c2 {rerror 'no reads'} {rwrite $tag 2}
+cat $W/c2
+echo $status
+echo abc > $W/c2
+echo $status
+file2chan $W/c3 {} {}
+cat $W/c3
+echo $status
+file2chan only args
+echo $status

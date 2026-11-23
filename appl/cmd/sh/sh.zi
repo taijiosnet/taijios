@@ -17,6 +17,7 @@ Ns :: #import "taijios_namespace";
 #import "shell_regex";
 #import "shell_csv";
 #import "shell_sexprs";
+#import "shell_file2chan";
 
 main :: () -> s32 {
     unused RegisterModule("builtin", InitShellBuiltins, ShellRun, ShellSRun, ShellWhatis);
@@ -29,8 +30,10 @@ main :: () -> s32 {
     unused RegisterModule("regex", RegexInit, RegexRun, RegexSRun, NoWhatis);
     unused RegisterModule("csv", CsvInit, CsvRun, CsvSRun, NoWhatis);
     unused RegisterModule("sexprs", SexprsInit, SexprsRun, SexprsSRun, NoWhatis);
+    unused RegisterModule("file2chan", F2cInit, F2cRun, F2cSRun, NoWhatis);
     count := Args.OperandCount();
-    if count > 0 && Args.Operand(0) == "-%" { return Child(count) }
+    if count > 0 && Args.Operand(0) == "-%" { return Child(count, false) }
+    if count > 0 && Args.Operand(0) == "-%f" { return Child(count, true) }
 
     interactive := false;
     lflag := false;
@@ -137,9 +140,10 @@ IsConsole :: (h: s32) -> bool {
     return true;
 }
 
-// -% modules star zero status options word...
-Child :: (count: s32) -> s32 {
-    if count < 6 { return Usage() }
+// -% modules star zero status options word..., or -%f with the operands
+// of file2chan to serve the file it names.
+Child :: (count: s32, serve: bool) -> s32 {
+    if count < 6 || (serve && count < 9) { return Usage() }
     NewContext(false);
     flags := LimboInt(Args.Operand(5));
     unused SetOptions(INTERACTIVE | VERBOSE | EXECPRINT | ERROREXIT, false);
@@ -156,6 +160,15 @@ Child :: (count: s32) -> s32 {
     zeroval := StringsToList(*zero);
     SetLocal("0", *zeroval);
     if Args.Operand(4) != "" { SetStatus(Args.Operand(4)) }
+    if serve {
+        rcmd: Items;
+        wcmd: Items;
+        ccmd: Items;
+        PushWord(*rcmd, Args.Operand(7));
+        PushWord(*wcmd, Args.Operand(8));
+        if count > 9 { PushWord(*ccmd, Args.Operand(9)) }
+        return ServeFile2chan(Args.Operand(6), *rcmd, *wcmd, *ccmd);
+    }
     list: Items;
     for k: 6..count - 1 { PushWord(*list, Args.Operand(k)) }
     status: Text = Run(*list, true);

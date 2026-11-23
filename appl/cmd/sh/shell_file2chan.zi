@@ -1,0 +1,385 @@
+// The file2chan builtin module of appl/cmd/sh/file2chan.b. The Limbo
+// module served the file from a thread beside the shell; here a child
+// sh.zx serves it (sh.zi starts that mode with -%f), sharing the
+// namespace, running {readcmd}, {writecmd} and {closecmd} for each request
+// with $tag naming it. The request tags live in that server, so rread and
+// the other reply builtins answer requests from the commands it runs.
+#import "std/vec";
+#import "std/option";
+Io :: #import "taijios_io";
+Process :: #import "taijios_process";
+F2c :: #import "taijios_file2chan";
+#import "shell_util";
+#import "shell_filepat";
+#import "shell";
+
+#scope_file
+
+f2cmod: s32;
+
+TagRec :: struct {
+    id: s32;
+    kind: s32;
+    fid: s32;
+    offset: s64;
+    count: s32;
+    tag: u64;
+    data: Vec(u8);
+    blocked: bool;
+}
+
+tags: Vec(TagRec);
+maxtagid: s32;
+served: F2c.File;
+serving: bool;
+
+FUsage :: (s: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "usage: %", s);
+    Fail("usage", TextView(msg[:]));
+}
+
+// As iscmd in file2chan.b, which looked for '}': only a parsed block.
+IsF2cCmd :: (args: *Items, i: s64) -> bool {
+    return args.*[i].cmd >= 0 || (args.*[i].word.bytes.count != 0 && args.*[i].word.bytes[0] == #char "}");
+}
+
+PathSplit :: (p: string, dir: *Text, file: *Text) {
+    i := p.count - 1;
+    while i >= 0 && p[i] == #char "/" { i -= 1 }
+    if i < 0 { SetText(dir, p); SetText(file, ""); return }
+    q := p[:i + 1];
+    j := q.count - 1;
+    while j >= 0 && q[j] != #char "/" { j -= 1 }
+    if j < 0 { SetText(dir, "."); SetText(file, q); return }
+    SetText(dir, q[:j + 1]);
+    SetText(file, q[j + 1:]);
+}
+
+FindTag :: (id: s64) -> s64 {
+    for i: 0..tags.count - 1 { if tags[i].id == cast(s32)id { return i } }
+    return -1;
+}
+
+DelTag :: (id: s32) {
+    k := FindTag(id);
+    if k < 0 { return }
+    last := tags.count - 1;
+    if k != last {
+        tags[k].id = tags[last].id;
+        tags[k].kind = tags[last].kind;
+        tags[k].fid = tags[last].fid;
+        tags[k].offset = tags[last].offset;
+        tags[k].count = tags[last].count;
+        tags[k].tag = tags[last].tag;
+        tags[k].blocked = tags[last].blocked;
+        VecSwap(tags[k].data, tags[last].data);
+    }
+    unused VecPop(tags);
+}
+
+// The tag a reply builtin names: the argument, or $tag.
+GetTag :: (args: *Items, at: s64, useargs: bool) -> s64 {
+    id: s64;
+    if useargs {
+        id = LimboInt(TextView(args.*[at].word));
+    } else {
+        t := Get("tag");
+        if t.count != 1 { return -1 }
+        id = LimboInt(TextView(t[0].word));
+    }
+    return FindTag(id);
+}
+
+Request :: (k: s64, request: *F2c.Request) {
+    request.kind = tags[k].kind;
+    request.fid = tags[k].fid;
+    request.offset = tags[k].offset;
+    request.count = tags[k].count;
+    request.tag = tags[k].tag;
+}
+
+ReplyRead :: (k: s64, data: string, err: string) {
+    request: F2c.Request;
+    Request(k, *request);
+    if err.count != 0 { unused F2c.ReplyError(*served, *request, err); return }
+    bytes: Vec(u8);
+    unused BuilderAppend(bytes, data);
+    unused F2c.ReplyRead(*served, *request, bytes[:]);
+}
+
+ReplyWrite :: (k: s64, count: s32, err: string) {
+    request: F2c.Request;
+    Request(k, *request);
+    if err.count != 0 { unused F2c.ReplyError(*served, *request, err); return }
+    unused F2c.ReplyWrite(*served, *request, count);
+}
+
+BadTag :: (cmd: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "%: cannot find tag", cmd);
+    Fail("bad tag", TextView(msg[:]));
+}
+
+Inappropriate :: (cmd: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "%: inappropriate tag id", cmd);
+    Fail("bad tag", TextView(msg[:]));
+}
+
+RRead :: (args: *Items, one: bool) -> Text {
+    n := args.count;
+    name: Text = TextCopy(TextView(args.*[0].word));
+    if n < 2 || n > 3 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "usage: % [tag] data", TextView(name));
+        Fail("usage", TextView(msg[:]));
+        return TextCopy("");
+    }
+    k := GetTag(args, 1, n == 3);
+    if k < 0 { Fail("bad tag", "rread: cannot find tag"); return TextCopy("") }
+    if tags[k].kind != F2c.Read { Inappropriate("rread"); return TextCopy("") }
+    w: Text = ItemText(args, n - 1);
+    d := TextView(w);
+    if one {
+        if tags[k].offset >= d.count { d = "" } else { d = d[tags[k].offset:] }
+    }
+    if d.count > tags[k].count { d = d[:tags[k].count] }
+    ReplyRead(k, d, "");
+    DelTag(tags[k].id);
+    return TextCopy("");
+}
+
+RWrite :: (args: *Items) -> Text {
+    n := args.count;
+    if n > 3 { FUsage("rwrite [tag [count]]"); return TextCopy("") }
+    k := GetTag(args, 1, n > 1);
+    if k < 0 { BadTag("rwrite"); return TextCopy("") }
+    if tags[k].kind != F2c.Write { Inappropriate("rwrite"); return TextCopy("") }
+    count := cast(s32)tags[k].data.count;
+    if n == 3 {
+        arg: Text = ItemText(args, 2);
+        if !IsNum(TextView(arg)) { FUsage("freply [tag [count]]"); return TextCopy("") }
+        count = cast(s32)LimboInt(TextView(arg));
+    }
+    ReplyWrite(k, count, "");
+    DelTag(tags[k].id);
+    return TextCopy("");
+}
+
+RBlock :: (args: *Items) -> Text {
+    if args.count > 2 { FUsage("rblock [tag]"); return TextCopy("") }
+    k := GetTag(args, 1, args.count > 1);
+    if k < 0 { BadTag("rblock"); return TextCopy("") }
+    tags[k].blocked = true;
+    return TextCopy("");
+}
+
+RError :: (args: *Items) -> Text {
+    n := args.count;
+    if n < 2 || n > 3 { FUsage("ferror [tag] error"); return TextCopy("") }
+    k := GetTag(args, 1, n == 3);
+    if k < 0 { BadTag("rerror"); return TextCopy("") }
+    err: Text = ItemText(args, n - 1);
+    if tags[k].kind == F2c.Write { ReplyWrite(k, 0, TextView(err)) } else { ReplyRead(k, "", TextView(err)) }
+    DelTag(tags[k].id);
+    return TextCopy("");
+}
+
+FetchWData :: (args: *Items) -> Text {
+    if args.count > 2 { FUsage("fetchwdata [tag]"); return TextCopy("") }
+    k := GetTag(args, 1, args.count > 1);
+    if k < 0 { BadTag("fetchwdata"); return TextCopy("") }
+    if tags[k].kind != F2c.Write { Inappropriate("fetchwdata"); return TextCopy("") }
+    data: Vec(u8);
+    for i: 0..tags[k].data.count - 1 { VecPush(data, tags[k].data[i]) }
+    unused Print(TextView(data[:]));
+    return TextCopy("");
+}
+
+PutRData :: (args: *Items) -> Text {
+    if args.count > 2 { FUsage("putrdata [tag]"); return TextCopy("") }
+    k := GetTag(args, 1, args.count > 1);
+    if k < 0 { BadTag("putrdata"); return TextCopy("") }
+    if tags[k].kind != F2c.Read { Inappropriate("putrdata"); return TextCopy("") }
+    want := cast(s64)tags[k].count;
+    buf: Vec(u8);
+    chunk: [8192]u8;
+    while buf.count < want {
+        room := want - buf.count;
+        if room > 8192 { room = 8192 }
+        nr := ReadFd(0, chunk[:room]);
+        if nr <= 0 { break }
+        unused BuilderAppend(buf, TextView(chunk[:nr]));
+    }
+    ReplyRead(k, TextView(buf[:]), "");
+    DelTag(tags[k].id);
+    return TextCopy("");
+}
+
+RGet :: (args: *Items) -> Items {
+    n := args.count;
+    if n < 2 || n > 3 { FUsage("rget (data|count|offset|fid) [tag]"); return NoItems() }
+    k := GetTag(args, 2, n == 3);
+    if k < 0 { BadTag("rget"); return NoItems() }
+    what: Text = TextCopy(TextView(args.*[1].word));
+    s: Vec(u8);
+    w := TextView(what);
+    if w == "data" {
+        if tags[k].kind != F2c.Write { Inappropriate("rget"); return NoItems() }
+        for i: 0..tags[k].data.count - 1 { VecPush(s, tags[k].data[i]) }
+    } else if w == "count" {
+        if tags[k].kind != F2c.Read { Inappropriate("rget"); return NoItems() }
+        BuilderPrint(*s, "%", tags[k].count);
+    } else if w == "offset" {
+        BuilderPrint(*s, "%", tags[k].offset);
+    } else if w == "fid" {
+        BuilderPrint(*s, "%", tags[k].fid);
+    } else {
+        FUsage("rget (data|count|offset|fid) [tag]");
+        return NoItems();
+    }
+    out: Items;
+    PushWord(*out, TextView(s[:]));
+    return out;
+}
+
+// file2chan file {readcmd} {writecmd} [{closecmd}]: start the server and
+// wait until the file is there.
+File2chan :: (args: *Items) -> Text {
+    use := "file2chan file {readcmd} {writecmd} [ {closecmd} ]";
+    n := args.count;
+    if n < 4 || n > 5 { FUsage(use); return TextCopy("") }
+    path: Text = TextCopy(TextView(args.*[1].word));
+    if path.bytes.count == 0 || !IsF2cCmd(args, 2) || !IsF2cCmd(args, 3) || (n == 5 && !IsF2cCmd(args, 4)) {
+        FUsage(use);
+        return TextCopy("");
+    }
+    _, existed := StatMode(TextView(path));
+    words: Items;
+    PushWord(*words, TextView(path));
+    for i: 2..n - 1 { VecPush(words, CopyItem(args, i)) }
+    ops := ChildOperands(*words);
+    SetText(*ops[0], "-%f");
+    Export();
+    batch: Batch;
+    StartZx(*batch, TextView(shellpath), *ops);
+    id: s32 = 0;
+    if batch.jobs.count > 0 { id = batch.jobs[0].id }
+    if id == 0 { return TextCopy("cannot make chan") }
+    // The server makes the file; it is ready once the name answers.
+    ready := false;
+    while true {
+        _, there := StatMode(TextView(path));
+        if there && !existed { ready = true; break }
+        outcome := Process.Poll(id);
+        if outcome.status != -2 { break }
+        if existed { ready = true; break }
+    }
+    if !ready { return TextCopy("cannot make chan") }
+    VecPush(bgjobs, id);
+    idtext: Vec(u8);
+    BuilderPrint(*idtext, "%", id);
+    SetWord("apid", TextView(idtext[:]));
+    if (Options() & INTERACTIVE) != 0 {
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", id);
+        unused PrintErr(TextView(line[:]));
+    }
+    return TextCopy("");
+}
+
+F2cRunText :: (args: *Items) -> Text {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    w := TextView(name);
+    if w == "file2chan" { return File2chan(args) }
+    if w == "rblock" { return RBlock(args) }
+    if w == "rread" { return RRead(args, false) }
+    if w == "rreadone" { return RRead(args, true) }
+    if w == "rwrite" { return RWrite(args) }
+    if w == "rerror" { return RError(args) }
+    if w == "fetchwdata" { return FetchWData(args) }
+    if w == "putrdata" { return PutRData(args) }
+    return TextCopy("");
+}
+
+RunCmd :: (block: *Items, k: s64) {
+    idtext: Vec(u8);
+    BuilderPrint(*idtext, "%", tags[k].id);
+    SetLocalWord("tag", TextView(idtext[:]));
+    cmd := CloneItems(block);
+    ignored: Text = Run(*cmd, false);
+    if raising || exiting { ClearRaise(); exiting = false }
+}
+
+#scope_export
+
+// The server: -%f modules star zero status options file {r} {w} [{c}].
+ServeFile2chan :: (path: string, rcmd: *Items, wcmd: *Items, ccmd: *Items) -> s32 {
+    dir: Text;
+    file: Text;
+    PathSplit(path, *dir, *file);
+    if !F2c.Create(*served, TextView(dir), TextView(file)) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "file2chan: cannot make %: %", path, Io.Error());
+        if (Options() & VERBOSE) != 0 { line: Vec(u8); BuilderPrint(*line, "%\n", TextView(msg[:])); unused PrintErr(TextView(line[:])) }
+        return 1;
+    }
+    serving = true;
+    request: F2c.Request;
+    while F2c.Next(*served, *request, true) == 1 {
+        t: TagRec;
+        t.id = maxtagid;
+        maxtagid += 1;
+        t.kind = request.kind;
+        t.fid = request.fid;
+        t.offset = request.offset;
+        t.count = request.count;
+        t.tag = request.tag;
+        if request.kind == F2c.Write { for i: 0..request.count - 1 { VecPush(t.data, request.data[i]) } }
+        id := t.id;
+        VecPush(tags, t);
+        k := tags.count - 1;
+        if request.kind == F2c.Close {
+            if ccmd.count != 0 {
+                tags[k].offset = -1;
+                tags[k].count = -1;
+                RunCmd(ccmd, k);
+            }
+            DelTag(id);
+            none: Items;
+            SetLocal("tag", *none);
+            continue;
+        }
+        if request.kind == F2c.Read { RunCmd(rcmd, k) } else { RunCmd(wcmd, k) }
+        // A default reply unless the command answered or blocked it.
+        j := FindTag(id);
+        if j >= 0 && !tags[j].blocked {
+            if tags[j].kind == F2c.Read { ReplyRead(j, "", "invalid read") } else { ReplyWrite(j, cast(s32)tags[j].data.count, "") }
+            DelTag(id);
+        }
+        none: Items;
+        SetLocal("tag", *none);
+    }
+    return 0;
+}
+
+F2cInit :: (mod: s32, err: *Text) -> bool {
+    f2cmod = mod;
+    names := string.["file2chan", "rblock", "rread", "rreadone", "rwrite", "rerror", "fetchwdata", "putrdata"];
+    for names { AddBuiltin(it, mod) }
+    AddSBuiltin("rget", mod);
+    return true;
+}
+
+F2cRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = F2cRunText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+F2cSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := RGet(args);
+    VecSwap(<<out, result);
+    return true;
+}

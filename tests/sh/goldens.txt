@@ -332,3 +332,7 @@ err: rm: $W/s1: '$W/s1' does not exist\n
 status: \n
 out:  5\n\n
 err: 
+=== mod-file2chan
+status: usage\n
+out: hello from read\nread error\n\nread error\n
+err: closed\ngot written\n at 0\nclosed\ncat: error reading $W/c2: no reads\ncat: error reading $W/c3: invalid read\nusage: file2chan file {readcmd} {writecmd} [ {closecmd} ]\n

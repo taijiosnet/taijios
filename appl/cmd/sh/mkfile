@@ -70,8 +70,8 @@ $ROOT/dis/sh.dis:	sh.dis
 %.dis: ${SYSMODULES:%=$MODDIR/%}
 
 # The ZX shell: sh.zi and its modules, with the builtin modules compiled in.
-SHZX=sh.zi shell.zi shell_parse.zi shell_util.zi shell_filepat.zi shell_std.zi shell_string.zi shell_expr.zi shell_small.zi shell_regexp.zi shell_regex.zi shell_csv.zi shell_sexpr.zi shell_sexprs.zi
-CMDZX=../taijios_args.zi ../taijios_io.zi ../taijios_process.zi ../taijios_namespace.zi ../taijios_clock.zi
+SHZX=sh.zi shell.zi shell_parse.zi shell_util.zi shell_filepat.zi shell_std.zi shell_string.zi shell_expr.zi shell_small.zi shell_regexp.zi shell_regex.zi shell_csv.zi shell_sexpr.zi shell_sexprs.zi shell_file2chan.zi
+CMDZX=../taijios_args.zi ../taijios_io.zi ../taijios_process.zi ../taijios_namespace.zi ../taijios_clock.zi ../taijios_file2chan.zi
 
 sh.zx:	$SHZX $CMDZX mkfile
 	zi2zx --root . --module-path .. --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --bind-host taijios_clock --entry sh:main -o $target sh.zi
