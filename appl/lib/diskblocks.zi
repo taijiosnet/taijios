@@ -1,0 +1,87 @@
+// Blocks of a scratch file handed out and taken back, as the Limbo
+// Diskblocks module did for Acme-style temporary storage. A block's
+// space is its size rounded up to the granule; a released block is kept
+// for the next request of the same rounded size, the latest release
+// first, and the file only grows. The caller does the reading and
+// writing at the addresses given.
+#import "std/vec";
+
+Block :: struct {
+    address: s64; // where the block starts in the file; -1 for no block
+    size: s64;    // bytes in use
+}
+
+Free :: struct {
+    bucket: s64;
+    address: s64;
+}
+
+Disk :: struct {
+    length: s64;     // bytes of the file handed out so far
+    granule: s64;
+    largest: s64;    // the largest block, a multiple of the granule
+    free: Vec(Free); // released blocks, oldest first
+}
+
+// A disk of blocks up to largest bytes; false when the granule is 0 or
+// does not divide largest.
+Init :: (disk: *Disk, granule: s64, largest: s64) -> bool {
+    if granule == 0 || largest % granule != 0 { return false }
+    disk.length = 0;
+    disk.granule = granule;
+    disk.largest = largest;
+    VecClear(disk.free);
+    return true;
+}
+
+// The space a block of n bytes takes, or -1 when n is too large.
+Space :: (disk: *Disk, n: s64) -> s64 {
+    if n > disk.largest { return -1 }
+    return n + (disk.granule - n % disk.granule) % disk.granule;
+}
+
+None :: () -> Block {
+    block: Block;
+    block.address = -1;
+    return block;
+}
+
+// A block for n bytes, or no block when n is larger than the largest.
+New :: (disk: *Disk, n: s64) -> Block {
+    space := Space(disk, n);
+    if space < 0 { return None() }
+    block: Block;
+    block.size = n;
+    bucket := space / disk.granule;
+    found: s64 = -1;
+    for i: 0..disk.free.count - 1 { if disk.free[i].bucket == bucket { found = i } }
+    if found < 0 {
+        block.address = disk.length;
+        disk.length += space;
+        return block;
+    }
+    block.address = disk.free[found].address;
+    for i: found..disk.free.count - 2 { disk.free[i] = disk.free[i + 1] }
+    unused VecResize(disk.free, disk.free.count - 1);
+    return block;
+}
+
+Release :: (disk: *Disk, block: Block) {
+    free: Free;
+    free.bucket = Space(disk, block.size) / disk.granule;
+    free.address = block.address;
+    VecPush(disk.free, free);
+}
+
+// The block to write n bytes to in place of block, which may be no
+// block: the same one when n takes the same space, else a new one after
+// releasing it. No block when n is too large, and block is then gone.
+ForWrite :: (disk: *Disk, block: Block, n: s64) -> Block {
+    if block.address >= 0 && Space(disk, block.size) == Space(disk, n) {
+        same := block;
+        same.size = n;
+        return same;
+    }
+    if block.address >= 0 { Release(disk, block) }
+    return New(disk, n);
+}

@@ -933,7 +933,7 @@ appl
 		dialog.b
 		dict.b
 		dis.b
-		diskblocks.b
+		diskblocks.zi
 		disks.b
 		dividers.b
 		ecmascript
@@ -1554,7 +1554,6 @@ dis
 		dialog.dis
 		dict.dis
 		dis.dis
-		diskblocks.dis
 		disks.dis
 		dividers.dis
 		drawmux.dis
@@ -2184,7 +2183,6 @@ module
 	dialog.m
 	dict.m
 	dis.m
-	diskblocks.m
 	disks.m
 	dividers.m
 	draw.m

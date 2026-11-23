@@ -53,10 +53,6 @@ getstring dialog
 prompt dialog
 dict dict
 dis dis
-block diskblocks
-disk diskblocks
-diskblocks diskblocks
-tempfile diskblocks
 chstext disks
 disk disks
 disks disks
