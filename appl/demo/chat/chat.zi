@@ -54,17 +54,19 @@ AppendLog :: (msg: string) -> bool {
 
 PollIncoming :: () -> bool {
     if !state.connected || msgs_fd < 0 { return false }
-    meta: [12]u8;
-    if IO.Stat(TextView(msgs_path), meta[:]) != 0 { return false }
-    size := Model.ParseFileSize(meta[:]);
-    if size <= state.read_offset { return false }
-    if IO.Seek(msgs_fd, state.read_offset, SEEK_START) < 0 { return false }
     buf: [4096]u8;
     changed := false;
-    while state.read_offset < size {
-        n := IO.Read(msgs_fd, buf[:]);
-        if n <= 0 { break }
-        state.read_offset += cast(s64)n;
+    while true {
+        n := IO.PollRead(msgs_fd, buf[:]);
+        if n == -2 { break }
+        if n <= 0 {
+            unused IO.Close(msgs_fd);
+            msgs_fd = -1;
+            state.connected = false;
+            unused AppendLog(Model.FormatStatus(false));
+            changed = true;
+            break;
+        }
         if !AppendLog(TextView(buf[:n])) { return false }
         changed = true;
     }
