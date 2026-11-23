@@ -1,0 +1,178 @@
+// Spree Bounce arena game engine, ported from appl/spree/engines/bounce.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+
+W :: 500;
+H :: 500;
+INSET :: 20;
+BATLEN :: 100;
+
+BounceMember :: struct {
+    member_id: s32;
+    score: s32;
+    bat_obj: s32;
+}
+
+BounceEngine :: struct {
+    arena_obj: s32;
+    members: [4]BounceMember;
+    member_count: s32;
+}
+
+ClientType :: () -> string { return "bounce" }
+MaxMembers :: () -> s32 { return 4 }
+
+Propose :: (count: s32) -> string {
+    if count < 2 { return "need at least two members" }
+    if count > 4 { return "too many members" }
+    return "";
+}
+
+AddLine :: (c: *Core.Clique, x1: s32, y1: s32, x2: s32, y2: s32, owner: string) -> s32 {
+    l := Core.CliqueNewObject(c, 0, Core.SetAll(), "line");
+    coords: Text;
+    Core.AppendInt(*coords, cast(s64)x1); unused BuilderAppend(coords.bytes, " ");
+    Core.AppendInt(*coords, cast(s64)y1); unused BuilderAppend(coords.bytes, " ");
+    Core.AppendInt(*coords, cast(s64)x2); unused BuilderAppend(coords.bytes, " ");
+    Core.AppendInt(*coords, cast(s64)y2);
+    Core.ObjSetAttr(c, l, "coords", TextView(coords), Core.SetAll());
+    ib: [24]u8;
+    Core.ObjSetAttr(c, l, "id", FormatInteger(cast(s64)l, ib[:]), Core.SetAll());
+    if owner.count > 0 { Core.ObjSetAttr(c, l, "owner", owner, Core.SetAll()) }
+    return l;
+}
+
+Init :: (e: *BounceEngine, c: *Core.Clique) {
+    e.member_count = 0;
+    // Arena walls with 20% center goals (0.0..0.4 and 0.6..1.0 on inset(20) = 20..480)
+    // Sides: left(20,20)-(20,480), right(480,20)-(480,480), top(20,20)-(480,20), bottom(20,480)-(480,480)
+    unused AddLine(c, 20, 20, 20, 204, "");
+    unused AddLine(c, 20, 296, 20, 480, "");
+    unused AddLine(c, 480, 20, 480, 204, "");
+    unused AddLine(c, 480, 296, 480, 480, "");
+    unused AddLine(c, 20, 20, 204, 20, "");
+    unused AddLine(c, 296, 20, 480, 20, "");
+    unused AddLine(c, 20, 480, 204, 480, "");
+    unused AddLine(c, 296, 480, 480, 480, "");
+    e.arena_obj = Core.CliqueNewObject(c, 0, Core.SetAll(), "arena");
+    Core.ObjSetAttr(c, e.arena_obj, "arenasize", "500 500", Core.SetAll());
+}
+
+Start :: (e: *BounceEngine, c: *Core.Clique, mids: []s32) {
+    colours: [4]string = .["blue", "orange", "yellow", "white"];
+    bat_x1: [4]s32 = .[70, 430, 106, 106];
+    bat_y1: [4]s32 = .[106, 106, 70, 430];
+    bat_x2: [4]s32 = .[70, 430, 394, 394];
+    bat_y2: [4]s32 = .[394, 394, 70, 430];
+    e.member_count = cast(s32)(ifx mids.count > 4 then 4 else mids.count);
+    for i: 0..cast(s64)e.member_count-1 {
+        mid := mids[i];
+        nm := TextView(c.members[mid].name);
+        bat := AddLine(c, bat_x1[i], bat_y1[i], bat_x2[i], bat_y2[i], nm);
+        Core.ObjSetAttr(c, bat, "pos", "10 110", Core.SetAll());
+        mk: Text; unused BuilderAppend(mk.bytes, "member"); Core.AppendInt(*mk, i);
+        mv: Text; unused BuilderAppend(mv.bytes, nm); unused BuilderAppend(mv.bytes, " "); unused BuilderAppend(mv.bytes, colours[i]);
+        Core.ObjSetAttr(c, e.arena_obj, TextView(mk), TextView(mv), Core.SetAll());
+        e.members[i] = .{member_id = mid, score = 0, bat_obj = bat};
+    }
+}
+
+Order :: (e: *BounceEngine, mid: s32) -> s32 {
+    for i: 0..cast(s64)e.member_count-1 {
+        if e.members[i].member_id == mid { return cast(s32)i }
+    }
+    return -1;
+}
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    neg := false;
+    i: s64 = 0;
+    if s.count > 0 && s[0] == 45 { neg = true; i = 1 }
+    while i < s.count {
+        ch := s[i];
+        if ch >= 48 && ch <= 57 { v = v * 10 + cast(s32)(ch - 48) }
+        else { break }
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+Command :: (e: *BounceEngine, c: *Core.Clique, mid: s32, cmd: string, now_ms: s64) -> string {
+    ord := Order(e, mid);
+    toks: [16]string;
+    nt: s32 = 0;
+    i: s64 = 0;
+    while i < cmd.count && nt < 16 {
+        while i < cmd.count && (cmd[i] == 32 || cmd[i] == 10 || cmd[i] == 13) { i += 1 }
+        if i >= cmd.count { break }
+        start := i;
+        while i < cmd.count && cmd[i] != 32 && cmd[i] != 10 && cmd[i] != 13 { i += 1 }
+        toks[nt] = cmd[start:i];
+        nt += 1;
+    }
+    if nt == 0 { return "unknown command" }
+    if toks[0] == "newball" {
+        if nt != 7 { return "bad command usage" }
+        bat_id := Core.MemberObj(*c.members[mid], ParseInt(toks[1]));
+        if bat_id < 0 { return "no such bat" }
+        ball := Core.CliqueNewObject(c, 0, Core.SetAll(), "ball");
+        st: Text;
+        Core.AppendInt(*st, cast(s64)bat_id); unused BuilderAppend(st.bytes, " ");
+        Core.AppendInt(*st, cast(s64)ord);
+        for k: 2..6 { unused BuilderAppend(st.bytes, " "); unused BuilderAppend(st.bytes, toks[k]) }
+        unused BuilderAppend(st.bytes, " "); Core.AppendInt(*st, now_ms);
+        Core.ObjSetAttr(c, ball, "state", TextView(st), Core.SetAll());
+        return "";
+    }
+    if toks[0] == "lost" {
+        if nt != 2 { return "bad command usage" }
+        oid := Core.MemberObj(*c.members[mid], ParseInt(toks[1]));
+        if oid < 0 { return "bad object" }
+        tmp: Text;
+        if !Core.ObjGetAttr(c, oid, "state", *tmp) { return "can only lose balls" }
+        Core.ObjDelete(c, oid);
+        return "";
+    }
+    if toks[0] == "state" {
+        if nt != 10 { return "bad command usage" }
+        if ord < 0 { return "you are not playing" }
+        oid := Core.MemberObj(*c.members[mid], ParseInt(toks[1]));
+        if oid < 0 { return "object does not exist" }
+        st: Text;
+        for k: 2..9 {
+            if k > 2 { unused BuilderAppend(st.bytes, " ") }
+            unused BuilderAppend(st.bytes, toks[k]);
+        }
+        Core.ObjSetAttr(c, oid, "state", TextView(st), Core.SetAll());
+        e.members[ord].score += 1;
+        sk: Text; unused BuilderAppend(sk.bytes, "score"); Core.AppendInt(*sk, cast(s64)ord);
+        sb: [24]u8;
+        Core.ObjSetAttr(c, e.arena_obj, TextView(sk), FormatInteger(cast(s64)e.members[ord].score, sb[:]), Core.SetAll());
+        return "";
+    }
+    if toks[0] == "bat" {
+        if nt != 2 || ord < 0 { return "bad command usage" }
+        s1 := ParseInt(toks[1]);
+        pos: Text;
+        unused BuilderAppend(pos.bytes, toks[1]);
+        unused BuilderAppend(pos.bytes, " ");
+        Core.AppendInt(*pos, cast(s64)(s1 + BATLEN));
+        Core.ObjSetAttr(c, e.members[ord].bat_obj, "pos", TextView(pos), Core.SetAll());
+        return "";
+    }
+    if toks[0] == "time" {
+        if nt != 2 { return "bad command usage" }
+        tm := cast(s64)ParseInt(toks[1]);
+        msg: Text;
+        unused BuilderAppend(msg.bytes, "time ");
+        Core.AppendInt(*msg, now_ms - tm);
+        unused BuilderAppend(msg.bytes, " ");
+        unused BuilderAppend(msg.bytes, toks[1]);
+        empty_objs: [0]s32;
+        Core.CliqueAction(c, TextView(msg), empty_objs[:], "", Core.SetSingleton(mid));
+        return "";
+    }
+    return "bad command";
+}

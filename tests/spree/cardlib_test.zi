@@ -1,0 +1,68 @@
+// Table-driven unit tests for cardlib, tricks, and bounce engine.
+#import "std/vec"
+using Core :: #import "spree_core"
+using CL :: #import "cardlib"
+using Tr :: #import "tricks"
+using Bnc :: #import "bounce"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    // 1. Cardlib + Tricks test
+    c: Core.Clique;
+    Core.CliqueInit(*c, 1, 0, "Alice");
+    m0 := Core.CliqueAddMember(*c, "Alice");
+    m1 := Core.CliqueAddMember(*c, "Bob");
+    c.started = true;
+
+    cs: CL.CardState;
+    CL.Init(*cs);
+    o0 := CL.JoinMember(*cs, *c, m0);
+    o1 := CL.JoinMember(*cs, *c, m1);
+    Expect(o0 == 0 && o1 == 1, "JoinMember 0, 1");
+    CL.MakeTable(*cs, *c, "");
+
+    deck := CL.NewStack(*c, 0, -1, .{style = "pile", maxcards = 52, conceal = false, title = "deck"});
+    CL.MakeCards(*c, deck, 0, 13, "rear");
+    Expect(c.objects[deck].children.count == 52, "52 cards created");
+    CL.Shuffle(*c, deck);
+    Expect(c.objects[deck].children.count == 52, "52 cards after shuffle");
+
+    h0 := CL.NewStack(*c, 0, m0, .{style = "hand", maxcards = 13, conceal = true, title = "h0"});
+    h1 := CL.NewStack(*c, 0, m1, .{style = "hand", maxcards = 13, conceal = true, title = "h1"});
+    pile := CL.NewStack(*c, 0, -1, .{style = "pile", maxcards = 4, conceal = false, title = "trick"});
+    hands: [2]s32 = .[h0, h1];
+    CL.Deal(*c, deck, 5, hands[:], 0);
+    Expect(c.objects[h0].children.count == 5 && c.objects[h1].children.count == 5, "dealt 5 each");
+    Expect(c.objects[deck].children.count == 42, "42 left in deck");
+
+    t: Tr.Trick;
+    Tr.InitTrick(*t, pile, CL.SPADES, hands[:]);
+    e1 := Tr.PlayCard(*t, *c, 0, 0);
+    Expect(e1 == "" && t.winner == 0 && c.objects[pile].children.count == 1, "first trick card played");
+
+    // 2. Bounce engine test
+    bc: Core.Clique;
+    Core.CliqueInit(*bc, 2, 0, "Alice");
+    bm0 := Core.CliqueAddMember(*bc, "Alice");
+    bm1 := Core.CliqueAddMember(*bc, "Bob");
+    bc.started = true;
+    be: Bnc.BounceEngine;
+    Bnc.Init(*be, *bc);
+    bmids: [2]s32 = .[bm0, bm1];
+    Bnc.Start(*be, *bc, bmids[:]);
+    Expect(Bnc.Command(*be, *bc, bm0, "bat 50", 1000) == "", "bounce bat cmd");
+    Expect(Bnc.Command(*be, *bc, bm0, "time 900", 1000) == "", "bounce time cmd");
+    Expect(Bnc.Propose(1) == "need at least two members", "bounce propose min");
+    Expect(Bnc.Propose(2) == "", "bounce propose ok");
+
+    if failures == 0 { print("cardlib_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

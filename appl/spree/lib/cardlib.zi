@@ -1,0 +1,502 @@
+// Spree card-game layout, deck, stack, selection, and player library,
+// ported from appl/spree/lib/cardlib.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using ObjStore :: #import "objstore"
+
+// Pack and facing directions
+dTOP :: 0;
+dLEFT :: 1;
+dBOTTOM :: 2;
+dRIGHT :: 3;
+dMASK :: 7;
+dSHIFT :: 0;
+
+// Anchor positions
+aSHIFT :: 4;
+aMASK :: 0xf0;
+aCENTRE :: 0x00;
+aUPPERCENTRE :: 0x10;
+aUPPERLEFT :: 0x20;
+aCENTRELEFT :: 0x30;
+aLOWERLEFT :: 0x40;
+aLOWERCENTRE :: 0x50;
+aLOWERRIGHT :: 0x60;
+aCENTRERIGHT :: 0x70;
+aUPPERRIGHT :: 0x80;
+
+// Orientations
+oMASK :: 0xf00;
+oSHIFT :: 8;
+oRIGHT :: 0x000;
+oUP :: 0x100;
+oLEFT :: 0x200;
+oDOWN :: 0x300;
+
+EXPAND :: 0x1000;
+FILLSHIFT :: 13;
+FILLX :: 0x2000;
+FILLY :: 0x4000;
+FILLMASK :: 0x6000;
+
+CLUBS :: 0;
+DIAMONDS :: 1;
+HEARTS :: 2;
+SPADES :: 3;
+
+Stackspec :: struct {
+    style: string;
+    maxcards: s32;
+    conceal: bool;
+    title: string;
+}
+
+Card :: struct {
+    suit: s32;
+    number: s32;
+    face: s32;
+}
+
+Selection :: struct {
+    stack_id: s32; // -1 if none
+    owner_cid: s32;
+    isrange: bool;
+    start: s32;
+    end: s32;
+    indices: Vec(s32);
+}
+
+Cmember :: struct {
+    ord: s32;
+    cid: s32;
+    member_id: s32;
+    obj_id: s32;
+    layout_id: s32;
+    sel: Selection;
+    alive: bool;
+}
+
+LayEntry :: struct {
+    name: Text;
+    layout_id: s32;
+    lay_obj: s32;
+    is_frame: bool;
+    facing: s32;
+    target_obj: s32;
+    packopts: s32;
+}
+
+CardState :: struct {
+    cmembers: Vec(Cmember);
+    layouts: Vec(LayEntry);
+    store: ObjStore.Store;
+    maxlayid: s32;
+    cmemberid: s32;
+}
+
+Init :: (cs: *CardState) {
+    unused VecResize(cs.cmembers, 0);
+    unused VecResize(cs.layouts, 0);
+    unused VecResize(cs.store.entries, 0);
+    cs.maxlayid = 1;
+    cs.cmemberid = 1;
+}
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    neg := false;
+    i: s64 = 0;
+    if s.count > 0 && s[0] == 45 { neg = true; i = 1 }
+    while i < s.count {
+        c := s[i];
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        else { break }
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+PackOptsFacing :: (opts: s32, facing: s32) -> s32 {
+    if facing == dTOP { return opts }
+    nopts: s32 = 0;
+    nopts = nopts | ((facing + (opts & dMASK)) % 4);
+    nopts = nopts | (((facing + ((opts & oMASK) >> oSHIFT)) % 4) << oSHIFT);
+    a := opts & aMASK;
+    if a != aCENTRE {
+        a = ((((a >> aSHIFT) - 1 + facing * 2) % 8) + 1) << aSHIFT;
+    }
+    nopts = nopts | a;
+    if (facing % 2) != 0 {
+        if (opts & FILLX) != 0 { nopts = nopts | FILLY }
+        if (opts & FILLY) != 0 { nopts = nopts | FILLX }
+    } else {
+        nopts = nopts | (opts & (FILLX | FILLY));
+    }
+    nopts = nopts | (opts & EXPAND);
+    return nopts;
+}
+
+PackOptsToStr :: (opts: s32, out: *Text) {
+    sides: [4]string = .["top", "left", "bottom", "right"];
+    anchors: [9]string = .["centre", "n", "nw", "w", "sw", "s", "se", "e", "ne"];
+    orients: [4]string = .["right", "up", "left", "down"];
+    fills: [4]string = .["none", "x", "y", "both"];
+
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, orients[(opts & oMASK) >> oSHIFT]);
+    unused BuilderAppend(out.bytes, " -side ");
+    unused BuilderAppend(out.bytes, sides[opts & dMASK]);
+    if (opts & aMASK) != aCENTRE {
+        unused BuilderAppend(out.bytes, " -anchor ");
+        unused BuilderAppend(out.bytes, anchors[(opts & aMASK) >> aSHIFT]);
+    }
+    if (opts & EXPAND) != 0 { unused BuilderAppend(out.bytes, " -expand 1") }
+    if (opts & FILLMASK) != 0 {
+        unused BuilderAppend(out.bytes, " -fill ");
+        unused BuilderAppend(out.bytes, fills[(opts & FILLMASK) >> FILLSHIFT]);
+    }
+}
+
+NewLayout :: (cs: *CardState, c: *Core.Clique, parent_id: s32, vis: Core.Set) -> s32 {
+    lay := Core.CliqueNewObject(c, parent_id, vis, "layout");
+    root_frame := Core.CliqueNewObject(c, lay, Core.SetAll(), "layframe");
+    opts: s32 = dTOP | EXPAND | FILLX | FILLY;
+    ostr: Text;
+    PackOptsToStr(opts, *ostr);
+    Core.ObjSetAttr(c, root_frame, "opts", TextView(ostr), Core.SetAll());
+    idx := cs.layouts.count;
+    unused VecResize(cs.layouts, idx + 1);
+    Core.SetText(*cs.layouts[idx].name, "");
+    cs.layouts[idx].layout_id = lay;
+    cs.layouts[idx].lay_obj = root_frame;
+    cs.layouts[idx].is_frame = true;
+    cs.layouts[idx].facing = dTOP;
+    cs.layouts[idx].target_obj = -1;
+    cs.layouts[idx].packopts = opts;
+    return lay;
+}
+
+AddLay :: (cs: *CardState, c: *Core.Clique, name: string, parent: string, layout_id: s32,
+           packopts: s32, is_frame: bool, facing: s32, target_obj: s32) {
+    n_existing := cs.layouts.count;
+    for i: 0..n_existing-1 {
+        if TextView(cs.layouts[i].name) != parent { continue }
+        if layout_id >= 0 && cs.layouts[i].layout_id != layout_id { continue }
+        if !cs.layouts[i].is_frame { continue }
+        pfacing := cs.layouts[i].facing;
+        play_obj := cs.layouts[i].lay_obj;
+        play_id := cs.layouts[i].layout_id;
+        nopts := PackOptsFacing(packopts, pfacing);
+        oid: s32 = -1;
+        nfacing := facing;
+        if is_frame {
+            oid = Core.CliqueNewObject(c, play_obj, Core.SetAll(), "layframe");
+            nfacing = (facing + pfacing) % 4;
+        } else {
+            oid = Core.CliqueNewObject(c, play_obj, Core.SetAll(), "layobj");
+            lid: Text;
+            if !Core.ObjGetAttr(c, target_obj, "layid", *lid) || lid.bytes.count == 0 {
+                Core.AppendInt(*lid, cast(s64)cs.maxlayid);
+                cs.maxlayid += 1;
+                Core.ObjSetAttr(c, target_obj, "layid", TextView(lid), Core.SetAll());
+            }
+            Core.ObjSetAttr(c, oid, "layid", TextView(lid), Core.SetAll());
+        }
+        ostr: Text;
+        PackOptsToStr(nopts, *ostr);
+        Core.ObjSetAttr(c, oid, "opts", TextView(ostr), Core.SetAll());
+        if name.count > 0 {
+            idx := cs.layouts.count;
+            unused VecResize(cs.layouts, idx + 1);
+            Core.SetText(*cs.layouts[idx].name, name);
+            cs.layouts[idx].layout_id = play_id;
+            cs.layouts[idx].lay_obj = oid;
+            cs.layouts[idx].is_frame = is_frame;
+            cs.layouts[idx].facing = nfacing;
+            cs.layouts[idx].target_obj = target_obj;
+            cs.layouts[idx].packopts = nopts;
+        }
+    }
+}
+
+AddLayFrame :: (cs: *CardState, c: *Core.Clique, name: string, parent: string, layout_id: s32, packopts: s32, facing: s32) {
+    AddLay(cs, c, name, parent, layout_id, packopts, true, facing, -1);
+}
+
+AddLayObj :: (cs: *CardState, c: *Core.Clique, name: string, parent: string, layout_id: s32, packopts: s32, obj_id: s32) {
+    AddLay(cs, c, name, parent, layout_id, packopts, false, dTOP, obj_id);
+}
+
+JoinMember :: (cs: *CardState, c: *Core.Clique, member_id: s32) -> s32 {
+    ord := cast(s32)cs.cmembers.count;
+    unused VecResize(cs.cmembers, cast(s64)ord + 1);
+    cid := cs.cmemberid;
+    cs.cmemberid += 1;
+    obj := Core.CliqueNewObject(c, 0, Core.SetAll(), "member");
+    cbuf: [24]u8;
+    cids := FormatInteger(cast(s64)cid, cbuf[:]);
+    Core.ObjSetAttr(c, obj, "id", cids, Core.SetAll());
+    Core.ObjSetAttr(c, obj, "name", TextView(c.members[member_id].name), Core.SetAll());
+    Core.ObjSetAttr(c, obj, "you", cids, Core.SetSingleton(member_id));
+    Core.ObjSetAttr(c, obj, "cliquetitle", TextView(c.fname), Core.SetAll());
+    lay := NewLayout(cs, c, obj, Core.SetSingleton(member_id));
+
+    cp := *cs.cmembers[ord];
+    cp.ord = ord;
+    cp.cid = cid;
+    cp.member_id = member_id;
+    cp.obj_id = obj;
+    cp.layout_id = lay;
+    cp.sel.stack_id = -1;
+    cp.sel.owner_cid = cid;
+    cp.sel.isrange = true;
+    cp.sel.start = 0;
+    cp.sel.end = 0;
+    cp.alive = true;
+    return ord;
+}
+
+FindMember :: (cs: *CardState, member_id: s32) -> s32 {
+    for i: 0..cs.cmembers.count-1 {
+        if cs.cmembers[i].alive && cs.cmembers[i].member_id == member_id { return cast(s32)i }
+    }
+    return -1;
+}
+
+FindByCid :: (cs: *CardState, cid: s32) -> s32 {
+    for i: 0..cs.cmembers.count-1 {
+        if cs.cmembers[i].alive && cs.cmembers[i].cid == cid { return cast(s32)i }
+    }
+    return -1;
+}
+
+NewStack :: (c: *Core.Clique, parent_id: s32, owner_member: s32, spec: Stackspec) -> s32 {
+    vis := Core.SetAll();
+    if spec.conceal {
+        vis = Core.SetNone();
+        if owner_member >= 0 { vis = Core.SetAdd(vis, owner_member) }
+    }
+    o := Core.CliqueNewObject(c, parent_id, vis, "stack");
+    buf: [24]u8;
+    Core.ObjSetAttr(c, o, "maxcards", FormatInteger(cast(s64)spec.maxcards, buf[:]), Core.SetAll());
+    Core.ObjSetAttr(c, o, "style", spec.style, Core.SetAll());
+    if spec.title.count > 0 {
+        Core.ObjSetAttr(c, o, "title", spec.title, Core.SetAll());
+    }
+    return o;
+}
+
+SetFace :: (c: *Core.Clique, card_id: s32, face: s32) {
+    buf: [16]u8;
+    Core.ObjSetAttr(c, card_id, "face", FormatInteger(cast(s64)face, buf[:]), Core.SetAll());
+    // Update number visibility
+    o := *c.objects[card_id];
+    for i: 0..o.attrs.count-1 {
+        if TextView(o.attrs[i].name) == "number" {
+            o.attrs[i].visibility = ifx face != 0 then Core.SetAll() else Core.SetNone();
+            break;
+        }
+    }
+}
+
+MakeCard :: (c: *Core.Clique, deck_id: s32, suit: s32, num: s32, face: s32, rear: string) -> s32 {
+    card := Core.CliqueNewObject(c, deck_id, Core.SetNone(), "card");
+    b1: [16]u8; b2: [16]u8;
+    Core.ObjSetAttr(c, card, "face", FormatInteger(cast(s64)face, b1[:]), Core.SetAll());
+    vis := ifx face != 0 then Core.SetAll() else Core.SetNone();
+    Core.ObjSetAttr(c, card, "number", FormatInteger(cast(s64)(num * 4 + suit), b2[:]), vis);
+    if rear.count > 0 { Core.ObjSetAttr(c, card, "rear", rear, Core.SetAll()) }
+    return card;
+}
+
+MakeCards :: (c: *Core.Clique, deck_id: s32, start: s32, end: s32, rear: string) {
+    for i: start..end-1 {
+        for suit: 0..3 {
+            unused MakeCard(c, deck_id, cast(s32)suit, i, 0, rear);
+        }
+    }
+}
+
+GetCard :: (c: *Core.Clique, card_id: s32) -> Card {
+    ns: Text; fs: Text;
+    unused Core.ObjGetAttr(c, card_id, "number", *ns);
+    unused Core.ObjGetAttr(c, card_id, "face", *fs);
+    n := ParseInt(TextView(ns));
+    return .{suit = n % 4, number = n / 4, face = ParseInt(TextView(fs))};
+}
+
+Shuffle :: (c: *Core.Clique, stack_id: s32) {
+    ovis := c.objects[stack_id].visibility;
+    Core.ObjSetVisibility(c, stack_id, Core.SetNone());
+    n := c.objects[stack_id].children.count;
+    for i: 0..n-1 {
+        j := i + cast(s64)Core.CliqueRand(c, cast(s32)(n - i));
+        tmp := c.objects[stack_id].children[i];
+        c.objects[stack_id].children[i] = c.objects[stack_id].children[j];
+        c.objects[stack_id].children[j] = tmp;
+    }
+    Core.ObjSetVisibility(c, stack_id, ovis);
+}
+
+Deal :: (c: *Core.Clique, deck_id: s32, n: s32, stacks: []s32, first: s32) {
+    ncards := cast(s32)c.objects[deck_id].children.count;
+    nstacks := cast(s32)stacks.count;
+    if nstacks <= 0 { return }
+    per := n;
+    leftover: s32 = 0;
+    if n * nstacks > ncards {
+        per = ncards / nstacks;
+        leftover = ncards % nstacks;
+    }
+    for i: 0..cast(s64)nstacks-1 {
+        cnt := per;
+        if leftover > 0 { cnt += 1; leftover -= 1 }
+        dst := stacks[(cast(s64)first + i) % stacks.count];
+        dst_len := cast(s32)c.objects[dst].children.count;
+        Core.ObjTransfer(c, deck_id, ncards - cnt, ncards, dst, dst_len);
+        ns: Text;
+        cur_n: s32 = 0;
+        if Core.ObjGetAttr(c, dst, "n", *ns) { cur_n = ParseInt(TextView(ns)) }
+        nb: [24]u8;
+        Core.ObjSetAttr(c, dst, "n", FormatInteger(cast(s64)(cur_n + cnt), nb[:]), Core.SetAll());
+        new_len := c.objects[dst].children.count;
+        for j: new_len - cast(s64)cnt..new_len-1 {
+            SetFace(c, c.objects[dst].children[j], 1);
+        }
+        ncards -= cnt;
+    }
+}
+
+Discard :: (c: *Core.Clique, stk_id: s32, pile_id: s32, facedown: bool) {
+    n := cast(s32)c.objects[stk_id].children.count;
+    if facedown {
+        for i: 0..cast(s64)n-1 {
+            SetFace(c, c.objects[stk_id].children[i], 0);
+        }
+    }
+    Core.ObjTransfer(c, stk_id, 0, n, pile_id, cast(s32)c.objects[pile_id].children.count);
+}
+
+Flip :: (c: *Core.Clique, stack_id: s32) {
+    ovis := c.objects[stack_id].visibility;
+    Core.ObjSetVisibility(c, stack_id, Core.SetNone());
+    n := c.objects[stack_id].children.count;
+    m := n / 2;
+    for i: 0..m-1 {
+        j := n - i - 1;
+        tmp := c.objects[stack_id].children[i];
+        c.objects[stack_id].children[i] = c.objects[stack_id].children[j];
+        c.objects[stack_id].children[j] = tmp;
+    }
+    for i: 0..n-1 {
+        cid := c.objects[stack_id].children[i];
+        card := GetCard(c, cid);
+        SetFace(c, cid, ifx card.face == 0 then 1 else 0);
+    }
+    Core.ObjSetVisibility(c, stack_id, ovis);
+}
+
+SyncSel :: (cs: *CardState, c: *Core.Clique, sel: *Selection) {
+    if sel.stack_id < 0 { return }
+    s: Text;
+    if sel.isrange {
+        if sel.end > sel.start {
+            Core.AppendInt(*s, cast(s64)sel.start);
+            unused BuilderAppend(s.bytes, " - ");
+            Core.AppendInt(*s, cast(s64)sel.end);
+        }
+    } else if sel.indices.count > 0 {
+        for i: 0..sel.indices.count-1 {
+            if i > 0 { unused BuilderAppend(s.bytes, " ") }
+            Core.AppendInt(*s, cast(s64)sel.indices[i]);
+        }
+    }
+    if s.bytes.count > 0 {
+        ob: [24]u8;
+        Core.ObjSetAttr(c, sel.stack_id, "owner", FormatInteger(cast(s64)sel.owner_cid, ob[:]), Core.SetAll());
+    } else {
+        Core.ObjSetAttr(c, sel.stack_id, "owner", "", Core.SetAll());
+    }
+    cidx := FindByCid(cs, sel.owner_cid);
+    if cidx >= 0 {
+        vis := Core.SetSingleton(cs.cmembers[cidx].member_id);
+        Core.ObjSetAttr(c, sel.stack_id, "sel", TextView(s), vis);
+    }
+}
+
+SelSet :: (cs: *CardState, c: *Core.Clique, sel: *Selection, stack_id: s32) {
+    if sel.stack_id == stack_id { return }
+    if sel.stack_id >= 0 {
+        Core.ObjSetAttr(c, sel.stack_id, "owner", "", Core.SetAll());
+    }
+    sel.stack_id = stack_id;
+    sel.isrange = true;
+    sel.start = 0;
+    sel.end = 0;
+    unused VecResize(sel.indices, 0);
+    SyncSel(cs, c, sel);
+}
+
+SelSetRange :: (cs: *CardState, c: *Core.Clique, sel: *Selection, start: s32, end: s32) {
+    sel.isrange = true;
+    sel.start = start;
+    sel.end = end;
+    unused VecResize(sel.indices, 0);
+    SyncSel(cs, c, sel);
+}
+
+SelIsEmpty :: (sel: *Selection) -> bool {
+    if sel.stack_id < 0 { return true }
+    if sel.isrange { return sel.start == sel.end }
+    return sel.indices.count == 0;
+}
+
+SelTransfer :: (cs: *CardState, c: *Core.Clique, sel: *Selection, dst_id: s32, index: s32) {
+    if SelIsEmpty(sel) { return }
+    src := sel.stack_id;
+    if sel.isrange {
+        s := sel.start;
+        e := sel.end;
+        SelSet(cs, c, sel, -1);
+        Core.ObjTransfer(c, src, s, e, dst_id, index);
+    }
+}
+
+MakeTable :: (cs: *CardState, c: *Core.Clique, parent: string) {
+    plcount := cast(s32)cs.cmembers.count;
+    if plcount < 1 || plcount > 4 { return }
+    for i: 0..cast(s64)plcount-1 {
+        lay := cs.cmembers[i].layout_id;
+        // Player seats + public center matching cardlib.b table[]
+        if plcount == 1 {
+            AddLayFrame(cs, c, "@p0", parent, lay, dBOTTOM | FILLX, dTOP);
+            AddLayFrame(cs, c, "p0", "@p0", lay, dBOTTOM, dTOP);
+            AddLayFrame(cs, c, "@public", parent, lay, dTOP | EXPAND, dTOP);
+            AddLayFrame(cs, c, "public", "@public", lay, dBOTTOM, dTOP);
+        } else if plcount == 2 {
+            p0: Text; p1: Text;
+            unused BuilderAppend(p0.bytes, "p"); Core.AppendInt(*p0, i);
+            unused BuilderAppend(p1.bytes, "p"); Core.AppendInt(*p1, (i + 1) % 2);
+            ap0: Text; unused BuilderAppend(ap0.bytes, "@"); unused BuilderAppend(ap0.bytes, TextView(p0));
+            ap1: Text; unused BuilderAppend(ap1.bytes, "@"); unused BuilderAppend(ap1.bytes, TextView(p1));
+            AddLayFrame(cs, c, TextView(ap0), parent, lay, dBOTTOM | FILLX, dTOP);
+            AddLayFrame(cs, c, TextView(p0), TextView(ap0), lay, dBOTTOM, dTOP);
+            AddLayFrame(cs, c, TextView(ap1), parent, lay, dTOP | FILLX, dTOP);
+            AddLayFrame(cs, c, TextView(p1), TextView(ap1), lay, dTOP, dBOTTOM);
+            AddLayFrame(cs, c, "@public", parent, lay, dTOP | EXPAND, dTOP);
+            AddLayFrame(cs, c, "public", "@public", lay, dBOTTOM, dTOP);
+        } else {
+            for j: 0..cast(s64)plcount-1 {
+                pn: Text; unused BuilderAppend(pn.bytes, "p"); Core.AppendInt(*pn, (j + i) % cast(s64)plcount);
+                apn: Text; unused BuilderAppend(apn.bytes, "@"); unused BuilderAppend(apn.bytes, TextView(pn));
+                outer: s32 = ifx j == 0 then dBOTTOM | FILLX else ifx j == 1 then dLEFT | FILLY else ifx j == 2 then dTOP | FILLX else dRIGHT | FILLY;
+                facing: s32 = ifx j == 0 then dTOP else ifx j == 1 then dRIGHT else ifx j == 2 then dBOTTOM else dLEFT;
+                AddLayFrame(cs, c, TextView(apn), parent, lay, outer, dTOP);
+                AddLayFrame(cs, c, TextView(pn), TextView(apn), lay, outer & dMASK, facing);
+            }
+            AddLayFrame(cs, c, "@public", parent, lay, dRIGHT | EXPAND, dTOP);
+            AddLayFrame(cs, c, "public", "@public", lay, dBOTTOM, dTOP);
+        }
+    }
+}

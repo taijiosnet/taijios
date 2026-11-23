@@ -1,0 +1,80 @@
+// Spree trick-taking card game helper, ported from appl/spree/lib/tricks.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using CL :: #import "cardlib"
+
+Trick :: struct {
+    trumps: s32;
+    winner: s32;
+    start_suit: s32;
+    start_num: s32;
+    high_suit: s32;
+    high_num: s32;
+    pile_id: s32;
+    hands: [8]s32;
+    hand_count: s32;
+    rank: [13]s32;
+}
+
+InitTrick :: (t: *Trick, pile_id: s32, trumps: s32, hands: []s32) {
+    t.trumps = trumps;
+    t.winner = -1;
+    t.start_suit = -1;
+    t.start_num = -1;
+    t.high_suit = -1;
+    t.high_num = -1;
+    t.pile_id = pile_id;
+    t.hand_count = cast(s32)(ifx hands.count > 8 then 8 else hands.count);
+    for i: 0..cast(s64)t.hand_count-1 { t.hands[i] = hands[i] }
+    def: [13]s32 = .[12, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+    for i: 0..12 { t.rank[i] = def[i] }
+}
+
+ContainsSuit :: (c: *Core.Clique, stack_id: s32, suit: s32) -> bool {
+    o := *c.objects[stack_id];
+    for i: 0..o.children.count-1 {
+        card := CL.GetCard(c, o.children[i]);
+        if card.suit == suit { return true }
+    }
+    return false;
+}
+
+PlayCard :: (t: *Trick, c: *Core.Clique, ord: s32, idx: s32) -> string {
+    if ord < 0 || ord >= t.hand_count { return "invalid player" }
+    stack_id := t.hands[ord];
+    if idx < 0 || cast(s64)idx >= c.objects[stack_id].children.count {
+        return "invalid card to play";
+    }
+    card := CL.GetCard(c, c.objects[stack_id].children[idx]);
+    rnum := t.rank[card.number];
+    if c.objects[t.pile_id].children.count == 0 {
+        t.winner = ord;
+        t.start_suit = card.suit;
+        t.start_num = rnum;
+        t.high_suit = card.suit;
+        t.high_num = rnum;
+    } else {
+        if card.suit != t.start_suit {
+            if ContainsSuit(c, stack_id, t.start_suit) {
+                return "you must play the suit that was led";
+            }
+            if card.suit == t.trumps && (t.high_suit != t.trumps || rnum > t.high_num) {
+                t.high_suit = card.suit;
+                t.high_num = rnum;
+                t.winner = ord;
+            }
+        } else if card.suit == t.high_suit && rnum > t.high_num {
+            t.high_suit = card.suit;
+            t.high_num = rnum;
+            t.winner = ord;
+        }
+    }
+    Core.ObjTransfer(c, stack_id, idx, idx + 1, t.pile_id, cast(s32)c.objects[t.pile_id].children.count);
+    ns: Text;
+    cur_n: s32 = 0;
+    if Core.ObjGetAttr(c, stack_id, "n", *ns) { cur_n = CL.ParseInt(TextView(ns)) }
+    nb: [24]u8;
+    Core.ObjSetAttr(c, stack_id, "n", FormatInteger(cast(s64)(cur_n - 1), nb[:]), Core.SetAll());
+    return "";
+}
