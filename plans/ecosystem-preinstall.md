@@ -212,6 +212,7 @@ Parallel groups: **U** (Ziran upstream; one lane, ordered), **K** (Kryon upstrea
 - Test: `make -C ... check CHECK_FILTER=lowered` and the verifier cases that list the rejected subset.
 - Done: the feature table row for pointer-sized scalars changes with a fixture that exercises it.
 - Blocks: U4.
+- Confirmed failing case (root coordinator, 2026-11-23): `Add :: (a: usize, b: usize) -> usize { return a + b }` with `main` calling it, built as `zi2zx --root . --entry main:main -o t.zx main.zi`, fails at the `usize` declaration with `this type has no portable lowered representation yet`. So the rejection happens before code generation, and the current message does not name a substitute.
 
 **U4. [upstream] Self-hosting S16-S18: the toolchain can be built as ZX.**
 - Behaviour: the remaining compiler C and drivers move to Ziran, and `make zx-toolchain` writes `zi2zx.zx` (and `ziran`'s command surface) that builds and runs a bundle inside a ZX host.
