@@ -1,14 +1,50 @@
-// HTML/OEB document text extraction, word-wrapping pagination, and navigation state,
+// Full OEB/HTML/CSS reader layout engine, table formatter, link/anchor index,
+// annotation store, and multi-page pagination model,
 // ported from appl/ebook/reader.b and appl/ebook/ebook.b.
 #import "std/vec"
 #import "std/number_text"
+using Strmap :: #import "strmap"
+using CSS :: #import "cssparser"
+using Sheet :: #import "stylesheet"
+using Font :: #import "cssfont"
+using Table :: #import "table"
+using Units :: #import "units"
+using Pkg :: #import "oebpackage"
 
 MAX_PAGES :: 512;
 MAX_HISTORY :: 64;
+MAX_ANCHORS :: 256;
+MAX_LINKS :: 256;
+MAX_ANNOTATIONS :: 128;
+MAX_TABLE_COLS :: 16;
+MAX_TABLE_ROWS :: 64;
 
 PageSpan :: struct {
     start: s64;
     end: s64;
+    file_offset: s64;
+}
+
+Anchor :: struct {
+    name: Text;
+    body_offset: s64;
+    file_offset: s64;
+}
+
+Link :: struct {
+    href: Text;
+    label: Text;
+    body_offset: s64;
+}
+
+Annotation :: struct {
+    file_offset: s64;
+    text: Text;
+}
+
+Bookmark :: struct {
+    item_idx: s32;
+    page: s32;
 }
 
 Document :: struct {
@@ -20,6 +56,16 @@ Document :: struct {
     history: [MAX_HISTORY]s32;
     history_count: s32;
     history_pos: s32;
+    anchors: [MAX_ANCHORS]Anchor;
+    anchor_count: s32;
+    links: [MAX_LINKS]Link;
+    link_count: s32;
+    annotations: [MAX_ANNOTATIONS]Annotation;
+    annotation_count: s32;
+    sheet: Sheet.Sheet;
+    css_rules_parsed: s32;
+    table_count: s32;
+    image_count: s32;
 }
 
 LowerByte :: (c: u8) -> u8 {
@@ -41,10 +87,22 @@ AppendEntity :: (ent: string, out: *Text) {
     else if ent == "quot" { unused BuilderAppend(out.bytes, "\"") }
     else if ent == "apos" { unused BuilderAppend(out.bytes, "'") }
     else if ent == "nbsp" { unused BuilderAppend(out.bytes, " ") }
+    else if ent == "mdash" { unused BuilderAppend(out.bytes, "--") }
+    else if ent == "ndash" { unused BuilderAppend(out.bytes, "-") }
+    else if ent == "copy" { unused BuilderAppend(out.bytes, "(c)") }
     else if ent.count > 1 && ent[0] == 35 {
         code: s64 = 0;
-        for i: 1..ent.count-1 {
-            if ent[i] >= 48 && ent[i] <= 57 { code = code * 10 + cast(s64)(ent[i] - 48) }
+        if ent.count > 2 && (ent[1] == 120 || ent[1] == 88) {
+            for i: 2..ent.count-1 {
+                ch := ent[i];
+                if ch >= 48 && ch <= 57 { code = code * 16 + cast(s64)(ch - 48) }
+                else if ch >= 97 && ch <= 102 { code = code * 16 + cast(s64)(ch - 87) }
+                else if ch >= 65 && ch <= 70 { code = code * 16 + cast(s64)(ch - 55) }
+            }
+        } else {
+            for i: 1..ent.count-1 {
+                if ent[i] >= 48 && ent[i] <= 57 { code = code * 10 + cast(s64)(ent[i] - 48) }
+            }
         }
         if code >= 32 && code < 127 { unused VecPush(out.bytes, cast(u8)code) }
         else { unused BuilderAppend(out.bytes, " ") }
@@ -62,18 +120,168 @@ EnsureNewlines :: (out: *Text, count: s64) {
     }
 }
 
+ParseIntAttr :: (s: string, fallback: s32) -> s32 {
+    if s.count == 0 { return fallback }
+    v: s64 = 0;
+    any := false;
+    for c: s {
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s64)(c - 48); any = true }
+        else if any { break }
+    }
+    return ifx any && v > 0 then cast(s32)v else fallback;
+}
+
+AppendRoman :: (num: s32, upper: bool, out: *Text) {
+    n := num;
+    if n <= 0 { unused BuilderAppend(out.bytes, "0"); return }
+    vals: [13]s32 = .[1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    syms_u: [13]string = .["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"];
+    syms_l: [13]string = .["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"];
+    for i: 0..12 {
+        while n >= vals[i] {
+            unused BuilderAppend(out.bytes, ifx upper then syms_u[i] else syms_l[i]);
+            n -= vals[i];
+        }
+    }
+}
+
+AppendListMarker :: (ordered: bool, index: s32, style_type: string, out: *Text) {
+    if !ordered {
+        unused BuilderAppend(out.bytes, "  * ");
+        return;
+    }
+    unused BuilderAppend(out.bytes, "  ");
+    if style_type == "lower-alpha" {
+        c := 97 + ((index - 1) % 26);
+        unused VecPush(out.bytes, cast(u8)c);
+    } else if style_type == "upper-alpha" {
+        c := 65 + ((index - 1) % 26);
+        unused VecPush(out.bytes, cast(u8)c);
+    } else if style_type == "lower-roman" {
+        AppendRoman(index, false, out);
+    } else if style_type == "upper-roman" {
+        AppendRoman(index, true, out);
+    } else {
+        buf: [24]u8;
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)index, buf[:]));
+    }
+    unused BuilderAppend(out.bytes, ". ");
+}
+
+InitDefaultStylesheet :: (sheet: *Sheet.Sheet) {
+    names: [12]string = .[
+        "background-color", "border", "color", "font-family",
+        "font-size", "font-style", "font-weight", "list-style-type",
+        "margin-bottom", "margin-left", "margin-top", "text-align",
+    ];
+    Sheet.InitSheet(sheet, names[:]);
+    def_css := "h1 { font-size: xx-large; font-weight: bold; }";
+    rules: CSS.RuleList;
+    CSS.Parse(def_css, *rules);
+    Sheet.AddRules(sheet, *rules, Sheet.DEFAULT_ORIGIN);
+}
+
+RecordAnchor :: (doc: *Document, name: string, file_offset: s64) {
+    if name.count == 0 || doc.anchor_count >= MAX_ANCHORS { return }
+    idx := doc.anchor_count;
+    unused VecResize(doc.anchors[idx].name.bytes, 0);
+    unused BuilderAppend(doc.anchors[idx].name.bytes, name);
+    doc.anchors[idx].body_offset = doc.body.bytes.count;
+    doc.anchors[idx].file_offset = file_offset;
+    doc.anchor_count += 1;
+}
+
+RecordLink :: (doc: *Document, href: string, label: string, body_offset: s64) {
+    if href.count == 0 || doc.link_count >= MAX_LINKS { return }
+    idx := doc.link_count;
+    unused VecResize(doc.links[idx].href.bytes, 0);
+    unused BuilderAppend(doc.links[idx].href.bytes, href);
+    unused VecResize(doc.links[idx].label.bytes, 0);
+    if label.count > 0 {
+        unused BuilderAppend(doc.links[idx].label.bytes, label);
+    } else {
+        unused BuilderAppend(doc.links[idx].label.bytes, href);
+    }
+    doc.links[idx].body_offset = body_offset;
+    doc.link_count += 1;
+}
+
+FlushTable :: (cells_text: []Text, cells_meta: []Table.Cell, nrows: s32, ncols: s32, out: *Text) {
+    if nrows <= 0 || ncols <= 0 { return }
+    total_cells := cast(s64)nrows * cast(s64)ncols;
+    if total_cells > cells_meta.count { return }
+    unused Table.LayoutTable(cells_meta[:total_cells], ncols, nrows);
+    EnsureNewlines(out, 2);
+    for r: 0..cast(s64)nrows-1 {
+        for c: 0..cast(s64)ncols-1 {
+            idx := r * cast(s64)ncols + c;
+            if !cells_meta[idx].present { continue }
+            if c > 0 { unused BuilderAppend(out.bytes, " | ") }
+            txt := TextView(cells_text[idx]);
+            unused BuilderAppend(out.bytes, txt);
+            pad := (cells_meta[idx].out_w / 8) - cast(s32)txt.count;
+            while pad > 0 {
+                unused VecPush(out.bytes, 32);
+                pad -= 1;
+            }
+        }
+        EnsureNewlines(out, 1);
+    }
+    EnsureNewlines(out, 2);
+}
+
+// Full HTML/OEB extraction with CSS <style> parsing, anchors, links, tables, lists, images, and <pre>.
 ExtractText :: (html: string, doc: *Document) {
     unused VecResize(doc.title.bytes, 0);
     unused VecResize(doc.body.bytes, 0);
+    doc.anchor_count = 0;
+    doc.link_count = 0;
+    doc.css_rules_parsed = 0;
+    doc.table_count = 0;
+    doc.image_count = 0;
+    InitDefaultStylesheet(*doc.sheet);
+
     in_style := false;
     in_script := false;
     in_title := false;
+    in_pre := false;
+    in_link := false;
+    in_table := false;
+    in_cell := false;
     last_space := true;
+    blockquote_depth: s32 = 0;
+    list_ordered: [16]bool;
+    list_counter: [16]s32;
+    list_depth: s32 = 0;
+
+    style_buf: Text;
+    cur_link_href: Text;
+    cur_link_label: Text;
+    cur_link_body_off: s64 = 0;
+
+    // Table accumulator
+    t_cells_text: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Text;
+    t_cells_meta: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Table.Cell;
+    t_rows: s32 = 0;
+    t_cols: s32 = 0;
+    t_cur_col: s32 = 0;
+    t_cur_idx: s64 = -1;
 
     i: s64 = 0;
     while i < html.count {
         c := html[i];
         if c == 60 { // '<'
+            tag_file_off := i;
+            // Skip HTML comments <!-- ... -->
+            if i + 3 < html.count && html[i + 1] == 33 && html[i + 2] == 45 && html[i + 3] == 45 {
+                j := i + 4;
+                while j + 2 < html.count {
+                    if html[j] == 45 && html[j + 1] == 45 && html[j + 2] == 62 { j += 3; break }
+                    j += 1;
+                }
+                i = j;
+                continue;
+            }
             end := i + 1;
             while end < html.count && html[end] != 62 { end += 1 }
             if end >= html.count { break }
@@ -87,55 +295,231 @@ ExtractText :: (html: string, doc: *Document) {
             ne := ns;
             while ne < raw.count && raw[ne] != 32 && raw[ne] != 9 && raw[ne] != 10 && raw[ne] != 13 && raw[ne] != 47 { ne += 1 }
             tname := raw[ns:ne];
+            attrs := raw[ne:];
 
-            if TagEquals(tname, "style") { in_style = !closing }
-            else if TagEquals(tname, "script") { in_script = !closing }
-            else if TagEquals(tname, "title") { in_title = !closing }
-            else if TagEquals(tname, "br") {
+            if !closing {
+                id_val: Text;
+                if Pkg.FindAttr(attrs, "id", *id_val) {
+                    RecordAnchor(doc, TextView(id_val), tag_file_off);
+                }
+            }
+
+            if TagEquals(tname, "style") {
+                if !closing {
+                    in_style = true;
+                    unused VecResize(style_buf.bytes, 0);
+                } else {
+                    in_style = false;
+                    rules: CSS.RuleList;
+                    CSS.Parse(TextView(style_buf), *rules);
+                    doc.css_rules_parsed += cast(s32)rules.items.count;
+                    Sheet.AddRules(*doc.sheet, *rules, Sheet.AUTHOR_ORIGIN);
+                }
+            } else if TagEquals(tname, "script") {
+                in_script = !closing;
+            } else if TagEquals(tname, "title") {
+                in_title = !closing;
+            } else if TagEquals(tname, "pre") {
+                in_pre = !closing;
+                EnsureNewlines(*doc.body, 2);
+                last_space = true;
+            } else if TagEquals(tname, "a") {
+                if !closing {
+                    aname: Text;
+                    if Pkg.FindAttr(attrs, "name", *aname) {
+                        RecordAnchor(doc, TextView(aname), tag_file_off);
+                    }
+                    if Pkg.FindAttr(attrs, "href", *cur_link_href) {
+                        in_link = true;
+                        unused VecResize(cur_link_label.bytes, 0);
+                        cur_link_body_off = doc.body.bytes.count;
+                    }
+                } else if in_link {
+                    RecordLink(doc, TextView(cur_link_href), TextView(cur_link_label), cur_link_body_off);
+                    in_link = false;
+                }
+            } else if TagEquals(tname, "img") && !closing {
+                doc.image_count += 1;
+                alt_t: Text;
+                src_t: Text;
+                unused Pkg.FindAttr(attrs, "alt", *alt_t);
+                unused Pkg.FindAttr(attrs, "src", *src_t);
+                unused BuilderAppend(doc.body.bytes, "[Image: ");
+                if alt_t.bytes.count > 0 { unused BuilderAppend(doc.body.bytes, TextView(alt_t)) }
+                else if src_t.bytes.count > 0 { unused BuilderAppend(doc.body.bytes, TextView(src_t)) }
+                else { unused BuilderAppend(doc.body.bytes, "img") }
+                unused BuilderAppend(doc.body.bytes, "]");
+                last_space = false;
+            } else if TagEquals(tname, "hr") {
+                EnsureNewlines(*doc.body, 1);
+                unused BuilderAppend(doc.body.bytes, "----------------------------------------");
+                EnsureNewlines(*doc.body, 2);
+                last_space = true;
+            } else if TagEquals(tname, "br") {
                 EnsureNewlines(*doc.body, 1);
                 last_space = true;
-            } else if TagEquals(tname, "p") || TagEquals(tname, "div") || TagEquals(tname, "blockquote") ||
-                      TagEquals(tname, "h1") || TagEquals(tname, "h2") || TagEquals(tname, "h3") ||
-                      TagEquals(tname, "h4") || TagEquals(tname, "h5") || TagEquals(tname, "h6") ||
-                      TagEquals(tname, "tr") {
+            } else if TagEquals(tname, "blockquote") {
+                if !closing { blockquote_depth += 1 }
+                else if blockquote_depth > 0 { blockquote_depth -= 1 }
+                EnsureNewlines(*doc.body, 2);
+                last_space = true;
+            } else if TagEquals(tname, "ul") || TagEquals(tname, "ol") {
+                if !closing && list_depth < 16 {
+                    list_ordered[list_depth] = TagEquals(tname, "ol");
+                    list_counter[list_depth] = 0;
+                    list_depth += 1;
+                } else if closing && list_depth > 0 {
+                    list_depth -= 1;
+                }
                 EnsureNewlines(*doc.body, 2);
                 last_space = true;
             } else if TagEquals(tname, "li") {
                 EnsureNewlines(*doc.body, 1);
-                if !closing { unused BuilderAppend(doc.body.bytes, "- ") }
-                last_space = true;
-            } else if TagEquals(tname, "td") || TagEquals(tname, "th") {
-                if !closing && doc.body.bytes.count > 0 && !last_space {
-                    unused BuilderAppend(doc.body.bytes, "  ");
-                    last_space = true;
+                if !closing {
+                    if list_depth > 0 {
+                        d := list_depth - 1;
+                        list_counter[d] += 1;
+                        AppendListMarker(list_ordered[d], list_counter[d], "decimal", *doc.body);
+                    } else {
+                        unused BuilderAppend(doc.body.bytes, "  * ");
+                    }
                 }
+                last_space = true;
+            } else if TagEquals(tname, "dt") || TagEquals(tname, "dd") {
+                EnsureNewlines(*doc.body, 1);
+                if !closing && TagEquals(tname, "dd") {
+                    unused BuilderAppend(doc.body.bytes, "    ");
+                }
+                last_space = true;
+            } else if TagEquals(tname, "table") {
+                if !closing {
+                    in_table = true;
+                    in_cell = false;
+                    t_rows = 0;
+                    t_cols = 0;
+                    t_cur_col = 0;
+                    t_cur_idx = -1;
+                    doc.table_count += 1;
+                    for ci: 0..t_cells_meta.count-1 {
+                        t_cells_meta[ci] = .{};
+                        unused VecResize(t_cells_text[ci].bytes, 0);
+                    }
+                } else if in_table {
+                    FlushTable(t_cells_text[:], t_cells_meta[:], t_rows, t_cols, *doc.body);
+                    in_table = false;
+                    in_cell = false;
+                }
+                last_space = true;
+            } else if in_table && TagEquals(tname, "tr") {
+                if !closing && t_rows < MAX_TABLE_ROWS {
+                    t_rows += 1;
+                    t_cur_col = 0;
+                    in_cell = false;
+                }
+            } else if in_table && (TagEquals(tname, "td") || TagEquals(tname, "th")) {
+                if !closing {
+                    if t_rows == 0 { t_rows = 1 }
+                    if t_cur_col < MAX_TABLE_COLS {
+                        cs_t: Text;
+                        rs_t: Text;
+                        unused Pkg.FindAttr(attrs, "colspan", *cs_t);
+                        unused Pkg.FindAttr(attrs, "rowspan", *rs_t);
+                        sx := ParseIntAttr(TextView(cs_t), 1);
+                        sy := ParseIntAttr(TextView(rs_t), 1);
+                        r0 := t_rows - 1;
+                        idx := cast(s64)r0 * MAX_TABLE_COLS + cast(s64)t_cur_col;
+                        t_cells_meta[idx] = .{present = true, span_x = sx, span_y = sy, req_w = 16, req_h = 16};
+                        unused VecResize(t_cells_text[idx].bytes, 0);
+                        t_cur_idx = idx;
+                        t_cur_col += sx;
+                        if t_cur_col > t_cols { t_cols = t_cur_col }
+                        in_cell = true;
+                    }
+                } else {
+                    if t_cur_idx >= 0 {
+                        w := cast(s32)(t_cells_text[t_cur_idx].bytes.count * 8);
+                        if w > t_cells_meta[t_cur_idx].req_w { t_cells_meta[t_cur_idx].req_w = w }
+                    }
+                    in_cell = false;
+                    t_cur_idx = -1;
+                }
+                last_space = true;
+            } else if TagEquals(tname, "p") || TagEquals(tname, "div") ||
+                      TagEquals(tname, "h1") || TagEquals(tname, "h2") || TagEquals(tname, "h3") ||
+                      TagEquals(tname, "h4") || TagEquals(tname, "h5") || TagEquals(tname, "h6") ||
+                      TagEquals(tname, "center") {
+                EnsureNewlines(*doc.body, 2);
+                if !closing && blockquote_depth > 0 {
+                    for q: 0..cast(s64)blockquote_depth-1 { unused BuilderAppend(doc.body.bytes, "  ") }
+                }
+                last_space = true;
             }
             continue;
         }
-        if in_style || in_script { i += 1; continue }
+        if in_style {
+            unused VecPush(style_buf.bytes, c);
+            i += 1;
+            continue;
+        }
+        if in_script { i += 1; continue }
         if c == 38 { // '&'
             semi := i + 1;
             while semi < html.count && semi - i < 12 && html[semi] != 59 && html[semi] != 32 && html[semi] != 60 { semi += 1 }
             if semi < html.count && html[semi] == 59 {
                 ent := html[i + 1:semi];
                 if in_title { AppendEntity(ent, *doc.title) }
-                else { AppendEntity(ent, *doc.body); last_space = false }
+                else if in_table && in_cell && t_cur_idx >= 0 { AppendEntity(ent, *t_cells_text[t_cur_idx]) }
+                else {
+                    AppendEntity(ent, *doc.body);
+                    if in_link { AppendEntity(ent, *cur_link_label) }
+                    last_space = false;
+                }
                 i = semi + 1;
                 continue;
             }
         }
+        if in_pre {
+            unused VecPush(doc.body.bytes, c);
+            i += 1;
+            continue;
+        }
         if c == 32 || c == 9 || c == 10 || c == 13 {
             if in_title {
                 if doc.title.bytes.count > 0 { unused VecPush(doc.title.bytes, 32) }
+            } else if in_table && in_cell && t_cur_idx >= 0 {
+                if !last_space { unused VecPush(t_cells_text[t_cur_idx].bytes, 32); last_space = true }
             } else if !last_space {
                 unused VecPush(doc.body.bytes, 32);
+                if in_link { unused VecPush(cur_link_label.bytes, 32) }
                 last_space = true;
             }
         } else {
             if in_title { unused VecPush(doc.title.bytes, c) }
-            else { unused VecPush(doc.body.bytes, c); last_space = false }
+            else if in_table && in_cell && t_cur_idx >= 0 {
+                unused VecPush(t_cells_text[t_cur_idx].bytes, c);
+                last_space = false;
+            } else {
+                unused VecPush(doc.body.bytes, c);
+                if in_link { unused VecPush(cur_link_label.bytes, c) }
+                last_space = false;
+            }
         }
         i += 1;
+    }
+
+    // Re-pack table cells into compact row-major array if a table was closed early.
+    if in_table {
+        compact_text: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Text;
+        compact_meta: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Table.Cell;
+        for r: 0..cast(s64)t_rows-1 {
+            for col: 0..cast(s64)t_cols-1 {
+                src_i := r * MAX_TABLE_COLS + col;
+                dst_i := r * cast(s64)t_cols + col;
+                compact_meta[dst_i] = t_cells_meta[src_i];
+                unused BuilderAppend(compact_text[dst_i].bytes, TextView(t_cells_text[src_i]));
+            }
+        }
+        FlushTable(compact_text[:], compact_meta[:], t_rows, t_cols, *doc.body);
     }
 }
 
@@ -150,7 +534,7 @@ Paginate :: (doc: *Document, cols: s32, rows: s32) {
     r := ifx rows < 4 then 4 else rows;
     text := TextView(doc.body);
     if text.count == 0 {
-        doc.pages[0] = .{start = 0, end = 0};
+        doc.pages[0] = .{start = 0, end = 0, file_offset = 0};
         doc.page_count = 1;
         return;
     }
@@ -174,8 +558,89 @@ Paginate :: (doc: *Document, cols: s32, rows: s32) {
                 }
             }
         }
-        doc.pages[doc.page_count] = .{start = page_start, end = pos};
+        doc.pages[doc.page_count] = .{start = page_start, end = pos, file_offset = page_start};
         doc.page_count += 1;
+    }
+}
+
+PageForOffset :: (doc: *Document, body_offset: s64) -> s32 {
+    for p: 0..cast(s64)doc.page_count-1 {
+        if body_offset >= doc.pages[p].start && body_offset < doc.pages[p].end {
+            return cast(s32)p;
+        }
+    }
+    return 0;
+}
+
+GotoAnchor :: (doc: *Document, frag: string) -> (page: s32, found: bool) {
+    for i: 0..cast(s64)doc.anchor_count-1 {
+        if TextView(doc.anchors[i].name) == frag {
+            p := PageForOffset(doc, doc.anchors[i].body_offset);
+            doc.current_page = p;
+            return p, true;
+        }
+    }
+    return -1, false;
+}
+
+// --- Annotation management & .annot file codec (matching ebook.b) ---
+
+AddOrUpdateAnnotation :: (doc: *Document, file_offset: s64, text: string) {
+    for i: 0..cast(s64)doc.annotation_count-1 {
+        if doc.annotations[i].file_offset == file_offset {
+            if text.count == 0 {
+                // Delete annotation
+                for j: i..cast(s64)doc.annotation_count-2 {
+                    doc.annotations[j].file_offset = doc.annotations[j + 1].file_offset;
+                    tmp: Text;
+                    unused BuilderAppend(tmp.bytes, TextView(doc.annotations[j + 1].text));
+                    unused VecResize(doc.annotations[j].text.bytes, 0);
+                    unused BuilderAppend(doc.annotations[j].text.bytes, TextView(tmp));
+                }
+                doc.annotation_count -= 1;
+                return;
+            }
+            unused VecResize(doc.annotations[i].text.bytes, 0);
+            unused BuilderAppend(doc.annotations[i].text.bytes, text);
+            return;
+        }
+    }
+    if text.count == 0 || doc.annotation_count >= MAX_ANNOTATIONS { return }
+    idx := doc.annotation_count;
+    doc.annotations[idx].file_offset = file_offset;
+    unused VecResize(doc.annotations[idx].text.bytes, 0);
+    unused BuilderAppend(doc.annotations[idx].text.bytes, text);
+    doc.annotation_count += 1;
+}
+
+FormatAnnotations :: (doc: *Document, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    buf: [24]u8;
+    for i: 0..cast(s64)doc.annotation_count-1 {
+        unused BuilderAppend(out.bytes, FormatInteger(doc.annotations[i].file_offset, buf[:]));
+        unused VecPush(out.bytes, 32);
+        unused BuilderAppend(out.bytes, TextView(doc.annotations[i].text));
+        unused VecPush(out.bytes, 10);
+    }
+}
+
+ParseAnnotations :: (data: string, doc: *Document) {
+    doc.annotation_count = 0;
+    i: s64 = 0;
+    while i < data.count && doc.annotation_count < MAX_ANNOTATIONS {
+        start := i;
+        while i < data.count && data[i] != 10 { i += 1 }
+        line := data[start:i];
+        if i < data.count && data[i] == 10 { i += 1 }
+        if line.count == 0 { continue }
+        sp: s64 = 0;
+        while sp < line.count && line[sp] != 32 { sp += 1 }
+        if sp == 0 || sp + 1 >= line.count { continue }
+        off: s64 = 0;
+        for k: 0..sp-1 {
+            if line[k] >= 48 && line[k] <= 57 { off = off * 10 + cast(s64)(line[k] - 48) }
+        }
+        AddOrUpdateAnnotation(doc, off, line[sp + 1:]);
     }
 }
 
@@ -224,5 +689,17 @@ FormatPageLabel :: (doc: *Document, out: *Text) {
     buf: [24]u8;
     unused BuilderAppend(out.bytes, FormatInteger(cast(s64)(doc.current_page + 1), buf[:]));
     unused BuilderAppend(out.bytes, " / ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.page_count, buf[:]));
+}
+
+FormatSectionPageLabel :: (section_id: string, doc: *Document, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    buf: [24]u8;
+    if section_id.count > 0 {
+        unused BuilderAppend(out.bytes, section_id);
+        unused VecPush(out.bytes, 46);
+    }
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)(doc.current_page + 1), buf[:]));
+    unused VecPush(out.bytes, 47);
     unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.page_count, buf[:]));
 }

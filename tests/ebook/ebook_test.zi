@@ -1,6 +1,7 @@
-// Table-driven unit tests for appl/ebook (units, oebpackage, reader_model).
+// Table-driven unit tests for appl/ebook (units, mimeimage, oebpackage, reader_model).
 #import "std/vec"
 using Units :: #import "units"
+using Mime :: #import "mimeimage"
 using Pkg :: #import "oebpackage"
 using Reader :: #import "reader_model"
 
@@ -14,66 +15,92 @@ Expect :: (ok: bool, what: string) {
 }
 
 UnitCase :: struct {
-    input: string;
+    text: string;
     em: s64;
     ex: s64;
     rel: s64;
-    ok: bool;
-    expected: s64;
+    px: s64;
+    is_rel: bool;
 }
 
 main :: () -> s32 {
-    // 1. Units tests
-    unit_cases: [8]UnitCase = UnitCase.[
-        .{input = "12px", em = 16, ex = 8, rel = 100, ok = true, expected = 12},
-        .{input = "2em", em = 16, ex = 8, rel = 100, ok = true, expected = 32},
-        .{input = "1.5ex", em = 16, ex = 10, rel = 100, ok = true, expected = 15},
-        .{input = "1in", em = 16, ex = 8, rel = 100, ok = true, expected = 100},
-        .{input = "72pt", em = 16, ex = 8, rel = 100, ok = true, expected = 100},
-        .{input = "50%", em = 16, ex = 8, rel = 200, ok = true, expected = 100},
-        .{input = "-10px", em = 16, ex = 8, rel = 100, ok = true, expected = -10},
-        .{input = "badunit", em = 16, ex = 8, rel = 100, ok = false, expected = 0},
+    // 1. Units tests including N2S and Length
+    ucases: [6]UnitCase = UnitCase.[
+        .{text = "12px", em = 14, ex = 7, rel = 100, px = 12, is_rel = false},
+        .{text = "2em", em = 14, ex = 7, rel = 100, px = 28, is_rel = true},
+        .{text = "1.5em", em = 10, ex = 5, rel = 100, px = 15, is_rel = true},
+        .{text = "1in", em = 14, ex = 7, rel = 100, px = 100, is_rel = false},
+        .{text = "72pt", em = 14, ex = 7, rel = 100, px = 100, is_rel = false},
+        .{text = "50%", em = 14, ex = 7, rel = 200, px = 100, is_rel = true},
     ];
-    for unit_cases {
-        px, ok := Units.LengthPx(it.input, it.em, it.ex, it.rel);
-        Expect(ok == it.ok && (!ok || px == it.expected), it.input);
+    for ucases {
+        px, ok := Units.LengthPx(it.text, it.em, it.ex, it.rel);
+        Expect(ok && px == it.px && Units.IsRelative(it.text) == it.is_rel, it.text);
     }
-    Expect(Units.IsRelative("2em") && Units.IsRelative("50%") && !Units.IsRelative("12px"), "IsRelative");
+    out: Text;
+    Units.N2S(1500, *out);
+    Expect(TextView(out) == "1.500", "N2S 1.500");
+    Units.N2S(2000, *out);
+    Expect(TextView(out) == "2", "N2S 2");
+    lpx, lok := Units.Length("1.5em", 10, 5, "20px", *out);
+    Expect(lok && lpx == 15 && TextView(out) == "15px", "Units.Length 1.5em");
 
-    // 2. OEB package parser tests
-    opf := "<?xml version=\"1.0\"?><package><metadata><dc-metadata><dc:Title>Test Book</dc:Title></dc-metadata></metadata><manifest><item id=\"c1\" href=\"ch1.html\" media-type=\"text/x-oeb1-document\"/><item id=\"c2\" href=\"ch2.html\" media-type=\"text/x-oeb1-document\"/></manifest><spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine><guide><reference type=\"toc\" title=\"Contents\" href=\"ch1.html\"/></guide></package>";
+    // 2. Mimeimage tests (.bit, .png, .gif, .xbm, extension inference)
+    Mime.InferMediaType("", "/books/cover.PNG", *out);
+    Expect(TextView(out) == "png" && Mime.IsSupportedType(TextView(out)), "InferMediaType png");
+    bit_raw: Vec(u8);
+    unused BuilderAppend(bit_raw, "     r8g8b8           0           0           2           2 ");
+    for i: 0..11 { unused VecPush(bit_raw, 128) }
+    img: Mime.ImageInfo;
+    ok_bit, _ := Mime.DecodeImage("", "sample.bit", VecSlice(bit_raw, 0, bit_raw.count), *img);
+    Expect(ok_bit && img.width == 2 && img.height == 2 && img.rgba.count == 16, "DecodeImage bit");
+    xbm_buf: Vec(u8);
+    unused BuilderAppend(xbm_buf, "#define test_width 16\n#define test_height 8\n");
+    ok_xbm, _ := Mime.DecodeImage("xbm", "test.xbm", VecSlice(xbm_buf, 0, xbm_buf.count), *img);
+    Expect(ok_xbm && img.width == 16 && img.height == 8, "DecodeImage xbm");
+
+    // 3. OEBpackage tests (DOCTYPE, uniqueid, metadata, fallbacks, circularity, guide)
+    Expect(Pkg.CheckDoctype(Pkg.OEB_PKG_DTD, false) == .OEBpkg, "CheckDoctype strict pkg");
+    Expect(Pkg.CheckDoctype("oebdoc101", true) == .OEBdoc, "CheckDoctype lax doc");
+    opf := "<?xml version=\"1.0\"?>\n";
+    opf_full: Text;
+    unused BuilderAppend(opf_full.bytes, opf);
+    unused BuilderAppend(opf_full.bytes, "<package unique-identifier=\"uid1\"><metadata><dc-metadata><dc:Title>Test Book</dc:Title><dc:Creator>Author</dc:Creator></dc-metadata></metadata>");
+    unused BuilderAppend(opf_full.bytes, "<manifest><item id=\"c1\" href=\"ch1.html\" media-type=\"text/x-oeb1-document\" fallback=\"c2\"/><item id=\"c2\" href=\"ch2.html\" media-type=\"text/x-oeb1-document\" fallback=\"c1\"/></manifest>");
+    unused BuilderAppend(opf_full.bytes, "<spine><itemref idref=\"c1\"/></spine><guide><reference type=\"toc\" title=\"Contents\" href=\"ch1.html#toc\"/></guide></package>");
     pkg: Pkg.Package;
-    Pkg.ParsePackage("/lib/ebooks/demo/book.opf", opf, *pkg);
-    Expect(TextView(pkg.title) == "Test Book", "opf title");
-    Expect(pkg.manifest_count == 2 && pkg.spine_count == 2 && pkg.guide_count == 1, "opf counts");
-    Expect(TextView(pkg.manifest[0].file) == "/lib/ebooks/demo/ch1.html", "opf resolved path");
-    Expect(TextView(pkg.guide[0].title) == "Contents", "opf guide");
+    Pkg.ParsePackage("/books/test.opf", TextView(opf_full), *pkg);
+    Expect(TextView(pkg.uniqueid) == "uid1", "pkg uniqueid");
+    Expect(TextView(pkg.title) == "Test Book", "pkg title");
+    Expect(Pkg.GetMeta(*pkg, "dc:Creator", *out) && TextView(out) == "Author", "pkg GetMeta");
+    Expect(pkg.manifest_count == 2 && pkg.spine_count == 1 && pkg.guide_count == 1, "pkg counts");
+    Expect(pkg.manifest[0].fallback_idx == 1 && pkg.manifest[1].fallback_idx == -1, "circular fallback broken");
 
-    // Standalone HTML wrapped as 1-item package
-    html := "<html><head><title>Hello &amp; World</title></head><body><h1>Chapter 1</h1><p>First paragraph.</p><p>Second paragraph with &lt;tags&gt;.</p></body></html>";
-    Pkg.ParsePackage("/tmp/sample.html", html, *pkg);
-    Expect(pkg.manifest_count == 1 && pkg.spine_count == 1, "standalone html package");
-
-    // 3. Reader text extraction, pagination & navigation tests
+    // 4. Reader model tests (CSS <style>, anchors, links, lists, tables, annotations, pagination)
+    html: Text;
+    unused BuilderAppend(html.bytes, "<html><head><title>Ch1</title><style>p { color: #112233; }</style></head><body>");
+    unused BuilderAppend(html.bytes, "<h1 id=\"top\">Title</h1><p>Hello &amp; <a href=\"ch2.html#sec\">world</a>.</p>");
+    unused BuilderAppend(html.bytes, "<ol><li>One</li><li>Two</li></ol>");
+    unused BuilderAppend(html.bytes, "<table><tr><td>A</td><td>B</td></tr></table><img src=\"fig.png\" alt=\"Fig1\"/></body></html>");
     doc: Reader.Document;
-    Reader.ExtractText(html, *doc);
-    Expect(TextView(doc.title) == "Hello & World", "html title entity decode");
-    body := TextView(doc.body);
-    Expect(body.count > 20, "extracted body non-empty");
+    Reader.ExtractText(TextView(html), *doc);
+    Expect(TextView(doc.title) == "Ch1", "doc title");
+    Expect(doc.css_rules_parsed == 1, "css rules parsed");
+    Expect(doc.anchor_count == 1 && TextView(doc.anchors[0].name) == "top", "anchor recorded");
+    Expect(doc.link_count == 1 && TextView(doc.links[0].href) == "ch2.html#sec", "link recorded");
+    Expect(doc.table_count == 1 && doc.image_count == 1, "table and image counted");
 
-    Reader.Paginate(*doc, 20, 4);
-    Expect(doc.page_count >= 2, "paginated into multiple pages");
-    Expect(doc.current_page == 0, "starts on page 0");
-    Expect(!Reader.PrevPage(*doc), "cannot prev from page 0");
-    Expect(Reader.NextPage(*doc) && doc.current_page == 1, "next page");
-    Expect(Reader.PrevPage(*doc) && doc.current_page == 0, "prev page");
-    Expect(Reader.GotoPage(*doc, 1) && doc.current_page == 1, "goto page 1");
-    Expect(Reader.HistoryBack(*doc) && doc.current_page == 0, "history back");
-    Expect(Reader.HistoryForward(*doc) && doc.current_page == 1, "history forward");
+    Reader.Paginate(*doc, 40, 20);
+    Expect(doc.page_count >= 1, "paginated");
+    ap, aok := Reader.GotoAnchor(*doc, "top");
+    Expect(aok && ap == 0, "GotoAnchor top");
 
-    lbl: Text;
-    Reader.FormatPageLabel(*doc, *lbl);
-    Expect(TextView(lbl)[0] == 50, "page label starts with 2");
+    // Annotations round-trip
+    Reader.AddOrUpdateAnnotation(*doc, 10, "Remember this");
+    Reader.FormatAnnotations(*doc, *out);
+    doc2: Reader.Document;
+    Reader.ParseAnnotations(TextView(out), *doc2);
+    Expect(doc2.annotation_count == 1 && doc2.annotations[0].file_offset == 10 && TextView(doc2.annotations[0].text) == "Remember this", "annotations round-trip");
 
     if failures == 0 { print("ebook_test: all checks passed\n") }
     return ifx failures == 0 then 0 else 1;

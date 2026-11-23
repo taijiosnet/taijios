@@ -1,15 +1,29 @@
-// OEB 1.0.1 package (.opf) and standalone document descriptor,
+// OEB 1.0.1 package (.opf) and standalone document parser with DOCTYPE checking,
+// dc-metadata, manifest fallbacks (circularity-checked), spine, guide, and URL locate,
 // ported from appl/ebook/oebpackage.b.
 #import "std/vec"
 
+OEB_PKG_DTD :: "http://openebook.org/dtds/oeb-1.0.1/oebpkg101.dtd";
+OEB_DOC_DTD :: "http://openebook.org/dtds/oeb-1.0.1/oebdoc101.dtd";
+
 MAX_ITEMS :: 64;
 MAX_GUIDE :: 32;
+MAX_META :: 64;
+
+DocKind :: enum {
+    Unknown;
+    OEBpkg;
+    OEBdoc;
+}
 
 Item :: struct {
     id: Text;
     href: Text;
     media_type: Text;
+    fallback_id: Text;
+    fallback_idx: s32; // -1 if none
     file: Text;
+    missing: Text;
 }
 
 Reference :: struct {
@@ -18,15 +32,42 @@ Reference :: struct {
     href: Text;
 }
 
+MetaEntry :: struct {
+    name: Text;
+    attrs: Text;
+    value: Text;
+}
+
 Package :: struct {
     file: Text;
+    uniqueid: Text;
     title: Text;
+    meta: [MAX_META]MetaEntry;
+    meta_count: s32;
     manifest: [MAX_ITEMS]Item;
     manifest_count: s32;
     spine: [MAX_ITEMS]s32; // indices into manifest
     spine_count: s32;
     guide: [MAX_GUIDE]Reference;
     guide_count: s32;
+}
+
+Contains :: (s1: string, s2: string) -> bool {
+    if s2.count > s1.count { return false }
+    if s2.count == 0 { return true }
+    for i: 0..s1.count - s2.count {
+        if s1[i:i + s2.count] == s2 { return true }
+    }
+    return false;
+}
+
+CheckDoctype :: (pubid: string, lax: bool) -> DocKind {
+    if pubid == OEB_PKG_DTD { return .OEBpkg }
+    if pubid == OEB_DOC_DTD { return .OEBdoc }
+    if !lax { return .Unknown }
+    if Contains(pubid, "oebpkg1") { return .OEBpkg }
+    if Contains(pubid, "oebdoc1") { return .OEBdoc }
+    return .Unknown;
 }
 
 BaseDir :: (path: string, out: *Text) {
@@ -37,19 +78,92 @@ BaseDir :: (path: string, out: *Text) {
     }
     if last_slash >= 0 {
         unused BuilderAppend(out.bytes, path[:last_slash + 1]);
+    } else {
+        unused BuilderAppend(out.bytes, "./");
     }
 }
 
-ResolveHref :: (base_file: string, href: string, out: *Text) {
+// Clean a path by collapsing //, /./, and /../ segments.
+CleanPath :: (path: string, out: *Text) {
     unused VecResize(out.bytes, 0);
-    if href.count > 0 && href[0] == 47 {
-        unused BuilderAppend(out.bytes, href);
-        return;
+    if path.count == 0 { return }
+    abs := path[0] == 47;
+    segs: [64]string;
+    nseg: s32 = 0;
+    i: s64 = 0;
+    while i < path.count {
+        while i < path.count && path[i] == 47 { i += 1 }
+        if i >= path.count { break }
+        start := i;
+        while i < path.count && path[i] != 47 { i += 1 }
+        seg := path[start:i];
+        if seg == "." { continue }
+        if seg == ".." {
+            if nseg > 0 && segs[nseg - 1] != ".." {
+                nseg -= 1;
+            } else if !abs && nseg < 64 {
+                segs[nseg] = seg;
+                nseg += 1;
+            }
+            continue;
+        }
+        if nseg < 64 {
+            segs[nseg] = seg;
+            nseg += 1;
+        }
     }
-    dir: Text;
-    BaseDir(base_file, *dir);
-    unused BuilderAppend(out.bytes, TextView(dir));
-    unused BuilderAppend(out.bytes, href);
+    if abs { unused VecPush(out.bytes, 47) }
+    for s: 0..cast(s64)nseg-1 {
+        if s > 0 { unused VecPush(out.bytes, 47) }
+        unused BuilderAppend(out.bytes, segs[s]);
+    }
+    if out.bytes.count == 0 { unused VecPush(out.bytes, 46) }
+}
+
+// Resolve an item href relative to base_file (validating local/file URL scheme).
+ResolveLocalHref :: (base_file: string, href: string, out: *Text) -> (ok: bool, err: string) {
+    unused VecResize(out.bytes, 0);
+    if href.count == 0 { return false, "no location specified (missing HREF)" }
+
+    // Strip fragment if any.
+    work := href;
+    for i: 0..work.count-1 {
+        if work[i] == 35 { work = work[:i]; break }
+    }
+    // Check scheme ("://").
+    for i: 0..work.count-1 {
+        if i + 3 <= work.count && work[i:i + 3] == "://" {
+            scheme := work[:i];
+            if scheme != "file" {
+                return false, "URL scheme not yet supported";
+            }
+            rest := work[i + 3:];
+            // Extract host before first '/'.
+            slash: s64 = 0;
+            while slash < rest.count && rest[slash] != 47 { slash += 1 }
+            host := rest[:slash];
+            if host.count > 0 && host != "localhost" {
+                return false, "non-local URLs not supported";
+            }
+            work = ifx slash < rest.count then rest[slash:] else "/";
+            break;
+        }
+    }
+    raw: Text;
+    if work.count > 0 && work[0] == 47 {
+        unused BuilderAppend(raw.bytes, work);
+    } else {
+        dir: Text;
+        BaseDir(base_file, *dir);
+        unused BuilderAppend(raw.bytes, TextView(dir));
+        unused BuilderAppend(raw.bytes, work);
+    }
+    CleanPath(TextView(raw), out);
+    return true, "";
+}
+
+ResolveHref :: (base_file: string, href: string, out: *Text) {
+    unused ResolveLocalHref(base_file, href, out);
 }
 
 FindAttr :: (tag: string, name: string, out: *Text) -> bool {
@@ -65,7 +179,7 @@ FindAttr :: (tag: string, name: string, out: *Text) -> bool {
             while i < tag.count && tag[i] != 32 && tag[i] != 9 && tag[i] != 10 && tag[i] != 13 { i += 1 }
             continue;
         }
-        i += 1; // skip '='
+        i += 1;
         while i < tag.count && (tag[i] == 32 || tag[i] == 9) { i += 1 }
         if i >= tag.count { break }
         quote: u8 = 0;
@@ -87,13 +201,7 @@ FindAttr :: (tag: string, name: string, out: *Text) -> bool {
 }
 
 IsPackageContent :: (data: string) -> bool {
-    // Check for <package tag in content.
-    needle := "<package";
-    if data.count < needle.count { return false }
-    for i: 0..data.count - needle.count {
-        if data[i:i + needle.count] == needle { return true }
-    }
-    return false;
+    return Contains(data, "<package");
 }
 
 FindManifestById :: (pkg: *Package, id: string) -> s32 {
@@ -103,16 +211,53 @@ FindManifestById :: (pkg: *Package, id: string) -> s32 {
     return -1;
 }
 
+// Get first metadata value matching `name` (e.g. "dc:Title", "dc:Creator").
+GetMeta :: (pkg: *Package, name: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    for i: 0..cast(s64)pkg.meta_count-1 {
+        if TextView(pkg.meta[i].name) == name {
+            unused BuilderAppend(out.bytes, TextView(pkg.meta[i].value));
+            return true;
+        }
+    }
+    return false;
+}
+
+ResolveFallbacks :: (pkg: *Package) {
+    for i: 0..cast(s64)pkg.manifest_count-1 {
+        pkg.manifest[i].fallback_idx = -1;
+    }
+    for i: 0..cast(s64)pkg.manifest_count-1 {
+        fb_id := TextView(pkg.manifest[i].fallback_id);
+        if fb_id.count == 0 { continue }
+        fb := FindManifestById(pkg, fb_id);
+        if fb < 0 { continue }
+        // Check for circular fallback chain.
+        cur := fb;
+        circular := false;
+        steps: s32 = 0;
+        while cur >= 0 && steps < MAX_ITEMS {
+            if cur == cast(s32)i { circular = true; break }
+            cur = pkg.manifest[cur].fallback_idx;
+            steps += 1;
+        }
+        if !circular {
+            pkg.manifest[i].fallback_idx = fb;
+        }
+    }
+}
+
 ParsePackage :: (file_path: string, data: string, pkg: *Package) {
     unused VecResize(pkg.file.bytes, 0);
     unused BuilderAppend(pkg.file.bytes, file_path);
+    unused VecResize(pkg.uniqueid.bytes, 0);
     unused VecResize(pkg.title.bytes, 0);
+    pkg.meta_count = 0;
     pkg.manifest_count = 0;
     pkg.spine_count = 0;
     pkg.guide_count = 0;
 
     if !IsPackageContent(data) {
-        // Standalone OEB/HTML/XML document wrapped as a single-item package.
         pkg.manifest_count = 1;
         unused VecResize(pkg.manifest[0].id.bytes, 0);
         unused BuilderAppend(pkg.manifest[0].id.bytes, "doc");
@@ -120,13 +265,17 @@ ParsePackage :: (file_path: string, data: string, pkg: *Package) {
         unused BuilderAppend(pkg.manifest[0].href.bytes, file_path);
         unused VecResize(pkg.manifest[0].media_type.bytes, 0);
         unused BuilderAppend(pkg.manifest[0].media_type.bytes, "text/x-oeb1-document");
+        unused VecResize(pkg.manifest[0].fallback_id.bytes, 0);
+        pkg.manifest[0].fallback_idx = -1;
         unused VecResize(pkg.manifest[0].file.bytes, 0);
-        unused BuilderAppend(pkg.manifest[0].file.bytes, file_path);
+        CleanPath(file_path, *pkg.manifest[0].file);
+        unused VecResize(pkg.manifest[0].missing.bytes, 0);
         pkg.spine[0] = 0;
         pkg.spine_count = 1;
         return;
     }
 
+    in_dc_meta := false;
     i: s64 = 0;
     while i < data.count {
         if data[i] != 60 { i += 1; continue }
@@ -137,35 +286,76 @@ ParsePackage :: (file_path: string, data: string, pkg: *Package) {
         tag := data[start:end];
         i = end + 1;
 
-        // Extract tag name.
         ns: s64 = 0;
         while ns < tag.count && (tag[ns] == 32 || tag[ns] == 9) { ns += 1 }
+        closing := false;
+        if ns < tag.count && tag[ns] == 47 { closing = true; ns += 1 }
         ne := ns;
         while ne < tag.count && tag[ne] != 32 && tag[ne] != 9 && tag[ne] != 10 && tag[ne] != 13 && tag[ne] != 47 { ne += 1 }
         name := tag[ns:ne];
         attrs := tag[ne:];
 
-        if (name == "dc:Title" || name == "dc:title" || name == "title") && pkg.title.bytes.count == 0 {
+        if name == "package" && !closing {
+            unused FindAttr(attrs, "unique-identifier", *pkg.uniqueid);
+        } else if name == "dc-metadata" {
+            in_dc_meta = !closing;
+        } else if in_dc_meta && !closing && name.count > 0 && name[0] != 33 && name[0] != 63 && pkg.meta_count < MAX_META {
+            close_pos := i;
+            while close_pos < data.count && data[close_pos] != 60 { close_pos += 1 }
+            val := data[i:close_pos];
+            m := pkg.meta_count;
+            unused VecResize(pkg.meta[m].name.bytes, 0);
+            unused BuilderAppend(pkg.meta[m].name.bytes, name);
+            unused VecResize(pkg.meta[m].attrs.bytes, 0);
+            unused BuilderAppend(pkg.meta[m].attrs.bytes, attrs);
+            unused VecResize(pkg.meta[m].value.bytes, 0);
+            unused BuilderAppend(pkg.meta[m].value.bytes, val);
+            pkg.meta_count += 1;
+            if (name == "dc:Title" || name == "dc:title" || name == "title") && pkg.title.bytes.count == 0 {
+                unused BuilderAppend(pkg.title.bytes, val);
+            }
+        } else if !closing && (name == "dc:Title" || name == "dc:title" || name == "title") && pkg.title.bytes.count == 0 {
             close_pos := i;
             while close_pos < data.count && data[close_pos] != 60 { close_pos += 1 }
             unused BuilderAppend(pkg.title.bytes, data[i:close_pos]);
-        } else if name == "item" && pkg.manifest_count < MAX_ITEMS {
+        } else if !closing && name == "item" && pkg.manifest_count < MAX_ITEMS {
             idx := pkg.manifest_count;
             unused FindAttr(attrs, "id", *pkg.manifest[idx].id);
             unused FindAttr(attrs, "href", *pkg.manifest[idx].href);
             unused FindAttr(attrs, "media-type", *pkg.manifest[idx].media_type);
-            ResolveHref(file_path, TextView(pkg.manifest[idx].href), *pkg.manifest[idx].file);
+            unused FindAttr(attrs, "fallback", *pkg.manifest[idx].fallback_id);
+            pkg.manifest[idx].fallback_idx = -1;
+            unused VecResize(pkg.manifest[idx].missing.bytes, 0);
+            ok, err := ResolveLocalHref(file_path, TextView(pkg.manifest[idx].href), *pkg.manifest[idx].file);
+            if !ok {
+                unused BuilderAppend(pkg.manifest[idx].missing.bytes, err);
+            }
             pkg.manifest_count += 1;
-        } else if name == "itemref" && pkg.spine_count < MAX_ITEMS {
+        } else if !closing && name == "itemref" && pkg.spine_count < MAX_ITEMS {
             idref: Text;
             if FindAttr(attrs, "idref", *idref) {
                 found := FindManifestById(pkg, TextView(idref));
                 if found >= 0 {
                     pkg.spine[pkg.spine_count] = found;
                     pkg.spine_count += 1;
+                } else if pkg.manifest_count < MAX_ITEMS {
+                    // Preserve spine item missing from manifest (matching oebpackage.b).
+                    idx := pkg.manifest_count;
+                    unused VecResize(pkg.manifest[idx].id.bytes, 0);
+                    unused BuilderAppend(pkg.manifest[idx].id.bytes, TextView(idref));
+                    unused VecResize(pkg.manifest[idx].href.bytes, 0);
+                    unused VecResize(pkg.manifest[idx].media_type.bytes, 0);
+                    unused VecResize(pkg.manifest[idx].fallback_id.bytes, 0);
+                    pkg.manifest[idx].fallback_idx = -1;
+                    unused VecResize(pkg.manifest[idx].file.bytes, 0);
+                    unused VecResize(pkg.manifest[idx].missing.bytes, 0);
+                    unused BuilderAppend(pkg.manifest[idx].missing.bytes, "item in OEB spine but not listed in manifest");
+                    pkg.manifest_count += 1;
+                    pkg.spine[pkg.spine_count] = idx;
+                    pkg.spine_count += 1;
                 }
             }
-        } else if name == "reference" && pkg.guide_count < MAX_GUIDE {
+        } else if !closing && name == "reference" && pkg.guide_count < MAX_GUIDE {
             g := pkg.guide_count;
             unused FindAttr(attrs, "type", *pkg.guide[g].kind);
             unused FindAttr(attrs, "title", *pkg.guide[g].title);
@@ -173,6 +363,8 @@ ParsePackage :: (file_path: string, data: string, pkg: *Package) {
             pkg.guide_count += 1;
         }
     }
+
+    ResolveFallbacks(pkg);
 
     if pkg.spine_count == 0 && pkg.manifest_count > 0 {
         for m: 0..cast(s64)pkg.manifest_count-1 {

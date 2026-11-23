@@ -1,4 +1,8 @@
-// CSS length unit parsing and pixel conversion, ported from appl/ebook/units.b.
+// CSS length unit parsing, n2s formatting, and pixel conversion,
+// ported from appl/ebook/units.b.
+#import "std/vec"
+#import "std/number_text"
+
 DPI :: 100;
 SCALE :: 1000;
 
@@ -22,6 +26,24 @@ IsRelative :: (s: string) -> bool {
     if s[n - 1] == 37 { return true } // '%'
     tail := s[n - 2:];
     return tail == "em" || tail == "ex";
+}
+
+// Format a SCALE-fixed-point integer as decimal string (matching units.b n2s).
+N2S :: (n: s64, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    i := n / SCALE;
+    f := n % SCALE;
+    buf: [24]u8;
+    if i == 0 && f < 0 {
+        unused VecPush(out.bytes, 45); // '-'
+    }
+    unused BuilderAppend(out.bytes, FormatInteger(i, buf[:]));
+    if f == 0 { return }
+    if f < 0 { f = -f }
+    unused VecPush(out.bytes, 46); // '.'
+    if f < 100 { unused VecPush(out.bytes, 48) }
+    if f < 10 { unused VecPush(out.bytes, 48) }
+    unused BuilderAppend(out.bytes, FormatInteger(f, buf[:]));
 }
 
 ParseUnits :: (s: string) -> (scaled: s64, kind: UnitKind) {
@@ -79,4 +101,37 @@ LengthPx :: (s: string, emsize: s64, xsize: s64, relative_px: s64) -> (px: s64, 
     if kind == .Percent { return ((n * relative_px) / SCALE) / 100, true }
     if kind == .None { return (n * relative_px) / SCALE, true }
     return 0, false;
+}
+
+// Return length in pixels and absolute-unit string equivalent (matching units.b length()).
+Length :: (s: string, emsize: s64, xsize: s64, relative: string, abs_out: *Text) -> (px: s64, ok: bool) {
+    unused VecResize(abs_out.bytes, 0);
+    n, kind := ParseUnits(s);
+    if kind == .Invalid { return 0, false }
+    if kind == .Em {
+        px := n * emsize;
+        N2S(px, abs_out);
+        unused BuilderAppend(abs_out.bytes, "px");
+        return px / SCALE, true;
+    }
+    if kind == .Ex {
+        px := n * xsize;
+        N2S(px, abs_out);
+        unused BuilderAppend(abs_out.bytes, "px");
+        return px / SCALE, true;
+    }
+    if kind == .Percent || kind == .None {
+        if relative.count == 0 { return 0, false }
+        rn, rok := LengthPx(relative, 0, 0, 0);
+        if !rok { return 0, false }
+        px := (n * rn) / SCALE;
+        if kind == .Percent { px /= 100 }
+        buf: [24]u8;
+        unused BuilderAppend(abs_out.bytes, FormatInteger(px, buf[:]));
+        unused BuilderAppend(abs_out.bytes, "px");
+        return px, true;
+    }
+    px, ok := LengthPx(s, emsize, xsize, 0);
+    unused BuilderAppend(abs_out.bytes, s);
+    return px, ok;
 }

@@ -1,6 +1,8 @@
 // Open eBook (OEB 1.0.1) and HTML/XML graphical reader,
-// ported from appl/ebook/ebook.b and its supporting modules.
+// ported from appl/ebook/ebook.b and its supporting modules
+// (strmap, cssparser, stylesheet, cssfont, table, units, mimeimage, oebpackage, reader).
 #import "std/vec"
+#import "std/number_text"
 using Args :: #import "taijios_args"
 using IO :: #import "taijios_io"
 using Tcl :: #import "tcl/interpreter"
@@ -12,33 +14,58 @@ using Window :: #import "tcltk"
 using Pkg :: #import "oebpackage"
 using Reader :: #import "reader_model"
 using Units :: #import "units"
+using Mime :: #import "mimeimage"
 
 CONTROLS :: #string END_CONTROLS
 frame .f
-button .f.prev -text {<} -command {ebook_nav prev}
-button .f.next -text {>} -command {ebook_nav next}
+menubutton .f.annot -menu .f.annot.m -text {Opts}
+menu .f.annot.m
+.f.annot.m add command -label {Toggle Annotations} -command {ebook_nav annot}
+.f.annot.m add command -label {Add/Edit Note} -command {ebook_nav editannot}
+button .f.prev -text {<-} -command {ebook_nav back}
+button .f.next -text {->} -command {ebook_nav forward}
 button .f.up -text {^} -command {ebook_nav up}
 button .f.down -text {v} -command {ebook_nav down}
-label .f.pagenum -text {1 / 1}
-pack .f.prev -side left
-pack .f.next -side left
-pack .f.up -side left
-pack .f.down -side left
+label .f.pagenum -text {1.1/1}
+pack .f.annot -side left
 pack .f.pagenum -side right
+pack .f.down -side right
+pack .f.up -side right
+pack .f.next -side right
+pack .f.prev -side right
 frame .body
 scrollbar .body.sb -command {.body.t yview}
 text .body.t -yscrollcommand {.body.sb set}
 pack .body.sb -side left -fill y
 pack .body.t -fill both -expand 1
+frame .annotbar
+label .annotbar.l -text {Note:}
+entry .annotbar.e -bg white
+button .annotbar.save -text {Save} -command {ebook_nav saveannot}
+pack .annotbar.l -side left
+pack .annotbar.e -side left -fill x -expand 1
+pack .annotbar.save -side right
 pack .f -fill x
 pack .body -fill both -expand 1
+pack .annotbar -fill x
 END_CONTROLS;
 
 pkg: Pkg.Package;
 doc: Reader.Document;
-nav_action: s32; // 0=none, 1=prev, 2=next, 3=up, 4=down
+section_ids: [Pkg.MAX_ITEMS]Text;
+current_item: s32 = -1;
+show_annotations: bool = true;
+debug_mode: bool = false;
 win_w: s32 = 400;
 win_h: s32 = 600;
+
+hist: [Reader.MAX_HISTORY]Reader.Bookmark;
+hist_count: s32 = 0;
+fhist: [Reader.MAX_HISTORY]Reader.Bookmark;
+fhist_count: s32 = 0;
+
+nav_action: s32 = 0; // 0=none, 1=back, 2=forward, 3=up, 4=down, 5=goto, 6=annot, 7=saveannot, 8=editannot
+nav_arg: Text;
 
 ReadWholeFile :: (path: string, out: *Text) -> bool {
     unused VecResize(out.bytes, 0);
@@ -57,17 +84,186 @@ ReadWholeFile :: (path: string, out: *Text) -> bool {
     return ok;
 }
 
+WriteWholeFile :: (path: string, data: string) {
+    fd := IO.Create(path, 1, 0x1b6);
+    if fd < 0 { return }
+    off: s64 = 0;
+    while off < data.count {
+        n := IO.Write(fd, data[off:]);
+        if n <= 0 { break }
+        off += cast(s64)n;
+    }
+    unused IO.Close(fd);
+}
+
+AnnotFilePath :: (item_idx: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if item_idx < 0 || item_idx >= pkg.manifest_count { return }
+    unused BuilderAppend(out.bytes, TextView(pkg.manifest[item_idx].file));
+    unused BuilderAppend(out.bytes, ".annot");
+}
+
+SaveAnnotations :: () {
+    if current_item < 0 { return }
+    apath: Text;
+    AnnotFilePath(current_item, *apath);
+    if apath.bytes.count == 0 { return }
+    data: Text;
+    Reader.FormatAnnotations(*doc, *data);
+    if data.bytes.count > 0 {
+        WriteWholeFile(TextView(apath), TextView(data));
+    }
+}
+
+LoadAnnotations :: (item_idx: s32) {
+    doc.annotation_count = 0;
+    apath: Text;
+    AnnotFilePath(item_idx, *apath);
+    if apath.bytes.count == 0 { return }
+    raw: Text;
+    if ReadWholeFile(TextView(apath), *raw) {
+        Reader.ParseAnnotations(TextView(raw), *doc);
+    }
+}
+
+AssignSectionIds :: () {
+    for i: 0..cast(s64)pkg.manifest_count-1 {
+        unused VecResize(section_ids[i].bytes, 0);
+    }
+    buf: [24]u8;
+    for s: 0..cast(s64)pkg.spine_count-1 {
+        idx := pkg.spine[s];
+        if idx >= 0 && idx < pkg.manifest_count {
+            unused BuilderAppend(section_ids[idx].bytes, FormatInteger(s + 1, buf[:]));
+        }
+    }
+    letter: s32 = 0;
+    for i: 0..cast(s64)pkg.manifest_count-1 {
+        if section_ids[i].bytes.count == 0 {
+            c := cast(u8)(65 + (letter % 26));
+            unused VecPush(section_ids[i].bytes, c);
+            letter += 1;
+        }
+    }
+}
+
+LoadItem :: (item_idx: s32) -> bool {
+    if item_idx < 0 || item_idx >= pkg.manifest_count { return false }
+    if item_idx == current_item { return true }
+    SaveAnnotations();
+    path := TextView(pkg.manifest[item_idx].file);
+    raw: Text;
+    if !ReadWholeFile(path, *raw) {
+        // Try fallback item if configured.
+        fb := pkg.manifest[item_idx].fallback_idx;
+        if fb >= 0 && fb < pkg.manifest_count {
+            path = TextView(pkg.manifest[fb].file);
+            if !ReadWholeFile(path, *raw) { return false }
+        } else {
+            return false;
+        }
+    }
+    Reader.ExtractText(TextView(raw), *doc);
+    cols := (win_w - 40) / 8;
+    rows := (win_h - 90) / 16;
+    Reader.Paginate(*doc, cols, rows);
+    current_item = item_idx;
+    LoadAnnotations(item_idx);
+    return true;
+}
+
+FindSpinePos :: (item_idx: s32) -> s32 {
+    for s: 0..cast(s64)pkg.spine_count-1 {
+        if pkg.spine[s] == item_idx { return cast(s32)s }
+    }
+    return -1;
+}
+
+PushHist :: () {
+    if current_item < 0 { return }
+    if hist_count < Reader.MAX_HISTORY {
+        hist[hist_count] = .{item_idx = current_item, page = doc.current_page};
+        hist_count += 1;
+    }
+    fhist_count = 0;
+}
+
+BookForward :: () -> bool {
+    if Reader.NextPage(*doc) { return true }
+    sp := FindSpinePos(current_item);
+    if sp >= 0 && sp + 1 < pkg.spine_count {
+        if LoadItem(pkg.spine[sp + 1]) {
+            doc.current_page = 0;
+            return true;
+        }
+    }
+    return false;
+}
+
+BookBack :: () -> bool {
+    if Reader.PrevPage(*doc) { return true }
+    sp := FindSpinePos(current_item);
+    if sp > 0 {
+        if LoadItem(pkg.spine[sp - 1]) {
+            if doc.page_count > 0 { doc.current_page = doc.page_count - 1 }
+            return true;
+        }
+    }
+    return false;
+}
+
+BookGotoLink :: (href: string) -> bool {
+    if href.count == 0 { return false }
+    // Split path#frag
+    hash_pos: s64 = -1;
+    for i: 0..href.count-1 {
+        if href[i] == 35 { hash_pos = i; break }
+    }
+    path_part := ifx hash_pos >= 0 then href[:hash_pos] else href;
+    frag_part := ifx hash_pos >= 0 && hash_pos + 1 < href.count then href[hash_pos + 1:] else "";
+
+    PushHist();
+    if path_part.count > 0 {
+        from_file := ifx current_item >= 0 then TextView(pkg.manifest[current_item].file) else TextView(pkg.file);
+        resolved: Text;
+        ok, _ := Pkg.ResolveLocalHref(from_file, path_part, *resolved);
+        if ok {
+            rpath := TextView(resolved);
+            for i: 0..cast(s64)pkg.manifest_count-1 {
+                if TextView(pkg.manifest[i].file) == rpath {
+                    unused LoadItem(cast(s32)i);
+                    break;
+                }
+            }
+        }
+    }
+    if frag_part.count > 0 {
+        _, found := Reader.GotoAnchor(*doc, frag_part);
+        if !found { doc.current_page = 0 }
+    } else {
+        doc.current_page = 0;
+    }
+    return true;
+}
+
 NavCmd :: (_: s64, args: []Text, result: *T.Result) {
-    if args.count != 1 {
+    if args.count < 1 {
         result.code = .Error;
         unused BuilderAppend(result.value.bytes, "expected ebook_nav action");
         return;
     }
     act := TextView(args[0]);
-    if act == "prev" { nav_action = 1 }
-    else if act == "next" { nav_action = 2 }
+    if act == "back" || act == "prev" { nav_action = 1 }
+    else if act == "forward" || act == "next" { nav_action = 2 }
     else if act == "up" { nav_action = 3 }
     else if act == "down" { nav_action = 4 }
+    else if act == "goto" && args.count >= 2 {
+        nav_action = 5;
+        unused VecResize(nav_arg.bytes, 0);
+        unused BuilderAppend(nav_arg.bytes, TextView(args[1]));
+    } else if act == "annot" { nav_action = 6 }
+    else if act == "saveannot" { nav_action = 7 }
+    else if act == "editannot" { nav_action = 8 }
 }
 
 ShowCurrentPage :: (tcl: *Tcl.Interpreter) -> bool {
@@ -81,12 +277,23 @@ ShowCurrentPage :: (tcl: *Tcl.Interpreter) -> bool {
         if span.end <= body.count && span.start <= span.end {
             if !Tk.AppendText(widget, body[span.start:span.end]) { return false }
         }
+        if show_annotations {
+            for a: 0..cast(s64)doc.annotation_count-1 {
+                off := doc.annotations[a].file_offset;
+                if off >= span.start && off <= span.end {
+                    unused Tk.AppendText(widget, "\n[Note: ");
+                    unused Tk.AppendText(widget, TextView(doc.annotations[a].text));
+                    unused Tk.AppendText(widget, "]\n");
+                }
+            }
+        }
     }
     Tk.TextLayout(widget);
     View.See(*widget.view, 0);
 
+    sec := ifx current_item >= 0 then TextView(section_ids[current_item]) else "1";
     label_text: Text;
-    Reader.FormatPageLabel(*doc, *label_text);
+    Reader.FormatSectionPageLabel(sec, *doc, *label_text);
     cmd: Text;
     unused BuilderAppend(cmd.bytes, ".f.pagenum configure -text {");
     unused BuilderAppend(cmd.bytes, TextView(label_text));
@@ -121,10 +328,48 @@ Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResul
     if nav_action != 0 {
         act := nav_action;
         nav_action = 0;
-        if act == 1 { changed = Reader.PrevPage(*doc) }
-        else if act == 2 { changed = Reader.NextPage(*doc) }
-        else if act == 3 { changed = Reader.HistoryBack(*doc) }
-        else if act == 4 { changed = Reader.HistoryForward(*doc) }
+        if act == 1 { changed = BookBack() }
+        else if act == 2 { changed = BookForward() }
+        else if act == 3 {
+            if hist_count > 0 {
+                if fhist_count < Reader.MAX_HISTORY {
+                    fhist[fhist_count] = .{item_idx = current_item, page = doc.current_page};
+                    fhist_count += 1;
+                }
+                hist_count -= 1;
+                bm := hist[hist_count];
+                unused LoadItem(bm.item_idx);
+                doc.current_page = bm.page;
+                changed = true;
+            }
+        } else if act == 4 {
+            if fhist_count > 0 {
+                if hist_count < Reader.MAX_HISTORY {
+                    hist[hist_count] = .{item_idx = current_item, page = doc.current_page};
+                    hist_count += 1;
+                }
+                fhist_count -= 1;
+                bm := fhist[fhist_count];
+                unused LoadItem(bm.item_idx);
+                doc.current_page = bm.page;
+                changed = true;
+            }
+        } else if act == 5 {
+            changed = BookGotoLink(TextView(nav_arg));
+        } else if act == 6 {
+            show_annotations = !show_annotations;
+            changed = true;
+        } else if act == 7 {
+            res := Tcl.Eval(tcl, ".annotbar.e get");
+            if res.code == .OK && doc.page_count > 0 {
+                off := doc.pages[doc.current_page].file_offset;
+                Reader.AddOrUpdateAnnotation(*doc, off, TextView(res.value));
+                SaveAnnotations();
+                changed = true;
+            }
+        } else if act == 8 {
+            unused Window.Execute(tcl, "focus .annotbar.e");
+        }
         if changed {
             if !ShowCurrentPage(tcl) { return .Failed }
         }
@@ -151,7 +396,7 @@ main :: () -> s32 {
                 win_w = 240;
                 win_h = 320;
             } else if arg[i] == 100 { // -d
-                continue;
+                debug_mode = true;
             } else {
                 return Usage();
             }
@@ -168,46 +413,52 @@ main :: () -> s32 {
     }
 
     Pkg.ParsePackage(book_path, TextView(raw), *pkg);
+    AssignSectionIds();
 
-    // Load all spine items in order.
-    combined: Text;
     if pkg.spine_count > 0 {
-        for s: 0..cast(s64)pkg.spine_count-1 {
-            item_idx := pkg.spine[s];
-            item_path := TextView(pkg.manifest[item_idx].file);
-            if item_path == book_path {
-                unused BuilderAppend(combined.bytes, TextView(raw));
-            } else {
-                part: Text;
-                if ReadWholeFile(item_path, *part) {
-                    unused BuilderAppend(combined.bytes, TextView(part));
-                    unused BuilderAppend(combined.bytes, "<p>");
-                }
-            }
+        if !LoadItem(pkg.spine[0]) {
+            Reader.ExtractText(TextView(raw), *doc);
+            cols := (win_w - 40) / 8;
+            rows := (win_h - 90) / 16;
+            Reader.Paginate(*doc, cols, rows);
+            current_item = 0;
         }
     } else {
-        unused BuilderAppend(combined.bytes, TextView(raw));
+        Reader.ExtractText(TextView(raw), *doc);
+        cols := (win_w - 40) / 8;
+        rows := (win_h - 90) / 16;
+        Reader.Paginate(*doc, cols, rows);
+        current_item = 0;
     }
-
-    Reader.ExtractText(TextView(combined), *doc);
-    cols := (win_w - 40) / 8;
-    rows := (win_h - 60) / 16;
-    Reader.Paginate(*doc, cols, rows);
 
     title := book_path;
     if pkg.title.bytes.count > 0 { title = TextView(pkg.title) }
     else if doc.title.bytes.count > 0 { title = TextView(doc.title) }
 
-    // Set initial page count label in script.
+    sec := ifx current_item >= 0 then TextView(section_ids[current_item]) else "1";
     page_label: Text;
-    Reader.FormatPageLabel(*doc, *page_label);
+    Reader.FormatSectionPageLabel(sec, *doc, *page_label);
+
     script: Text;
     unused BuilderAppend(script.bytes, CONTROLS);
+    if pkg.guide_count > 0 {
+        unused BuilderAppend(script.bytes, "\nmenubutton .f.guide -menu .f.guide.m -text {Guide}\nmenu .f.guide.m\n");
+        for g: 0..cast(s64)pkg.guide_count-1 {
+            unused BuilderAppend(script.bytes, ".f.guide.m add command -label {");
+            unused BuilderAppend(script.bytes, TextView(pkg.guide[g].title));
+            unused BuilderAppend(script.bytes, "} -command {ebook_nav goto ");
+            unused BuilderAppend(script.bytes, TextView(pkg.guide[g].href));
+            unused BuilderAppend(script.bytes, "}\n");
+        }
+        unused BuilderAppend(script.bytes, "pack .f.guide -side left\n");
+    }
     unused BuilderAppend(script.bytes, "\n.f.pagenum configure -text {");
     unused BuilderAppend(script.bytes, TextView(page_label));
     unused BuilderAppend(script.bytes, "}\n");
 
     tcl: Tcl.Interpreter;
     if !Tcl.RegisterCommand(*tcl, "ebook_nav", NavCmd) { return 1 }
-    return Window.RunPolled(*tcl, TextView(script), title, win_w, win_h, Start, Tick, 50);
+    rc := Window.RunPolled(*tcl, TextView(script), title, win_w, win_h, Start, Tick, 50);
+    SaveAnnotations();
+    return rc;
 }
