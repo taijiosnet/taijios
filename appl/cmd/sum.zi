@@ -1,0 +1,115 @@
+// Print the Inferno CRC-32 checksum and size of each file, replacing the Limbo sum.
+#import "std/vec";
+#import "std/number_text";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+// The reflected CRC-32 table of appl/lib/crc.b for polynomial 16redb88320.
+Table :: (table: []u32) {
+    for i: 0..255 {
+        crc: u32 = cast(u32)i;
+        for 1..8 {
+            if (crc & 1) != 0 { crc = (crc >> 1) ^ 0xedb88320 }
+            else { crc = crc >> 1 }
+        }
+        table[i] = crc;
+    }
+}
+
+// The crc of data continuing from the given value.
+Update :: (table: []u32, crc: u32, data: []u8) -> u32 {
+    for i: 0..data.count-1 {
+        crc = table[cast(s64)((crc ^ cast(u32)data[i]) & 0xff)] ^ ((crc >> 8) & 0xffffff);
+    }
+    return crc;
+}
+
+// Eight lowercase hexadecimal digits.
+Hex8 :: (out: []u8, value: u32) {
+    digits := "0123456789abcdef";
+    shift: s32 = 28;
+    at: s64 = 0;
+    while shift >= 0 {
+        n := cast(s64)((value >> cast(u32)shift) & 15);
+        out[at] = digits[n];
+        at += 1;
+        shift -= 4;
+    }
+}
+
+Diagnostic :: (prefix: string, path: string) {
+    unused Cli.WriteAll(2, prefix);
+    unused Cli.WriteAll(2, path);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, Io.LastError());
+    unused Cli.WriteAll(2, "\n");
+}
+
+#program_export
+main :: () -> s32 {
+    table: [256]u32;
+    Table(table[:]);
+    failed := false;
+    count := Args.OperandCount();
+    for i: 0..count-1 {
+        path := Args.Operand(i);
+        metadata: [Fs.BufferSize]u8;
+        size := Io.StatPacked(path, metadata[:]);
+        if size <= 0 {
+            Diagnostic("sum: cannot get status of ", path);
+            failed = true;
+            continue;
+        }
+        if (Fs.Decode(metadata[:size]).mode & Fs.Directory) != 0 { continue }
+        handle := Io.OpenFile(path, 0);
+        if handle < 0 {
+            Diagnostic("sum: cannot open ", path);
+            failed = true;
+            continue;
+        }
+        crc: u32 = 0;
+        nbytes: s64 = 0;
+        buffer: [8192]u8;
+        read_error := false;
+        while true {
+            got := Io.ReadBytes(handle, buffer[:]);
+            if got < 0 { read_error = true; break }
+            if got == 0 { break }
+            crc = Update(table[:], crc, buffer[:got]);
+            nbytes += cast(s64)got;
+        }
+        unused Io.CloseFile(handle);
+        if read_error {
+            Diagnostic("sum: error reading ", path);
+            failed = true;
+        }
+        // encode the length but make n==0 not 0
+        length := cast(u32)nbytes;
+        tail: [4]u8;
+        tail[0] = cast(u8)((length >> 24) ^ 0xcc);
+        tail[1] = cast(u8)((length >> 16) ^ 0x55);
+        tail[2] = cast(u8)((length >> 8) ^ 0xcc);
+        tail[3] = cast(u8)(length ^ 0x55);
+        crc = Update(table[:], crc, tail[:]);
+        line: Text;
+        hex: [8]u8;
+        Hex8(hex[:], crc);
+        unused BuilderAppend(line.bytes, TextView(hex[:]));
+        unused BuilderAppend(line.bytes, " ");
+        digits: [24]u8;
+        number := FormatInteger(nbytes, digits[:]);
+        for d: number.count..5 { unused BuilderAppend(line.bytes, " ") }
+        unused BuilderAppend(line.bytes, number);
+        unused BuilderAppend(line.bytes, " ");
+        unused BuilderAppend(line.bytes, path);
+        unused Cli.WriteAll(1, BuilderFinish(line.bytes));
+        unused Cli.WriteAll(1, "\n");
+    }
+    if failed {
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    return 0;
+}

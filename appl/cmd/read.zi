@@ -1,0 +1,81 @@
+// Read a number of bytes from standard input, replacing the Limbo read.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+Usage :: "usage: read [-[ero] offset] count\n";
+
+Space :: (byte: u8) -> bool {
+    return byte == 32 || (byte >= 9 && byte <= 13);
+}
+
+// The leading integer as Limbo's int and big conversions read it through
+// strtol: spaces skipped, an optional sign, decimal digits, saturating on overflow.
+Number :: (text: string) -> s64 {
+    at: s64 = 0;
+    while at < text.count && Space(text[at]) { at += 1 }
+    negative := false;
+    if at < text.count && (text[at] == 43 || text[at] == 45) {
+        negative = text[at] == 45;
+        at += 1;
+    }
+    value: s64 = 0;
+    while at < text.count && text[at] >= 48 && text[at] <= 57 {
+        digit := cast(s64)(text[at] - 48);
+        if value > (9223372036854775807 - digit) / 10 {
+            value = 9223372036854775807;
+        } else {
+            value = value * 10 + digit;
+        }
+        at += 1;
+    }
+    if negative { value = 0 - value }
+    return value;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    amount: s32 = 8192;
+    offset: s64 = 0;
+    origin: s32 = -1;
+    next: s32 = 0;
+    if count > 0 {
+        option := Args.Operand(0);
+        if option.count > 0 && option[0] == #char "-" {
+            if count == 1 { return Cli.Usage(Usage) }
+            if option == "-o" { origin = 0 }
+            else if option == "-e" { origin = 2 }
+            else if option == "-r" { origin = 1 }
+            else { return Cli.Usage(Usage) }
+            offset = Number(Args.Operand(1));
+            next = 2;
+        }
+    }
+    if next < count {
+        if next + 1 < count { return Cli.Usage(Usage) }
+        amount = cast(s32)Number(Args.Operand(next));
+    }
+    if origin != -1 { unused Io.Seek(0, offset, origin) }
+    if amount == 0 { return 0 }
+    buffer: Vec(u8);
+    if !VecResize(buffer, cast(s64)amount) {
+        unused Args.SetFailure("out of memory: heap");
+        return 1;
+    }
+    got := Io.ReadBytes(0, buffer[:]);
+    if got > 0 {
+        unused Io.WriteBytes(1, TextView(buffer[:cast(s64)got]));
+        return 0;
+    }
+    if got == 0 {
+        unused Args.SetFailure("eof");
+        return 1;
+    }
+    unused Cli.WriteAll(2, "read: read error: ");
+    unused Cli.WriteAll(2, Io.LastError());
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("error");
+    return 1;
+}

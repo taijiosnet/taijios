@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **705** open rows = **683** on-disk `dis/` files (**143** top-level `dis/*.dis` + **540** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **701** open rows = **679** on-disk `dis/` files (**139** top-level `dis/*.dis` + **540** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -221,7 +221,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 145 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 141 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -293,7 +293,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/mv.dis | appl/cmd/mv.b |  | - |  |
 | dis/netkey.dis | appl/cmd/netkey.b |  | - |  |
 | dis/netstat.dis | appl/cmd/netstat.b |  | - |  |
-| dis/newer.dis | appl/cmd/newer.b |  | - |  |
 | dis/ns.dis | appl/cmd/ns.b |  | - |  |
 | dis/nsbuild.dis | appl/cmd/nsbuild.b |  | - |  |
 | dis/os.dis | appl/cmd/os.b |  | - |  |
@@ -307,7 +306,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/raw2iaf.dis | appl/cmd/raw2iaf.b |  | - |  |
 | dis/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
 | dis/rdp.dis | appl/cmd/rdp.b |  | - |  |
-| dis/read.dis | appl/cmd/read.b |  | - |  |
 | dis/rioimport.dis | appl/cmd/rioimport.b |  | - |  |
 | dis/rm.dis | appl/cmd/rm.b |  | - |  |
 | dis/runas.dis | appl/cmd/runas.b |  | - |  |
@@ -340,7 +338,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/styxchat.dis | appl/cmd/styxchat.b |  | - |  |
 | dis/styxlisten.dis | appl/cmd/styxlisten.b |  | - |  |
 | dis/styxmon.dis | appl/cmd/styxmon.b |  | - |  |
-| dis/sum.dis | appl/cmd/sum.b |  | - |  |
 | dis/tail.dis | appl/cmd/tail.b |  | - |  |
 | dis/tcs.dis | appl/cmd/tcs.b |  | - |  |
 | dis/telnet.dis | appl/cmd/telnet.b |  | - |  |
@@ -350,7 +347,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/tiny/rm.dis | appl/tiny/rm.b |  | - |  |
 | dis/tiny/sh.dis | appl/tiny/sh.b | module/sh.m | - |  |
 | dis/tkcmd.dis | appl/cmd/tkcmd.b |  | - |  |
-| dis/tokenize.dis | appl/cmd/tokenize.b |  | - |  |
 | dis/touch.dis | appl/cmd/touch.b |  | - |  |
 | dis/touchcal.dis | appl/cmd/touchcal.b |  | - |  |
 | dis/tsort.dis | appl/cmd/tsort.b |  | - |  |

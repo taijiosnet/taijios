@@ -1,0 +1,35 @@
+// Split a string at delimiter characters, replacing the Limbo tokenize.
+using Args :: #import "taijios_args";
+using Cli :: #import "zx_cli";
+using UTF :: #import "std/utf8";
+
+// Whether the rune is one of the delimiters, compared rune by rune as the
+// Limbo Sys->tokenize compared the characters of its two strings.
+Delimiter :: (rune: u32, delimiters: string) -> bool {
+    at: s32 = 0;
+    while at < cast(s32)delimiters.count {
+        decoded := UTF.Decode(delimiters, at);
+        if decoded.value == rune { return true }
+        at = decoded.after;
+    }
+    return false;
+}
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 2 { return Cli.Usage("Usage: tokenize string delimiters\n") }
+    text := Args.Operand(0);
+    delimiters := Args.Operand(1);
+    limit := cast(s32)text.count;
+    at: s32 = 0;
+    while at < limit {
+        while at < limit && Delimiter(UTF.Decode(text, at).value, delimiters) { at = UTF.Decode(text, at).after }
+        if at == limit { break }
+        start := at;
+        while at < limit && !Delimiter(UTF.Decode(text, at).value, delimiters) { at = UTF.Decode(text, at).after }
+        if start == at { break }
+        unused Cli.WriteAll(1, text[start:at]);
+        unused Cli.WriteAll(1, "\n");
+    }
+    return 0;
+}

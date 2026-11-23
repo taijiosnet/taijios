@@ -39,6 +39,10 @@ y.debug
 /appl/cmd/test.zx
 /appl/cmd/ls.zx
 /appl/cmd/mkdir.zx
+/appl/cmd/sum.zx
+/appl/cmd/newer.zx
+/appl/cmd/read.zx
+/appl/cmd/tokenize.zx
 /appl/cmd/pwd.zx
 /appl/cmd/export.zx
 /appl/cmd/mntgen.zx
@@ -73,6 +77,10 @@ y.debug
 /dis/test.zx
 /dis/ls.zx
 /dis/mkdir.zx
+/dis/sum.zx
+/dis/newer.zx
+/dis/read.zx
+/dis/tokenize.zx
 /dis/pwd.zx
 /dis/export.zx
 /dis/mntgen.zx

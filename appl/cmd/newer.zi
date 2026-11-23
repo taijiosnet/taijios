@@ -1,0 +1,41 @@
+// Report whether the first file is newer than the second, replacing the Limbo newer.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+// Fail with a status built from the last guest error, as the Limbo raiser did;
+// nothing goes to standard error.
+Fail :: (prefix: string) -> s32 {
+    message: Vec(u8);
+    BuilderPrint(*message, "%", prefix);
+    BuilderPrint(*message, "%", Io.LastError());
+    unused Args.SetFailure(BuilderFinish(message));
+    return 1;
+}
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 2 { return Cli.Usage("usage: newer newfile oldfile\n") }
+    metadata: [Fs.BufferSize]u8;
+    size := Io.StatPacked(Args.Operand(0), metadata[:]);
+    if size <= 0 { return Fail("new:") }
+    new_info := Fs.Decode(metadata[:size]);
+    if (new_info.mode & Fs.Directory) != 0 {
+        unused Args.SetFailure("new:directory");
+        return 1;
+    }
+    size = Io.StatPacked(Args.Operand(1), metadata[:]);
+    if size <= 0 { return Fail("old:") }
+    old_info := Fs.Decode(metadata[:size]);
+    if (old_info.mode & Fs.Directory) != 0 {
+        unused Args.SetFailure("old:directory");
+        return 1;
+    }
+    if old_info.modified > new_info.modified {
+        unused Args.SetFailure("older");
+        return 1;
+    }
+    return 0;
+}

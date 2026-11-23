@@ -95,7 +95,6 @@ TARG=\
 	mv.dis\
 	netkey.dis\
 	netstat.dis\
-	newer.dis\
 	ns.dis\
 	nsbuild.dis\
 	os.dis\
@@ -112,7 +111,6 @@ TARG=\
 	rawdbfs.dis\
 	rcmd.dis\
 	rdp.dis\
-	read.dis\
 	rioimport.dis\
 	rm.dis\
 	runas.dis\
@@ -129,7 +127,6 @@ TARG=\
 	styxchat.dis\
 	styxmon.dis\
 	styxlisten.dis\
-	sum.dis\
 	tail.dis\
 	tarfs.dis\
 	tcs.dis\
@@ -139,7 +136,6 @@ TARG=\
 	tkcmd.dis\
 	touch.dis\
 	touchcal.dis\
-	tokenize.dis\
 	trfs.dis\
 	tsort.dis\
 	unicode.dis\
@@ -196,6 +192,10 @@ SYSMODULES=\
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
 ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh env
+ZXCOMMANDS=$ZXCOMMANDS sum
+ZXCOMMANDS=$ZXCOMMANDS read
+ZXCOMMANDS=$ZXCOMMANDS newer
+ZXCOMMANDS=$ZXCOMMANDS tokenize
 ZXCOMMANDS=$ZXCOMMANDS pwd
 ZXCOMMANDS=$ZXCOMMANDS export mntgen
 ZXCOMMANDS=$ZXCOMMANDS date
@@ -263,6 +263,14 @@ ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 
 mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
+sum.zx: sum.zi taijios_stat.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry sum:main -o $target sum.zi
+read.zx: read.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry read:main -o $target read.zi
+newer.zx: newer.zi taijios_stat.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry newer:main -o $target newer.zi
+tokenize.zx: tokenize.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry tokenize:main -o $target tokenize.zi
 pwd.zx: pwd.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry pwd:main -o $target pwd.zi
 
@@ -362,6 +370,10 @@ $DISBIN/cp.zx: cp.zx mkfile
 $DISBIN/test.zx: test.zx mkfile
 $DISBIN/ls.zx: ls.zx mkfile
 $DISBIN/mkdir.zx: mkdir.zx mkfile
+$DISBIN/sum.zx: sum.zx mkfile
+$DISBIN/read.zx: read.zx mkfile
+$DISBIN/newer.zx: newer.zx mkfile
+$DISBIN/tokenize.zx: tokenize.zx mkfile
 $DISBIN/pwd.zx: pwd.zx mkfile
 
 $DISBIN/%.zx: %.zx
