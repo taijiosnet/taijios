@@ -9,6 +9,10 @@ D :: #import "image_document";
 Decoder :: #import "image_guest";
 IO :: #import "taijios_io";
 Args :: #import "taijios_args";
+WM :: #import "taijios_wm";
+Clock :: #import "taijios_clock";
+GIF :: #import "gif_image";
+Bitmap :: #import "inferno_image";
 #import "kryon/bitmap_image"
 #import "kryon/geometry"
 #import "kryon/session"
@@ -17,6 +21,7 @@ Args :: #import "taijios_args";
 #import "kryon/key_input"
 #import "kryon/drawing_props"
 #import "std/vec"
+#import "std/image"
 
 path_bytes: [1024]u8;
 path_field: Field.State;
@@ -26,15 +31,41 @@ zoom: s32;
 scroll_x: s32;
 scroll_y: s32;
 load_pending: bool;
+load_now: bool;
 first_frame: bool = true;
+// Files up to this size load in the first frame; larger ones after it, so the
+// window can say it is loading while Escape can cancel.
+QuickBytes :: 1048576;
+// A GIF's frames, stacked, are drawn over the picture in turn, as the Dis
+// viewer did, every FrameMillis while the window idles.
+FrameMillis :: 250;
+layers: Image;
+frame_count: s32;
+frame_index: s32;
+frame_due: s64;
+// With -i, files plumbed to the "view" port open here.
+plumb: s32 = -1;
+plumb_bytes: [8192]u8;
+plumb_used: s64;
+// Further files from the command line open in their own viewers.
+others: [16]string;
+other_count: s64;
+// The file this window last opened, which Save never overwrites.
+shown_bytes: [1024]u8;
+shown_length: s64;
+// What Save last did, shown until the next file opens.
+notice: string;
 
 Load :: (session: Session) {
     if texture.id != cast(u32)0 { BitmapImageRelease(session, texture); texture = .{} }
     VecFree(document.image.pixels)
     document.image.width = 0; document.image.height = 0; document.format = ""; document.error = ""
     scroll_x = 0; scroll_y = 0; zoom = 0
+    notice = ""
     path := TextView(path_bytes[:path_field.length])
-    if path == "" { document.error = "Choose a PNG, JPEG, GIF or Inferno image file"; return }
+    for i: cast(s64)0..path.count-1 { shown_bytes[i] = path[i] }
+    shown_length = path.count
+    if path == "" { document.error = "Choose a PNG, JPEG, GIF, Inferno, X bitmap or PIC image file"; return }
     metadata: [12]u8
     if IO.Stat(path, metadata[:]) != 0 { document.error = "Cannot read this file"; return }
     length: s64
@@ -55,12 +86,132 @@ Load :: (session: Session) {
     extra: [1]u8
     if IO.Read(fd, extra[:]) != 0 { document.error = "The image file changed while reading"; return }
     document = Decoder.Decode(bytes[:])
+    VecFree(layers.pixels)
+    frame_count = 0; frame_index = 0
+    if document.error == "" && document.format == "GIF" {
+        // Keep the frames within 64 MiB.
+        layer := cast(s64)document.image.width * document.image.height * 4
+        limit := ifx layer > 0 then 67108864 / layer else cast(s64)1
+        if limit > 256 { limit = 256 }
+        count, problem := GIF.DecodeFrames(bytes[:], *layers, cast(s32)limit)
+        if problem == "" && count > 1 { frame_count = count; frame_due = Clock.MonotonicMillis() + FrameMillis }
+    }
+}
+
+// Draw the next frame over the picture.
+Advance :: (session: Session) {
+    if frame_count < 2 || Clock.MonotonicMillis() < frame_due { return }
+    frame_due = Clock.MonotonicMillis() + FrameMillis
+    frame_index = (frame_index + 1) % frame_count
+    layer := cast(s64)document.image.width * document.image.height * 4
+    base := cast(s64)frame_index * layer
+    for i: cast(s64)0..layer/4-1 {
+        if layers.pixels[base+i*4+3] == 0 { continue }
+        for c: cast(s64)0..3 { document.image.pixels[i*4+c] = layers.pixels[base+i*4+c] }
+    }
+    // Updating the picture in place gives it a new revision, so the retained
+    // frame repaints it.
+    if texture.id != cast(u32)0 && !BitmapImageUpdate(session, texture, document.image.pixels[:]) {
+        BitmapImageRelease(session, texture); texture = .{}
+    }
+}
+
+// Read plumb messages without waiting: source, destination, directory, kind,
+// attributes and data length on lines, then the data, a file name.
+Plumbed :: (session: Session) {
+    if plumb < 0 { return }
+    count := IO.PollRead(plumb, plumb_bytes[plumb_used:])
+    if count > 0 { plumb_used += count }
+    else if count != -2 { unused IO.Close(plumb); plumb = -1; return }
+    lines: [6]s64
+    found: s64 = 0
+    for i: cast(s64)0..plumb_used-1 {
+        if found < 6 && plumb_bytes[i] == 10 { lines[found] = i; found += 1 }
+    }
+    if found < 6 { return }
+    length: s64 = 0
+    for i: lines[4]+1..lines[5]-1 { length = length*10 + cast(s64)plumb_bytes[i] - 48 }
+    start := lines[5] + 1
+    if plumb_used - start < length { return }
+    // The first file opens here, as do later ones while this window shows
+    // no picture; the rest open in viewers of their own.
+    target: [1024]u8
+    used := PlumbedPath(plumb_bytes[lines[1]+1:lines[2]], plumb_bytes[lines[2]+1:lines[3]], plumb_bytes[start:start+length], target[:])
+    if used > 0 && document.image.width > 0 { LaunchViewer(TextView(target[:used])) }
+    else if used > 0 {
+        for i: cast(s64)0..used-1 { path_bytes[i] = target[i] }
+        path_field.length = cast(s32)used; path_field.cursor = path_field.length; path_field.anchor = path_field.length
+        Load(session)
+    }
+    rest := plumb_used - start - length
+    for i: cast(s64)0..rest-1 { plumb_bytes[i] = plumb_bytes[start+length+i] }
+    plumb_used = rest
+}
+
+// The file a plumb message names, in `out`; a relative name is in the
+// sender's directory. Only text messages name files. Returns its length, or
+// 0 for a message that names none or a name too long for the path field.
+PlumbedPath :: (directory: []u8, kind: []u8, name: []u8, out: []u8) -> s64 {
+    if TextView(kind) != "text" || name.count == 0 { return 0 }
+    used: s64 = 0
+    if name[0] != 47 && directory.count > 0 {
+        for c: directory { if used < out.count { out[used] = c; used += 1 } }
+        if used > 0 && out[used-1] != 47 && used < out.count { out[used] = 47; used += 1 }
+    }
+    for c: name { if used < out.count { out[used] = c; used += 1 } }
+    if used >= path_bytes.count - 1 { return 0 }
+    return used
+}
+
+LaunchViewer :: (path: string) {
+    argv: [1040]u8
+    used: s64 = 0
+    for c: "view" { argv[used] = c; used += 1 }
+    argv[used] = 0; used += 1
+    for c: path { if used < argv.count - 1 { argv[used] = c; used += 1 } }
+    argv[used] = 0; used += 1
+    unused WM.Launch("/dis/wm/view.zx", TextView(argv[:used]))
+}
+
+// Open each further command-line file in a viewer of its own.
+LaunchOthers :: () {
+    for i: cast(s64)0..other_count-1 { LaunchViewer(others[i]) }
+    other_count = 0
+}
+
+// Write the shown picture, over white where it is clear, as an uncompressed
+// Inferno image to the file named in the path field, as the Dis viewer's Save
+// did. The file this window opened is never overwritten.
+Save :: () {
+    path := TextView(path_bytes[:path_field.length])
+    if document.image.width < 1 { notice = "Open an image before saving"; return }
+    if path == "" || path == TextView(shown_bytes[:shown_length]) {
+        notice = "Type a new file name, then Save writes an Inferno image"
+        return
+    }
+    data: Vec(u8); defer VecFree(data)
+    if !VecResize(data, Bitmap.EncodedBytes(document.image.width, document.image.height)) { notice = "Not enough memory to save"; return }
+    Bitmap.Encode(*document.image, data[:])
+    fd := IO.Create(path, 1, 436)
+    if fd < 0 { notice = "Cannot create that file"; return }
+    written: s64
+    while written < data.count {
+        count := IO.Write(fd, TextView(data[written:]))
+        if count <= 0 { break }
+        written += count
+    }
+    unused IO.Close(fd)
+    notice = ifx written == data.count then "Saved as an Inferno image" else "Could not write the whole file"
 }
 
 Draw :: (frame: Surface.Frame) {
     session: Session = .{frame.slot, frame.epoch}
+    if load_now { load_now = false; Load(session) }
     if load_pending && !first_frame { load_pending = false; Load(session) }
+    if first_frame { LaunchOthers() }
     first_frame = false
+    Plumbed(session)
+    Advance(session)
     bounds := TreeRootBounds(session)
     Box.Draw(session, .{.key = 1, .bounds = bounds, .fill = .{248, 250, 252, 255}})
     typed: [256]u8
@@ -68,11 +219,12 @@ Draw :: (frame: Surface.Frame) {
     key := KeyboardTake(session)
     edit := Field.Draw(session, Field.StateProps(path_field, .{.key = 2, .focus_id = 2,
         .bounds = .{bounds.x+8.0, bounds.y+8.0, bounds.width-100.0, 32.0},
-        .placeholder = "Path to a PNG or JPEG image", .max_bytes = 1023,
+        .placeholder = "Path to an image file", .max_bytes = 1023,
         .input = TextFieldInputFor(key, KeyboardModifiers(session), text)}))
     unused Field.StateApplyResult(*path_field, edit)
     open := Button.Draw(session, .{.key = 3, .bounds = .{bounds.x+bounds.width-84.0, bounds.y+8.0, 76.0, 32.0}, .label = "Open"}) > 0
     if open || edit.committed { Load(session) }
+    if Button.Draw(session, .{.key = 13, .bounds = .{bounds.x+bounds.width-84.0, bounds.y+46.0, 76.0, 30.0}, .label = "Save"}) > 0 { Save() }
     labels: [4]string = .["Fit", "100%", "-", "+"]
     for index: cast(s32)0..3 {
         if Button.Draw(session, .{.key = cast(u64)(4+index), .bounds = .{bounds.x+8.0+cast(float32)index*68.0,
@@ -86,11 +238,13 @@ Draw :: (frame: Surface.Frame) {
     }
     status: Vec(u8); defer VecFree(status)
     if document.error != "" { BuilderAppend(status, document.error) }
+    else if notice != "" { BuilderAppend(status, notice) }
     else if document.image.width > 0 {
         BuilderPrint(*status, "% x % %", document.image.width, document.image.height, document.format)
         if zoom == 0 { BuilderAppend(status, "  Fit to window") } else { BuilderPrint(*status, "  %", zoom); BuilderAppend(status, "%") }
     } else if load_pending { BuilderAppend(status, "Loading image; Escape cancels") }
-    else { BuilderAppend(status, "Open PNG and JPEG images") }
+    else if plumb >= 0 { BuilderAppend(status, "Waiting for images plumbed to view") }
+    else { BuilderAppend(status, "Open PNG, JPEG, GIF, Inferno, X bitmap and PIC images") }
     Label.Draw(session, .{.key = 8, .bounds = .{bounds.x+8.0, bounds.y+bounds.height-30.0, bounds.width-16.0, 24.0}, .text = TextView(status[:]), .size = 14})
     area: Rectangle = .{bounds.x+8.0, bounds.y+84.0, bounds.width-16.0, bounds.height-120.0}
     if area.width < 16.0 || area.height < 16.0 { return }
@@ -117,18 +271,51 @@ Draw :: (frame: Surface.Frame) {
     if vertical.opened { End(session) }
 }
 
+// view [-f] [-i] [file ...]: -i shows the files plumbed to the "view" port;
+// -f is accepted for the Dis viewer's sake, which used it to turn off error
+// diffusion: pictures here keep their full colour.
 #program_export
 main :: () -> s32 {
     path_field.bytes = path_bytes[:]
-    if Args.Count() > 0 {
-        argument := Args.Operand(0)
-        if argument.count < path_bytes.count {
-            for i: cast(s64)0..argument.count-1 { path_bytes[i] = argument[i] }
-            path_field.length = cast(s32)argument.count; path_field.cursor = path_field.length; path_field.anchor = path_field.length
-            load_pending = true
+    animate := false
+    first: string
+    for index: cast(s32)0..Args.Count()-1 {
+        argument := Args.Operand(index)
+        if argument == "-f" { continue }
+        if argument == "-i" {
+            plumb = IO.Open("/chan/plumb.view", 0)
+            if plumb < 0 { document.error = "Cannot read /chan/plumb.view" }
+            animate = true
+            continue
+        }
+        if first.count == 0 { first = argument }
+        else if other_count < others.count { others[other_count] = argument; other_count += 1 }
+    }
+    if first.count > 0 {
+        if first.count < path_bytes.count {
+            for i: cast(s64)0..first.count-1 { path_bytes[i] = first[i] }
+            path_field.length = cast(s32)first.count; path_field.cursor = path_field.length; path_field.anchor = path_field.length
+            metadata: [12]u8
+            length: s64
+            if IO.Stat(first, metadata[:]) == 0 { for i: cast(s32)0..7 { length |= cast(s64)metadata[i] << cast(s64)(i*8) } }
+            if length > QuickBytes { load_pending = true } else { load_now = true }
+            // A deferred load needs the timer to get its second frame.
+            animate = animate || load_pending || StartsWithGif(first)
         } else { document.error = "Image path is too long" }
     }
-    result := Surface.RunRetained(.{.title = "Image Viewer", .width = 720, .height = 520}, Draw, 0)
+    // Redraw on a timer only for GIF frames, plumbed files and large files.
+    result := Surface.RunRetained(.{.title = "Image Viewer", .width = 720, .height = 520}, Draw,
+        ifx animate then cast(s32)FrameMillis else cast(s32)0)
     VecFree(document.image.pixels)
+    VecFree(layers.pixels)
     return result
+}
+
+StartsWithGif :: (path: string) -> bool {
+    fd := IO.Open(path, 0)
+    if fd < 0 { return false }
+    header: [6]u8
+    count := IO.Read(fd, header[:])
+    unused IO.Close(fd)
+    return count == 6 && GIF.Looks(header[:])
 }

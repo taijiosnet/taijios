@@ -219,7 +219,7 @@ $ROOT/dis/lib/window_chrome.zx: window_chrome.zx
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 window_chrome.zx "$staged" && mv "$staged" "$target"
 
-view.zx: view.zi image_document.zi image_guest.zi gif_image.zi inferno_image.zi color_map.zi ../cmd/taijios_image.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
-	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_image --bind-host taijios_io --bind-host taijios_args --entry view:main -o $target view.zi
+view.zx: view.zi image_document.zi image_guest.zi gif_image.zi inferno_image.zi xbm_image.zi pic_image.zi color_map.zi ../cmd/taijios_wm.zi ../cmd/taijios_clock.zi ../cmd/taijios_image.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_image --bind-host taijios_io --bind-host taijios_args --bind-host taijios_wm --bind-host taijios_clock --entry view:main -o $target view.zi
 
 install-view-zx:V: $DISBIN/view.zx

@@ -18,37 +18,53 @@ ScreenSize :: (bytes: []u8) -> (width: s32, height: s32, ok: bool) {
 // screen. Pixels the frame leaves out, and transparent ones, stay clear.
 // Returns "" or the reason; the caller frees the picture either way.
 Decode :: (bytes: []u8, picture: *Image) -> string {
+    count, problem := DecodeFrames(bytes, picture, 1);
+    if problem == "" && count == 0 { return "GIF file has no image" }
+    return problem;
+}
+
+// Decode up to `limit` frames as layers the size of the logical screen,
+// stacked in one picture: frame n fills rows n*height to (n+1)*height. A
+// layer is clear where its frame leaves pixels out or marks them
+// transparent, so drawing the layers in turn over each other animates the
+// picture. A damaged later frame ends the sequence; only a damaged first
+// frame is an error. The caller frees the picture either way.
+DecodeFrames :: (bytes: []u8, layers: *Image, limit: s32) -> (count: s32, error: string) {
     width, height, ok := ScreenSize(bytes);
-    if !ok { return "Malformed GIF header" }
-    if width <= 0 || height <= 0 { return "Empty GIF image" }
+    if !ok { return 0, "Malformed GIF header" }
+    if width <= 0 || height <= 0 { return 0, "Empty GIF image" }
     flags := bytes[10];
     at: s64 = 13;
     global: []u8;
     if (flags & 128) != 0 {
         size := cast(s64)3 << cast(s64)((flags & 7) + 1);
-        if bytes.count - at < size { return "Truncated GIF palette" }
+        if bytes.count - at < size { return 0, "Truncated GIF palette" }
         global = bytes[at:at + size];
         at += size;
     }
+    layer := cast(s64)width * height * 4;
+    count: s32 = 0;
     transparent: s32 = -1;
-    while at < bytes.count {
+    layers.width = width;
+    layers.height = 0;
+    while at < bytes.count && count < limit {
         kind := bytes[at];
         at += 1;
         if kind == 59 { break }
         if kind == 33 {
-            if at >= bytes.count { return "Truncated GIF extension" }
+            if at >= bytes.count { return Ended(count, "Truncated GIF extension") }
             label := bytes[at];
             at += 1;
             if label == 249 && bytes.count - at >= 6 && bytes[at] >= 4 {
                 transparent = ifx (bytes[at + 1] & 1) != 0 then cast(s32)bytes[at + 4] else -1;
             }
             skipped, problem := SkipBlocks(bytes, at);
-            if problem != "" { return problem }
+            if problem != "" { return Ended(count, problem) }
             at = skipped;
             continue;
         }
-        if kind != 44 { return "Malformed GIF block" }
-        if bytes.count - at < 9 { return "Truncated GIF image" }
+        if kind != 44 { return Ended(count, "Malformed GIF block") }
+        if bytes.count - at < 9 { return Ended(count, "Truncated GIF image") }
         left := Word(bytes, at); top := Word(bytes, at + 2);
         frame_width := Word(bytes, at + 4); frame_height := Word(bytes, at + 6);
         frame_flags := bytes[at + 8];
@@ -56,28 +72,31 @@ Decode :: (bytes: []u8, picture: *Image) -> string {
         palette := global;
         if (frame_flags & 128) != 0 {
             size := cast(s64)3 << cast(s64)((frame_flags & 7) + 1);
-            if bytes.count - at < size { return "Truncated GIF palette" }
+            if bytes.count - at < size { return Ended(count, "Truncated GIF palette") }
             palette = bytes[at:at + size];
             at += size;
         }
-        if palette.count == 0 { return "GIF image has no palette" }
-        if at >= bytes.count { return "Truncated GIF image" }
+        if palette.count == 0 { return Ended(count, "GIF image has no palette") }
+        if at >= bytes.count { return Ended(count, "Truncated GIF image") }
         minimum := cast(s32)bytes[at];
         at += 1;
-        if minimum < 2 || minimum > 8 { return "Malformed GIF image data" }
-        size, problem := BlockBytes(bytes, at);
-        if problem != "" { return problem }
+        if minimum < 2 || minimum > 8 { return Ended(count, "Malformed GIF image data") }
+        size, end, problem := BlockBytes(bytes, at);
+        if problem != "" { return Ended(count, problem) }
         data: Vec(u8);
         defer VecFree(data);
-        if !VecResize(data, size) { return "Image exceeds the memory limit" }
+        if !VecResize(data, size) { return Ended(count, "Image exceeds the memory limit") }
         CopyBlocks(bytes, at, data[:]);
-        count := cast(s64)frame_width * frame_height;
+        at = end;
         indices: Vec(u8);
         defer VecFree(indices);
-        if !VecResize(indices, count) { return "Image exceeds the memory limit" }
+        if !VecResize(indices, cast(s64)frame_width * frame_height) { return Ended(count, "Image exceeds the memory limit") }
         problem = Expand(data[:], minimum, indices[:]);
-        if problem != "" { return problem }
-        if !Clear(picture, width, height) { return "Image exceeds the memory limit" }
+        if problem != "" { return Ended(count, problem) }
+        // A new clear layer below the earlier ones.
+        base := cast(s64)count * layer;
+        if !VecResize(layers.pixels, base + layer) { return Ended(count, "Image exceeds the memory limit") }
+        for i: 0 .. layer - 1 { layers.pixels[base + i] = 0 }
         interlaced := (frame_flags & 64) != 0;
         for row: 0 .. cast(s64)frame_height - 1 {
             y := cast(s64)top + ifx interlaced then Interlaced(row, frame_height) else row;
@@ -87,16 +106,19 @@ Decode :: (bytes: []u8, picture: *Image) -> string {
                 if x < 0 || x >= width { continue }
                 index := cast(s64)indices[row * frame_width + column];
                 if index == cast(s64)transparent || index * 3 + 2 >= palette.count { continue }
-                out := (y * width + x) * 4;
-                picture.pixels[out] = palette[index * 3];
-                picture.pixels[out + 1] = palette[index * 3 + 1];
-                picture.pixels[out + 2] = palette[index * 3 + 2];
-                picture.pixels[out + 3] = 255;
+                out := base + (y * width + x) * 4;
+                layers.pixels[out] = palette[index * 3];
+                layers.pixels[out + 1] = palette[index * 3 + 1];
+                layers.pixels[out + 2] = palette[index * 3 + 2];
+                layers.pixels[out + 3] = 255;
             }
         }
-        return "";
+        count += 1;
+        layers.height = height * count;
+        // Each frame has its own graphic control block.
+        transparent = -1;
     }
-    return "GIF file has no image";
+    return count, "";
 }
 
 #scope_file
@@ -117,19 +139,24 @@ SkipBlocks :: (bytes: []u8, at: s64) -> (at: s64, error: string) {
     return at, "";
 }
 
-// The bytes in a run of data sub-blocks.
-BlockBytes :: (bytes: []u8, at: s64) -> (size: s64, error: string) {
+// After a damaged frame, keep the frames decoded before it.
+Ended :: (count: s32, problem: string) -> (count: s32, error: string) {
+    return count, ifx count > 0 then "" else problem;
+}
+
+// The bytes in a run of data sub-blocks, and where the run ends.
+BlockBytes :: (bytes: []u8, at: s64) -> (size: s64, end: s64, error: string) {
     total: s64 = 0;
     while true {
-        if at >= bytes.count { return 0, "Truncated GIF data" }
+        if at >= bytes.count { return 0, at, "Truncated GIF data" }
         size := cast(s64)bytes[at];
         at += 1;
-        if size == 0 { return total, "" }
-        if bytes.count - at < size { return 0, "Truncated GIF data" }
+        if size == 0 { return total, at, "" }
+        if bytes.count - at < size { return 0, at, "Truncated GIF data" }
         total += size;
         at += size;
     }
-    return total, "";
+    return total, at, "";
 }
 
 CopyBlocks :: (bytes: []u8, at: s64, out: []u8) {
@@ -141,15 +168,6 @@ CopyBlocks :: (bytes: []u8, at: s64, out: []u8) {
         written += size;
         at += size;
     }
-}
-
-// Size a picture and make every pixel clear.
-Clear :: (picture: *Image, width: s32, height: s32) -> bool {
-    if !VecResize(picture.pixels, cast(s64)width * height * 4) { return false }
-    for i: 0 .. picture.pixels.count - 1 { picture.pixels[i] = 0 }
-    picture.width = width;
-    picture.height = height;
-    return true;
 }
 
 // The source row stored at an interlaced position: rows 0, 8, 16..., then

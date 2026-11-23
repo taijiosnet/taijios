@@ -5,11 +5,14 @@ JPEG :: #import "std/jpeg";
 #import "std/file"
 
 CRC :: #import "std/zip";
+GIF :: #import "gif_image";
+Bitmap :: #import "inferno_image";
 
 // Decode a file through the viewer and compare its pixels with a CRC-32 of
 // what a reference decoder produced. For Inferno images that is Inferno's own
 // Draw, drawing the file into r8g8b8 (blue, green, red bytes). For GIF it is
-// Pillow's first frame as RGBA with transparent pixels cleared.
+// Pillow's first frame as RGBA with transparent pixels cleared, and for X
+// bitmaps Inferno's readxbitmap as RGBA.
 Matches :: (path: string, format: string, width: s32, height: s32, crc: u32) -> bool {
     bytes: Vec(u8); defer VecFree(bytes)
     if !ReadFileInto(path, *bytes) { return false }
@@ -17,7 +20,7 @@ Matches :: (path: string, format: string, width: s32, height: s32, crc: u32) -> 
     if document.error != "" || document.format != format { print("%: % %\n", path, document.format, document.error); return false }
     if document.image.width != width || document.image.height != height { return false }
     sum := cast(u32)0xffffffff
-    if format == "GIF" { sum = CRC.ZipCRC32Update(sum, document.image.pixels[:]) }
+    if format != "Inferno image" { sum = CRC.ZipCRC32Update(sum, document.image.pixels[:]) }
     else {
         bgr: [3]u8
         for i: cast(s64)0..document.image.pixels.count/4-1 {
@@ -105,6 +108,29 @@ main :: () -> s32 {
     if !Matches("services/webget/inferno.gif", "GIF", 233, 75, 3695199128) { return 30 }
     if !Matches("services/webget/smallinferno.gif", "GIF", 150, 48, 3797876854) { return 31 }
     if !Matches("services/webget/vnlogo.gif", "GIF", 121, 110, 2115683368) { return 32 }
+    if !Matches("tests/desktop/sample.xbm", "X bitmap", 13, 7, 353782105) { return 36 }
+    // frames.gif has three frames: a full one, a smaller one with a transparent
+    // colour, and an offset one. Its layers were built with the file.
+    frames: Vec(u8); defer VecFree(frames)
+    if !ReadFileInto("tests/desktop/frames.gif", *frames) { return 37 }
+    layers: Image; defer VecFree(layers.pixels)
+    count, problem := GIF.DecodeFrames(frames[:], *layers, 16)
+    if problem != "" || count != 3 || layers.width != 9 || layers.height != 18 ||
+       CRC.ZipCRC32(layers.pixels[:]) != 2042660174 { return 38 }
+    first: Image; defer VecFree(first.pixels)
+    one, why := GIF.DecodeFrames(frames[:], *first, 1)
+    if why != "" || one != 1 || CRC.ZipCRC32(first.pixels[:]) != 2823328147 { return 39 }
+    // sample.pic decodes as Inferno's readpicfile reads it.
+    if !Matches("tests/desktop/sample.pic", "PIC picture", 5, 3, 2567782757) { return 40 }
+    // The viewer's Save writes the bytes that Inferno's Draw read back as the
+    // first two frames of frames.gif over white.
+    two: Image; defer VecFree(two.pixels)
+    pair, why2 := GIF.DecodeFrames(frames[:], *two, 2)
+    if why2 != "" || pair != 2 { return 41 }
+    encoded: Vec(u8); defer VecFree(encoded)
+    if !VecResize(encoded, Bitmap.EncodedBytes(two.width, two.height)) { return 42 }
+    Bitmap.Encode(*two, encoded[:])
+    if CRC.ZipCRC32(encoded[:]) != 41973348 { return 43 }
     // Truncated input fails cleanly.
     bitmap: Vec(u8); defer VecFree(bitmap)
     gif: Vec(u8); defer VecFree(gif)

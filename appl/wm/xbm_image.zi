@@ -1,0 +1,100 @@
+// X11 bitmaps as Inferno's readxbitmap reads them: "#define" lines for the
+// width and height, optionally two more for the hot spot, then hexadecimal
+// bytes after "{". Each row is padded to whole bytes, pixels run from each
+// byte's low bit, and a set bit is black on white.
+#import "std/vec"
+#import "std/image"
+
+// Whether the bytes start like an X11 bitmap.
+Looks :: (bytes: []u8) -> bool {
+    at: s64 = 0;
+    width, ok := Define(bytes, *at);
+    return ok && width > 0 && bytes.count > 8 && TextView(bytes[:8]) == "#define ";
+}
+
+// The width and height, for admission before decoding.
+Size :: (bytes: []u8) -> (width: s32, height: s32, ok: bool) {
+    at: s64 = 0;
+    width, found := Define(bytes, *at);
+    if !found { return 0, 0, false }
+    height, found2 := Define(bytes, *at);
+    if !found2 || width <= 0 || height <= 0 { return 0, 0, false }
+    return width, height, true;
+}
+
+// Decode into black and white RGBA. Returns "" or the reason; the caller
+// frees the picture either way.
+Decode :: (bytes: []u8, picture: *Image) -> string {
+    at: s64 = 0;
+    width, found := Define(bytes, *at);
+    height, found2 := Define(bytes, *at);
+    if !found || !found2 { return "X bitmap does not start with its width and height" }
+    if width <= 0 || height <= 0 { return "X bitmap has a bad width or height" }
+    // The hot spot, if any.
+    hot, found3 := Define(bytes, *at);
+    unused hot;
+    if found3 { unused Define(bytes, *at) }
+    while at < bytes.count && bytes[at] != 123 { at += 1 }
+    if at >= bytes.count { return "Truncated X bitmap" }
+    if !VecResize(picture.pixels, cast(s64)width * height * 4) { return "Image exceeds the memory limit" }
+    picture.width = width;
+    picture.height = height;
+    line := (cast(s64)width + 7) / 8;
+    out: s64 = 0;
+    for row: 0 .. cast(s64)height - 1 {
+        for column: 0 .. line - 1 {
+            value, ok := HexByte(bytes, *at);
+            if !ok { return "Truncated X bitmap" }
+            last := ifx column == line - 1 then (cast(s64)width - 1) % 8 else 7;
+            for k: 0 .. last {
+                shade: u8 = ifx (value & (cast(u8)1 << cast(u8)k)) != 0 then cast(u8)0 else cast(u8)255;
+                picture.pixels[out] = shade;
+                picture.pixels[out + 1] = shade;
+                picture.pixels[out + 2] = shade;
+                picture.pixels[out + 3] = 255;
+                out += 4;
+            }
+        }
+    }
+    return "";
+}
+
+#scope_file
+
+// A "#define name value" line: the number after its last space.
+Define :: (bytes: []u8, at: *s64) -> (value: s32, found: bool) {
+    if at.* >= bytes.count || bytes[at.*] != 35 { return 0, false }
+    start := at.*;
+    while at.* < bytes.count && bytes[at.*] != 10 { at.* += 1 }
+    end := at.*;
+    if at.* < bytes.count { at.* += 1 }
+    while end > start && (bytes[end - 1] == 13 || bytes[end - 1] == 32) { end -= 1 }
+    space := end;
+    while space > start && bytes[space - 1] != 32 { space -= 1 }
+    if space == start || space == end { return 0, true }
+    value: s64 = 0;
+    for i: space .. end - 1 {
+        if bytes[i] < 48 || bytes[i] > 57 { return 0, true }
+        value = value * 10 + cast(s64)bytes[i] - 48;
+        if value > 1000000 { return 0, true }
+    }
+    return cast(s32)value, true;
+}
+
+// The two hexadecimal digits after the next "x".
+HexByte :: (bytes: []u8, at: *s64) -> (value: u8, ok: bool) {
+    while at.* < bytes.count && bytes[at.*] != 120 { at.* += 1 }
+    if bytes.count - at.* < 3 { return 0, false }
+    high := Digit(bytes[at.* + 1]);
+    low := Digit(bytes[at.* + 2]);
+    at.* += 3;
+    if high < 0 || low < 0 { return 0, false }
+    return cast(u8)(high * 16 + low), true;
+}
+
+Digit :: (c: u8) -> s32 {
+    if c >= 48 && c <= 57 { return cast(s32)c - 48 }
+    if c >= 97 && c <= 102 { return cast(s32)c - 87 }
+    if c >= 65 && c <= 70 { return cast(s32)c - 55 }
+    return -1;
+}

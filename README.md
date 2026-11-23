@@ -239,14 +239,27 @@ restore the default cursor.
 
 ### Build and run the ZX image viewer
 
-`appl/wm/view.zi` shows PNG, JPEG, GIF and Inferno image files, fitted to the
-window or zoomed. Inferno images (`.bit`) are read as libdraw reads them: plain
-or compressed, with a channel descriptor or an old ldepth header, including
-the colour map. GIF shows its first frame with its transparency. Build it with
-`(cd appl/wm && mk view.zx)` and open a file with
-`zxrun -w /dis/wm/view.zx /icons/inferno.bit`. `tests/desktop/image_document_test.zi`
-compares the decoded pixels of every Inferno image format in the tree with what
-Inferno's own Draw produced, and the tree's GIFs with Pillow's first frame.
+`appl/wm/view.zi` shows PNG, JPEG, GIF, Inferno image, X bitmap and PIC files,
+fitted to the window or zoomed. Inferno images (`.bit`) are read as libdraw
+reads them: plain or compressed, with a channel descriptor or an old ldepth
+header, including the colour map. Animated GIFs play their frames every 250
+ms, each drawn over the last with its transparency. X bitmaps and PIC
+pictures (`TYPE=dump`, rgb) are read as Inferno's `readxbitmap` and
+`readpicfile` read them. Build it with `(cd appl/wm && mk view.zx)` and open
+files with `zxrun -w /dis/wm/view.zx /icons/inferno.bit /services/webget/inferno.gif`:
+the first file opens in this viewer and each further file in a viewer of its
+own. `view -i` waits for files plumbed to the `view` port; the first opens in
+its window and each later one in a new viewer. Save writes the shown picture,
+over white where it is clear, as an uncompressed `r8g8b8` Inferno image to the
+file named in the path field; it never overwrites the file the window opened.
+`-f` is accepted and does nothing: it turned off the Dis viewer's dithering to
+Inferno's 256-colour map, and pictures here keep their full colour.
+
+`tests/desktop/image_document_test.zi` compares the decoded pixels of every
+Inferno image format in the tree with what Inferno's own Draw produced, the
+tree's GIFs with Pillow's first frame, an X bitmap and a PIC picture with
+Inferno's readers, each frame of a three-frame GIF with the layers it was built
+from, and Save's bytes with a file Inferno's Draw read back.
 
 ### Build and run ZX Clock
 

@@ -1,0 +1,96 @@
+// PIC pictures as Inferno's readpicfile reads them: "NAME=value" header
+// lines up to an empty line, then the pixels. Only TYPE=dump with CHAN=rgb,
+// NCHAN=3 and no CMAP is read; WINDOW=x0 y0 x1 y1 gives the size, and each
+// pixel is a red, a green and a blue byte.
+#import "std/vec"
+#import "std/image"
+
+Header :: struct {
+    width: s32;
+    height: s32;
+    data: s64;      // Offset of the first pixel.
+    plain: bool;    // A dump of interleaved rgb bytes without a colour map.
+}
+
+// Whether the bytes start like a PIC picture.
+Looks :: (bytes: []u8) -> bool {
+    return bytes.count >= 5 && TextView(bytes[:5]) == "TYPE=";
+}
+
+// Parse the header. Returns "" or the reason it cannot be read.
+ReadHeader :: (bytes: []u8, header: *Header) -> string {
+    header.* = .{};
+    header.plain = true;
+    type_dump := false; rgb := false; three := false;
+    at: s64 = 0;
+    while true {
+        start := at;
+        while at < bytes.count && bytes[at] != 10 { at += 1 }
+        if at >= bytes.count { return "Cannot parse the PIC header" }
+        line := bytes[start:at];
+        at += 1;
+        if line.count == 0 { break }
+        equals: s64 = -1;
+        for i: 0 .. line.count - 1 {
+            if line[i] == 61 { equals = i; break }
+            if line[i] == 0 || line[i] > 127 { return "Not a PIC header" }
+        }
+        if equals < 0 { return "Not a PIC header" }
+        name := TextView(line[:equals]);
+        value := line[equals + 1:];
+        if name == "TYPE" { type_dump = TextView(value) == "dump" }
+        else if name == "CHAN" { rgb = TextView(value) == "rgb" }
+        else if name == "NCHAN" { three = TextView(value) == "3" }
+        else if name == "CMAP" { header.plain = false }
+        else if name == "WINDOW" {
+            numbers: [4]s64;
+            found: s64 = 0;
+            i: s64 = 0;
+            while i < value.count {
+                while i < value.count && value[i] == 32 { i += 1 }
+                if i >= value.count { break }
+                if found == 4 { return "Bad PIC WINDOW" }
+                negative := value[i] == 45;
+                if negative { i += 1 }
+                number: s64 = 0;
+                digits: s64 = 0;
+                while i < value.count && value[i] >= 48 && value[i] <= 57 {
+                    number = number * 10 + cast(s64)value[i] - 48;
+                    if number > 1000000 { return "Bad PIC WINDOW" }
+                    i += 1; digits += 1;
+                }
+                if digits == 0 || (i < value.count && value[i] != 32) { return "Bad PIC WINDOW" }
+                numbers[found] = ifx negative then -number else number;
+                found += 1;
+            }
+            if found != 4 { return "Bad PIC WINDOW" }
+            header.width = cast(s32)(numbers[2] - numbers[0]);
+            header.height = cast(s32)(numbers[3] - numbers[1]);
+        }
+    }
+    if header.width <= 0 || header.height <= 0 { return "Empty PIC picture or WINDOW not set" }
+    header.plain = header.plain && type_dump && rgb && three;
+    header.data = at;
+    return "";
+}
+
+// Decode into RGBA. The caller checks the size with ReadHeader first, and
+// frees the picture whether or not this returns "".
+Decode :: (bytes: []u8, picture: *Image) -> string {
+    header: Header;
+    problem := ReadHeader(bytes, *header);
+    if problem != "" { return problem }
+    if !header.plain { return "Unsupported PIC picture; only rgb dumps are read" }
+    pixels := cast(s64)header.width * header.height;
+    if bytes.count - header.data < pixels * 3 { return "PIC file too short" }
+    if !VecResize(picture.pixels, pixels * 4) { return "Image exceeds the memory limit" }
+    picture.width = header.width;
+    picture.height = header.height;
+    for i: 0 .. pixels - 1 {
+        picture.pixels[i * 4] = bytes[header.data + i * 3];
+        picture.pixels[i * 4 + 1] = bytes[header.data + i * 3 + 1];
+        picture.pixels[i * 4 + 2] = bytes[header.data + i * 3 + 2];
+        picture.pixels[i * 4 + 3] = 255;
+    }
+    return "";
+}

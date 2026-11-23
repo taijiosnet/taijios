@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bring the ZX image viewer to the Dis viewer's features: animated GIFs, X bitmaps and PIC pictures, several files at once, files plumbed to the view port with -i, Save as an Inferno image, and -f.
+
 - Add /dis/alphabet.zx, Alphabet in Ziran: the typed evaluator, its rewriter and the builtins of "load alphabet", with the modules of the root typeset. The Dis alphabet stays until the ZX shell runs it as its builtin.
 
 - Ship Snake only as ZX and remove its Dis version.

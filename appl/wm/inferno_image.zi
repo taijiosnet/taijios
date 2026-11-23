@@ -114,7 +114,46 @@ Decode :: (bytes: []u8, picture: *Image) -> string {
     return "";
 }
 
+// The size of a picture saved by Encode.
+EncodedBytes :: (width: s32, height: s32) -> s64 {
+    return 60 + cast(s64)width * height * 3;
+}
+
+// Write an RGBA picture as an uncompressed r8g8b8 Inferno image, drawn over
+// white where it is transparent, into EncodedBytes(width, height) bytes.
+Encode :: (picture: *Image, out: []u8) {
+    for i: 0 .. 59 { out[i] = 32 }
+    channels := "r8g8b8";
+    for i: 0 .. channels.count - 1 { out[11 - channels.count + i] = channels[i] }
+    // Five fields of eleven bytes and a space: channels and the rectangle.
+    RightAlign(out[12:23], 0);
+    RightAlign(out[24:35], 0);
+    RightAlign(out[36:47], picture.width);
+    RightAlign(out[48:59], picture.height);
+    pixels := cast(s64)picture.width * picture.height;
+    for i: 0 .. pixels - 1 {
+        alpha := cast(u32)picture.pixels[i * 4 + 3];
+        // Pixels are little-endian with red most significant: blue, green, red.
+        for c: 0 .. 2 {
+            value := (cast(u32)picture.pixels[i * 4 + c] * alpha + 255 * (255 - alpha) + 127) / 255;
+            out[60 + i * 3 + 2 - c] = cast(u8)value;
+        }
+    }
+}
+
 #scope_file
+
+// A number right-aligned in an 11-byte field.
+RightAlign :: (field: []u8, value: s32) {
+    at := field.count - 1;
+    remaining := value;
+    while true {
+        field[at] = cast(u8)(48 + remaining % 10);
+        remaining /= 10;
+        if remaining == 0 || at == 0 { break }
+        at -= 1;
+    }
+}
 
 Number :: (field: []u8) -> (value: s32, ok: bool) {
     i: s64 = 0;

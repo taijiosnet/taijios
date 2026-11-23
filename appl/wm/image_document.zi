@@ -2,6 +2,8 @@ PNG :: #import "std/png_linux";
 JPEG :: #import "std/jpeg";
 GIF :: #import "gif_image";
 Bitmap :: #import "inferno_image";
+XBM :: #import "xbm_image";
+PIC :: #import "pic_image";
 CRC :: #import "std/zip";
 #import "std/image"
 
@@ -117,7 +119,20 @@ DecodeWithProgress :: (bytes: []u8, progress: ImageProgress) -> Document {
         } else {
             result.error = Bitmap.Decode(bytes, *result.image)
         }
-    } else { result.error = "Unsupported image format; open a PNG, JPEG, GIF or Inferno image" }
+    } else if XBM.Looks(bytes) {
+        result.format = "X bitmap"
+        width, height, ok := XBM.Size(bytes)
+        if !ok { result.error = "X bitmap does not start with its width and height" }
+        else if !Admit(width, height) { result.error = "Image exceeds the 4096-pixel side or 2-megapixel limit" }
+        else { result.error = XBM.Decode(bytes, *result.image) }
+    } else if PIC.Looks(bytes) {
+        result.format = "PIC picture"
+        header: PIC.Header
+        result.error = PIC.ReadHeader(bytes, *header)
+        if result.error == "" && !Admit(header.width, header.height) {
+            result.error = "Image exceeds the 4096-pixel side or 2-megapixel limit"
+        } else if result.error == "" { result.error = PIC.Decode(bytes, *result.image) }
+    } else { result.error = "Unsupported image format; open a PNG, JPEG, GIF, Inferno, X bitmap or PIC image" }
     if result.error == "" && !ImageValid(*result.image) { result.error = "Malformed or unsupported image data" }
     return result
 }
