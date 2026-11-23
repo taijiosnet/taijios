@@ -1,0 +1,36 @@
+// Table-driven unit tests for appl/spree/join_model.zi.
+#import "std/vec"
+using Model :: #import "join_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    args: [5]string = .["-d", "/n/spree", "-j", "join alice", "0"];
+    cfg: Model.JoinConfig;
+    Expect(Model.ParseJoinArgs(args[:], *cfg), "ParseJoinArgs valid");
+    Expect(TextView(cfg.mnt) == "/n/spree" && TextView(cfg.joinmsg) == "join alice" && TextView(cfg.dir) == "0", "ParseJoinArgs fields");
+
+    bad: [1]string = .["-x"];
+    Expect(!Model.ParseJoinArgs(bad[:], *cfg), "ParseJoinArgs bad flag");
+
+    ctl: Text;
+    Model.BuildCtlPath("/n/spree", "0", *ctl);
+    Expect(TextView(ctl) == "/n/spree/0/ctl", "BuildCtlPath");
+
+    spec: Model.ClientSpec;
+    Expect(Model.ParseClientTypeLine("clienttype cards arg1 arg2", *spec), "ParseClientTypeLine cards");
+    Expect(TextView(spec.client_type) == "cards" && spec.extra_count == 2 && TextView(spec.extra[0]) == "arg1" && TextView(spec.extra[1]) == "arg2", "ClientSpec fields");
+
+    Expect(!Model.ParseClientTypeLine("clienttype ../evil", *spec), "reject path traversal");
+    Expect(!Model.ParseClientTypeLine("hello world", *spec), "reject non-clienttype");
+
+    if failures == 0 { print("joinsession_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

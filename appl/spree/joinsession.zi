@@ -1,0 +1,95 @@
+// Join a Spree session and launch its client, ported from appl/spree/joinsession.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Namespace :: #import "taijios_namespace"
+using Proc :: #import "taijios_process"
+using Model :: #import "join_model"
+
+CLIENTDIR :: "/dis/spree/clients";
+
+Usage :: () -> s32 {
+    print("usage: joinsession [-d mntdir] [-j joinrequest] name\n");
+    unused Args.SetFailure("usage");
+    return 2;
+}
+
+JoinSession :: (mnt: string, dir: string, joinmsg: string) -> (ok: bool, err: string) {
+    ctl_path: Text;
+    Model.BuildCtlPath(mnt, dir, *ctl_path);
+    fd := IO.Open(TextView(ctl_path), 2);
+    if fd < 0 {
+        return false, "cannot open ctl";
+    }
+    if joinmsg.count > 0 {
+        if IO.Write(fd, joinmsg) < 0 {
+            unused IO.Close(fd);
+            return false, "cannot join";
+        }
+    }
+
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        chunk := TextView(buf[:n]);
+        pos: s64 = 0;
+        while pos < chunk.count {
+            start := pos;
+            while pos < chunk.count && chunk[pos] != 10 { pos += 1 }
+            line := chunk[start:pos];
+            if pos < chunk.count && chunk[pos] == 10 { pos += 1 }
+            if line.count == 0 { continue }
+            spec: Model.ClientSpec;
+            if Model.ParseClientTypeLine(line, *spec) {
+                unused Namespace.Fork();
+                path: Text;
+                unused BuilderAppend(path.bytes, CLIENTDIR);
+                unused BuilderAppend(path.bytes, "/");
+                unused BuilderAppend(path.bytes, TextView(spec.client_type));
+                unused BuilderAppend(path.bytes, ".zx");
+                meta: [12]u8;
+                if IO.Stat(TextView(path), meta[:]) != 0 {
+                    unused VecResize(path.bytes, 0);
+                    unused BuilderAppend(path.bytes, CLIENTDIR);
+                    unused BuilderAppend(path.bytes, "/");
+                    unused BuilderAppend(path.bytes, TextView(spec.client_type));
+                    unused BuilderAppend(path.bytes, ".dis");
+                }
+                ops: [Model.MAX_EXTRA_ARGS + 2]string;
+                ops[0] = mnt;
+                ops[1] = dir;
+                for k: 0..cast(s64)spec.extra_count-1 {
+                    ops[2 + k] = TextView(spec.extra[k]);
+                }
+                launch := Proc.StartWith(TextView(path), ops[:2 + spec.extra_count], fd, -1, -1);
+                unused IO.Close(fd);
+                if launch.id <= 0 {
+                    return false, "cannot load client";
+                }
+                return true, "";
+            }
+            print("startclient: unknown lobby message %\n", line);
+        }
+    }
+    unused IO.Close(fd);
+    return false, "premature EOF";
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    arg_buf: [32]string;
+    n_args := ifx argc > 32 then 32 else argc;
+    for i: 0..cast(s64)n_args-1 { arg_buf[i] = Args.Operand(cast(s32)i) }
+
+    cfg: Model.JoinConfig;
+    if !Model.ParseJoinArgs(arg_buf[:n_args], *cfg) { return Usage() }
+
+    ok, err := JoinSession(TextView(cfg.mnt), TextView(cfg.dir), TextView(cfg.joinmsg));
+    if !ok {
+        print("startclient: %\n", err);
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    return 0;
+}

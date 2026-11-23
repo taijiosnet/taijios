@@ -1,0 +1,92 @@
+// Pure CLI parsing and lobby protocol message parser for spree/join and spree/joinsession,
+// ported from appl/spree/join.b and appl/spree/joinsession.b.
+#import "std/vec"
+
+MAX_EXTRA_ARGS :: 16;
+
+JoinConfig :: struct {
+    mnt: Text;
+    joinmsg: Text;
+    dir: Text;
+}
+
+ClientSpec :: struct {
+    client_type: Text;
+    extra: [MAX_EXTRA_ARGS]Text;
+    extra_count: s32;
+}
+
+ParseJoinArgs :: (args: []string, cfg: *JoinConfig) -> bool {
+    unused VecResize(cfg.mnt.bytes, 0);
+    unused BuilderAppend(cfg.mnt.bytes, "/n/remote");
+    unused VecResize(cfg.joinmsg.bytes, 0);
+    unused BuilderAppend(cfg.joinmsg.bytes, "join");
+    unused VecResize(cfg.dir.bytes, 0);
+
+    i: s64 = 0;
+    while i < args.count {
+        a := args[i];
+        if a.count < 2 || a[0] != 45 { break }
+        i += 1;
+        if a == "--" { break }
+        if a == "-d" {
+            if i >= args.count { return false }
+            unused VecResize(cfg.mnt.bytes, 0);
+            unused BuilderAppend(cfg.mnt.bytes, args[i]);
+            i += 1;
+        } else if a == "-j" {
+            if i >= args.count { return false }
+            unused VecResize(cfg.joinmsg.bytes, 0);
+            unused BuilderAppend(cfg.joinmsg.bytes, args[i]);
+            i += 1;
+        } else {
+            return false;
+        }
+    }
+    if args.count - i != 1 { return false }
+    unused BuilderAppend(cfg.dir.bytes, args[i]);
+    return true;
+}
+
+IsSafeClientName :: (name: string) -> bool {
+    if name.count == 0 { return false }
+    for c: name {
+        if c == 47 || c == 92 || c == 0 { return false }
+    }
+    return name != "." && name != "..";
+}
+
+// Parse one lobby ctl line: "clienttype <type> [extra...]"
+ParseClientTypeLine :: (line: string, out: *ClientSpec) -> bool {
+    unused VecResize(out.client_type.bytes, 0);
+    out.extra_count = 0;
+    toks: [MAX_EXTRA_ARGS + 2]string;
+    nt: s32 = 0;
+    i: s64 = 0;
+    while i < line.count && cast(s64)nt < toks.count {
+        while i < line.count && (line[i] == 32 || line[i] == 9 || line[i] == 13 || line[i] == 10) { i += 1 }
+        if i >= line.count { break }
+        start := i;
+        while i < line.count && line[i] != 32 && line[i] != 9 && line[i] != 13 && line[i] != 10 { i += 1 }
+        toks[nt] = line[start:i];
+        nt += 1;
+    }
+    if nt < 2 || toks[0] != "clienttype" { return false }
+    if !IsSafeClientName(toks[1]) { return false }
+    unused BuilderAppend(out.client_type.bytes, toks[1]);
+    for k: 2..cast(s64)nt-1 {
+        idx := out.extra_count;
+        unused VecResize(out.extra[idx].bytes, 0);
+        unused BuilderAppend(out.extra[idx].bytes, toks[k]);
+        out.extra_count += 1;
+    }
+    return true;
+}
+
+BuildCtlPath :: (mnt: string, dir: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, mnt);
+    unused BuilderAppend(out.bytes, "/");
+    unused BuilderAppend(out.bytes, dir);
+    unused BuilderAppend(out.bytes, "/ctl");
+}

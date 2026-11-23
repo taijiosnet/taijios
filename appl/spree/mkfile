@@ -44,9 +44,18 @@ DEST=$ROOT/dis/spree
 ALL= ${ENGINES:%=$DEST/%} \
 	${CLIENTS:%=$DEST/%} \
 	${LIB:%=$DEST/%} \
-	${MAIN:%=$DEST/%}
+	${MAIN:%=$DEST/%} \
+	$DEST/joinsession.zx
 
-all:V: $ENGINES $CLIENTS $LIB $MAIN
+all:V: $ENGINES $CLIENTS $LIB $MAIN joinsession.zx
+
+joinsession.zx: joinsession.zi join_model.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process --entry joinsession:main -o $target joinsession.zi
+
+$DEST/joinsession.zx: joinsession.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 joinsession.zx "$staged" && mv "$staged" "$target"
 
 install:V:	$ALL
 

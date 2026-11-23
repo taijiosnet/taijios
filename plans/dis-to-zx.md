@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **708** open rows = **686** on-disk `dis/` files (**143** top-level `dis/*.dis` + **543** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **707** open rows = **685** on-disk `dis/` files (**143** top-level `dis/*.dis` + **542** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -46,7 +46,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (97 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (61 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (11), demo (3), ebook (0), math (9).
+5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (11), demo (3), ebook (0), math (9).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
@@ -670,7 +670,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/alphabet/reports.dis | appl/alphabet/reports.b | module/alphabet/reports.m | - |  |
 | dis/alphabet/rexecsrv.dis | appl/alphabet/auxi/rexecsrv.b |  | - |  |
 
-### 9. Spree - multiuser engine family - 24 rows
+### 9. Spree - multiuser engine family - 23 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -691,7 +691,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/spree/engines/spit.dis | appl/spree/engines/spit.b |  | - |  |
 | dis/spree/engines/whist.dis | appl/spree/engines/whist.b |  | - |  |
 | dis/spree/join.dis | appl/spree/join.b |  | - |  |
-| dis/spree/joinsession.dis | appl/spree/joinsession.b |  | - |  |
 | dis/spree/lib/allow.dis | appl/spree/lib/allow.b |  | - |  |
 | dis/spree/lib/cardlib.dis | appl/spree/lib/cardlib.b |  | - |  |
 | dis/spree/lib/commandline.dis | appl/spree/lib/commandline.b |  | - |  |
