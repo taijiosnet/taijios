@@ -53,7 +53,8 @@ Memory shows the guest's `main`, `heap`, and `image` arenas. It reads
 `/dev/memory` on launch and every second. Each row shows used capacity and
 the arena limit, the allocation count in the original display units, a red usage
 bar, and the high-water mark. The graph uses the shared Ziran Canvas
-widget. [ZX source](memory_app.zi) · [Inferno source](../../wm/memory.b)
+widget. [ZX source](memory_app.zi). The Dis version is removed; `test_memory.py`
+compares the canvas commands with results recorded from Inferno tkcmd.
 
 LINPACK opens with matrix order 200. Edit the order and press Run to generate
 the original deterministic matrix, factor it with partial pivoting, solve it,

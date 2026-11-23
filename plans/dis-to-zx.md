@@ -47,7 +47,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 3. Services (105 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (72 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (15), demo (14), ebook (10), math (22).
-6. WM apps with zx-twins (4 rows) and the rest of dis/wm (56 rows total): delete or port through the desktop-core owner.
+6. WM apps with zx-twins (3 rows) and the rest of dis/wm (55 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
 ## Open rows
@@ -485,7 +485,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 56 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 55 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -520,7 +520,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/wm/man.dis | appl/wm/man.b | module/man.m | - |  |
 | dis/wm/mand.dis | appl/wm/mand.b |  | - |  |
 | dis/wm/mash.dis | appl/wm/mash.b |  | - |  |
-| dis/wm/memory.dis | appl/wm/memory.b |  | - | zx-twin |
 | dis/wm/mpeg.dis | appl/wm/mpeg.b | module/mpeg.m | - |  |
 | dis/wm/mprof.dis | appl/wm/mprof.b |  | - |  |
 | dis/wm/pen.dis | appl/wm/pen.b |  | - |  |

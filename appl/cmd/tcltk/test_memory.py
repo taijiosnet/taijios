@@ -1,4 +1,9 @@
-"""Compare the live Inferno Memory graph with the hosted Ziran port."""
+"""Check the Ziran Memory Monitor graph, and its canvas commands against recorded Inferno tkcmd results.
+
+memory_canvas_commands.expected was recorded from Inferno tkcmd. The Dis
+Memory Monitor is removed; the hosted port is checked against the same
+fixture records and geometry the Dis version passed.
+"""
 
 import argparse
 from contextlib import contextmanager
@@ -25,20 +30,10 @@ def desktop(env, script):
         app.stderr.close()
 
 
-def tkcmd_reference(env):
-    with desktop(env, "tkcmd < /appl/cmd/tcltk/memory_canvas_commands.tcl") as app:
-        output = bytearray()
-
-        def transcript():
-            read_output(app, output)
-            lines = output.decode().splitlines()
-            assert not any(line.startswith("#!") for line in lines), lines
-            return [line[1:] for line in lines] if lines and lines[-1] == "#42" else None
-
-        try:
-            return until(transcript, "canvas tkcmd transcript was incomplete")
-        except AssertionError as failure:
-            raise AssertionError(f"{failure} ({output!r})") from failure
+def tkcmd_reference():
+    lines = (SOURCES / "memory_canvas_commands.expected").read_text().splitlines()
+    assert lines and lines[-1] == "#42" and not any(line.startswith("#!") for line in lines), lines
+    return [line[1:] for line in lines]
 
 
 def fixture(used, high):
@@ -50,7 +45,7 @@ def fixture(used, high):
 
 
 def save_snapshot(path, data):
-    # The Dis oracle keeps one descriptor open. Rewrite this fixed-size record in place.
+    # The application keeps one descriptor open. Rewrite this fixed-size record in place.
     with path.open("r+b", buffering=0) as stream:
         assert stream.write(data) == len(data), "short memory fixture write"
 
@@ -146,7 +141,6 @@ def exercise(env, invocation, *, device_fixture, hosted=False):
 
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--oracle-only", action="store_true", help="run the original Dis application")
     cli.add_argument("--installed", action="store_true", help="exercise /dis/wm/memory.zx")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
@@ -157,27 +151,24 @@ def main():
         "Memory verified Inferno arena records, used and high-water bar widths, and count and size formatting", "0",
     ] and not result.stderr, result
 
+    oracle = tkcmd_reference()
+    commands = (SOURCES / "memory_canvas_commands.tcl").read_text()
+    write_fixture("memory_canvas_fixture.zi", f"Commands :: #string CANVAS_END\n{commands}CANVAS_END;\n")
+    canvas = BUILD / "memory_canvas_test.zx"
+    compile_image("memory_canvas_test", canvas)
+    portable = command("zi2zx", "run", "--backend", "engine", canvas, capture_output=True, text=True, check=True)
+    assert portable.stdout.splitlines() == [*oracle, "0"] and not portable.stderr, portable
+    print("Ziran Tk matched the recorded Inferno canvas creation, sizes, coordinates, bounds and item text")
+    image = ROOT / "dis/wm/memory.zx" if args.installed else BUILD / "memory.zx"
+    if not args.installed:
+        compile_image("memory_app", image, "--module-path", ROOT / "appl/wm", "--bind-host", "zx_surface",
+                      "--bind-host", "taijios_files", "--bind-host", "taijios_clock")
+    invocation = f"zxrun -p -w /{image.relative_to(ROOT)}"
     with private_display() as env:
-        oracle = tkcmd_reference(env)
-        print(f"Inferno Memory canvas command results {oracle!r}")
-        exercise(env, "wm/memory", device_fixture=True)
-        print("Inferno Memory verified three usage bars, high-water marks, refreshed size labels and window close")
-        if not args.oracle_only:
-            commands = (SOURCES / "memory_canvas_commands.tcl").read_text()
-            write_fixture("memory_canvas_fixture.zi", f"Commands :: #string CANVAS_END\n{commands}CANVAS_END;\n")
-            canvas = BUILD / "memory_canvas_test.zx"
-            compile_image("memory_canvas_test", canvas)
-            portable = command("zi2zx", "run", "--backend", "engine", canvas, capture_output=True, text=True, check=True)
-            assert portable.stdout.splitlines() == [*oracle, "0"] and not portable.stderr, portable
-            print("Inferno and Ziran Tk agree on canvas creation, sizes, coordinates, bounds and item text")
-            image = ROOT / "dis/wm/memory.zx" if args.installed else BUILD / "memory.zx"
-            if not args.installed:
-                compile_image("memory_app", image, "--module-path", ROOT / "appl/wm", "--bind-host", "zx_surface",
-                              "--bind-host", "taijios_files", "--bind-host", "taijios_clock")
-            invocation = f"zxrun -p -w /{image.relative_to(ROOT)}"
-            exercise(env, invocation, device_fixture=True, hosted=True)
-            exercise(env, invocation, device_fixture=False, hosted=True)
-            print("Hosted Memory matched the live graph and clean close and verified the real /dev/memory device")
+        exercise(env, invocation, device_fixture=True, hosted=True)
+        exercise(env, invocation, device_fixture=False, hosted=True)
+    print("Hosted Memory showed three usage bars, high-water marks, refreshed size labels and a clean close, "
+          "and read the real /dev/memory device")
 
 
 if __name__ == "__main__":

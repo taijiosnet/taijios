@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Memory Monitor only as ZX and remove its Dis version.
+
 - Ship About Inferno only as ZX and remove its Dis version.
 
 - Give ZX programs the Keyring cryptography: digests, HMAC, AES-CBC, big integers, and RSA, DSA and ElGamal keys and signatures.
