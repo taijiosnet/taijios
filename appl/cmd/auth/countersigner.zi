@@ -1,0 +1,38 @@
+// auth/countersigner: reads a box id as a message on its standard input
+// and answers with the first message of /keydb/countersigned/boxid, the
+// blinded certificate that auth/verify accepted.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Keydb :: #import "keydb";
+
+Fail :: (message: string, status: string) -> s32 {
+    unused Cli.WriteAll(2, message);
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+main :: () -> s32 {
+    if !Keydb.HasKeydb() { return Fail("countersigner: no key database\n", "no keydb") }
+    box: Vec(u8);
+    error: Vec(u8);
+    if !Keydb.ReadMessage(0, false, *box, *error) { return Fail("countersigner: client hung up\n", "hungup") }
+    name: Vec(u8);
+    BuilderPrint(*name, "countersigned/%", TextView(box[:]));
+    fd := Keydb.Open(TextView(name[:]), 0);
+    message: Vec(u8);
+    if fd < 0 {
+        BuilderPrint(*message, "countersigner: can't open %: ", TextView(name[:]));
+        Keydb.Error(*message);
+        VecPush(message, #char "\n");
+        return Fail(TextView(message[:]), "bad boxid");
+    }
+    blind: Vec(u8);
+    if !Keydb.ReadMessage(fd, false, *blind, *error) || blind.count == 0 {
+        BuilderPrint(*message, "countersigner: can't read %\n", TextView(name[:]));
+        return Fail(TextView(message[:]), "no blind");
+    }
+    unused Io.Close(fd);
+    unused Keydb.SendMessage(1, TextView(blind[:]));
+    return 0;
+}

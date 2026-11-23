@@ -2,7 +2,7 @@
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
 // ndb/csquery, ndb/dnsquery, ndb/mkhash, ndb/query, ndb/regquery,
 // auxi/digest, export, mntgen, auth/aescbc, auth/rsagen, auth/dsagen,
-// auth/getpk and auth/ai2key.
+// auth/getpk, auth/ai2key, auth/verify and auth/countersigner.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -54,7 +54,7 @@ AUTHINFO_SHORT :: "303030340a7273610a";
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [164]Case = Case.[
+cases: [182]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -233,6 +233,26 @@ cases: [164]Case = Case.[
     .{args = "auth/ai2key", status = "usage", err = "usage: ai2key [-t 'attr=value attr=value ...'] keyfile ...\n"},
     .{args = "auth/ai2key -t", status = "usage", err = "usage: ai2key [-t 'attr=value attr=value ...'] keyfile ...\n"},
     .{args = "auth/ai2key -q default", status = "usage", err = "usage: ai2key [-t 'attr=value attr=value ...'] keyfile ...\n"},
+    // auth/verify and auth/countersigner work on a key database bound on
+    // /keydb: a box whose certificate was signed, and broken ones.
+    .{args = "bind keydb /keydb"},
+    .{args = "auth/verify", status = "usage", err = "usage: verify boxid\n"},
+    .{args = "auth/verify box1 < no", status = "rejected", out = "0: alpha\t1: alpha\n2: alpha\t3: kilo\n4: bravo\t5: uniform\n6: bravo\t7: echo\n8: charlie\t9: oscar\n10: delta\t11: yankee\n12: delta\t13: india\n14: echo\t15: sierra\n16: foxtrot\t17: charlie\n18: foxtrot\t19: mike\n20: golf\t21: whisky\n22: golf\t23: golf\n24: hotel\t25: quebec\n26: india\t27: alpha\n28: india\t29: kilo\n30: juliet\t31: uniform\n32: kilo\t33: echo\n34: kilo\t35: oscar\n36: lima\t37: yankee\n38: lima\t39: india\n\naccept (y or n)? \nrejected\n"},
+    .{args = "auth/verify box1 < empty", status = "rejected", out = "0: alpha\t1: alpha\n2: alpha\t3: kilo\n4: bravo\t5: uniform\n6: bravo\t7: echo\n8: charlie\t9: oscar\n10: delta\t11: yankee\n12: delta\t13: india\n14: echo\t15: sierra\n16: foxtrot\t17: charlie\n18: foxtrot\t19: mike\n20: golf\t21: whisky\n22: golf\t23: golf\n24: hotel\t25: quebec\n26: india\t27: alpha\n28: india\t29: kilo\n30: juliet\t31: uniform\n32: kilo\t33: echo\n34: kilo\t35: oscar\n36: lima\t37: yankee\n38: lima\t39: india\n\naccept (y or n)? \nrejected\n"},
+    .{args = "auth/verify box1 < yes", out = "0: alpha\t1: alpha\n2: alpha\t3: kilo\n4: bravo\t5: uniform\n6: bravo\t7: echo\n8: charlie\t9: oscar\n10: delta\t11: yankee\n12: delta\t13: india\n14: echo\t15: sierra\n16: foxtrot\t17: charlie\n18: foxtrot\t19: mike\n20: golf\t21: whisky\n22: golf\t23: golf\n24: hotel\t25: quebec\n26: india\t27: alpha\n28: india\t29: kilo\n30: juliet\t31: uniform\n32: kilo\t33: echo\n34: kilo\t35: oscar\n36: lima\t37: yankee\n38: lima\t39: india\n\naccept (y or n)? \naccepted\n"},
+    .{args = "cat keydb/countersigned/box1", out = "0024\nthe blinded certificate\n"},
+    .{args = "auth/verify missing < yes", status = "no certificate", err = "signer: can't open signed/missing: 'signed/missing' does not exist\n"},
+    .{args = "auth/verify short < yes", status = "bad certificate", err = "signer: can't read signed/short: hungup\n"},
+    .{args = "auth/verify remote < yes", status = "bad certificate", err = "signer: can't read signed/remote: nope!\n"},
+    .{args = "auth/verify garbage < yes", status = "bad certificate", err = "signer: can't read signed/garbage: hungup\n"},
+    .{args = "auth/countersigner < box1.msg", out = "0024\nthe blinded certificate\n"},
+    .{args = "auth/countersigner < missing.msg", status = "bad boxid", err = "countersigner: can't open countersigned/missing: 'countersigned/missing' does not exist\n"},
+    .{args = "auth/countersigner < bad.msg", status = "hungup", err = "countersigner: client hung up\n"},
+    .{args = "auth/countersigner < empty", status = "hungup", err = "countersigner: client hung up\n"},
+    .{args = "unmount /keydb"},
+    .{args = "bind emptydb /keydb"},
+    .{args = "auth/verify box1 < yes", status = "no certificate", err = "signer: can't open signed/box1: 'signed' file does not exist\n"},
+    .{args = "unmount /keydb"},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},
@@ -297,6 +317,16 @@ Prepare :: (binary: string) -> bool {
         Write("file.tcl", TCL_FILE) && Write("two.tcl", "puts file-two\n") && Write("lines.tcl", TCL_LINES) &&
         Write("reg.db", REGISTRY) && Write("digits.cl", digits) && Write("ndb.main", NDB_MAIN) && Write("ndb.second", NDB_SECOND) && Directory("work/mnt") &&
         WriteHex("default", AUTHINFO_DEFAULT) && WriteHex("tcp!alpha.example!infsigner", AUTHINFO_TCP_ALPHA_EXAMPLE_INFSIGNER) && WriteHex("beta.example", AUTHINFO_BETA_EXAMPLE) && WriteHex("old", AUTHINFO_OLD) && WriteHex("garbage", AUTHINFO_GARBAGE) && WriteHex("short", AUTHINFO_SHORT) &&
+        Directory("work/keydb") && Directory("work/keydb/signed") && Directory("work/keydb/countersigned") && Directory("work/emptydb") &&
+        WriteHex("keydb/signed/box1", "303032340a74686520626c696e6465642063657274696669636174650a303032300a000a141e28323c46505a646e78828c96a0aab4be") &&
+        WriteHex("keydb/signed/short", "303031360a6f6e6c79206f6e65206d657373616765") &&
+        WriteHex("keydb/signed/remote", "303030340a63657274213030350a6e6f706521") &&
+        WriteHex("keydb/signed/garbage", "7879") &&
+        WriteHex("yes", "790a") &&
+        WriteHex("no", "6e0a") &&
+        WriteHex("box1.msg", "303030340a626f7831") &&
+        WriteHex("missing.msg", "303030370a6d697373696e67") &&
+        WriteHex("bad.msg", "3030") &&
         WriteHex("clear.aes", AES_CLEAR) && WriteHex("old.aes", AES_OLD) && Write("aes.key", "secret\n\n") && Write("blank.key", "\n\n") &&
         Write("fake/sh.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
         SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755

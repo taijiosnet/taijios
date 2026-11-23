@@ -108,9 +108,9 @@ Repository of `unblinded' certificates.
 .SH SOURCE
 .B /appl/cmd/auth/signer.b
 .br
-.B /appl/cmd/auth/verify.b
+.B /appl/cmd/auth/verify.zi
 .br
-.B /appl/cmd/auth/countersigner.b
+.B /appl/cmd/auth/countersigner.zi
 .SH SEE ALSO
 .IR createsignerkey (8),
 .IR register (8),

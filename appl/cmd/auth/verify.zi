@@ -1,0 +1,83 @@
+// auth/verify boxid: shows the digest of a box's signed certificate in
+// /keydb/signed as code words for a person to compare, and on y copies the
+// certificate to /keydb/countersigned for the countersigner to send.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Keydb :: #import "keydb";
+
+WORDS: [26]string = .["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
+    "kilo", "lima", "mike", "nancy", "oscar", "papa", "quebec", "romeo", "sierra", "tango", "uniform", "victor",
+    "whisky", "xray", "yankee", "zulu"];
+
+Fail :: (message: string, status: string) -> s32 {
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+main :: () -> s32 {
+    message: Vec(u8);
+    if Args.OperandCount() < 1 {
+        BuilderAppend(message, "usage: verify boxid");
+        return Fail(TextView(message[:]), "usage");
+    }
+    if !Keydb.HasKeydb() {
+        BuilderAppend(message, "signer: no key database");
+        return Fail(TextView(message[:]), "no keydb");
+    }
+    box := Args.Operand(0);
+    name: Vec(u8);
+    BuilderPrint(*name, "signed/%", box);
+    fd := Keydb.Open(TextView(name[:]), 0);
+    if fd < 0 {
+        BuilderPrint(*message, "signer: can't open %: ", TextView(name[:]));
+        Keydb.Error(*message);
+        return Fail(TextView(message[:]), "no certificate");
+    }
+    certificate: Vec(u8);
+    digest: Vec(u8);
+    error: Vec(u8);
+    have_certificate := Keydb.ReadMessage(fd, true, *certificate, *error);
+    first_error: Vec(u8);
+    VecSwap(first_error, error);
+    have_digest := Keydb.ReadMessage(fd, true, *digest, *error);
+    unused Io.Close(fd);
+    // An empty message was nil to the Limbo command.
+    if !have_certificate || !have_digest || certificate.count == 0 || digest.count == 0 {
+        reason := ifx have_digest then TextView(first_error[:]) else TextView(error[:]);
+        BuilderPrint(*message, "signer: can't read %: %", TextView(name[:]), reason);
+        return Fail(TextView(message[:]), "bad certificate");
+    }
+    words: Vec(u8);
+    for digest {
+        BuilderPrint(*words, "%: %\t", 2 * it_index, WORDS[(it >> 4) % 26]);
+        BuilderPrint(*words, "%: %\n", 2 * it_index + 1, WORDS[it % 26]);
+    }
+    BuilderAppend(words, "\naccept (y or n)? ");
+    unused Cli.WriteAll(1, TextView(words[:]));
+    answer: [5]u8;
+    n := Io.Read(0, answer[:]);
+    if n < 1 || answer[0] != #char "y" {
+        unused Cli.WriteAll(1, "\nrejected\n");
+        unused Args.SetFailure("rejected");
+        return 1;
+    }
+    unused Cli.WriteAll(1, "\naccepted\n");
+    VecClear(name);
+    BuilderPrint(*name, "countersigned/%", box);
+    out := Keydb.Create(TextView(name[:]), 1, 384);
+    if out < 0 {
+        BuilderPrint(*message, "signer: can't create %: ", TextView(name[:]));
+        Keydb.Error(*message);
+        return Fail(TextView(message[:]), "create");
+    }
+    if !Keydb.SendMessage(out, TextView(certificate[:])) {
+        BuilderPrint(*message, "signer: can't write %: ", TextView(name[:]));
+        Keydb.Error(*message);
+        return Fail(TextView(message[:]), "write");
+    }
+    unused Io.Close(out);
+    return 0;
+}

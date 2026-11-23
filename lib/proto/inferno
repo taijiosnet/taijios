@@ -367,7 +367,7 @@ appl
 			ai2key.zi
 			authinfo.zi
 			changelogin.b
-			countersigner.b
+			countersigner.zi
 			convpasswd.b
 			createsignerkey.b
 			dsagen.zi
@@ -385,6 +385,7 @@ appl
 					pass.b
 				rpc.b
 			getpk.zi
+			keydb.zi
 			keyfs.b
 			keygen.zi
 			keysrv.b
@@ -395,7 +396,7 @@ appl
 			rsagen.zi
 			secstore.b
 			signer.b
-			verify.b
+			verify.zi
 		auxi
 			cpuslave.b
 			fpgaload.b

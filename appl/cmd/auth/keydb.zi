@@ -1,0 +1,120 @@
+// What the signer's helper commands share: the key database in /keydb and
+// the messages in its files, each a four-digit length and a newline before
+// its bytes, or "!" and a three-digit length before an error text from the
+// other end.
+//
+// The Limbo commands changed directory to /keydb and named files relative
+// to it. ZX programs cannot change directory, so these open the files under
+// /keydb and give their errors with the names the Limbo commands used.
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+KEYDB :: "/keydb";
+MAXMSG :: 4096;
+
+HasKeydb :: () -> bool {
+    metadata: [128]u8;
+    return Io.Stat(KEYDB, metadata[:]) >= 0;
+}
+
+// The last error, with the /keydb/ before a name dropped. The kernel says
+// "file does not exist" when the first part of a relative name is missing,
+// and the name then is that part alone.
+Error :: (out: *Vec(u8)) {
+    error := Io.Error();
+    prefix := "'/keydb/";
+    if error.count < prefix.count || error[:prefix.count] != prefix {
+        BuilderAppend(<<out, error);
+        return;
+    }
+    rest := error[prefix.count:];
+    VecPush(<<out, #char "'");
+    end: s64 = 0;
+    while end < rest.count && rest[end] != #char "'" { end += 1 }
+    first_part := true;
+    for rest[:end] { if it == #char "/" { first_part = false } }
+    if first_part && rest[end:] == "' does not exist" {
+        BuilderAppend(<<out, rest[:end]);
+        BuilderAppend(<<out, "' file does not exist");
+        return;
+    }
+    BuilderAppend(<<out, rest);
+}
+
+// Opens a file of the database by its name there.
+Open :: (name: string, mode: s32) -> s32 {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/%", KEYDB, name);
+    return Io.Open(TextView(path[:]), mode);
+}
+
+Create :: (name: string, mode: s32, permissions: s32) -> s32 {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/%", KEYDB, name);
+    return Io.Create(TextView(path[:]), mode, permissions);
+}
+
+// Reads up to the size of buffer; the count read, as readn gave it.
+ReadN :: (handle: s32, buffer: []u8) -> s64 {
+    at: s64 = 0;
+    while at < buffer.count {
+        n := Io.Read(handle, buffer[at:]);
+        if n < 0 { return ifx at > 0 then at else -1 }
+        if n == 0 { break }
+        at += n;
+    }
+    return at;
+}
+
+// Reads one message into out. keyring chooses Keyring's getmsg, which
+// refuses a message of 4096 bytes, over Msgio's, which takes it. On
+// failure error holds why, as those modules said it.
+ReadMessage :: (handle: s32, keyring: bool, out: *Vec(u8), error: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    VecClear(<<error);
+    header: [5]u8;
+    got := ReadN(handle, header[:]);
+    if got != 5 {
+        if got > 0 { BuilderAppend(<<error, "input or format error") }
+        else if got == 0 { BuilderAppend(<<error, "hungup") }
+        else { Error(error) }
+        return false;
+    }
+    remote := header[0] == #char "!";
+    length: s64 = 0;
+    for header[ifx remote then 1 else 0:] {
+        if it < #char "0" || it > #char "9" { break }
+        length = length * 10 + cast(s64)(it - #char "0");
+    }
+    if (keyring && length >= MAXMSG) || length > MAXMSG {
+        BuilderAppend(<<error, "input or format error");
+        return false;
+    }
+    data: Vec(u8);
+    unused VecResize(data, length);
+    got = ReadN(handle, data[:]);
+    if got != length {
+        if got > 0 { BuilderAppend(<<error, "input or format error") }
+        else if got == 0 && length > 0 { BuilderAppend(<<error, "hungup") }
+        else { Error(error) }
+        return false;
+    }
+    if remote {
+        BuilderAppend(<<error, TextView(data[:]));
+        return false;
+    }
+    VecSwap(<<out, data);
+    return true;
+}
+
+SendMessage :: (handle: s32, data: string) -> bool {
+    header: Vec(u8);
+    digits := "0123456789";
+    for i: 0..3 {
+        divisor: s64 = 1;
+        for 1..3 - i { divisor *= 10 }
+        VecPush(header, digits[(data.count / divisor) % 10]);
+    }
+    VecPush(header, #char "\n");
+    return Cli.WriteAll(handle, TextView(header[:])) && Cli.WriteAll(handle, data);
+}
