@@ -1,17 +1,19 @@
 <../../../mkconfig
 
 TARG=\
+	palmsrv.dis\
 
 MODULES=\
 
 SYSMODULES=\
+	palm.m\
 
 DISBIN=$ROOT/dis/palm
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=connex palmsrv
-ZXUTIL=palm_proto.zi desklink.zi ../zx_cli.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi
+ZXCOMMANDS=connex
+ZXUTIL=palm_proto.zi desklink.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 

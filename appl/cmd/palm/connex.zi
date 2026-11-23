@@ -1,7 +1,9 @@
-// palm/connex: Desklink test client for palmsrv.
+// palm/connex: Desklink test client for palmsrv, matching appl/cmd/palm/connex.b.
 #import "std/vec";
 using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
 using Cli :: #import "zx_cli";
+using Proto :: #import "palm_proto";
 using Dl :: #import "desklink";
 
 Fail :: (msg: string) -> s32 {
@@ -12,6 +14,48 @@ Fail :: (msg: string) -> s32 {
     return 1;
 }
 
+AppendHex2 :: (out: *Vec(u8), v: u8) {
+    digits := "0123456789abcdef";
+    VecPush(<<out, digits[(v >> 4) & 0xF]);
+    VecPush(<<out, digits[v & 0xF]);
+}
+
+AppendHex4 :: (out: *Vec(u8), v: u16) {
+    AppendHex2(out, cast(u8)((v >> 8) & 0xFF));
+    AppendHex2(out, cast(u8)(v & 0xFF));
+}
+
+AppendHex8 :: (out: *Vec(u8), v: u32) {
+    AppendHex4(out, cast(u16)((v >> 16) & 0xFFFF));
+    AppendHex4(out, cast(u16)(v & 0xFFFF));
+}
+
+ListDbs :: (c: *Dl.Client, sort: u8) {
+    index: u16 = 0;
+    dbs: Dl.DBList;
+    err: Text;
+    while true {
+        more, ok := Dl.ReadDBList(c, 0, sort, index, *dbs, *err);
+        if !ok || dbs.items.count == 0 {
+            if TextView(err).count > 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "ReadDBList: %\n", TextView(err));
+                unused Cli.WriteAll(1, BuilderFinish(msg));
+            }
+            break;
+        }
+        for i: 0..dbs.items.count - 1 {
+            line: Vec(u8);
+            VecPush(line, #char "#");
+            AppendHex4(*line, dbs.items[i].index);
+            BuilderPrint(*line, " '%'\n", TextView(dbs.items[i].name));
+            unused Cli.WriteAll(1, BuilderFinish(line));
+            index = dbs.items[i].index + 1;
+        }
+        if !more { break }
+    }
+}
+
 main :: () -> s32 {
     client: Dl.Client;
     err: Text;
@@ -20,16 +64,82 @@ main :: () -> s32 {
         BuilderPrint(*msg, "can't init Desklink: %", TextView(err));
         return Fail(BuilderFinish(msg));
     }
-    info: Dl.SysInfo;
-    if !Dl.ReadSysInfo(*client, *info, *err) {
+
+    sysinfo: Dl.SysInfo;
+    if !Dl.ReadSysInfo(*client, *sysinfo, *err) {
         Dl.Hangup(*client);
         msg: Vec(u8);
         BuilderPrint(*msg, "can't read sys Info: %", TextView(err));
         return Fail(BuilderFinish(msg));
     }
-    line: Vec(u8);
-    BuilderPrint(*line, "ROM: % locale: % product: '%'\n", info.romversion, info.locale, TextView(info.product));
-    unused Cli.WriteAll(1, BuilderFinish(line));
+    sline: Vec(u8);
+    BuilderAppend(sline, "ROM: ");
+    AppendHex8(*sline, sysinfo.romversion);
+    BuilderAppend(sline, " locale: ");
+    AppendHex8(*sline, sysinfo.locale);
+    BuilderPrint(*sline, " product: '%'\n", TextView(sysinfo.product));
+    unused Cli.WriteAll(1, BuilderFinish(sline));
+
+    user: Dl.User;
+    if !Dl.ReadUserInfo(*client, *user, *err) {
+        Dl.Hangup(*client);
+        return Fail("can't read user info");
+    }
+    pw: Vec(u8);
+    for user.password { AppendHex2(*pw, it) }
+    uline: Vec(u8);
+    BuilderPrint(*uline, "userid: % viewerid: % lastsyncpc: % succsync: ", user.userid, user.viewerid, user.lastsyncpc);
+    AppendHex8(*uline, cast(u32)user.succsynctime);
+    BuilderAppend(uline, " lastsync: ");
+    AppendHex8(*uline, cast(u32)user.lastsynctime);
+    BuilderPrint(*uline, " uname: '%' password: %\n", TextView(user.username), TextView(pw[:]));
+    unused Cli.WriteAll(1, BuilderFinish(uline));
+
+    unused Cli.WriteAll(1, "Storage:\n");
+    cno: u8 = 0;
+    cards: Dl.CardList;
+    while true {
+        more, ok := Dl.ReadStorageInfo(*client, cno, *cards, *err);
+        if !ok { break }
+        for i: 0..cards.items.count - 1 {
+            cline: Vec(u8);
+            BuilderPrint(*cline, "% v=% c=% romsize=% ramsize=% ramfree=% name='%' maker='%'\n",
+                cards.items[i].cardno, cards.items[i].version, cards.items[i].creation, cards.items[i].romsize,
+                cards.items[i].ramsize, cards.items[i].ramfree, TextView(cards.items[i].name), TextView(cards.items[i].maker));
+            unused Cli.WriteAll(1, BuilderFinish(cline));
+            cno = cast(u8)(cards.items[i].cardno + 1);
+        }
+        if !more { break }
+    }
+
+    unused Cli.WriteAll(1, "ROM DBs:\n");
+    ListDbs(*client, Proto.DB_LIST_ROM);
+    unused Cli.WriteAll(1, "RAM DBs:\n");
+    ListDbs(*client, Proto.DB_LIST_RAM);
+
+    db: Dl.OpenDB;
+    if !Dl.DbOpen(*client, "AddressDB", Dl.OREAD, *db, *err) {
+        emsg: Vec(u8);
+        BuilderPrint(*emsg, "error: AddressDB: %\n", TextView(err));
+        unused Cli.WriteAll(1, BuilderFinish(emsg));
+        Dl.Hangup(*client);
+        return 0;
+    }
+    if (db.attr & Dl.F_RESOURCE) != 0 {
+        unused Cli.WriteAll(1, "error: AddressDB: not a database file\n");
+        Dl.Hangup(*client);
+        return 0;
+    }
+    dumpfd := Io.CreateFile("dump", 1, 0x180);
+    if dumpfd >= 0 {
+        rec: Dl.Record;
+        idx: u16 = 0;
+        while Dl.PdbRead(*client, *db, idx, *rec, *err) {
+            unused Io.WriteBytes(dumpfd, TextView(rec.data[:]));
+            idx += 1;
+        }
+        unused Io.CloseFile(dumpfd);
+    }
     Dl.Hangup(*client);
     return 0;
 }

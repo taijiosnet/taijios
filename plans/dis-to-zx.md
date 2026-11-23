@@ -887,6 +887,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/mpeg/remap8.dis | appl/wm/mpeg/remap8.b |  | - |  |
 | dis/mpeg/scidct.dis | appl/wm/mpeg/scidct.b |  | - |  |
 | dis/mpeg/vlc.dis | appl/wm/mpeg/vlc.b |  | - |  |
+| dis/palm/palmsrv.dis | appl/cmd/palm/palmsrv.b |  | - | blocked: needs file2chan/spawn/timers in ZX host API |
 
 ### 15. Acme helper binaries outside dis/ - 22 rows
 

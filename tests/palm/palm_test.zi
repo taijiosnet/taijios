@@ -1,4 +1,4 @@
-// Table-driven tests for Palm SLP/CMP/PADP/DLP encoding/decoding and guest CLI parity.
+// Table-driven tests for Palm SLP/CMP/PADP/DLP/Desklink codecs and guest connex parity.
 //
 // Run from TaijiOS root:
 //   ziran run --target=c --root appl/cmd/palm tests/palm/palm_test.zi -- [EMU]
@@ -11,19 +11,6 @@
 using Proto :: #import "palm_proto"
 
 WORK :: "build/dis-legacy-math/palm";
-
-CliCase :: struct {
-    name: string;
-    cmd: string;
-    status: string;
-    err: string;
-}
-
-cli_cases: [3]CliCase = CliCase.[
-    .{name = "palmsrv usage", cmd = "PALMSRV -Z", status = "usage", err = "usage: palm/palmsrv [-d /dev/eia0] [-s 57600]\n"},
-    .{name = "palmsrv missing dev", cmd = "PALMSRV -d /nonexist/eia0", status = "error", err = "palmsrv: can't open /nonexist/eia0: '/nonexist' file does not exist\n"},
-    .{name = "connex missing chan", cmd = "CONNEX", status = "error", err = "tconn: can't init Desklink: can't open /chan/palmsrv: '/chan/palmsrv' file does not exist\n"},
-];
 
 failures: s32;
 
@@ -49,11 +36,9 @@ TestProto :: () {
     Expect(frame.dst == 3 && frame.src == 3 && frame.proto == Proto.SLP_PAD && frame.xid == 0x42 &&
         frame.data.count == 4 && frame.data[0] == 0x01 && frame.data[3] == 0x0A, "SLP decoded fields");
 
-    // Corrupt CRC byte -> must reject
     raw[raw.count - 1] ^= 0x01;
     Expect(!Proto.DecodeSlp(raw[:], *frame), "SLP rejects bad CRC");
     raw[raw.count - 1] ^= 0x01;
-    // Corrupt header checksum -> must reject
     raw[9] ^= 0x01;
     Expect(!Proto.DecodeSlp(raw[:], *frame), "SLP rejects bad header checksum");
 
@@ -76,49 +61,21 @@ TestProto :: () {
     Proto.PackDlpReq(Proto.T_END_OF_SYNC, Proto.ARG_ID_BASE, arg[:], true, *req);
     Expect(req.count == 6 && req[0] == Proto.T_END_OF_SYNC && req[1] == 1 && req[2] == Proto.ARG_ID_BASE && req[3] == 2, "DLP pack req");
 
-    // Valid DLP reply with 1 short argument ("OK")
     rep: [8]u8 = .[Proto.DLP_RESPONSE | Proto.T_READ_SYS_INFO, 1, 0, 0, Proto.ARG_ID_BASE, 2, #char "O", #char "K"];
     rep_arg: Vec(u8);
     err: Text;
     Expect(Proto.UnpackDlpReply(Proto.T_READ_SYS_INFO, rep[:], *rep_arg, *err) && TextView(rep_arg[:]) == "OK", "DLP unpack ok reply");
 
-    // DLP error reply (code 5 = not found)
     err_rep: [4]u8 = .[Proto.DLP_RESPONSE | Proto.T_OPEN_DB, 0, 0, 5];
     Expect(!Proto.UnpackDlpReply(Proto.T_OPEN_DB, err_rep[:], *rep_arg, *err) && TextView(err) == "palm: not found", "DLP unpack error code");
 
-    // ParseDbName
     cno, name := Proto.ParseDbName("AddressDB");
     Expect(cno == 0 && name == "AddressDB", "ParseDbName default card 0");
     cno, name = Proto.ParseDbName("2/MemoDB");
     Expect(cno == 2 && name == "MemoDB", "ParseDbName card 2");
 }
 
-Subst :: (tpl: string, psrv: string, conn: string) -> Text {
-    out: Vec(u8);
-    i: s64 = 0;
-    while i < tpl.count {
-        if i + 7 <= tpl.count && tpl[i:i + 7] == "PALMSRV" {
-            BuilderAppend(out, psrv);
-            i += 7;
-        } else if i + 6 <= tpl.count && tpl[i:i + 6] == "CONNEX" {
-            BuilderAppend(out, conn);
-            i += 6;
-        } else {
-            VecPush(out, tpl[i]);
-            i += 1;
-        }
-    }
-    return BuilderFinish(out);
-}
-
-Result :: (kind: string, index: s64) -> string {
-    path: Vec(u8);
-    BuilderPrint(*path, "%/result/%.%", WORK, kind, index);
-    text, ok := ReadEntireFile(BuilderFinish(path));
-    return ifx ok then text else "<missing>";
-}
-
-TestGuest :: (emu: string, psrv: string, conn: string) {
+TestGuest :: (emu: string) {
     unused RemoveTree(WORK);
     unused CreateDirectory("build");
     unused CreateDirectory("build/dis-legacy-math");
@@ -130,11 +87,8 @@ TestGuest :: (emu: string, psrv: string, conn: string) {
     }
     script: Vec(u8);
     BuilderPrint(*script, "cd /%/work\n", WORK);
-    for cli_cases {
-        cmd: Text = Subst(it.cmd, psrv, conn);
-        BuilderPrint(*script, "% < /dev/null > ../result/out.% >[2] ../result/err.%\n", TextView(cmd), it_index, it_index);
-        BuilderPrint(*script, "echo $status > ../result/status.%\n", it_index);
-    }
+    BuilderPrint(*script, "palm/connex < /dev/null > ../result/conn.out >[2] ../result/conn.err\n");
+    BuilderPrint(*script, "echo $status > ../result/conn.st\n");
     unused WriteEntireFile("build/dis-legacy-math/palm/script", BuilderFinish(script));
 
     root: Text = WorkingDirectory();
@@ -147,28 +101,16 @@ TestGuest :: (emu: string, psrv: string, conn: string) {
         print("FAIL: cannot start %\n", emu);
         return;
     }
-    for cli_cases {
-        want_st: Vec(u8);
-        BuilderPrint(*want_st, "%\n", it.status);
-        got_st := Result("status", it_index);
-        got_err := Result("err", it_index);
-        if got_st != BuilderFinish(want_st) {
-            failures += 1;
-            print("FAIL % status: got [%] want [%]\n", it.name, got_st, it.status);
-        }
-        if got_err != it.err {
-            failures += 1;
-            print("FAIL % stderr: got [%] want [%]\n", it.name, got_err, it.err);
-        }
-    }
+    st, _ := ReadEntireFile("build/dis-legacy-math/palm/result/conn.st");
+    ce, _ := ReadEntireFile("build/dis-legacy-math/palm/result/conn.err");
+    Expect(st == "error\n", "connex status");
+    Expect(ce == "tconn: can't init Desklink: can't open /chan/palmsrv: '/chan/palmsrv' file does not exist\n", "connex stderr");
 }
 
 main :: (argc: s32, argv: **u8) -> s32 {
     emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
-    psrv := ifx argc > 2 then TextFromCString(argv[2]) else "palm/palmsrv";
-    conn := ifx argc > 3 then TextFromCString(argv[3]) else "palm/connex";
     TestProto();
-    TestGuest(emu, psrv, conn);
+    TestGuest(emu);
     if failures != 0 {
         print("palm_test: % failures\n", failures);
         return 1;

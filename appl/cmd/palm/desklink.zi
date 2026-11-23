@@ -1,7 +1,39 @@
-// Desklink DLP client over a palmsrv channel file.
+// Complete Palm Desk Link Protocol (DLP) client and record/card/dbinfo codecs,
+// matching Inferno's appl/cmd/palm/desklink.b.
 #import "std/vec";
 using Io :: #import "taijios_io";
 using Proto :: #import "palm_proto";
+
+MAXRECBYTES :: 0xFFFF;
+MAXNAME :: 32;
+A1 :: 0x20;
+A2 :: 0x21;
+
+// Additional DLP operation codes
+T_READ_APP_BLOCK :: 0x1B;
+T_WRITE_APP_BLOCK :: 0x1C;
+T_READ_SORT_BLOCK :: 0x1D;
+T_WRITE_SORT_BLOCK :: 0x1E;
+T_READ_NEXT_MODIFIED_REC :: 0x1F;
+T_WRITE_RECORD :: 0x21;
+T_DELETE_RECORD :: 0x22;
+T_READ_RESOURCE :: 0x23;
+T_WRITE_RESOURCE :: 0x24;
+T_DELETE_RESOURCE :: 0x25;
+T_CLEANUP_DATABASE :: 0x26;
+T_RESET_SYNC_FLAGS :: 0x27;
+T_RESET_SYSTEM :: 0x29;
+T_ADD_SYNC_LOG_ENTRY :: 0x2A;
+T_READ_OPEN_DB_INFO :: 0x2B;
+T_MOVE_CATEGORY :: 0x2C;
+T_RESET_DB_INDEX :: 0x30;
+T_READ_RECORD_ID_LIST :: 0x31;
+T_FIND_DB :: 0x39;
+
+F_RESOURCE :: 0x0001;
+R_SECRET :: 0x10;
+OREAD :: 0x80;
+OWRITE :: 0x40;
 
 Client :: struct {
     fd: s32;
@@ -11,6 +43,230 @@ SysInfo :: struct {
     romversion: u32;
     locale: u32;
     product: Text;
+}
+
+User :: struct {
+    userid: u32;
+    viewerid: u32;
+    lastsyncpc: u32;
+    succsynctime: s64;
+    lastsynctime: s64;
+    username: Text;
+    password: Vec(u8);
+}
+
+CardInfo :: struct {
+    cardno: s32;
+    version: s32;
+    creation: s64;
+    romsize: u32;
+    ramsize: u32;
+    ramfree: u32;
+    name: Text;
+    maker: Text;
+}
+
+DBInfo :: struct {
+    attr: u16;
+    dtype: Text;
+    creator: Text;
+    version: u16;
+    modno: u32;
+    ctime: s64;
+    mtime: s64;
+    btime: s64;
+    index: u16;
+    name: Text;
+}
+
+Record :: struct {
+    id: u32;
+    attr: u8;
+    cat: u8;
+    index: u16;
+    data: Vec(u8);
+}
+
+Resource :: struct {
+    name: u32;
+    id: u16;
+    index: u16;
+    data: Vec(u8);
+}
+
+OpenDB :: struct {
+    handle: u8;
+    attr: u16;
+}
+
+CardList :: struct {
+    items: Vec(CardInfo);
+}
+
+DBList :: struct {
+    items: Vec(DBInfo);
+}
+
+Id2S :: (id: u32, out: *Text) {
+    VecClear(out.bytes);
+    VecPush(out.bytes, cast(u8)((id >> 24) & 0xFF));
+    VecPush(out.bytes, cast(u8)((id >> 16) & 0xFF));
+    VecPush(out.bytes, cast(u8)((id >> 8) & 0xFF));
+    VecPush(out.bytes, cast(u8)(id & 0xFF));
+}
+
+S2Id :: (s: string) -> u32 {
+    v: u32 = 0;
+    for i: 0..3 {
+        b: u32 = ifx i < s.count then cast(u32)s[i] else 0;
+        v = (v << 8) | b;
+    }
+    return v;
+}
+
+PutCStr :: (out: *Vec(u8), s: string, maxlen: s64) {
+    n := ifx s.count < maxlen - 1 then s.count else maxlen - 1;
+    for i: 0..n - 1 { VecPush(<<out, s[i]) }
+    VecPush(<<out, 0);
+}
+
+IsLeap :: (y: s64) -> bool {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+DaysInMonth :: (y: s64, m: s64) -> s64 {
+    dm: [12]s64 = .[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if m == 2 && IsLeap(y) { return 29 }
+    if m < 1 || m > 12 { return 30 }
+    return dm[m - 1];
+}
+
+// Decodes 8-byte Palm DLP date (year[2] mon[1] day[1] hour[1] min[1] sec[1] pad[1]) to Unix epoch.
+GetDate :: (data: []u8, off: s64) -> s64 {
+    if off + 8 > data.count { return 0 }
+    yr := cast(s64)Proto.Get2(data, off);
+    if yr == 0 { return 0 }
+    mon := cast(s64)data[off + 2];
+    mday := cast(s64)data[off + 3];
+    hour := cast(s64)data[off + 4];
+    min := cast(s64)data[off + 5];
+    sec := cast(s64)data[off + 6];
+    days: s64 = 0;
+    if yr >= 1970 {
+        y: s64 = 1970;
+        while y < yr {
+            days += ifx IsLeap(y) then 366 else 365;
+            y += 1;
+        }
+    }
+    m: s64 = 1;
+    while m < mon {
+        days += DaysInMonth(yr, m);
+        m += 1;
+    }
+    days += mday - 1;
+    return ((days * 24 + hour) * 60 + min) * 60 + sec;
+}
+
+// Encodes Unix epoch into 8-byte Palm DLP date.
+PutDate :: (out: *Vec(u8), epoch: s64) {
+    if epoch <= 0 {
+        for i: 0..7 { VecPush(<<out, 0) }
+        return;
+    }
+    sec := epoch % 60;
+    t := epoch / 60;
+    min := t % 60;
+    t /= 60;
+    hour := t % 24;
+    days := t / 24;
+    yr: s64 = 1970;
+    while true {
+        yd := ifx IsLeap(yr) then 366 else 365;
+        if days < yd { break }
+        days -= yd;
+        yr += 1;
+    }
+    mon: s64 = 1;
+    while true {
+        md := DaysInMonth(yr, mon);
+        if days < md { break }
+        days -= md;
+        mon += 1;
+    }
+    mday := days + 1;
+    Proto.Put2(out, cast(u16)yr);
+    VecPush(<<out, cast(u8)mon);
+    VecPush(<<out, cast(u8)mday);
+    VecPush(<<out, cast(u8)hour);
+    VecPush(<<out, cast(u8)min);
+    VecPush(<<out, cast(u8)sec);
+    VecPush(<<out, 0);
+}
+
+UnpackCard :: (a: []u8, out: *CardInfo) -> s64 {
+    if a.count < 26 { return 0 }
+    nb := cast(s64)a[0];
+    out.cardno = cast(s32)a[1];
+    out.version = cast(s32)Proto.Get2(a, 2);
+    out.creation = GetDate(a, 4);
+    out.romsize = Proto.Get4(a, 12);
+    out.ramsize = Proto.Get4(a, 16);
+    out.ramfree = Proto.Get4(a, 20);
+    l1 := cast(s64)a[24];
+    l2 := cast(s64)a[25];
+    end1 := 26 + l1;
+    if end1 > a.count { end1 = a.count }
+    end2 := end1 + l2;
+    if end2 > a.count { end2 = a.count }
+    VecClear(out.name.bytes);
+    BuilderAppend(out.name.bytes, Proto.CStringSlice(a[26:end1]));
+    VecClear(out.maker.bytes);
+    BuilderAppend(out.maker.bytes, Proto.CStringSlice(a[end1:end2]));
+    return nb;
+}
+
+UnpackDbInfo :: (a: []u8, info: *DBInfo) -> s64 {
+    if a.count < 44 { return 0 }
+    size := cast(s64)a[0];
+    if size > a.count { size = a.count }
+    info.attr = Proto.Get2(a, 2);
+    Id2S(Proto.Get4(a, 4), *info.dtype);
+    Id2S(Proto.Get4(a, 8), *info.creator);
+    info.version = Proto.Get2(a, 12);
+    info.modno = Proto.Get4(a, 14);
+    info.ctime = GetDate(a, 18);
+    info.mtime = GetDate(a, 26);
+    info.btime = GetDate(a, 34);
+    info.index = Proto.Get2(a, 42);
+    VecClear(info.name.bytes);
+    if size > 44 { BuilderAppend(info.name.bytes, Proto.CStringSlice(a[44:size])) }
+    return size;
+}
+
+UnpackRec :: (a: []u8, rec: *Record) -> bool {
+    VecClear(rec.data);
+    if a.count < 10 { return false }
+    size := cast(s64)Proto.Get2(a, 6);
+    if a.count - 10 < size { return false }
+    rec.id = Proto.Get4(a, 0);
+    rec.index = Proto.Get2(a, 4);
+    rec.attr = a[8];
+    rec.cat = a[9];
+    for i: 0..size - 1 { VecPush(rec.data, a[10 + i]) }
+    return true;
+}
+
+UnpackResource :: (a: []u8, res: *Resource) -> bool {
+    VecClear(res.data);
+    if a.count < 10 { return false }
+    size := cast(s64)Proto.Get2(a, 8);
+    if a.count - 10 < size { return false }
+    res.name = Proto.Get4(a, 0);
+    res.id = Proto.Get2(a, 4);
+    res.index = Proto.Get2(a, 6);
+    for i: 0..size - 1 { VecPush(res.data, a[10 + i]) }
+    return true;
 }
 
 Connect :: (c: *Client, srvfile: string, err: *Text) -> bool {
@@ -57,12 +313,23 @@ Exec :: (c: *Client, cmd: u8, argid: u8, arg: []u8, has_arg: bool, minlen: s64, 
     return true;
 }
 
+OpenConduit :: (c: *Client, err: *Text) -> bool {
+    empty: [0]u8;
+    out: Vec(u8);
+    return Exec(c, Proto.T_OPEN_CONDUIT, A1, empty[:], false, 0, *out, err);
+}
+
+EndOfSync :: (c: *Client, status: u16, err: *Text) -> bool {
+    req: Vec(u8);
+    Proto.Put2(*req, status);
+    out: Vec(u8);
+    return Exec(c, Proto.T_END_OF_SYNC, A1, req[:], true, 0, *out, err);
+}
+
 ReadSysInfo :: (c: *Client, info: *SysInfo, err: *Text) -> bool {
     empty: [0]u8;
     body: Vec(u8);
-    if !Exec(c, Proto.T_READ_SYS_INFO, Proto.ARG_ID_BASE, empty[:], false, 14, *body, err) {
-        return false;
-    }
+    if !Exec(c, Proto.T_READ_SYS_INFO, A1, empty[:], false, 14, *body, err) { return false }
     info.romversion = Proto.Get4(body[:], 0);
     info.locale = Proto.Get4(body[:], 4);
     l := cast(s64)body[9];
@@ -70,4 +337,241 @@ ReadSysInfo :: (c: *Client, info: *SysInfo, err: *Text) -> bool {
     VecClear(info.product.bytes);
     BuilderAppend(info.product.bytes, Proto.CStringSlice(body[10:10 + l]));
     return true;
+}
+
+ReadSysInfoVer :: (c: *Client, err: *Text) -> (v0: u32, v1: u32, v2: u32, ok: bool) {
+    req: Vec(u8);
+    Proto.Put2(*req, 1);
+    Proto.Put2(*req, 2);
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_SYS_INFO, A2, req[:], true, 12, *body, err) { return 0, 0, 0, false }
+    return Proto.Get4(body[:], 0), Proto.Get4(body[:], 4), Proto.Get4(body[:], 8), true;
+}
+
+ReadUserInfo :: (c: *Client, u: *User, err: *Text) -> bool {
+    empty: [0]u8;
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_USER_INFO, 0, empty[:], false, 30, *body, err) { return false }
+    u.userid = Proto.Get4(body[:], 0);
+    u.viewerid = Proto.Get4(body[:], 4);
+    u.lastsyncpc = Proto.Get4(body[:], 8);
+    u.succsynctime = GetDate(body[:], 12);
+    u.lastsynctime = GetDate(body[:], 20);
+    ulen := cast(s64)body[28];
+    plen := cast(s64)body[29];
+    end_u := 30 + ulen;
+    if end_u > body.count { end_u = body.count }
+    end_p := end_u + plen;
+    if end_p > body.count { end_p = body.count }
+    VecClear(u.username.bytes);
+    BuilderAppend(u.username.bytes, Proto.CStringSlice(body[30:end_u]));
+    VecClear(u.password);
+    for i: end_u..end_p - 1 { VecPush(u.password, body[i]) }
+    return true;
+}
+
+WriteUserInfo :: (c: *Client, u: *User, flags: u8, err: *Text) -> bool {
+    req: Vec(u8);
+    Proto.Put4(*req, u.userid);
+    Proto.Put4(*req, u.viewerid);
+    Proto.Put4(*req, u.lastsyncpc);
+    PutDate(*req, u.lastsynctime);
+    VecPush(req, flags);
+    uname: Vec(u8);
+    PutCStr(*uname, TextView(u.username), MAXNAME);
+    VecPush(req, cast(u8)uname.count);
+    for uname { VecPush(req, it) }
+    out: Vec(u8);
+    return Exec(c, Proto.T_WRITE_USER_INFO, A1, req[:], true, 0, *out, err);
+}
+
+GetSysDateTime :: (c: *Client, err: *Text) -> (t: s64, ok: bool) {
+    empty: [0]u8;
+    body: Vec(u8);
+    if !Exec(c, Proto.T_GET_SYS_DATE_TIME, A1, empty[:], false, 8, *body, err) { return -1, false }
+    return GetDate(body[:], 0), true;
+}
+
+SetSysDateTime :: (c: *Client, epoch: s64, err: *Text) -> bool {
+    req: Vec(u8);
+    PutDate(*req, epoch);
+    out: Vec(u8);
+    return Exec(c, Proto.T_SET_SYS_DATE_TIME, A1, req[:], true, 0, *out, err);
+}
+
+ReadStorageInfo :: (c: *Client, cardno: u8, cards: *CardList, err: *Text) -> (more: bool, ok: bool) {
+    VecClear(cards.items);
+    req: [2]u8 = .[cardno, 0];
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_STORAGE_INFO, A1, req[:], true, 30, *body, err) { return false, false }
+    nc := cast(s64)body[3];
+    if nc <= 0 { return false, true }
+    more := body[1] != 0;
+    p: s64 = 4;
+    for i: 0..nc - 1 {
+        if p >= body.count { break }
+        ci: CardInfo;
+        nb := UnpackCard(body[p:], *ci);
+        if nb <= 0 { break }
+        VecPush(cards.items, ci);
+        p += nb;
+    }
+    return more, true;
+}
+
+ReadDBList :: (c: *Client, cardno: u8, flags: u8, start: u16, dbs: *DBList, err: *Text) -> (more: bool, ok: bool) {
+    VecClear(dbs.items);
+    req: Vec(u8);
+    VecPush(req, flags | Proto.DB_LIST_MULTIPLE);
+    VecPush(req, cardno);
+    Proto.Put2(*req, start);
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_DB_LIST, A1, req[:], true, 48, *body, err) { return false, false }
+    ndb := cast(s64)body[3];
+    if ndb == 0 { return false, true }
+    more := (body[2] & 0x80) != 0;
+    p: s64 = 4;
+    for i: 0..ndb - 1 {
+        if p >= body.count { break }
+        info: DBInfo;
+        nb := UnpackDbInfo(body[p:], *info);
+        if nb <= 0 { break }
+        VecPush(dbs.items, info);
+        p += nb;
+    }
+    return more, true;
+}
+
+DeleteDB :: (c: *Client, name: string, err: *Text) -> bool {
+    cno, dbname := Proto.ParseDbName(name);
+    req: Vec(u8);
+    VecPush(req, cast(u8)cno);
+    VecPush(req, 0);
+    PutCStr(*req, dbname, MAXNAME);
+    out: Vec(u8);
+    return Exec(c, Proto.T_DELETE_DB, A1, req[:], true, 0, *out, err);
+}
+
+ResetSystem :: (c: *Client, err: *Text) -> bool {
+    empty: [0]u8;
+    out: Vec(u8);
+    return Exec(c, T_RESET_SYSTEM, 0, empty[:], false, 0, *out, err);
+}
+
+CloseDBAll :: (c: *Client, err: *Text) -> bool {
+    empty: [0]u8;
+    out: Vec(u8);
+    return Exec(c, Proto.T_CLOSE_DB, A2, empty[:], false, 0, *out, err);
+}
+
+AddSyncLogEntry :: (c: *Client, entry: string, err: *Text) -> bool {
+    req: Vec(u8);
+    PutCStr(*req, entry, 256);
+    out: Vec(u8);
+    return Exec(c, T_ADD_SYNC_LOG_ENTRY, A1, req[:], true, 0, *out, err);
+}
+
+DbStat :: (c: *Client, db: *OpenDB, info: *DBInfo, err: *Text) -> bool {
+    req: [2]u8 = .[0x80, db.handle];
+    body: Vec(u8);
+    if !Exec(c, T_FIND_DB, A2, req[:], true, 54, *body, err) { return false }
+    return UnpackDbInfo(body[10:], info) > 0;
+}
+
+DbOpen :: (c: *Client, name: string, mode: u8, db: *OpenDB, err: *Text) -> bool {
+    cno, dbname := Proto.ParseDbName(name);
+    req: Vec(u8);
+    VecPush(req, cast(u8)cno);
+    VecPush(req, mode);
+    PutCStr(*req, dbname, MAXNAME);
+    body: Vec(u8);
+    if !Exec(c, Proto.T_OPEN_DB, A1, req[:], true, 1, *body, err) { return false }
+    db.handle = body[0];
+    info: DBInfo;
+    if !DbStat(c, db, *info, err) { return false }
+    db.attr = info.attr;
+    return true;
+}
+
+DbCreate :: (c: *Client, name: string, inf: *DBInfo, db: *OpenDB, err: *Text) -> bool {
+    cno, dbname := Proto.ParseDbName(name);
+    req: Vec(u8);
+    Proto.Put4(*req, S2Id(TextView(inf.creator)));
+    Proto.Put4(*req, S2Id(TextView(inf.dtype)));
+    VecPush(req, cast(u8)cno);
+    VecPush(req, 0);
+    Proto.Put2(*req, inf.attr);
+    Proto.Put2(*req, inf.version);
+    PutCStr(*req, dbname, MAXNAME);
+    body: Vec(u8);
+    if !Exec(c, Proto.T_CREATE_DB, A1, req[:], true, 1, *body, err) { return false }
+    db.handle = body[0];
+    db.attr = inf.attr;
+    return true;
+}
+
+DbClose :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
+    req: [1]u8 = .[db.handle];
+    out: Vec(u8);
+    return Exec(c, Proto.T_CLOSE_DB, A1, req[:], true, 0, *out, err);
+}
+
+DbNEntries :: (c: *Client, db: *OpenDB, err: *Text) -> s32 {
+    req: [1]u8 = .[db.handle];
+    body: Vec(u8);
+    if !Exec(c, T_READ_OPEN_DB_INFO, A1, req[:], true, 2, *body, err) { return -1 }
+    return cast(s32)Proto.Get2(body[:], 0);
+}
+
+PdbRead :: (c: *Client, db: *OpenDB, index: u16, rec: *Record, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put2(*req, index);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, MAXRECBYTES);
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_RECORD, A2, req[:], true, 10, *body, err) { return false }
+    return UnpackRec(body[:], rec);
+}
+
+PdbWrite :: (c: *Client, db: *OpenDB, rec: *Record, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put4(*req, rec.id);
+    VecPush(req, rec.attr & R_SECRET);
+    VecPush(req, rec.cat);
+    for rec.data { VecPush(req, it) }
+    body: Vec(u8);
+    if !Exec(c, T_WRITE_RECORD, A1, req[:], true, 4, *body, err) { return false }
+    if rec.id == 0 { rec.id = Proto.Get4(body[:], 0) }
+    return true;
+}
+
+PdbDelete :: (c: *Client, db: *OpenDB, id: u32, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put4(*req, id);
+    out: Vec(u8);
+    return Exec(c, T_DELETE_RECORD, A1, req[:], true, 0, *out, err);
+}
+
+PdbPurge :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
+    req: [1]u8 = .[db.handle];
+    out: Vec(u8);
+    return Exec(c, T_CLEANUP_DATABASE, A1, req[:], true, 0, *out, err);
+}
+
+PrcRead :: (c: *Client, db: *OpenDB, index: u16, res: *Resource, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put2(*req, index);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, MAXRECBYTES);
+    body: Vec(u8);
+    if !Exec(c, T_READ_RESOURCE, A1, req[:], true, 12, *body, err) { return false }
+    return UnpackResource(body[:], res);
 }
