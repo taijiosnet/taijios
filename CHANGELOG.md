@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship System Log only as ZX and remove its Dis version.
+
 - Ship Memory Monitor only as ZX and remove its Dis version.
 
 - Ship About Inferno only as ZX and remove its Dis version.
