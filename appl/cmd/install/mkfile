@@ -2,15 +2,11 @@
 
 TARG=\
 	create.dis\
-	info.dis\
-	wdiff.dis\
 	inst.dis\
 	wrap.dis\
 	install.dis\
 	arch.dis\
 	proto.dis\
-	wrap2list.dis\
-	wfind.dis\
 	log.dis\
 	eproto.dis\
 
@@ -33,8 +29,8 @@ DISBIN=$ROOT/dis/install
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=mkproto ckproto proto2list mergelog updatelog applylog archfs
-ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi arch_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../taijios_clock.zi ../taijios_keyring.zi ../taijios_namespace.zi ../../lib/taijios_quote.zi ../../lib/ninep.zi
+ZXCOMMANDS=mkproto ckproto proto2list mergelog updatelog applylog archfs info wfind wrap2list wdiff
+ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi arch_lib.zi wrap_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../taijios_clock.zi ../taijios_keyring.zi ../taijios_namespace.zi ../../lib/taijios_quote.zi ../../lib/ninep.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
@@ -43,6 +39,18 @@ updatelog.zx: updatelog.zi $ZXUTIL
 
 archfs.zx: archfs.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_namespace --entry archfs:main -o $target archfs.zi
+
+info.zx: info.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_keyring --entry info:main -o $target info.zi
+
+wfind.zx: wfind.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_keyring --entry wfind:main -o $target wfind.zi
+
+wrap2list.zx: wrap2list.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_keyring --entry wrap2list:main -o $target wrap2list.zi
+
+wdiff.zx: wdiff.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_keyring --entry wdiff:main -o $target wdiff.zi
 
 &.zx: &.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi

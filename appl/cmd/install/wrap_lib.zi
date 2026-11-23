@@ -1,0 +1,813 @@
+// Package wrapper library (replaces appl/cmd/install/wrap.b).
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Clock :: #import "taijios_clock";
+Keyring :: #import "taijios_keyring";
+Util :: #import "install_util";
+Arch :: #import "arch_lib";
+#import "std/format"
+#import "std/vec"
+
+NONE :: 0;
+FULL :: 1;
+UPD :: 2;
+MD5DLEN :: 16;
+TEN2EIGHT :: 100000000;
+
+Update :: struct {
+    desc: Text;
+    dir: Text;
+    time: s32;
+    utime: s32;
+    md5_data: Vec(u8);
+    remove_data: Vec(u8);
+    has_remove: bool;
+    typ: s32;
+}
+
+ArchFile :: struct {
+    name: Text;
+    mode: u32;
+    mtime: s32;
+    length: s64;
+    offset: s64;
+}
+
+Wrapped :: struct {
+    name: Text;
+    root: Text;
+    tfull: s32;
+    u: Vec(Update);
+    is_arch: bool;
+    ar: Arch.Archive;
+    arch_files: Vec(ArchFile);
+}
+
+SetText :: (dst: *Text, s: string) {
+    VecClear(dst.bytes);
+    unused BuilderAppend(dst.bytes, s);
+}
+
+UpdateCount :: (w: *Wrapped) -> s64 { return w.u.count }
+UpdateTime :: (w: *Wrapped, i: s64) -> s32 { return w.u[i].time }
+UpdateUtime :: (w: *Wrapped, i: s64) -> s32 { return w.u[i].utime }
+UpdateTyp :: (w: *Wrapped, i: s64) -> s32 { return w.u[i].typ }
+UpdateDesc :: (w: *Wrapped, i: s64) -> Text { return Util.CopyText(TextView(w.u[i].desc)) }
+UpdateDir :: (w: *Wrapped, i: s64) -> Text { return Util.CopyText(TextView(w.u[i].dir)) }
+UpdateMd5 :: (w: *Wrapped, i: s64, out: *Vec(u8)) {
+    VecClear(out.*);
+    if w.u[i].md5_data.count > 0 {
+        for k: 0..w.u[i].md5_data.count - 1 { VecPush(out.*, w.u[i].md5_data[k]) }
+    }
+}
+UpdateRemove :: (w: *Wrapped, i: s64, out: *Vec(u8)) -> bool {
+    VecClear(out.*);
+    if !w.u[i].has_remove { return false }
+    if w.u[i].remove_data.count > 0 {
+        for k: 0..w.u[i].remove_data.count - 1 { VecPush(out.*, w.u[i].remove_data[k]) }
+    }
+    return true;
+}
+TruncateUpdates :: (w: *Wrapped, n: s64) { VecResize(w.u, n) }
+
+CopyUpdate :: (dst: *Update, src: *Update) {
+    Util.CopyTextInto(*dst.desc, *src.desc);
+    Util.CopyTextInto(*dst.dir, *src.dir);
+    dst.time = src.time;
+    dst.utime = src.utime;
+    VecClear(dst.md5_data);
+    if src.md5_data.count > 0 {
+        unused BuilderAppend(dst.md5_data, TextView(src.md5_data[:]));
+    }
+    VecClear(dst.remove_data);
+    if src.remove_data.count > 0 {
+        unused BuilderAppend(dst.remove_data, TextView(src.remove_data[:]));
+    }
+    dst.has_remove = src.has_remove;
+    dst.typ = src.typ;
+}
+
+End :: (w: *Wrapped) {
+    if w.is_arch {
+        Arch.CloseArch(*w.ar);
+        w.is_arch = false;
+    }
+    VecClear(w.arch_files);
+}
+
+PathCat :: (s: string, t: string, out: *Vec(u8)) {
+    VecClear(out.*);
+    if s.count == 0 {
+        unused BuilderAppend(out.*, t);
+        return;
+    }
+    if t.count == 0 {
+        unused BuilderAppend(out.*, s);
+        return;
+    }
+    slashs := s[s.count - 1] == 47;
+    slasht := t[0] == 47;
+    if slashs && slasht {
+        unused BuilderAppend(out.*, s);
+        unused BuilderAppend(out.*, t[1:]);
+    } else if !slashs && !slasht {
+        unused BuilderAppend(out.*, s);
+        unused BuilderAppend(out.*, "/");
+        unused BuilderAppend(out.*, t);
+    } else {
+        unused BuilderAppend(out.*, s);
+        unused BuilderAppend(out.*, t);
+    }
+}
+
+Now2String :: (n: s32, flag: s32, out: *Vec(u8)) {
+    VecClear(out.*);
+    if flag == 0 {
+        BuilderPrint(out, "%", cast(u64)cast(u32)n);
+        return;
+    }
+    if n < 0 { return }
+    q := n / TEN2EIGHT;
+    r := n - TEN2EIGHT * q;
+    tmp: Vec(u8);
+    BuilderPrint(*tmp, "%", cast(s64)r);
+    lead: u8 = 48;
+    if q <= 9 { lead = cast(u8)(48 + q) }
+    else if q <= 21 { lead = cast(u8)(65 + q - 10) }
+    else { return }
+    VecPush(out.*, lead);
+    pad := 8 - tmp.count;
+    while pad > 0 {
+        VecPush(out.*, 48);
+        pad -= 1;
+    }
+    unused BuilderAppend(out.*, TextView(tmp[:]));
+}
+
+String2Now :: (s: string, flag: s32) -> s32 {
+    if s.count == 0 { return 0 }
+    if flag == 0 && s[0] != 65 { // 'A'
+        v, ok := Util.ParseIntBase(s, 10);
+        if !ok { return 0 }
+        return cast(s32)v;
+    }
+    if s.count != 9 { return 0 }
+    r, rok := Util.ParseIntBase(s[1:], 10);
+    if !rok { return 0 }
+    c := cast(u8)s[0];
+    q: s64 = 0;
+    if c >= 48 && c <= 57 { q = cast(s64)(c - 48) }
+    else if c >= 65 && c <= 76 { q = cast(s64)(c - 65 + 10) }
+    else { return 0 }
+    n := cast(s64)TEN2EIGHT * q + r;
+    if n < 0 { return 0 }
+    return cast(s32)n;
+}
+
+ReadTrimFile :: (path: string, out: *Vec(u8)) -> bool {
+    VecClear(out.*);
+    if !Util.ReadAllFile(path, out) { return false }
+    if out.count > 0 && out.*[out.count - 1] == 10 {
+        VecResize(out.*, out.count - 1);
+    }
+    return true;
+}
+
+SniffDir :: (base: string, elem: string) -> (rv: s32, t: s32) {
+    t := String2Now(elem, 0);
+    if t == 0 { return NONE, 0 }
+    rv: s32 = NONE;
+    p: Vec(u8);
+    BuilderPrint(*p, "%/%/package", base, elem);
+    d: Util.DirEntry;
+    if Util.StatEntry(TextView(p[:]), *d) { rv = rv | FULL }
+    VecClear(p);
+    BuilderPrint(*p, "%/%/update", base, elem);
+    if Util.StatEntry(TextView(p[:]), *d) { rv = rv | UPD }
+    return rv, t;
+}
+
+OpenUpdate :: (d: string, out_u: *Vec(Update)) -> (ok: bool, tfull: s32) {
+    VecClear(out_u.*);
+    dl: Util.DirList;
+    if !Util.ReadDirSorted(d, *dl) { return false, 0 }
+    tbase: s32 = -1;
+    tfull: s32 = -1;
+    nu: s64 = 0;
+    for i: 0..dl.entries.count - 1 {
+        ename_t := Util.EntryName(*dl, i);
+        ename := TextView(ename_t);
+        k, t := SniffDir(d, ename);
+        if k == FULL {
+            nu += 1;
+            if t > tfull { tfull = t }
+            if t > tbase { tbase = t }
+        } else if k == (FULL | UPD) {
+            nu += 1;
+            if t > tfull { tfull = t }
+        } else if k == UPD {
+            nu += 1;
+        }
+    }
+    if nu == 0 { return false, 0 }
+
+    for i: 0..dl.entries.count - 1 {
+        ename_t := Util.EntryName(*dl, i);
+        ename := TextView(ename_t);
+        k, t := SniffDir(d, ename);
+        if k == 0 { continue }
+        if t < tbase { continue }
+        if t < tfull && k == UPD { continue }
+
+        u: Update;
+        u.typ = k;
+        udir: Vec(u8);
+        PathCat(d, ename, *udir);
+        u.dir = Util.CopyText(TextView(udir[:]));
+        u.time = t;
+
+        p: Vec(u8);
+        BuilderPrint(*p, "%/desc", TextView(udir[:]));
+        desc_b: Vec(u8);
+        if ReadTrimFile(TextView(p[:]), *desc_b) {
+            u.desc = Util.CopyText(TextView(desc_b[:]));
+        }
+
+        VecClear(p);
+        BuilderPrint(*p, "%/md5sum", TextView(udir[:]));
+        if !Util.ReadAllFile(TextView(p[:]), *u.md5_data) {
+            continue;
+        }
+
+        VecClear(p);
+        BuilderPrint(*p, "%/remove", TextView(udir[:]));
+        u.has_remove = Util.ReadAllFile(TextView(p[:]), *u.remove_data);
+
+        VecClear(p);
+        BuilderPrint(*p, "%/update", TextView(udir[:]));
+        upd_b: Vec(u8);
+        u.utime = 0;
+        if ReadTrimFile(TextView(p[:]), *upd_b) {
+            // Trim leading spaces (update file is "%22ud\n")
+            s := TextView(upd_b[:]);
+            si: s64 = 0;
+            while si < s.count && (s[si] == 32 || s[si] == 9) { si += 1 }
+            uv, uok := Util.ParseIntBase(s[si:], 10);
+            if uok { u.utime = cast(s32)uv }
+        }
+        VecPush(out_u.*, u);
+    }
+    if out_u.count == 0 { return false, 0 }
+
+    // Sort by time ascending
+    for i: 1..out_u.count - 1 {
+        j := i;
+        while j > 0 && out_u.*[j].time < out_u.*[j - 1].time {
+            tmp: Update;
+            CopyUpdate(*tmp, *out_u.*[j]);
+            CopyUpdate(*out_u.*[j], *out_u.*[j - 1]);
+            CopyUpdate(*out_u.*[j - 1], *tmp);
+            j -= 1;
+        }
+    }
+    return true, tfull;
+}
+
+GetFirstDir :: (d: string, out: *Vec(u8)) -> bool {
+    VecClear(out.*);
+    dl: Util.DirList;
+    if !Util.ReadDirSorted(d, *dl) { return false }
+    for i: 0..dl.entries.count - 1 {
+        if (Util.EntryMode(*dl, i) & Stat.Directory) != 0 {
+            ename_t := Util.EntryName(*dl, i);
+            unused BuilderAppend(out.*, TextView(ename_t));
+            return true;
+        }
+    }
+    return false;
+}
+
+OpenMount :: (f_in: string, d: string, w: *Wrapped) -> bool {
+    fname: Vec(u8);
+    if f_in.count == 0 {
+        wp: Vec(u8);
+        BuilderPrint(*wp, "%/wrap", d);
+        if !GetFirstDir(TextView(wp[:]), *fname) { return false }
+    } else {
+        unused BuilderAppend(fname, f_in);
+    }
+    SetText(*w.name, TextView(fname[:]));
+    SetText(*w.root, d);
+
+    wp1: Vec(u8);
+    PathCat("wrap", TextView(fname[:]), *wp1);
+    p: Vec(u8);
+    PathCat(d, TextView(wp1[:]), *p);
+
+    ok, tfull := OpenUpdate(TextView(p[:]), *w.u);
+    if !ok { return false }
+    w.tfull = tfull;
+    return true;
+}
+
+FindArchFile :: (w: *Wrapped, path: string) -> s64 {
+    norm: Vec(u8);
+    if path.count == 0 || path[0] != 47 {
+        VecPush(norm, 47);
+    }
+    unused BuilderAppend(norm, path);
+    target := TextView(norm[:]);
+    for i: 0..w.arch_files.count - 1 {
+        if TextView(w.arch_files[i].name) == target { return i }
+    }
+    return -1;
+}
+
+ReadArchFileTrim :: (w: *Wrapped, path: string, out: *Vec(u8)) -> bool {
+    VecClear(out.*);
+    idx := FindArchFile(w, path);
+    if idx < 0 { return false }
+    if !Arch.ReadAt(*w.ar, w.arch_files[idx].offset, out, w.arch_files[idx].length) {
+        return false;
+    }
+    if out.count > 0 && out.*[out.count - 1] == 10 {
+        VecResize(out.*, out.count - 1);
+    }
+    return true;
+}
+
+ReadArchFileRaw :: (w: *Wrapped, path: string, out: *Vec(u8)) -> bool {
+    VecClear(out.*);
+    idx := FindArchFile(w, path);
+    if idx < 0 { return false }
+    return Arch.ReadAt(*w.ar, w.arch_files[idx].offset, out, w.arch_files[idx].length);
+}
+
+StatWrappedFile :: (w: *Wrapped, relpath: string, de: *Util.DirEntry) -> bool {
+    if w.is_arch {
+        idx := FindArchFile(w, relpath);
+        if idx < 0 { return false }
+        Util.CopyTextInto(*de.name, *w.arch_files[idx].name);
+        de.mode = w.arch_files[idx].mode;
+        de.mtime = w.arch_files[idx].mtime;
+        de.length = w.arch_files[idx].length;
+        return true;
+    }
+    p: Vec(u8);
+    PathCat(TextView(w.root), relpath, *p);
+    return Util.StatEntry(TextView(p[:]), de);
+}
+
+ReadWrappedFile :: (w: *Wrapped, relpath: string, out: *Vec(u8)) -> bool {
+    if w.is_arch {
+        return ReadArchFileRaw(w, relpath, out);
+    }
+    p: Vec(u8);
+    PathCat(TextView(w.root), relpath, *p);
+    return Util.ReadAllFile(TextView(p[:]), out);
+}
+
+SniffArchDir :: (w: *Wrapped, pkg: string, elem: string) -> (rv: s32, t: s32) {
+    t := String2Now(elem, 0);
+    if t == 0 { return NONE, 0 }
+    rv: s32 = NONE;
+    p: Vec(u8);
+    BuilderPrint(*p, "/wrap/%/%/package", pkg, elem);
+    if FindArchFile(w, TextView(p[:])) >= 0 { rv = rv | FULL }
+    VecClear(p);
+    BuilderPrint(*p, "/wrap/%/%/update", pkg, elem);
+    if FindArchFile(w, TextView(p[:])) >= 0 { rv = rv | UPD }
+    return rv, t;
+}
+
+OpenArchWrap :: (f: string, all: bool, w: *Wrapped) -> bool {
+    if !Arch.OpenArch(f, *w.ar) { return false }
+    w.is_arch = true;
+    VecClear(w.arch_files);
+    while Arch.GetHdr(*w.ar) {
+        aname := TextView(w.ar.hdr.name);
+        if !all {
+            if aname != "/wrap" && !(aname.count > 6 && aname[:6] == "/wrap/") {
+                break;
+            }
+        }
+        af: ArchFile;
+        af.name = Util.CopyText(aname);
+        af.mode = w.ar.hdr.mode;
+        af.mtime = w.ar.hdr.mtime;
+        af.length = w.ar.hdr.length;
+        af.offset = w.ar.pos;
+        VecPush(w.arch_files, af);
+        if !Arch.Drain(*w.ar, w.ar.hdr.length) { break }
+    }
+    if w.ar.err.bytes.count > 0 {
+        End(w);
+        return false;
+    }
+
+    // Discover package name under /wrap/<pkg>
+    pkg_name: Vec(u8);
+    for i: 0..w.arch_files.count - 1 {
+        nm := TextView(w.arch_files[i].name);
+        if nm.count > 6 && nm[:6] == "/wrap/" {
+            rest := nm[6:];
+            k: s64 = 0;
+            while k < rest.count && rest[k] != 47 { k += 1 }
+            if k > 0 {
+                cand := rest[:k];
+                if pkg_name.count == 0 || Util.StrLess(cand, TextView(pkg_name[:])) {
+                    VecClear(pkg_name);
+                    unused BuilderAppend(pkg_name, cand);
+                }
+            }
+        }
+    }
+    if pkg_name.count == 0 {
+        End(w);
+        return false;
+    }
+    pkg := TextView(pkg_name[:]);
+    SetText(*w.name, pkg);
+    SetText(*w.root, "/mnt/wrap");
+
+    // Collect distinct timestamp directory names under /wrap/<pkg>/<ts>
+    prefix: Vec(u8);
+    BuilderPrint(*prefix, "/wrap/%/", pkg);
+    pre_s := TextView(prefix[:]);
+    ts_list: Vec(Text);
+    for i: 0..w.arch_files.count - 1 {
+        nm := TextView(w.arch_files[i].name);
+        if nm.count > pre_s.count && nm[:pre_s.count] == pre_s {
+            rest := nm[pre_s.count:];
+            k: s64 = 0;
+            while k < rest.count && rest[k] != 47 { k += 1 }
+            if k > 0 {
+                ts_cand := rest[:k];
+                found := false;
+                for j: 0..ts_list.count - 1 {
+                    if TextView(ts_list[j]) == ts_cand { found = true; break }
+                }
+                if !found { VecPush(ts_list, Util.CopyText(ts_cand)) }
+            }
+        }
+    }
+
+    tbase: s32 = -1;
+    tfull: s32 = -1;
+    nu: s64 = 0;
+    for i: 0..ts_list.count - 1 {
+        ename := TextView(ts_list[i]);
+        k, t := SniffArchDir(w, pkg, ename);
+        if k == FULL {
+            nu += 1;
+            if t > tfull { tfull = t }
+            if t > tbase { tbase = t }
+        } else if k == (FULL | UPD) {
+            nu += 1;
+            if t > tfull { tfull = t }
+        } else if k == UPD {
+            nu += 1;
+        }
+    }
+    if nu == 0 {
+        End(w);
+        return false;
+    }
+
+    VecClear(w.u);
+    for i: 0..ts_list.count - 1 {
+        ename := TextView(ts_list[i]);
+        k, t := SniffArchDir(w, pkg, ename);
+        if k == 0 || t < tbase || (t < tfull && k == UPD) { continue }
+        u: Update;
+        u.typ = k;
+        udir: Vec(u8);
+        BuilderPrint(*udir, "/wrap/%/%", pkg, ename);
+        u.dir = Util.CopyText(TextView(udir[:]));
+        u.time = t;
+
+        p: Vec(u8);
+        BuilderPrint(*p, "%/desc", TextView(udir[:]));
+        desc_b: Vec(u8);
+        if ReadArchFileTrim(w, TextView(p[:]), *desc_b) {
+            u.desc = Util.CopyText(TextView(desc_b[:]));
+        }
+
+        VecClear(p);
+        BuilderPrint(*p, "%/md5sum", TextView(udir[:]));
+        if !ReadArchFileRaw(w, TextView(p[:]), *u.md5_data) {
+            continue;
+        }
+
+        VecClear(p);
+        BuilderPrint(*p, "%/remove", TextView(udir[:]));
+        u.has_remove = ReadArchFileRaw(w, TextView(p[:]), *u.remove_data);
+
+        VecClear(p);
+        BuilderPrint(*p, "%/update", TextView(udir[:]));
+        upd_b: Vec(u8);
+        u.utime = 0;
+        if ReadArchFileTrim(w, TextView(p[:]), *upd_b) {
+            s := TextView(upd_b[:]);
+            si: s64 = 0;
+            while si < s.count && (s[si] == 32 || s[si] == 9) { si += 1 }
+            uv, uok := Util.ParseIntBase(s[si:], 10);
+            if uok { u.utime = cast(s32)uv }
+        }
+        VecPush(w.u, u);
+    }
+    if w.u.count == 0 {
+        End(w);
+        return false;
+    }
+    for i: 1..w.u.count - 1 {
+        j := i;
+        while j > 0 && w.u[j].time < w.u[j - 1].time {
+            tmp: Update;
+            CopyUpdate(*tmp, *w.u[j]);
+            CopyUpdate(*w.u[j], *w.u[j - 1]);
+            CopyUpdate(*w.u[j - 1], *tmp);
+            j -= 1;
+        }
+    }
+    w.tfull = tfull;
+    return true;
+}
+
+FindSubstr :: (s: string, p: string) -> s64 {
+    if p.count == 0 || s.count < p.count { return -1 }
+    for i: 0..s.count - p.count - 1 {
+        if s[i:i + p.count] == p { return i }
+    }
+    return -1;
+}
+
+OpenWrap :: (f_in: string, d_in: string, all: bool, w: *Wrapped) -> bool {
+    w.is_arch = false;
+    VecClear(w.arch_files);
+    d := ifx d_in.count == 0 then "/" else d_in;
+    if OpenMount(f_in, d, w) { return true }
+    de: Util.DirEntry;
+    if !Util.StatEntry(f_in, *de) { return false }
+    if (de.mode & Stat.Directory) != 0 {
+        idx := FindSubstr(f_in, "/wrap/");
+        if idx >= 0 {
+            return OpenMount(f_in[idx + 6:], f_in[:idx + 6], w);
+        }
+        return OpenMount("", f_in, w);
+    }
+    return OpenArchWrap(f_in, all, w);
+}
+
+OpenWrapHdr :: (f: string, d: string, all: bool, w: *Wrapped) -> bool {
+    de: Util.DirEntry;
+    if !Util.StatEntry(f, *de) || (de.mode & Stat.Directory) != 0 {
+        return OpenWrap(f, d, all, w);
+    }
+    return OpenArchWrap(f, all, w);
+}
+
+HexVal :: (c: u8) -> s32 {
+    if c >= 48 && c <= 57 { return cast(s32)(c - 48) }
+    if c >= 97 && c <= 102 { return cast(s32)(c - 97 + 10) }
+    if c >= 65 && c <= 70 { return cast(s32)(c - 65 + 10) }
+    return -1;
+}
+
+MemCmp :: (b1: []u8, b2: []u8, n: s64) -> s32 {
+    for i: 0..n - 1 {
+        if b1[i] < b2[i] { return -1 }
+        if b1[i] > b2[i] { return 1 }
+    }
+    return 0;
+}
+
+FindMd5Line :: (data: *Vec(u8), target: string, out_line: *Vec(u8)) -> bool {
+    VecClear(out_line.*);
+    pos: s64 = 0;
+    l := target.count;
+    while pos < data.count {
+        start := pos;
+        while pos < data.count && data.*[pos] != 10 { pos += 1 }
+        if pos < data.count { pos += 1 }
+        if pos - start >= l + 1 {
+            matched := true;
+            for k: 0..l - 1 {
+                if data.*[start + k] != cast(u8)target[k] { matched = false; break }
+            }
+            if matched && (data.*[start + l] == 32 || data.*[start + l] == 10) {
+                for k: start..pos - 1 { VecPush(out_line.*, data.*[k]) }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+GetFileInfo :: (w: *Wrapped, f: string, has_rdigest: bool, rdigest: []u8, has_wdigest: bool, wdigest: []u8, has_ardigest: bool, ardigest: []u8) -> (ok: bool, t: s32) {
+    if w.u.count == 0 { return false, 0 }
+    digest: [16]u8;
+    line_b: Vec(u8);
+    i := w.u.count - 1;
+    while i >= 0 {
+        if !FindMd5Line(*w.u[i].md5_data, f, *line_b) {
+            i -= 1;
+            continue;
+        }
+        p := TextView(line_b[:]);
+        k: s64 = 0;
+        while k < p.count && p[k] != 32 { k += 1 }
+        if k == p.count { i -= 1; continue }
+        q := p[k + 1:];
+        if q.count != 33 { i -= 1; continue }
+        bad := false;
+        for j: 0..15 {
+            a := HexVal(cast(u8)q[2 * j]);
+            b := HexVal(cast(u8)q[2 * j + 1]);
+            if a < 0 || b < 0 { bad = true; break }
+            digest[j] = cast(u8)((a << 4) | b);
+        }
+        if bad { i -= 1; continue }
+        if !has_rdigest || MemCmp(rdigest, digest[:], 16) == 0 || (has_ardigest && MemCmp(ardigest, digest[:], 16) == 0) {
+            if has_wdigest {
+                // Note: copy parsed digest when rdigest is absent (or rdigest when present, which equals digest)
+                for j: 0..15 { wdigest[j] = digest[j] }
+            }
+            return true, w.u[i].time;
+        }
+        return false, 0;
+    }
+    return false, 0;
+}
+
+Md5File :: (file: string, digest: []u8) -> bool {
+    for i: 0..15 { digest[i] = 0 }
+    d: Util.DirEntry;
+    if !Util.StatEntry(file, *d) { return false }
+    if (d.mode & Stat.Directory) != 0 { return true }
+    fd := IO.Open(file, 0);
+    if fd < 0 { return false }
+    state: Keyring.DigestState;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused Keyring.DigestAdd(Keyring.MD5, *state, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    unused Keyring.DigestEnd(Keyring.MD5, *state, digest);
+    return true;
+}
+
+Md5FileA :: (file: string, digest: []u8) -> bool {
+    for i: 0..15 { digest[i] = 0 }
+    d: Util.DirEntry;
+    if !Util.StatEntry(file, *d) { return false }
+    if (d.mode & Stat.Directory) != 0 { return true }
+    fd := IO.Open(file, 0);
+    if fd < 0 { return false }
+    state: Keyring.DigestState;
+    buf: [8192]u8;
+    pending_cr := false;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        out: Vec(u8);
+        for i: 0..cast(s64)n - 1 {
+            c := buf[i];
+            if pending_cr {
+                if c == 10 {
+                    VecPush(out, 10);
+                    pending_cr = false;
+                } else if c == 13 {
+                    VecPush(out, 13);
+                } else {
+                    VecPush(out, 13);
+                    VecPush(out, c);
+                    pending_cr = false;
+                }
+            } else {
+                if c == 13 {
+                    pending_cr = true;
+                } else {
+                    VecPush(out, c);
+                }
+            }
+        }
+        if out.count > 0 {
+            unused Keyring.DigestAdd(Keyring.MD5, *state, TextView(out[:]));
+        }
+    }
+    if pending_cr {
+        cr: [1]u8 = .[13];
+        unused Keyring.DigestAdd(Keyring.MD5, *state, TextView(cr[:]));
+    }
+    unused IO.Close(fd);
+    unused Keyring.DigestEnd(Keyring.MD5, *state, digest);
+    return true;
+}
+
+Md5Sum :: (ar: *Arch.Archive, digest: []u8, leng_in: s64) -> bool {
+    for i: 0..15 { digest[i] = 0 }
+    state: Keyring.DigestState;
+    buf: [8192]u8;
+    leng := leng_in;
+    while leng > 0 {
+        chunk := ifx leng > 8192 then 8192 else leng;
+        got := Arch.ArchRead(ar, buf[:chunk]);
+        if got <= 0 { return false }
+        unused Keyring.DigestAdd(Keyring.MD5, *state, TextView(buf[:got]));
+        leng -= got;
+    }
+    unused Keyring.DigestEnd(Keyring.MD5, *state, digest);
+    return true;
+}
+
+Md5Conv :: (d: []u8, out: *Vec(u8)) {
+    VecClear(out.*);
+    hex := "0123456789abcdef";
+    for i: 0..15 {
+        b := d[i];
+        VecPush(out.*, cast(u8)hex[(b >> 4) & 0xF]);
+        VecPush(out.*, cast(u8)hex[b & 0xF]);
+    }
+}
+
+PutWrapFile :: (out_fd: s32, name: string, time: s32, elem: string, file: string, uid: string, gid: string) {
+    d: Util.DirEntry;
+    if !Util.StatEntry(file, *d) {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "cannot stat %: %", file, IO.Error());
+        Util.WriteErr(TextView(eb[:]));
+    }
+    ts: Vec(u8);
+    Now2String(time, 0, *ts);
+    s: Vec(u8);
+    BuilderPrint(*s, "/wrap/%/%/%", name, TextView(ts[:]), elem);
+    hdr: Vec(u8);
+    Arch.PutHdr(*hdr, TextView(s[:]), 0x124, uid, gid, time, d.length); // 0444
+    unused IO.Write(out_fd, TextView(hdr[:]));
+    unused Arch.PutFileToFd(out_fd, file, d.length);
+}
+
+PutWrap :: (out_fd: s32, name: string, time: s32, desc: string, utime: s32, pkg: bool, uid: string, gid: string) {
+    if utime == 0 && !pkg {
+        Util.WriteErr("bad precondition in putwrap()");
+    }
+    hdr: Vec(u8);
+    dmode: u32 = Stat.Directory | 0x1FD; // 0775
+    Arch.PutHdr(*hdr, "/wrap", dmode, uid, gid, time, 0);
+    s: Vec(u8);
+    BuilderPrint(*s, "/wrap/%", name);
+    Arch.PutHdr(*hdr, TextView(s[:]), dmode, uid, gid, time, 0);
+    ts: Vec(u8);
+    Now2String(time, 0, *ts);
+    BuilderPrint(*s, "/%", TextView(ts[:]));
+    Arch.PutHdr(*hdr, TextView(s[:]), dmode, uid, gid, time, 0);
+    dir_p := Util.CopyText(TextView(s[:]));
+    fmode: u32 = 0x124; // 0444
+    if utime != 0 {
+        up: Vec(u8);
+        BuilderPrint(*up, "%/update", TextView(dir_p));
+        Arch.PutHdr(*hdr, TextView(up[:]), fmode, uid, gid, time, 23);
+        uts: Vec(u8);
+        BuilderPrint(*uts, "%", cast(u64)cast(u32)utime);
+        pad := 22 - uts.count;
+        while pad > 0 { VecPush(hdr, 32); pad -= 1 }
+        unused BuilderAppend(hdr, TextView(uts[:]));
+        VecPush(hdr, 10);
+    }
+    if pkg {
+        pp: Vec(u8);
+        BuilderPrint(*pp, "%/package", TextView(dir_p));
+        Arch.PutHdr(*hdr, TextView(pp[:]), fmode, uid, gid, time, 0);
+    }
+    if desc.count > 0 {
+        dp: Vec(u8);
+        BuilderPrint(*dp, "%/desc", TextView(dir_p));
+        Arch.PutHdr(*hdr, TextView(dp[:]), fmode, uid, gid, time, desc.count + 1);
+        unused BuilderAppend(hdr, desc);
+        VecPush(hdr, 10);
+    }
+    unused IO.Write(out_fd, TextView(hdr[:]));
+}
+
+StrPrefix :: (s: string, pre: string) -> bool {
+    return s.count >= pre.count && s[:pre.count] == pre;
+}
+
+Match :: (s: string, pre: *Vec(Text)) -> bool {
+    if pre.count == 0 || s == "/wrap" || StrPrefix(s, "/wrap/") { return true }
+    for i: 0..pre.count - 1 {
+        if StrPrefix(s, TextView(pre.*[i])) { return true }
+    }
+    return false;
+}
+
+NotMatch :: (s: string, pre: *Vec(Text)) -> bool {
+    if pre.count == 0 || s == "/wrap" || StrPrefix(s, "/wrap/") { return true }
+    for i: 0..pre.count - 1 {
+        if StrPrefix(s, TextView(pre.*[i])) { return false }
+    }
+    return true;
+}

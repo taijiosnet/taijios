@@ -1,0 +1,145 @@
+// Print package wrap info (replaces appl/cmd/install/info.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Util :: #import "install_util";
+Wrap :: #import "wrap_lib";
+#import "std/format"
+#import "std/vec"
+
+Fatal :: (err: string) -> s32 {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "%\n", err);
+    Util.WriteErr(TextView(eb[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+IsLeap :: (y: s64) -> bool {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+FormatUtcTime :: (t_in: s32, out: *Vec(u8)) {
+    VecClear(out.*);
+    wdays: [7]string = .["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    months: [12]string = .["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    mdays: [12]s64 = .[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+    t := cast(s64)t_in;
+    days := t / 86400;
+    rem := t % 86400;
+    if rem < 0 {
+        rem += 86400;
+        days -= 1;
+    }
+    hour := rem / 3600;
+    min := (rem % 3600) / 60;
+    sec := rem % 60;
+
+    wday := (days + 4) % 7;
+    if wday < 0 { wday += 7 }
+
+    year: s64 = 1970;
+    if days >= 0 {
+        while true {
+            yd := ifx IsLeap(year) then 366 else 365;
+            if days < yd { break }
+            days -= yd;
+            year += 1;
+        }
+    } else {
+        while days < 0 {
+            year -= 1;
+            yd := ifx IsLeap(year) then 366 else 365;
+            days += yd;
+        }
+    }
+
+    mon: s64 = 0;
+    while mon < 12 {
+        md := mdays[mon];
+        if mon == 1 && IsLeap(year) { md = 29 }
+        if days < md { break }
+        days -= md;
+        mon += 1;
+    }
+    mday := days + 1;
+
+    // Inferno daytime->text: "DDD MMM DD HH:MM:SS GMT YYYY" (28 chars)
+    unused BuilderAppend(out.*, wdays[wday]);
+    unused BuilderAppend(out.*, " ");
+    unused BuilderAppend(out.*, months[mon]);
+    unused BuilderAppend(out.*, " ");
+    if mday < 10 { VecPush(out.*, 32) }
+    BuilderPrint(out, "% ", mday);
+    if hour < 10 { VecPush(out.*, 48) }
+    BuilderPrint(out, "%:", hour);
+    if min < 10 { VecPush(out.*, 48) }
+    BuilderPrint(out, "%:", min);
+    if sec < 10 { VecPush(out.*, 48) }
+    BuilderPrint(out, "% GMT %", sec, year);
+}
+
+TypeStr :: (typ: s32) -> string {
+    if typ == 1 { return "package" }
+    if typ == 2 { return "update" }
+    if typ == 3 { return "full update" }
+    return "???";
+}
+
+main :: () -> s32 {
+    root: Vec(u8);
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 114 { // -r
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("missing root name") }
+            VecClear(root);
+            unused BuilderAppend(root, v);
+        } else {
+            ch: [1]u8 = .[c];
+            eb: Vec(u8);
+            BuilderPrint(*eb, "bad argument -%", TextView(ch[:]));
+            return Fatal(TextView(eb[:]));
+        }
+    }
+    argc := Args.OperandCount();
+    if scan.next >= argc || scan.next + 1 < argc {
+        return Fatal("usage: install/info [-r root] package");
+    }
+    pkg := Args.Operand(scan.next);
+    w: Wrap.Wrapped;
+    if !Wrap.OpenWrapHdr(pkg, TextView(root[:]), false, *w) {
+        return Fatal("no such package found");
+    }
+
+    tm: Vec(u8);
+    FormatUtcTime(w.tfull, *tm);
+    out: Vec(u8);
+    BuilderPrint(*out, "% (complete as of %)\n", TextView(w.name), TextView(tm[:]));
+    i := Wrap.UpdateCount(*w) - 1;
+    while i >= 0 {
+        utime := Wrap.UpdateTime(*w, i);
+        utyp := Wrap.UpdateTyp(*w, i);
+        uutime := Wrap.UpdateUtime(*w, i);
+        udesc := Wrap.UpdateDesc(*w, i);
+        ts: Vec(u8);
+        Wrap.Now2String(utime, 0, *ts);
+        BuilderPrint(*out, "% %", TypeStr(utyp), TextView(ts[:]));
+        if (utyp & Wrap.UPD) != 0 {
+            uts: Vec(u8);
+            Wrap.Now2String(uutime, 0, *uts);
+            BuilderPrint(*out, " updating %", TextView(uts[:]));
+        }
+        udesc_s := TextView(udesc);
+        if udesc_s.count > 0 {
+            BuilderPrint(*out, ": %", udesc_s);
+        }
+        VecPush(out, 10);
+        i -= 1;
+    }
+    Util.WriteOut(TextView(out[:]));
+    Wrap.End(*w);
+    return 0;
+}

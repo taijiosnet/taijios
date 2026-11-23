@@ -45,7 +45,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
-4. Legacy misc (60 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
+4. Legacy misc (56 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (10), demo (3), ebook (0), math (9).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
@@ -739,7 +739,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/math/polyfill.dis | appl/math/polyfill.b | module/math/polyfill.m | - |  |
 | dis/math/polyhedra.dis | appl/math/polyhedra.b | module/math/polyhedra.m | - |  |
 
-### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 60 rows
+### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 56 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -777,15 +777,11 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/install/arch.dis | appl/cmd/install/arch.b |  | - |  |
 | dis/install/create.dis | appl/cmd/install/create.b |  | - |  |
 | dis/install/eproto.dis | appl/cmd/install/eproto.b |  | - |  |
-| dis/install/info.dis | appl/cmd/install/info.b |  | - |  |
 | dis/install/inst.dis | appl/cmd/install/inst.b |  | - |  |
 | dis/install/install.dis | appl/cmd/install/install.b |  | - |  |
 | dis/install/log.dis | appl/cmd/install/log.b |  | - |  |
 | dis/install/proto.dis | appl/cmd/install/proto.b |  | - |  |
-| dis/install/wdiff.dis | appl/cmd/install/wdiff.b |  | - |  |
-| dis/install/wfind.dis | appl/cmd/install/wfind.b |  | - |  |
 | dis/install/wrap.dis | appl/cmd/install/wrap.b |  | - |  |
-| dis/install/wrap2list.dis | appl/cmd/install/wrap2list.b |  | - |  |
 | dis/lego/clock.dis | appl/cmd/lego/clock.b |  | - | blocked: needs Tk/spawn in ZX |
 | dis/mpeg/decode.dis | appl/wm/mpeg/decode.b |  | - |  |
 | dis/mpeg/decode4.dis | appl/wm/mpeg/decode4.b |  | - |  |

@@ -1,0 +1,195 @@
+// Make a version list suitable for SDS from /wrap (replaces appl/cmd/install/wrap2list.b).
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Util :: #import "install_util";
+Wrap :: #import "wrap_lib";
+#import "std/format"
+#import "std/vec"
+
+crctab: [256]u32;
+
+InitCrcTab :: () {
+    poly: u32 = 0xEDB88320;
+    for i: 0..255 {
+        c := cast(u32)i;
+        for _: 0..7 {
+            if (c & 1) != 0 { c = (c >> 1) ^ poly }
+            else { c = c >> 1 }
+        }
+        crctab[i] = c;
+    }
+}
+
+FileCrc :: (path: string, mode: u32) -> s32 {
+    if (mode & Stat.Directory) != 0 { return 0 }
+    fd := IO.Open(path, 0);
+    if fd < 0 {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "cannot open %\n", path);
+        Util.WriteErr(TextView(eb[:]));
+        return 0;
+    }
+    crc: u32 = 0xFFFFFFFF;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n < 0 {
+            eb: Vec(u8);
+            BuilderPrint(*eb, "bad read on % : %\n", path, IO.Error());
+            Util.WriteErr(TextView(eb[:]));
+            unused IO.Close(fd);
+            return 0;
+        }
+        if n == 0 { break }
+        for i: 0..cast(s64)n - 1 {
+            idx := (crc ^ cast(u32)buf[i]) & 0xFF;
+            crc = crctab[idx] ^ (crc >> 8);
+        }
+    }
+    unused IO.Close(fd);
+    crc = crc ^ 0xFFFFFFFF;
+    return cast(s32)crc;
+}
+
+AddLines :: (data: []u8, list: *Vec(Text)) {
+    pos: s64 = 0;
+    while pos < data.count {
+        start := pos;
+        while pos < data.count && data[pos] != 10 { pos += 1 }
+        end := pos;
+        if pos < data.count { pos += 1 }
+        line := TextView(data[start:end]);
+        i: s64 = 0;
+        while i < line.count && line[i] == 32 { i += 1 }
+        if i >= line.count { continue }
+        fstart := i;
+        while i < line.count && line[i] != 32 { i += 1 }
+        elem := line[fstart:i];
+        found := false;
+        for k: 0..list.count - 1 {
+            if TextView(list.*[k]) == elem { found = true; break }
+        }
+        if !found { VecPush(list.*, Util.CopyText(elem)) }
+    }
+}
+
+SubtractLines :: (data: []u8, list: *Vec(Text)) {
+    pos: s64 = 0;
+    while pos < data.count {
+        start := pos;
+        while pos < data.count && data[pos] != 10 { pos += 1 }
+        end := pos;
+        if pos < data.count { pos += 1 }
+        line := TextView(data[start:end]);
+        i: s64 = 0;
+        while i < line.count && line[i] == 32 { i += 1 }
+        if i >= line.count { continue }
+        fstart := i;
+        while i < line.count && line[i] != 32 { i += 1 }
+        elem := line[fstart:i];
+        for k: 0..list.count - 1 {
+            if TextView(list.*[k]) == elem {
+                VecClear(list.*[k].bytes);
+                break;
+            }
+        }
+    }
+}
+
+OutLine :: (out: *Vec(u8), f: string, g_in: string, init_mode: bool) {
+    d: Util.DirEntry;
+    if !Util.StatEntry(f, *d) { return }
+    g := ifx g_in.count == 0 then "-" else g_in;
+    flen := d.length;
+    if (d.mode & Stat.Directory) != 0 { flen = 0 }
+    mtime: s32 = ifx init_mode then 0 else d.mtime;
+    cval := FileCrc(f, d.mode);
+    BuilderPrint(out, "%\t%\t%\t%\t%\t%\t0\n", f, g, flen, cast(s32)d.mode, cast(s64)mtime, cast(s64)cval);
+}
+
+main :: () -> s32 {
+    InitCrcTab();
+    init_mode := false;
+    argc := Args.OperandCount();
+    arg_idx: s32 = 0;
+    if arg_idx < argc && Args.Operand(arg_idx) == "-i" {
+        init_mode = true;
+        arg_idx += 1;
+    }
+
+    flist: Vec(Text);
+    dl: Util.DirList;
+    if Util.ReadDirSorted("/wrap", *dl) {
+        for i: 0..dl.entries.count - 1 {
+            if (Util.EntryMode(*dl, i) & Stat.Directory) != 0 {
+                ename_t := Util.EntryName(*dl, i);
+                w: Wrap.Wrapped;
+                if Wrap.OpenWrap(TextView(ename_t), "/", true, *w) {
+                    nu := Wrap.UpdateCount(*w);
+                    for j: 0..nu - 1 {
+                        mdata: Vec(u8);
+                        Wrap.UpdateMd5(*w, j, *mdata);
+                        AddLines(mdata[:], *flist);
+                        rdata: Vec(u8);
+                        if Wrap.UpdateRemove(*w, j, *rdata) {
+                            SubtractLines(rdata[:], *flist);
+                        }
+                    }
+                    Wrap.End(*w);
+                }
+            }
+        }
+    }
+
+    while arg_idx < argc {
+        fdata: Vec(u8);
+        if Util.ReadAllFile(Args.Operand(arg_idx), *fdata) {
+            AddLines(fdata[:], *flist);
+        }
+        arg_idx += 1;
+    }
+
+    // Filter out removed (empty) entries
+    active: Vec(Text);
+    for i: 0..flist.count - 1 {
+        if flist[i].bytes.count > 0 {
+            VecPush(active, Util.CopyText(TextView(flist[i])));
+        }
+    }
+
+    // Sort lexicographically
+    for i: 1..active.count - 1 {
+        j := i;
+        while j > 0 && Util.StrLess(TextView(active[j]), TextView(active[j - 1])) {
+            tmp: Text;
+            Util.CopyTextInto(*tmp, *active[j]);
+            Util.CopyTextInto(*active[j], *active[j - 1]);
+            Util.CopyTextInto(*active[j - 1], *tmp);
+            j -= 1;
+        }
+    }
+
+    // Uniq & emit
+    out: Vec(u8);
+    i: s64 = 0;
+    while i < active.count {
+        f := TextView(active[i]);
+        while i + 1 < active.count && TextView(active[i + 1]) == f { i += 1 }
+        OutLine(*out, f, "", init_mode);
+        if f.count >= 7 && f[f.count - 7:] == "emu.new" {
+            exe_p: Vec(u8);
+            unused BuilderAppend(exe_p, f[:f.count - 3]);
+            unused BuilderAppend(exe_p, "exe");
+            OutLine(*out, TextView(exe_p[:]), f, init_mode);
+            OutLine(*out, f[:f.count - 4], f, init_mode);
+        }
+        if out.count >= 16384 {
+            Util.WriteOut(TextView(out[:]));
+            VecClear(out);
+        }
+        i += 1;
+    }
+    if out.count > 0 { Util.WriteOut(TextView(out[:])) }
+    return 0;
+}

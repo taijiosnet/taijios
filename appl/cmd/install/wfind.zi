@@ -1,0 +1,228 @@
+// Find files in /install and /wrap packages (replaces appl/cmd/install/wfind.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Stat :: #import "taijios_stat";
+Util :: #import "install_util";
+Wrap :: #import "wrap_lib";
+#import "std/format"
+#import "std/vec"
+
+INSTALL :: 0;
+WRAP :: 1;
+
+Occ :: struct {
+    wname: Text;
+    utime: s32;
+    utyp: s32;
+    md5: Text;
+    where: s32;
+    pkg: Text;
+}
+
+StatItem :: struct {
+    name: Text;
+    occs: Vec(Occ);
+    md5: Text;
+}
+
+stats: Vec(StatItem);
+
+Fatal :: (err: string) -> s32 {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "%\n", err);
+    Util.WriteErr(TextView(eb[:]));
+    return 0;
+}
+
+StrSuffix :: (s: string, suf: string) -> bool {
+    if s.count < suf.count { return false }
+    return s[s.count - suf.count:] == suf;
+}
+
+PType :: (p: s32) -> string {
+    if p == 1 { return "package " }
+    if p == 2 { return "update  " }
+    if p == 3 { return "full upd" }
+    return "???";
+}
+
+WType :: (w: s32) -> string {
+    if w == WRAP { return "/wrap" }
+    return "/install";
+}
+
+AddFile :: (file: string, wname: string, utime: s32, utyp: s32, md5: string, where: s32, pkg: string) {
+    occ: Occ;
+    occ.wname = Util.CopyText(wname);
+    occ.utime = utime;
+    occ.utyp = utyp;
+    occ.md5 = Util.CopyText(md5);
+    occ.where = where;
+    occ.pkg = Util.CopyText(pkg);
+
+    for i: 0..stats.count - 1 {
+        if TextView(stats[i].name) == file {
+            VecPush(stats[i].occs, occ);
+            return;
+        }
+    }
+    digest: [16]u8;
+    mstr: Vec(u8);
+    if !Wrap.Md5File(file, digest[:]) {
+        unused BuilderAppend(mstr, "non-existent                    ");
+    } else {
+        Wrap.Md5Conv(digest[:], *mstr);
+    }
+    st: StatItem;
+    st.name = Util.CopyText(file);
+    st.md5 = Util.CopyText(TextView(mstr[:]));
+    VecPush(st.occs, occ);
+    VecPush(stats, st);
+}
+
+ScanW :: (w: *Wrap.Wrapped, idx: s64, files: *Vec(Text), where: s32, pkg: string) -> bool {
+    mdata: Vec(u8);
+    Wrap.UpdateMd5(w, idx, *mdata);
+    data := mdata[:];
+    utime := Wrap.UpdateTime(w, idx);
+    utyp := Wrap.UpdateTyp(w, idx);
+    pos: s64 = 0;
+    while pos < data.count {
+        start := pos;
+        while pos < data.count && data[pos] != 10 { pos += 1 }
+        end := pos;
+        if pos < data.count { pos += 1 }
+        line := TextView(data[start:end]);
+        // Tokenize by space/newline
+        i: s64 = 0;
+        while i < line.count && line[i] == 32 { i += 1 }
+        if i >= line.count { continue }
+        fstart := i;
+        while i < line.count && line[i] != 32 { i += 1 }
+        file := line[fstart:i];
+        while i < line.count && line[i] == 32 { i += 1 }
+        mstart := i;
+        while i < line.count && line[i] != 32 { i += 1 }
+        md5 := line[mstart:i];
+        while i < line.count && line[i] == 32 { i += 1 }
+        if file.count == 0 || md5.count == 0 || i < line.count {
+            ts: Vec(u8);
+            Wrap.Now2String(utime, 0, *ts);
+            eb: Vec(u8);
+            BuilderPrint(*eb, "bad md5 file in %/%/%\n\n", WType(where), TextView(w.name), TextView(ts[:]));
+            Util.WriteErr(TextView(eb[:]));
+            return false;
+        }
+        for fi: 0..files.count - 1 {
+            if StrSuffix(file, TextView(files.*[fi])) {
+                AddFile(file, TextView(w.name), utime, utyp, md5, where, pkg);
+            }
+        }
+    }
+    return true;
+}
+
+ScanPkg :: (pkg: string, d: string, files: *Vec(Text)) -> bool {
+    dl: Util.DirList;
+    if Util.ReadDirSorted(d, *dl) {
+        for i: 0..dl.entries.count - 1 {
+            ename_t := Util.EntryName(*dl, i);
+            ename := TextView(ename_t);
+            full: Vec(u8);
+            BuilderPrint(*full, "%/%", d, ename);
+            w: Wrap.Wrapped;
+            if Wrap.OpenWrapHdr(TextView(full[:]), "/", false, *w) {
+                if Wrap.UpdateCount(*w) != 1 {
+                    Wrap.End(*w);
+                    Util.WriteErr("strange package: more than one piece\n");
+                    return false;
+                }
+                ok := ScanW(*w, 0, files, INSTALL, pkg);
+                Wrap.End(*w);
+                if !ok { return false }
+            }
+        }
+    }
+    w2: Wrap.Wrapped;
+    if !Wrap.OpenWrap(pkg, "/", false, *w2) { return true }
+    nu := Wrap.UpdateCount(*w2);
+    for i: 0..nu - 1 {
+        if !ScanW(*w2, i, files, WRAP, pkg) {
+            Wrap.End(*w2);
+            return false;
+        }
+    }
+    Wrap.End(*w2);
+    return true;
+}
+
+main :: () -> s32 {
+    pkgs: Vec(Text);
+    indir := "/install";
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 112 { // -p
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("missing package name") }
+            VecPush(pkgs, Util.CopyText(v));
+        } else {
+            ch: [1]u8 = .[c];
+            eb: Vec(u8);
+            BuilderPrint(*eb, "bad argument -%", TextView(ch[:]));
+            return Fatal(TextView(eb[:]));
+        }
+    }
+    argc := Args.OperandCount();
+    if scan.next >= argc {
+        return Fatal("usage: install/wfind [-p package ... ] file ...");
+    }
+    files: Vec(Text);
+    for i: scan.next..argc - 1 {
+        VecPush(files, Util.CopyText(Args.Operand(cast(s32)i)));
+    }
+
+    if pkgs.count > 0 {
+        for i: 0..pkgs.count - 1 {
+            p := TextView(pkgs[i]);
+            d: Vec(u8);
+            BuilderPrint(*d, "%/%", indir, p);
+            if !ScanPkg(p, TextView(d[:]), *files) { return 0 }
+        }
+    } else {
+        dl: Util.DirList;
+        if Util.ReadDirSorted(indir, *dl) {
+            for i: 0..dl.entries.count - 1 {
+                if (Util.EntryMode(*dl, i) & Stat.Directory) != 0 {
+                    ename_t := Util.EntryName(*dl, i);
+                    ename := TextView(ename_t);
+                    d: Vec(u8);
+                    BuilderPrint(*d, "%/%", indir, ename);
+                    if !ScanPkg(ename, TextView(d[:]), *files) { return 0 }
+                }
+            }
+        }
+    }
+
+    // Print in reverse discovery order (matches Limbo cons list order in stats)
+    out: Vec(u8);
+    si := stats.count - 1;
+    while si >= 0 {
+        st := *stats[si];
+        BuilderPrint(*out, "%\n", TextView(st.name));
+        for oi: 0..st.occs.count - 1 {
+            o := *st.occs[oi];
+            ts: Vec(u8);
+            Wrap.Now2String(o.utime, 0, *ts);
+            BuilderPrint(*out, "\t% %/%(%)\t%/%\n",
+                TextView(o.md5), TextView(o.wname), TextView(ts[:]),
+                PType(o.utyp), WType(o.where), TextView(o.pkg));
+        }
+        BuilderPrint(*out, "\t% %\n", TextView(st.md5), TextView(st.name));
+        si -= 1;
+    }
+    // Wait: check exact space before '(' in wfind.b:176: "\t%s %s/%s(%s)\t%s\n" (no space before '('!)
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

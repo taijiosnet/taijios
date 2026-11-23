@@ -1,0 +1,277 @@
+// Diff wrapped package against local filesystem (replaces appl/cmd/install/wdiff.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Stat :: #import "taijios_stat";
+Util :: #import "install_util";
+Wrap :: #import "wrap_lib";
+#import "std/format"
+#import "std/vec"
+
+Fatal :: (err: string) -> s32 {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "%\n", err);
+    Util.WriteErr(TextView(eb[:]));
+    return 0;
+}
+
+SplitLines :: (data: []u8, out: *Vec(Text)) {
+    VecClear(out.*);
+    pos: s64 = 0;
+    while pos < data.count {
+        start := pos;
+        while pos < data.count && data[pos] != 10 { pos += 1 }
+        if pos < data.count { pos += 1 }
+        VecPush(out.*, Util.CopyText(TextView(data[start:pos])));
+    }
+}
+
+NormSpace :: (s: string, out: *Vec(u8)) {
+    VecClear(out.*);
+    in_sp := false;
+    for i: 0..s.count - 1 {
+        c := cast(u8)s[i];
+        if c == 32 || c == 9 {
+            if !in_sp {
+                VecPush(out.*, 32);
+                in_sp = true;
+            }
+        } else {
+            VecPush(out.*, c);
+            in_sp = false;
+        }
+    }
+    // Trim trailing space before newline
+    if out.count >= 2 && out.*[out.count - 1] == 10 && out.*[out.count - 2] == 32 {
+        out.*[out.count - 2] = 10;
+        VecResize(out.*, out.count - 1);
+    }
+}
+
+LinesEq :: (a: string, b: string, bflag: bool) -> bool {
+    if !bflag { return a == b }
+    na: Vec(u8);
+    nb: Vec(u8);
+    NormSpace(a, *na);
+    NormSpace(b, *nb);
+    return TextView(na[:]) == TextView(nb[:]);
+}
+
+AppendRange :: (out: *Vec(u8), lo: s64, hi: s64) {
+    if lo == hi { BuilderPrint(out, "%", lo) }
+    else { BuilderPrint(out, "%,%", lo, hi) }
+}
+
+DiffFiles :: (w: *Wrap.Wrapped, relpath: string, local: string, bflag: bool) {
+    de: Util.DirEntry;
+    if !Util.StatEntry(local, *de) {
+        ob: Vec(u8);
+        BuilderPrint(*ob, "cannot stat %\n", local);
+        Util.WriteOut(TextView(ob[:]));
+        return;
+    }
+    if !Wrap.StatWrappedFile(w, relpath, *de) {
+        ob: Vec(u8);
+        BuilderPrint(*ob, "cannot stat %/%\n", TextView(w.root), relpath);
+        Util.WriteOut(TextView(ob[:]));
+        return;
+    }
+    da: Vec(u8);
+    db: Vec(u8);
+    unused Wrap.ReadWrappedFile(w, relpath, *da);
+    unused Util.ReadAllFile(local, *db);
+    la: Vec(Text);
+    lb: Vec(Text);
+    SplitLines(da[:], *la);
+    SplitLines(db[:], *lb);
+
+    na := la.count;
+    nb := lb.count;
+    // DP LCS table for Plan 9 / Inferno diff output
+    cols := nb + 1;
+    dp: Vec(s32);
+    VecResize(dp, (na + 1) * cols);
+    for i: 0..dp.count - 1 { dp[i] = 0 }
+    ia := na - 1;
+    while ia >= 0 {
+        ib := nb - 1;
+        while ib >= 0 {
+            if LinesEq(TextView(la[ia]), TextView(lb[ib]), bflag) {
+                dp[ia * cols + ib] = dp[(ia + 1) * cols + (ib + 1)] + 1;
+            } else {
+                v1 := dp[(ia + 1) * cols + ib];
+                v2 := dp[ia * cols + (ib + 1)];
+                dp[ia * cols + ib] = ifx v1 >= v2 then v1 else v2;
+            }
+            ib -= 1;
+        }
+        ia -= 1;
+    }
+
+    out: Vec(u8);
+    i: s64 = 0;
+    j: s64 = 0;
+    while i < na || j < nb {
+        if i < na && j < nb && LinesEq(TextView(la[i]), TextView(lb[j]), bflag) {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        si := i;
+        sj := j;
+        while i < na || j < nb {
+            if i < na && j < nb && LinesEq(TextView(la[i]), TextView(lb[j]), bflag) { break }
+            if i < na && (j >= nb || dp[(i + 1) * cols + j] >= dp[i * cols + (j + 1)]) {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+        if si < i && sj < j {
+            AppendRange(*out, si + 1, i);
+            VecPush(out, 99); // 'c'
+            AppendRange(*out, sj + 1, j);
+            VecPush(out, 10);
+            for k: si..i - 1 {
+                BuilderPrint(*out, "< %", TextView(la[k]));
+                if la[k].bytes.count == 0 || la[k].bytes[la[k].bytes.count - 1] != 10 { VecPush(out, 10) }
+            }
+            unused BuilderAppend(out, "---\n");
+            for k: sj..j - 1 {
+                BuilderPrint(*out, "> %", TextView(lb[k]));
+                if lb[k].bytes.count == 0 || lb[k].bytes[lb[k].bytes.count - 1] != 10 { VecPush(out, 10) }
+            }
+        } else if si < i {
+            AppendRange(*out, si + 1, i);
+            VecPush(out, 100); // 'd'
+            BuilderPrint(*out, "%\n", sj);
+            for k: si..i - 1 {
+                BuilderPrint(*out, "< %", TextView(la[k]));
+                if la[k].bytes.count == 0 || la[k].bytes[la[k].bytes.count - 1] != 10 { VecPush(out, 10) }
+            }
+        } else if sj < j {
+            BuilderPrint(*out, "%a", si);
+            AppendRange(*out, sj + 1, j);
+            VecPush(out, 10);
+            for k: sj..j - 1 {
+                BuilderPrint(*out, "> %", TextView(lb[k]));
+                if lb[k].bytes.count == 0 || lb[k].bytes[lb[k].bytes.count - 1] != 10 { VecPush(out, 10) }
+            }
+        }
+    }
+    Util.WriteOut(TextView(out[:]));
+}
+
+main :: () -> s32 {
+    root: Vec(u8);
+    unused BuilderAppend(root, "/");
+    bflag := false;
+    listing := false;
+    pkg_only := false;
+
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 98 { bflag = true }
+        else if c == 108 { listing = true }
+        else if c == 112 { pkg_only = true }
+        else if c == 114 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("missing root name") }
+            VecClear(root);
+            unused BuilderAppend(root, v);
+        } else {
+            ch: [1]u8 = .[c];
+            eb: Vec(u8);
+            BuilderPrint(*eb, "bad argument -%", TextView(ch[:]));
+            return Fatal(TextView(eb[:]));
+        }
+    }
+    argc := Args.OperandCount();
+    if scan.next >= argc || scan.next + 1 < argc {
+        return Fatal("usage: install/wdiff [-blp] [-r root] package");
+    }
+    pkg := Args.Operand(scan.next);
+    de: Util.DirEntry;
+    if !Util.StatEntry(pkg, *de) {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "no such file %", pkg);
+        return Fatal(TextView(eb[:]));
+    }
+    w: Wrap.Wrapped;
+    if !Wrap.OpenWrapHdr(pkg, TextView(root[:]), !listing, *w) {
+        return Fatal("no such package found");
+    }
+    if pkg_only {
+        while Wrap.UpdateCount(*w) > 0 && Wrap.UpdateTyp(*w, Wrap.UpdateCount(*w) - 1) == Wrap.UPD {
+            Wrap.TruncateUpdates(*w, Wrap.UpdateCount(*w) - 1);
+        }
+    }
+
+    digest: [16]u8;
+    digest0: [16]u8;
+    dummy: [1]u8;
+
+    nu := Wrap.UpdateCount(*w);
+    for i: 0..nu - 1 {
+        mdata: Vec(u8);
+        Wrap.UpdateMd5(*w, i, *mdata);
+        data := mdata[:];
+        utime := Wrap.UpdateTime(*w, i);
+        pos: s64 = 0;
+        while pos < data.count {
+            start := pos;
+            while pos < data.count && data[pos] != 10 { pos += 1 }
+            end := pos;
+            if pos < data.count { pos += 1 }
+            line := TextView(data[start:end]);
+            k: s64 = 0;
+            while k < line.count && (line[k] == 32 || line[k] == 9) { k += 1 }
+            if k >= line.count { continue }
+            pstart := k;
+            while k < line.count && line[k] != 32 && line[k] != 9 { k += 1 }
+            p := line[pstart:k];
+            while k < line.count && (line[k] == 32 || line[k] == 9) { k += 1 }
+            mstart := k;
+            while k < line.count && line[k] != 32 && line[k] != 9 { k += 1 }
+            m := line[mstart:k];
+            while k < line.count && (line[k] == 32 || line[k] == 9) { k += 1 }
+            if p.count == 0 || m.count == 0 || k < line.count {
+                Wrap.End(*w);
+                return Fatal("error in md5sum file");
+            }
+            q: Vec(u8);
+            BuilderPrint(*q, "%/%", TextView(root[:]), p);
+            qde: Util.DirEntry;
+            if Util.StatEntry(TextView(q[:]), *qde) && (qde.mode & Stat.Directory) != 0 {
+                continue;
+            }
+            ok, t := Wrap.GetFileInfo(*w, p, false, dummy[:], true, digest0[:], false, dummy[:]);
+            if !ok {
+                Util.WriteOut("cannot happen\n");
+                continue;
+            }
+            if t != utime { continue }
+            if !Wrap.Md5File(TextView(q[:]), digest[:]) {
+                ob: Vec(u8);
+                BuilderPrint(*ob, "% removed\n", p);
+                Util.WriteOut(TextView(ob[:]));
+                continue;
+            }
+            s1: Vec(u8);
+            s0: Vec(u8);
+            Wrap.Md5Conv(digest[:], *s1);
+            Wrap.Md5Conv(digest0[:], *s0);
+            if TextView(s1[:]) == TextView(s0[:]) { continue }
+            if listing {
+                ob: Vec(u8);
+                BuilderPrint(*ob, "% modified\n", p);
+                Util.WriteOut(TextView(ob[:]));
+            } else {
+                DiffFiles(*w, p, TextView(q[:]), bflag);
+            }
+        }
+    }
+    Wrap.End(*w);
+    return 0;
+}

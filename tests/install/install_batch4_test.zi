@@ -1,0 +1,165 @@
+// Guest parity test for install batch 4: info, wfind, wrap2list, wdiff.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/install tests/install/install_batch4_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/inst4";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".dis";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/wrap") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/wrap/demo") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/wrap/demo/1700000000") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/wrap/demo/1700000100") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/files") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/mnt") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/root/mnt/wrap") ||
+        !CreateDirectory("build/dis-legacy-math/inst4/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Create a local tree with 2 files: hello.txt (modified) and gone.txt (missing)
+    // MD5("hello world\n") = 6f5902ac237024bdd0c176cb93063dc4
+    // MD5("keep me\n")     = 05958a122026348723640a97c3114415 (computed below or exact)
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/files/hello.txt", "hello modified\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/files/same.txt", "hello world\n");
+
+    // Package 1700000000 (full)
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000000/package", "");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000000/desc", "demo base\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000000/md5sum",
+        "/files/gone.txt 6f5902ac237024bdd0c176cb93063dc4\n/files/hello.txt 6f5902ac237024bdd0c176cb93063dc4\n/files/same.txt 6f5902ac237024bdd0c176cb93063dc4\n");
+
+    // Update 1700000100
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000100/update", "            1700000000\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000100/desc", "demo patch\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000100/md5sum",
+        "/files/hello.txt 6f5902ac237024bdd0c176cb93063dc4\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/root/wrap/demo/1700000100/remove",
+        "/files/gone.txt\n");
+
+    // Also build a self-contained archive for info & wdiff (archive mode)
+    arch: Vec(u8);
+    BuilderPrint(*arch, "/wrap 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo/1700000000 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo/1700000000/package 664 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo/1700000000/desc 664 inferno inferno 1700000000 10\n");
+    BuilderPrint(*arch, "demo base\n");
+    md5s := "/files/gone.txt 6f5902ac237024bdd0c176cb93063dc4\n/files/hello.txt 6f5902ac237024bdd0c176cb93063dc4\n/files/same.txt 6f5902ac237024bdd0c176cb93063dc4\n";
+    BuilderPrint(*arch, "/wrap/demo/1700000000/md5sum 664 inferno inferno 1700000000 %\n", md5s.count);
+    BuilderPrint(*arch, "%", md5s);
+    BuilderPrint(*arch, "/files 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/files/hello.txt 664 inferno inferno 1700000000 12\n");
+    BuilderPrint(*arch, "hello world\n");
+    BuilderPrint(*arch, "/files/same.txt 664 inferno inferno 1700000000 12\n");
+    BuilderPrint(*arch, "hello world\n");
+    BuilderPrint(*arch, "end of archive\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst4/demo.arch", BuilderFinish(arch));
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    BuilderPrint(*script, "bind -b /%/root/mnt /mnt\n", WORK);
+    BuilderPrint(*script, "bind -a /%/root /\n", WORK);
+    // 1. info on root dir
+    BuilderPrint(*script, "/dis/install/info% -r /%/root demo > result/info_dir.out >[2] result/info_dir.err\n", suffix, WORK);
+    // 2. info on archive file
+    BuilderPrint(*script, "/dis/install/info% /%/demo.arch > result/info_arch.out >[2] result/info_arch.err\n", suffix, WORK);
+    BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
+    // 3. wdiff -l on archive against root
+    BuilderPrint(*script, "/dis/install/wdiff% -l -r /%/root /%/demo.arch > result/wdiff_l.out >[2] result/wdiff_l.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
+    // 4. wdiff (full diff) on archive against root (note: wdiff.dis deadlocks when diff.dis raises fail:some, so run on .zx)
+    if suffix == ".zx" {
+        BuilderPrint(*script, "/dis/install/wdiff% -r /%/root /%/demo.arch > result/wdiff_d.out >[2] result/wdiff_d.err\n", suffix, WORK, WORK);
+        BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
+    }
+    // 5. wfind and wrap2list (with /wrap and /files visible via bind -a)
+    BuilderPrint(*script, "/dis/install/wfind% -p demo hello.txt > result/wfind.out >[2] result/wfind.err\n", suffix);
+    BuilderPrint(*script, "/dis/install/wrap2list% -i > result/wrap2list.out >[2] result/wrap2list.err\n", suffix);
+    unused WriteEntireFile("build/dis-legacy-math/inst4/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("info_dir.err") == "", "info dir no stderr");
+    Expect(Contains(Result("info_dir.out"), "demo (complete as of "), "info dir header");
+    Expect(Contains(Result("info_dir.out"), "update 1700000100 updating 1700000000: demo patch\n"), "info dir update");
+    Expect(Contains(Result("info_dir.out"), "package 1700000000: demo base\n"), "info dir package");
+
+    Expect(Result("info_arch.err") == "", "info arch no stderr");
+    Expect(Contains(Result("info_arch.out"), "demo (complete as of "), "info arch header");
+    Expect(Contains(Result("info_arch.out"), "package 1700000000: demo base\n"), "info arch package");
+
+    Expect(Result("wdiff_l.err") == "", "wdiff -l no stderr");
+    Expect(Contains(Result("wdiff_l.out"), "/files/gone.txt removed\n"), "wdiff -l removed");
+    Expect(Contains(Result("wdiff_l.out"), "/files/hello.txt modified\n"), "wdiff -l modified");
+
+    if suffix == ".zx" {
+        Expect(Result("wdiff_d.err") == "", "wdiff full no stderr");
+        Expect(Contains(Result("wdiff_d.out"), "< hello world\n"), "wdiff full old line");
+        Expect(Contains(Result("wdiff_d.out"), "> hello modified\n"), "wdiff full new line");
+    }
+
+    Expect(Result("wfind.err") == "", "wfind no stderr");
+    Expect(Contains(Result("wfind.out"), "/files/hello.txt\n"), "wfind file header");
+    Expect(Contains(Result("wfind.out"), "demo/1700000000(package )"), "wfind base package");
+    Expect(Contains(Result("wfind.out"), "demo/1700000100(update  )"), "wfind update");
+
+    Expect(Result("wrap2list.err") == "", "wrap2list no stderr");
+    Expect(Contains(Result("wrap2list.out"), "/files/hello.txt\t-\t15\t"), "wrap2list hello.txt");
+    Expect(!Contains(Result("wrap2list.out"), "/files/gone.txt"), "wrap2list subtracted gone.txt");
+
+    if failures != 0 {
+        print("install_batch4_test: % failures\n", failures);
+        return 1;
+    }
+    print("install_batch4_test: all checks passed\n");
+    return 0;
+}
