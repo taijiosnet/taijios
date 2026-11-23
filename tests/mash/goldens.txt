@@ -128,3 +128,7 @@ err:
 status: \n
 out: foo.o : bar.o { quote link $1; };\n
 err: 
+=== make reports a target it cannot build
+status: \n
+out: don't know how to make /build/tests/mash/nothing-here\n
+err: 

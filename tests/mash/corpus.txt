@@ -165,3 +165,8 @@ script:
 load make;
 foo.o : bar.o { quote link $1 };
 depends;
+
+=== make reports a target it cannot build
+script:
+load make;
+make /build/tests/mash/nothing-here;

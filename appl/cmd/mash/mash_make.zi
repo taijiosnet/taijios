@@ -11,6 +11,8 @@ Io :: #import "taijios_io";
 #import "mash_lex";
 #import "mash_env";
 #import "mash_value";
+Files :: #import "shell_filepat";
+Stat :: #import "taijios_stat";
 Exec :: #import "mash_exec";
 
 #scope_export
@@ -65,12 +67,12 @@ Node :: struct {
     mtime: s32;
 }
 
-// One step of an implicit chain.
+// One step of an implicit chain: the rule, the node it builds, and the step
+// it extends (-1 for the base of the chain).
 Step :: struct {
     rule: s32;
-    args_at: s32;
-    args_count: s32;
     node: s32;
+    prev: s32;
 }
 
 // A candidate chain: the node it would build and the steps to build it.
@@ -93,6 +95,9 @@ Rules :: struct {
     // The make node table.
     nodes: Vec(Node);
     ntab: [NSIZE]Vec(s32);
+    // Implicit chains: each step names its rule and the node it builds, and
+    // a chain is a slot that holds the step before it.
+    steps: Vec(Step);
     ready: bool;
 }
 
@@ -532,8 +537,22 @@ RunMakeBuiltin :: (x: *Exec.Exec, name: string, words: *Vec(Text)) -> Text {
     } else if name == "match" {
         MatchDetails(x, *out, *names)
     } else {
-        Exec.ExecError(x, "make: the build builtin is not ported yet\n");
-        return TextCopy("failed")
+        // make: build each name, defaulting to "default" as mash does.
+        targets: Vec(Text);
+        for i: 1..words.count - 1 { VecPush(targets, TextCopy(TextView(words.*[i]))) }
+        if targets.count == 0 { VecPush(targets, TextCopy("default")) }
+        for i: 0..targets.count - 1 {
+            name: Text = TextCopy(TextView(targets[i]));
+            n := GetFileFrom(*name);
+            r := Make(x, n, TextView(name));
+            if r < 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "don't know how to make %\n", TextView(name));
+                unused WriteAll(x.env.fds[1], TextView(msg[:]));
+                return TextCopy("make error")
+            }
+        }
+        return TextCopy("")
     }
     unused WriteAll(x.env.fds[1], TextView(out[:]));
     return TextCopy("")
@@ -546,4 +565,396 @@ RegisterMake :: (t: *Stab) {
         empty: Vec(Text);
         SetSym(t, it, SBUILTIN, *empty, -1, "make");
     }
+}
+
+// The node builder, after make.b: what exists, what is stale, and the rule
+// that brings a target up to date. Node indices are the arena's; -1 is none.
+
+// The node for a path, found or added.
+GetNode :: (name: string) -> s32 {
+    b := HashName(name, NSIZE);
+    for i: 0..set.ntab[b].count - 1 {
+        n := set.ntab[b][i]
+        if TextView(set.nodes[n].name) == name { return n }
+    }
+    NewNode :: (s: string) -> s32 {
+        n: Node;
+        unused BuilderAppend(n.name.bytes, s);
+        n.state = SUNKNOWN;
+        n.mtime = 0;
+        VecPush(set.nodes, n);
+        return cast(s32)(set.nodes.count - 1)
+    }
+    n := NewNode(name);
+    VecPush(set.ntab[b], n);
+    return n
+}
+
+// A path from a directory and an entry, as mkpath.
+MkPath :: (d: string, s: string) -> Text {
+    out: Vec(u8);
+    if d == "." { return TextCopy(s) }
+    if d == "/" { BuilderPrint(*out, "/%", s) } else { BuilderPrint(*out, "%/%", d, s) }
+    return BuilderFinish(out)
+}
+
+// Load a directory's entries into the node table.
+LoadDir :: (path: string) {
+    entries: Vec(Files.DirEntry);
+    if !Files.ReadDir(path, *entries) { return }
+    for i: 0..entries.count - 1 {
+        name := TextView(entries[i].name);
+        full: Text = MkPath(path, name);
+        n := GetNode(TextView(full));
+        if (entries[i].mode & Files.DMDIR) != 0 { set.nodes[n].state = SDIR }
+        else { set.nodes[n].state = SEXIST }
+        // The entry's time comes from a stat of the path itself.
+        bytes: [512]u8;
+        info := Stat.PathInfo(TextView(full), bytes[:]);
+        if info.name.count > 0 { set.nodes[n].mtime = info.modified }
+    }
+}
+
+// A file's node, stat'd or its directory loaded, as loadfile.
+LoadFile :: (path: string) -> s32 {
+    n := GetNode(path);
+    if set.nodes[n].state == SUNKNOWN {
+        bytes: [1024]u8;
+        info := Stat.PathInfo(path, bytes[:]);
+        // A path that is not there decodes to a zero record, so its name is
+        // what says it exists.
+        if info.name.count > 0 {
+            set.nodes[n].mtime = info.modified;
+            if (info.mode & cast(u32)Files.DMDIR) != 0 {
+                LoadDir(path);
+                set.nodes[n].state = SDIRLOAD
+            } else {
+                set.nodes[n].state = SEXIST
+            }
+        } else {
+            set.nodes[n].state = SNOEXIST
+        }
+    } else if set.nodes[n].state == SDIR {
+        LoadDir(path);
+        set.nodes[n].state = SDIRLOAD
+    }
+    return n
+}
+
+// getfile: the node for a path, with every directory on the way loaded.
+GetFile :: (path: string) -> s32 {
+    // The path is copied first: this call grows the tables a caller's view
+    // may point into.
+    own: Vec(u8);
+    unused BuilderAppend(own, path);
+    return GetFileOwned(TextView(own[:]))
+}
+
+GetFileOwned :: (path: string) -> s32 {
+    s := path;
+    n := s.count;
+    while n >= 2 && s[0:2] == "./" { s = s[2:]; n -= 2 }
+    dir: Vec(u8);
+    if n > 0 && s[0] == #char "/" {
+        VecPush(dir, #char "/");
+        s = s[1:];
+    } else {
+        VecPush(dir, #char ".");
+    }
+    d: Text = BuilderFinish(dir);
+    parts := Tokenize(s, "/");
+    k: s64;
+    while true {
+        w := LoadFile(TextView(d));
+        if k >= parts.count { return w }
+        next: Text = TextCopy(TextView(parts[k]));
+        joined: Text = MkPath(TextView(d), TextView(next));
+        VecSwap(d.bytes, joined.bytes);
+        k += 1
+    }
+    return -1
+}
+
+RuleArgs :: (x: *Exec.Exec, r: s32, path: string, rhs: *Text) -> bool {
+    caps: Vec(Text);
+    if !RuleCaptures(r, path, *caps) { return false }
+    saved: Vec(Text);
+    for i2: 0..x.env.args.count - 1 { VecPush(saved, TextCopy(TextView(x.env.args[i2]))) }
+    VecClear(x.env.args);
+    for i2: 0..caps.count - 1 { VecPush(x.env.args, TextCopy(TextView(caps[i2]))) }
+    x.env.hasargs = true;
+    v := Exec.SecondPass(x, set.rules[r].rhs);
+    got := v.word.bytes.count != 0;
+    if got { unused BuilderAppend(rhs.bytes, TextView(v.word)) }
+    // Restore the caller's arguments.
+    VecClear(x.env.args);
+    for i2: 0..saved.count - 1 { VecPush(x.env.args, TextCopy(TextView(saved[i2]))) }
+    x.env.hasargs = x.env.args.count > 0;
+    return got
+}
+
+// RunRuleDeps: for one target, make what it depends on and mark the target
+// stale when a dependency was built or is newer, as explicit does.
+MakeDeps :: (x: *Exec.Exec, t: s32, n: s32) -> bool {
+    deps: Vec(s32);
+    TargetDeps(t, *deps);
+    for i: 0..deps.count - 1 {
+        names: Vec(Text);
+        DependNames(deps[i], *names);
+        for k: 0..names.count - 1 {
+            name: Text = TextCopy(TextView(names[k]));
+            m := GetFile(TextView(name));
+            r := Make(x, m, TextView(name));
+            if r < 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "don't know how to make %\n", TextView(name));
+                unused WriteAll(x.env.fds[1], TextView(msg[:]));
+                return false
+            }
+            if set.nodes[m].state == SMADE || set.nodes[m].mtime > set.nodes[n].mtime {
+                set.nodes[n].state = SSTALE
+            }
+        }
+    }
+    return true
+}
+
+// The dependency that carries a command for this target, or -1.
+RuleDep :: (t: s32) -> s32 {
+    deps: Vec(s32);
+    TargetDeps(t, *deps);
+    found: s32 = -1;
+    for i: 0..deps.count - 1 {
+        if set.deps[deps[i]].op == CNOP { continue }
+        if found >= 0 { return -2 }
+        found = deps[i]
+    }
+    return found
+}
+
+// Make brings one node up to date. Returns -1 on a reported error, 0 when it
+// needs nothing and 1 when it is up to date, as mash's make.
+Make :: (x: *Exec.Exec, n: s32, name: string) -> s32 {
+    if set.nodes[n].state == SMADE { return 1 }
+    if set.nodes[n].mark {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "make: cycle in dependencies for target %\n", TextView(set.nodes[n].name));
+        unused WriteAll(x.env.fds[2], TextView(msg[:]));
+        return -1
+    }
+    set.nodes[n].mark = true;
+    t := TargetAt(name, false);
+    if t >= 0 {
+        if !MakeDeps(x, t, n) {
+            set.nodes[n].mark = false;
+            return -1
+        }
+        d := RuleDep(t);
+        if d == -2 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "make: too many rules for %\n", TextView(set.nodes[t].name));
+            unused WriteAll(x.env.fds[2], TextView(msg[:]));
+            set.nodes[n].mark = false;
+            return -1
+        }
+        if d >= 0 && (set.nodes[n].state == SNOEXIST || set.nodes[n].state == SSTALE) {
+            deps: Vec(s32);
+            TargetDeps(t, *deps);
+            if !RunDep(x, d) {
+                set.nodes[n].mark = false;
+                return -1
+            }
+            set.nodes[n].state = SMADE
+        }
+        set.nodes[n].mark = false;
+        return 1
+    }
+    // No explicit rule: try an implicit chain.
+    r := Implicit(x, n);
+    set.nodes[n].mark = false;
+    if r != 0 { return r }
+    if set.nodes[n].state == SEXIST { return 0 }
+    return -1
+}
+
+// RunDep runs one dependency's command with the environment raised.
+RunDep :: (x: *Exec.Exec, d: s32) -> bool {
+    if set.deps[d].cmd < 0 { return true }
+    x.env.flags |= EECHO | ERAISE;
+    status := Exec.XeqCmd(x, set.deps[d].cmd);
+    x.env.flags &= ~(EECHO | ERAISE);
+    unused status;
+    return true
+}
+
+// GetFileFrom loads a node for a path the caller owns; the copy inside keeps
+// the caller's text out of the table growth.
+GetFileFrom :: (path: *Text) -> s32 {
+    copy: Text = TextCopy(TextView(path.*));
+    return GetFile(TextView(copy))
+}
+
+// EnsurePrereq loads a prerequisite's node and builds it when it is neither
+// already made nor present. False means Make reported a failure.
+EnsurePrereq :: (x: *Exec.Exec, path: *Text) -> (node: s32, ok: bool) {
+    copy: Text = TextCopy(TextView(path.*));
+    m := GetFile(TextView(copy));
+    if set.nodes[m].state == SMADE || set.nodes[m].state == SEXIST { return m, true }
+    sub := Make(x, m, TextView(copy));
+    return m, sub >= 0
+}
+
+// ProbeRule evaluates one rule's right side for a path and loads the node
+// it names, saying whether that node exists or has a rule of its own.
+ProbeRule :: (x: *Exec.Exec, r: s32, path: string) -> (node: s32, exists: bool) {
+    buf: Text;
+    if !RuleArgs(x, r, path, *buf) { return -1, false }
+    n := GetFile(TextView(buf));
+    return n, set.nodes[n].state != SNOEXIST || TargetAt(TextView(buf), false) >= 0
+}
+
+// RuleHasRhs: whether a rule's right side evaluates for this path at all.
+RuleHasRhs :: (x: *Exec.Exec, r: s32, path: string) -> bool {
+    buf: Text;
+    return RuleArgs(x, r, path, *buf)
+}
+
+// ProbePath loads a path's node and says whether it exists or has a rule,
+// all in one call so no view outlives it.
+ProbePath :: (path: Vec(u8)) -> (node: s32, exists: bool) {
+    // One copy serves both calls; nothing outside is viewed while the
+    // tables grow.
+    held: Vec(u8);
+    unused BuilderAppend(held, TextView(path[:]));
+    n := GetFile(TextView(held[:]));
+    return n, set.nodes[n].state != SNOEXIST || TargetAt(TextView(held[:]), false) >= 0
+}
+
+// A new step extending one earlier step.
+NewStep :: (prev: s32, r: s32, node: s32) -> s32 {
+    st: Step;
+    st.rule = r;
+    st.node = node;
+    st.prev = prev;
+    VecPush(set.steps, st);
+    return cast(s32)(set.steps.count - 1)
+}
+
+// Whether a rule already appears in a chain.
+ChainHas :: (r: s32, chain: s32) -> bool {
+    at := chain;
+    while at >= 0 {
+        if set.steps[at].rule == r { return true }
+        at = set.steps[at].prev
+    }
+    return false
+}
+
+// Implicit finds the shortest chain of rules that builds a node, runs it,
+// and returns mash's tri-state result.
+Implicit :: (x: *Exec.Exec, base: s32) -> s32 {
+    // Candidates are (node, steps) pairs; a step is (rule, node it makes,
+    // the node before it). A chain grows from the base outwards.
+    cand_nodes: Vec(s32);
+    cand_steps: Vec(s32);
+    VecPush(cand_nodes, base);
+    VecPush(cand_steps, -1);
+    win_nodes: Vec(s32);
+    win_steps: Vec(s32);
+    rounds: s32;
+    while rounds < 32 {
+        rounds += 1;
+        VecClear(win_nodes);
+        VecClear(win_steps);
+        lose_nodes: Vec(s32);
+        lose_steps: Vec(s32);
+        for c: 0..cand_nodes.count - 1 {
+            b := cand_nodes[c];
+            chain := cand_steps[c];
+            namebuf: Vec(u8);
+            unused BuilderAppend(namebuf, TextView(set.nodes[b].name));
+            matched: Vec(s32) = RuleMatch(TextView(namebuf[:]));
+            for mi: 0..matched.count - 1 {
+                r := matched[mi];
+                if ChainHas(r, chain) { continue }
+                if !RuleHasRhs(x, r, TextView(namebuf[:])) { continue }
+                z, exists := ProbeRule(x, r, TextView(namebuf[:]));
+                step := NewStep(cast(s32)c, r, z);
+                if exists {
+                    VecPush(win_nodes, z);
+                    VecPush(win_steps, step);
+                    VecPush(win_nodes, z);
+                    VecPush(win_steps, step);
+                } else {
+                    VecPush(lose_nodes, z);
+                    VecPush(lose_steps, step);
+                }
+            }
+        }
+        if win_nodes.count != 0 {
+            if win_nodes.count > 1 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "% rules match for %\n", win_nodes.count, TextView(set.nodes[base].name));
+                unused WriteAll(x.env.fds[2], TextView(msg[:]));
+                return -1
+            }
+            return RunChain(x, base, win_nodes[0], win_steps[0])
+        }
+        VecClear(cand_nodes);
+        VecClear(cand_steps);
+        for i: 0..lose_nodes.count - 1 {
+            VecPush(cand_nodes, lose_nodes[i]);
+            VecPush(cand_steps, lose_steps[i]);
+        }
+        if cand_nodes.count == 0 { break }
+    }
+    return 0
+}
+
+// RunChain runs a winning implicit chain: the furthest step first, so a
+// prerequisite is built before what depends on it.
+RunChain :: (x: *Exec.Exec, base: s32, z: s32, top: s32) -> s32 {
+    // Collect the steps from the top back to the base.
+    order: Vec(s32);
+    at := top;
+    while at >= 0 {
+        VecPush(order, at)
+        at = set.steps[at].prev
+    }
+    // Run from the last (nearest the base is the furthest prerequisite).
+    k := order.count - 1;
+    while k >= 0 {
+        st := order[k];
+        r := set.steps[st].rule;
+        target := set.steps[st].node;
+        tbuf: Vec(u8);
+        unused BuilderAppend(tbuf, TextView(set.nodes[target].name));
+        // Make the prerequisite first, then build this node.
+        rhsbuf: Text;
+        if !RuleArgs(x, r, TextView(tbuf[:]), *rhsbuf) {
+            set.nodes[target].mark = false;
+            return -1
+        }
+        // The prerequisite is loaded and, when it needs building, built all
+        // through one call, so no view spans the table growth.
+        m, built := EnsurePrereq(x, *rhsbuf);
+        if !built {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "don't know how to make %\n", TextView(rhsbuf));
+            unused WriteAll(x.env.fds[1], TextView(msg[:]));
+            return -1
+        }
+        if set.nodes[m].state == SMADE || set.nodes[m].mtime > set.nodes[target].mtime ||
+           set.nodes[target].state == SSTALE {
+            if set.rules[r].cmd >= 0 {
+                x.env.flags |= EECHO | ERAISE;
+                status := Exec.XeqCmd(x, set.rules[r].cmd);
+                x.env.flags &= ~(EECHO | ERAISE);
+                unused status;
+            }
+            set.nodes[target].state = SMADE
+        }
+        k -= 1
+    }
+    return 1
 }

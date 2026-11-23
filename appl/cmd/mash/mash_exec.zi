@@ -812,6 +812,63 @@ RunWords :: (x: *Exec, words: *Vec(Text), wait: bool) -> Text {
     return RunProgram(x, words, wait)
 }
 
+// ResolveZx writes the ZX program for a command name: the name with .zx
+// added, looked for under each of $path's directories. The name is left
+// alone when no ZX program exists, so the .dis fallback still applies.
+ResolveZx :: (x: *Exec, name: string, out: *Vec(u8)) {
+    zx: Vec(u8);
+    unused BuilderAppend(zx, name);
+    if !HasSuffix(name, ".zx") { unused BuilderAppend(zx, ".zx") }
+    // An absolute name, or one with a directory part, is used as it stands.
+    if AbsoluteName(name) {
+        if FileExecutable(TextView(zx[:])) {
+            unused BuilderAppend(<<out, TextView(zx[:]));
+            return
+        }
+        unused BuilderAppend(<<out, name);
+        return
+    }
+    dirs: Vec(Text);
+    PathList(x, *dirs);
+    for i: 0..dirs.count - 1 {
+        candidate: Vec(u8);
+        d := TextView(dirs[i]);
+        if d.count != 0 { BuilderPrint(*candidate, "%/%", d, TextView(zx[:])) }
+        else { unused BuilderAppend(candidate, TextView(zx[:])) }
+        if FileExecutable(TextView(candidate[:])) {
+            unused BuilderAppend(<<out, TextView(candidate[:]));
+            return
+        }
+    }
+    unused BuilderAppend(<<out, name);
+}
+
+// Paths starting with /, #, ./ or ../ are not searched for.
+AbsoluteName :: (p: string) -> bool {
+    if p.count < 2 { return false }
+    if p[0] == #char "/" || p[0] == #char "#" { return true }
+    if p.count < 3 || p[0] != #char "." { return false }
+    if p[1] == #char "/" { return true }
+    return p[1] == #char "." && p[2] == #char "/"
+}
+
+// The directories $path names, or the shell's default.
+PathList :: (x: *Exec, out: *Vec(Text)) {
+    pl: Vec(Text);
+    unused Dollar(*x.env, "path", *pl);
+    if pl.count == 0 {
+        VecPush(<<out, TextCopy("/dis"));
+        VecPush(<<out, TextCopy("."));
+        return
+    }
+    for i: 0..pl.count - 1 { VecPush(<<out, TextCopy(TextView(pl[i]))) }
+}
+
+// Whether a path is a file with an execute bit.
+FileExecutable :: (path: string) -> bool {
+    return Executable(path, 73)
+}
+
 // HasSuffix: whether s ends with what.
 HasSuffix :: (s: string, what: string) -> bool {
     return s.count >= what.count && s[s.count - what.count:] == what
@@ -821,7 +878,11 @@ HasSuffix :: (s: string, what: string) -> bool {
 RunProgram :: (x: *Exec, words: *Vec(Text), wait: bool) -> Text {
     ops: Vec(string);
     for i: 1..words.count - 1 { VecPush(ops, TextView(words.*[i])) }
-    launch := Process.StartWith(TextView(words.*[0]), ops[:], x.env.fds[0], x.env.fds[1], x.env.fds[2]);
+    // A ZX guest finds the .zx twin of a command, as the shell does; the
+    // .dis fallback stays for a name with no ZX program.
+    program: Vec(u8);
+    ResolveZx(x, TextView(words.*[0]), *program);
+    launch := Process.StartWith(TextView(program[:]), ops[:], x.env.fds[0], x.env.fds[1], x.env.fds[2]);
     if launch.id == 0 {
         // mash loads "<name>.dis" unless the name already ends in .dis, and
         // its message names that file.
