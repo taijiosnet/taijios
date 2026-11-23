@@ -1,0 +1,35 @@
+# Reference outcomes for Inferno's Calendar (appl/wm/calendar.b).
+# monthinfo year month(0-based) -> days first_wday
+monthinfo 2023 10 30 3
+monthinfo 2024 1 29 4
+monthinfo 2023 1 28 3
+monthinfo 2000 1 29 2
+monthinfo 1970 0 31 4
+monthinfo 2037 11 31 2
+# incmonth yyyymmdd(0-based-mon) -> yyyymmdd
+incmonth 20230031 20230128
+incmonth 20240031 20240129
+incmonth 20231115 20240015
+incmonth 20371131 20371131
+# decmonth yyyymmdd(0-based-mon) -> yyyymmdd
+decmonth 20230231 20230128
+decmonth 20240231 20240129
+decmonth 20240015 20231115
+decmonth 19700001 19700001
+# adddays yyyymmdd delta -> yyyymmdd
+adddays 20231014 1 20231015
+adddays 20231014 -1 20231013
+adddays 20240128 1 20240129
+adddays 20240129 1 20240201
+adddays 20231131 1 20240001
+adddays 19700001 -1 19700001
+# mark kind -> shape col next_col next_shape
+mark 1 0 0 257 2
+mark 258 1 1 514 259
+mark 771 2 3 3 769
+# settime date time -> ok epoch_or_0
+settime 2023/11/14 22:13.26 1 1700000006
+settime 14/11/2023 22:13 1 1699999980
+settime 2023/02/29 12:00 0 0
+settime 2024/02/29 12:00.00 1 1709208000
+settime bad 12:00 0 0

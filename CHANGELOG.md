@@ -4,6 +4,8 @@
 
 - Ship the File Chooser only as ZX and remove its Dis version. It keeps the Miller columns, the glob patterns, the path and filter rows, the Tab expansion to the browsed path, double-click acceptance and the chosen path on standard output.
 
+- Ship Coffee and Man only as ZX and remove their Dis versions. The Tcl/Tk apps keep the six-cup Coffee animation with Stop/Go and the three sliders, and the manual browser's lookup, search and history.
+
 - Ship Calendar only as ZX and remove its Dis version. It keeps the month grid, the coloured marks, the schedule records with Del and Save, the Set Time dialog and the recorded window sizes.
 
 - Ship Polyhedra only as ZX and remove its Dis version. It keeps the solids, the thirteen greys, the z-buffered concave faces and the controls, and turns at about 1 to 2 frames a second under the ZX engine.

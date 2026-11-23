@@ -502,10 +502,10 @@ def main():
         assert display.isdecimal(), f"invalid Xvfb display {display!r}"
         env["DISPLAY"] = f":{display}"
         reference(env, "coffee_commands.tcl", COFFEE_RESULTS)
-        legacy_art = coffee_window(env, "wm/coffee", native=False)
+        recorded_art = Image.open(SOURCES / "coffee_dis_corner.png").convert("RGB")
         hosted_art = coffee_window(env, f"zxrun -w /{coffee.relative_to(ROOT)}", native=True)
-        assert ImageChops.difference(legacy_art, hosted_art).getbbox() is None, "Coffee artwork colors differ from Dis"
-        print("Infernal Coffee Dis and ZX verified animation, Stop/Go, matching artwork, and closure")
+        assert ImageChops.difference(recorded_art, hosted_art).getbbox() is None, "Coffee artwork differs from the Dis corner"
+        print("Infernal Coffee verified animation, Stop/Go, the recorded Dis artwork and closure")
         print("Hosted Coffee verified all three slider drags and frozen pixels while paused")
         if not args.coffee_only:
             reference(env)

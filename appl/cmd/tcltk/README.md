@@ -10,9 +10,8 @@ The [Bounce toolbar script](bounce_controls.tcl) adapts the label and count
 controls from Inferno's [Bounce demo](../../wm/bounce.b). The buttons run Tcl
 scripts that change the count and reconfigure the label. Close runs
 `destroy .`. The [Man browser](man_query.tcl) ports the query panel, manual
-display, and history from Inferno's [manual browser](../../wm/man.b) and
-[lookup library](../../lib/man.b). This port uses the Inferno
-[MIT notice](../../../NOTICE).
+display, and history from Inferno's manual browser and its lookup library.
+This port uses the Inferno [MIT notice](../../../NOTICE).
 
 Man, Coffee and About define `TK_NO_CANVAS` to omit the Canvas widget and its
 renderer, leaving more of the default Linux/386 guest memory pool available
@@ -34,7 +33,8 @@ and Rate, Jitter, and Skip sliders. It reads the shipped
 `/icons/bigdelight.bit` and `/icons/coffee*` artwork through the same guest file
 service as Man. Ziran decodes the compressed images, composites each frame,
 and renders the Tk widgets. The guest surface supplies window events and
-presents the resulting pixels. [ZX source](coffee_app.zi) · [Inferno source](../../wm/coffee.b)
+presents the resulting pixels. [ZX source](coffee_app.zi). The Dis version is
+removed; the test compares its paused artwork corner in `coffee_dis_corner.png`.
 
 About Inferno displays the shipped 300×207 `/icons/inferno.bit` and reads up to
 128 bytes from the live guest `/dev/sysctl`. The window uses the stock bitmap,
@@ -194,8 +194,8 @@ Xvfb they exercise Bounce, the UTF-8 entry, manual lookup, a real manual link,
 forward and backward text search, missing results, and history and scroll
 restoration. A hosted probe checks namespace mounts, file offsets and errors,
 and representative content from the real manuals. For Coffee, the tests compare
-scale values and panel commands against `tkcmd`, run the original `wm/coffee`
-alongside separate ZX runs, and verify motion, Stop/Go, and matching artwork.
+scale values and panel commands against `tkcmd`, and verify motion, Stop/Go,
+and the artwork corner recorded from the Dis version.
 The ZX run also verifies that each slider tracks a held drag, retains its value,
 and leaves the paused frame frozen. To run the Coffee tests alone, use
 `python3 appl/cmd/tcltk/test_tcltk.py --coffee-only` and add `--installed` to

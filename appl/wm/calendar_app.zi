@@ -1,0 +1,1032 @@
+// Port of Inferno's Calendar (appl/wm/calendar.b). See ../../NOTICE.
+// usage: calendar [-f font] [/mnt/schedule | schedfile]
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+Model :: #import "calendar_model";
+GuestTime :: #import "taijios_time";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Args :: #import "taijios_args";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/input_protocol"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+SchedDefault :: "/mnt/schedule";
+AtomIO :: 8192;
+
+// Layout constants, matching the Dis window's client area: a 224-wide grid in
+// a 234-wide window, 13-pixel calendar rows and a 284-wide schedule window.
+Pad :: 5;
+TopBarH :: 16;
+CalHeadH :: 18;
+CellW :: 32;
+CellH :: 13;
+GridW :: CellW * 7;
+GridH :: CellH * 7;
+SchedHeadH :: 24;
+ScrollbarW :: 12;
+TextAreaH :: 87;
+
+WinWNoSched :: GridW + Pad * 2;
+WinHNoSched :: TopBarH + CalHeadH + GridH + 7;
+WinWSched :: 284;
+WinHSched :: WinHNoSched + SchedHeadH + TextAreaH + Pad * 2;
+
+// Tk-like palette matching Sweeper/Tetris/Calendar
+face: Color = .{221, 221, 221, 255};
+active: Color = .{238, 238, 238, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{173, 173, 173, 255};
+disabled_fg: Color = .{130, 130, 130, 255};
+black: Color = .{0, 0, 0, 255};
+white: Color = .{255, 255, 255, 255};
+
+MarkColor :: (col: s32) -> Color {
+    if col == 0 { return .{255, 0, 0, 255} }
+    if col == 1 { return .{255, 255, 0, 255} }
+    if col == 2 { return .{0, 238, 238, 255} }
+    return .{255, 255, 255, 255}
+}
+
+DayName :: (w: s32) -> string {
+    names: [7]string = .["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    if w >= 0 && w < 7 { return names[w] }
+    return "Sun"
+}
+
+MonthName :: (m: s32) -> string {
+    names: [12]string = .["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    if m >= 0 && m < 12 { return names[m] }
+    return "Jan"
+}
+
+// Schedule storage: supports both a mounted dbfs directory and a rawdbfs file.
+SchedEntry :: struct {
+    date: s32;
+    mark: s32;
+    file_no: s32;
+    body_start: s64;
+    body_len: s64;
+}
+
+sched_ready: bool;
+sched_is_raw: bool;
+sched_path: string;
+sched_entries: Vec(SchedEntry);
+// Concatenated bodies for rawdbfs mode (and cache for dir mode).
+sched_pool: Vec(u8);
+
+// Calendar & editor state
+current_date: s32;
+curr_mark: s32;
+dirty: bool;
+editor_text: Vec(u8);
+editor_cursor: s64;
+editor_scroll: s32;
+editor_focused: bool = true;
+total_lines: s32 = 1;
+scroll_drag: bool;
+
+// Modal state: 0 = none, 1 = settime, 2 = notice
+modal_mode: s32;
+notice_buf: Vec(u8);
+dbfs_payload: Vec(u8);
+settime_fd: s32 = -1;
+date_bytes: [64]u8;
+date_field: Field.State;
+time_bytes: [64]u8;
+time_field: Field.State;
+
+// Button press tracking
+BtnNone :: 0;
+BtnSet :: 1;
+BtnShow :: 2;
+BtnBwdMonth :: 3;
+BtnFwdMonth :: 4;
+BtnBwdDay :: 5;
+BtnFwdDay :: 6;
+BtnSave :: 7;
+BtnDel :: 8;
+BtnMarkCol :: 9;
+BtnMarkShape :: 10;
+BtnModalOk :: 11;
+BtnModalCancel :: 12;
+pressed_btn: s32;
+pressed_day: s32 = -1;
+
+// --- Schedule I/O ---
+
+FindEntry :: (date: s32) -> s64 {
+    for i: 0..sched_entries.count-1 {
+        if sched_entries[i].date == date { return i }
+    }
+    return -1
+}
+
+AppendPool :: (text: string) -> (start: s64, length: s64) {
+    start := sched_pool.count
+    unused BuilderAppend(sched_pool, text)
+    return start, text.count
+}
+
+// Copy an entry's body out of the global pool; the caller keeps the view.
+EntryBodyInto :: (idx: s64, out: []u8) -> s64 {
+    if idx < 0 || idx >= sched_entries.count { return 0 }
+    e := sched_entries[idx]
+    if e.body_len <= 0 { return 0 }
+    n := e.body_len
+    if n > cast(s64)out.count { n = cast(s64)out.count }
+    for j: 0..n-1 { out[j] = sched_pool[e.body_start + j] }
+    return n
+}
+
+ReadEntireHandle :: (fd: s32, out: *Vec(u8)) -> bool {
+    buf: [4096]u8
+    while true {
+        n := IO.Read(fd, buf[:])
+        if n < 0 { return false }
+        if n == 0 { break }
+        unused BuilderAppend(out.*, TextView(buf[:n]))
+    }
+    return true
+}
+
+LoadScheduleDir :: (dir: string) -> bool {
+    stat_buf: [Stat.BufferSize]u8
+    new_path: Vec(u8); defer VecFree(new_path)
+    unused BuilderAppend(new_path, dir)
+    unused BuilderAppend(new_path, "/new")
+    new_info := Stat.PathInfo(TextView(new_path[:]), stat_buf[:])
+    if new_info.size == 0 { return false }
+
+    dfd := IO.Open(dir, 0)
+    if dfd < 0 { return false }
+    dir_bytes: Vec(u8); defer VecFree(dir_bytes)
+    ok := ReadEntireHandle(dfd, *dir_bytes)
+    unused IO.Close(dfd)
+    if !ok { return false }
+
+    fpath: Vec(u8); defer VecFree(fpath)
+    at: s64 = 0
+    while at < dir_bytes.count {
+        info := Stat.Decode(dir_bytes[at:])
+        if info.size <= 0 { break }
+        at += info.size
+        fno, is_num := Model.ParseUnsigned(info.name)
+        if !is_num { continue }
+        unused VecResize(fpath, 0)
+        unused BuilderAppend(fpath, dir)
+        unused BuilderAppend(fpath, "/")
+        unused BuilderAppend(fpath, info.name)
+        fd := IO.Open(TextView(fpath[:]), 0)
+        if fd < 0 { continue }
+        raw: [AtomIO]u8
+        n := IO.Read(fd, raw[:])
+        unused IO.Close(fd)
+        if n <= 0 { continue }
+        parsed := Model.ParseBody(TextView(raw[:n]))
+        if !parsed.ok { continue }
+        body := TextView(raw[parsed.body_start:n])
+        bs, bl := AppendPool(body)
+        unused VecPush(sched_entries, SchedEntry.{
+            .date = parsed.date, .mark = parsed.mark, .file_no = fno,
+            .body_start = bs, .body_len = bl,
+        })
+    }
+    sched_path = dir
+    sched_is_raw = false
+    sched_ready = true
+    return true
+}
+
+LoadScheduleRawFile :: (path: string) -> bool {
+    fd := IO.Open(path, 0)
+    if fd < 0 { return false }
+    data: Vec(u8); defer VecFree(data)
+    ok := ReadEntireHandle(fd, *data)
+    unused IO.Close(fd)
+    if !ok { return false }
+
+    offset: s64 = 0
+    next_id: s32 = 0
+    while offset + Model.RawHeaderLen <= data.count {
+        count, datalen, hok := Model.ParseRawHeader(TextView(data[offset:offset + Model.RawHeaderLen]))
+        if !hok || count < 0 { return false }
+        rec_start := offset + Model.RawHeaderLen
+        offset = rec_start + cast(s64)count
+        if offset > data.count { break }
+        if datalen >= 0 && datalen <= count {
+            parsed := Model.ParseBody(TextView(data[rec_start:rec_start + cast(s64)datalen]))
+            if parsed.ok {
+                body := TextView(data[rec_start + parsed.body_start:rec_start + cast(s64)datalen])
+                bs, bl := AppendPool(body)
+                unused VecPush(sched_entries, SchedEntry.{
+                    .date = parsed.date, .mark = parsed.mark, .file_no = next_id,
+                    .body_start = bs, .body_len = bl,
+                })
+            }
+        }
+        next_id += 1
+    }
+    sched_path = path
+    sched_is_raw = true
+    sched_ready = true
+    return true
+}
+
+LoadSchedule :: (path: string) {
+    stat_buf: [Stat.BufferSize]u8
+    info := Stat.PathInfo(path, stat_buf[:])
+    if info.size == 0 { return }
+    if (info.mode & Stat.Directory) != 0 {
+        unused LoadScheduleDir(path)
+    } else {
+        unused LoadScheduleRawFile(path)
+    }
+}
+
+FlushRawSchedule :: () -> bool {
+    out: Vec(u8); defer VecFree(out)
+    payload: Vec(u8); defer VecFree(payload)
+    body_buf: [AtomIO]u8
+    for i: 0..sched_entries.count-1 {
+        e := sched_entries[i]
+        unused VecResize(payload, 0)
+        n := EntryBodyInto(i, body_buf[:])
+        Model.FormatEntry(*payload, e.date, e.mark, TextView(body_buf[:n]))
+        Model.AppendRawRecord(*out, TextView(payload[:]))
+    }
+    fd := IO.Create(sched_path, 1, 438)
+    if fd < 0 { return false }
+    written: s64 = 0
+    while written < out.count {
+        n := IO.Write(fd, TextView(out[written:]))
+        if n <= 0 { unused IO.Close(fd); return false }
+        written += n
+    }
+    unused IO.Close(fd)
+    return true
+}
+
+SaveScheduleEntry :: (date: s32, mark: s32, body: string) -> (ok: bool, err: string) {
+    if !sched_ready { return false, "no schedule" }
+    idx := FindEntry(date)
+    if sched_is_raw {
+        if body.count == 0 {
+            if idx >= 0 {
+                for j: idx..sched_entries.count-2 { sched_entries[j] = sched_entries[j + 1] }
+                unused VecResize(sched_entries, sched_entries.count - 1)
+            }
+        } else {
+            bs, bl := AppendPool(body)
+            if idx >= 0 {
+                sched_entries[idx].mark = mark
+                sched_entries[idx].body_start = bs
+                sched_entries[idx].body_len = bl
+            } else {
+                unused VecPush(sched_entries, SchedEntry.{
+                    .date = date, .mark = mark, .file_no = cast(s32)sched_entries.count,
+                    .body_start = bs, .body_len = bl,
+                })
+            }
+        }
+        if !FlushRawSchedule() { return false, "cannot write schedule file" }
+        return true, ""
+    }
+
+    // dbfs directory mode
+    unused VecResize(dbfs_payload, 0)
+    Model.FormatEntry(*dbfs_payload, date, mark, body)
+    if dbfs_payload.count > AtomIO { return false, "entry is too long" }
+
+    if idx < 0 {
+        if body.count == 0 { return true, "" }
+        new_path: Vec(u8); defer VecFree(new_path)
+        unused BuilderAppend(new_path, sched_path)
+        unused BuilderAppend(new_path, "/new")
+        fd := IO.Open(TextView(new_path[:]), 1)
+        if fd < 0 { return false, "cannot open new" }
+        stat_buf: [Stat.BufferSize]u8
+        info := Stat.DescriptorInfo(fd, stat_buf[:])
+        fno, is_num := Model.ParseUnsigned(info.name)
+        if info.size == 0 || !is_num {
+            unused IO.Close(fd)
+            return false, "new dbfs entry is not numeric"
+        }
+        n := IO.Write(fd, TextView(dbfs_payload[:]))
+        unused IO.Close(fd)
+        if n != dbfs_payload.count { return false, "cannot write entry" }
+        bs, bl := AppendPool(body)
+        unused VecPush(sched_entries, SchedEntry.{
+            .date = date, .mark = mark, .file_no = fno,
+            .body_start = bs, .body_len = bl,
+        })
+        return true, ""
+    } else {
+        digits: [24]u8
+        fpath: Vec(u8); defer VecFree(fpath)
+        unused BuilderAppend(fpath, sched_path)
+        unused BuilderAppend(fpath, "/")
+        unused BuilderAppend(fpath, FormatInteger(cast(s64)sched_entries[idx].file_no, digits[:]))
+        if body.count == 0 {
+            unused IO.Remove(TextView(fpath[:]))
+            for j: idx..sched_entries.count-2 { sched_entries[j] = sched_entries[j + 1] }
+            unused VecResize(sched_entries, sched_entries.count - 1)
+            return true, ""
+        }
+        fd := IO.Open(TextView(fpath[:]), 1)
+        if fd < 0 { return false, "cannot open entry" }
+        n := IO.Write(fd, TextView(dbfs_payload[:]))
+        unused IO.Close(fd)
+        if n != dbfs_payload.count { return false, "cannot write entry" }
+        bs, bl := AppendPool(body)
+        sched_entries[idx].mark = mark
+        sched_entries[idx].body_start = bs
+        sched_entries[idx].body_len = bl
+        return true, ""
+    }
+}
+
+ShowNotice :: (prefix: string, detail: string) {
+    unused VecResize(notice_buf, 0)
+    unused BuilderAppend(notice_buf, prefix)
+    unused BuilderAppend(notice_buf, detail)
+    modal_mode = 2
+}
+
+SaveCurrent :: () -> bool {
+    if !sched_ready { return true }
+    mark := curr_mark
+    if editor_text.count == 0 { mark = 0 }
+    ok, err := SaveScheduleEntry(current_date, mark, TextView(editor_text[:]))
+    if !ok {
+        ShowNotice("Cannot save entry: ", err)
+        return false
+    }
+    curr_mark = mark
+    dirty = false
+    return true
+}
+
+SelectDate :: (new_date: s32) {
+    if new_date == current_date { return }
+    if dirty {
+        if !SaveCurrent() { return }
+    }
+    current_date = new_date
+    dirty = false
+    editor_scroll = 0
+    unused VecResize(editor_text, 0)
+    idx := FindEntry(current_date)
+    if idx >= 0 {
+        curr_mark = sched_entries[idx].mark
+        body_buf: [AtomIO]u8
+        n := EntryBodyInto(idx, body_buf[:])
+        unused BuilderAppend(editor_text, TextView(body_buf[:n]))
+    } else {
+        curr_mark = 0
+    }
+    editor_cursor = editor_text.count
+}
+
+TodayDate :: () -> s32 {
+    secs := GuestTime.LocalSeconds()
+    days := secs / 86400
+    if secs < 0 && secs % 86400 != 0 { days -= 1 }
+    y, m, d := Model.YMDFromDays(days)
+    if !Model.ValidDate(y, m, d) { return 19700001 }
+    return Model.YMDDate(y, m, d)
+}
+
+CurrentClockParts :: () -> (y: s32, m: s32, d: s32, wday: s32, hour: s32, min: s32, sec: s32) {
+    secs := GuestTime.LocalSeconds()
+    days := secs / 86400
+    rem := secs % 86400
+    if rem < 0 { rem += 86400; days -= 1 }
+    y, m, d := Model.YMDFromDays(days)
+    w := (days + 4) % 7
+    if w < 0 { w += 7 }
+    return y, m, d, cast(s32)w, cast(s32)(rem / 3600), cast(s32)((rem / 60) % 60), cast(s32)(rem % 60)
+}
+
+// Fill a text field's state from a string, ready to edit.
+InitField :: (state: *Field.State, text: string) {
+    n := text.count
+    if n > cast(s64)state.bytes.count { n = cast(s64)state.bytes.count }
+    for i: 0..n-1 { state.bytes[i] = text[i] }
+    state.length = cast(s32)n
+    state.cursor = cast(s32)n
+    state.anchor = cast(s32)n
+    state.scroll_x = 0
+    state.focused = true
+}
+
+OpenSetTime :: () {
+    if settime_fd >= 0 { unused IO.Close(settime_fd); settime_fd = -1 }
+    fd := IO.Open("/dev/time", 1)
+    if fd < 0 {
+        ShowNotice("Cannot set time: ", IO.LastError())
+        return
+    }
+    settime_fd = fd
+    y, m, d, _, hour, min, sec := CurrentClockParts()
+    if y < 1971 { y = 2000; m = 0; d = 1 }
+
+    dbuf: Vec(u8); defer VecFree(dbuf)
+    Model.FormatFour(*dbuf, y)
+    unused VecPush(dbuf, 47)
+    Model.FormatTwo(*dbuf, m + 1)
+    unused VecPush(dbuf, 47)
+    Model.FormatTwo(*dbuf, d)
+    InitField(*date_field, TextView(dbuf[:]))
+
+    tbuf: Vec(u8); defer VecFree(tbuf)
+    Model.FormatTwo(*tbuf, hour)
+    unused VecPush(tbuf, 58)
+    Model.FormatTwo(*tbuf, min)
+    unused VecPush(tbuf, 46)
+    Model.FormatTwo(*tbuf, sec)
+    InitField(*time_field, TextView(tbuf[:]))
+    modal_mode = 1
+}
+
+ApplySetTime :: () {
+    dtext := TextView(date_bytes[:date_field.length])
+    ttext := TextView(time_bytes[:time_field.length])
+    res := Model.ParseSetTime(dtext, ttext)
+    if !res.ok {
+        ShowNotice("Cannot set time: ", res.error)
+        return
+    }
+    // Write microseconds to /dev/time
+    digits: [32]u8
+    out: Vec(u8); defer VecFree(out)
+    unused BuilderAppend(out, FormatInteger(res.epoch, digits[:]))
+    unused BuilderAppend(out, "000000")
+    n := IO.Write(settime_fd, TextView(out[:]))
+    if n < 0 {
+        ShowNotice("Cannot set time: write failed: ", IO.LastError())
+        return
+    }
+    unused IO.Close(settime_fd)
+    settime_fd = -1
+    modal_mode = 0
+}
+
+// --- Drawing helpers ---
+
+Inside :: (x: float32, y: float32, left: s32, top: s32, width: s32, height: s32) -> bool {
+    return x >= cast(float32)left && y >= cast(float32)top &&
+        x < cast(float32)(left + width) && y < cast(float32)(top + height)
+}
+
+Bevel :: (session: Session, key: u64, left: s32, top: s32, width: s32, height: s32, sunken: bool) {
+    upper := ifx sunken then dark else light
+    lower := ifx sunken then light else dark
+    x := cast(float32)left
+    y := cast(float32)top
+    w := cast(float32)width
+    h := cast(float32)height
+    Box.Draw(session, .{.key = key, .bounds = .{x, y, w, 1.0}, .fill = upper})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x, y, 1.0, h}, .fill = upper})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x, y + h - 1.0, w, 1.0}, .fill = lower})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x + w - 1.0, y, 1.0, h}, .fill = lower})
+}
+
+Outline :: (session: Session, key: u64, left: s32, top: s32, width: s32, height: s32, thick: s32, color: Color) {
+    x := cast(float32)left
+    y := cast(float32)top
+    w := cast(float32)width
+    h := cast(float32)height
+    t := cast(float32)thick
+    Box.Draw(session, .{.key = key, .bounds = .{x, y, w, t}, .fill = color})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x, y, t, h}, .fill = color})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x, y + h - t, w, t}, .fill = color})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x + w - t, y, t, h}, .fill = color})
+}
+
+DrawButton :: (session: Session, key: u64, btn_id: s32, left: s32, top: s32, width: s32, height: s32,
+               label: string, enabled: bool, px: float32, py: float32) {
+    hovered := enabled && Inside(px, py, left, top, width, height)
+    sunken := enabled && pressed_btn == btn_id && hovered
+    fill := ifx hovered then active else face
+    Box.Draw(session, .{.key = key, .bounds = .{cast(float32)left, cast(float32)top,
+        cast(float32)width, cast(float32)height}, .fill = fill})
+    Bevel(session, key + 1, left, top, width, height, sunken)
+    Text.Draw(session, .{.key = key + 5, .bounds = .{cast(float32)left, cast(float32)top,
+        cast(float32)width, cast(float32)height}, .text = label, .size = 12, .disabled = !enabled,
+        .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+}
+
+// Draw Oval, Diamond, or Square mark inside (left, top, width, height).
+DrawShape :: (session: Session, base_key: u64, left: s32, top: s32, width: s32, height: s32,
+              shape: s32, fill: Color, outline_only: bool) {
+    if shape == Model.Square {
+        if !outline_only {
+            Box.Draw(session, .{.key = base_key, .bounds = .{cast(float32)left, cast(float32)top,
+                cast(float32)width, cast(float32)height}, .fill = fill})
+        }
+        Outline(session, base_key + 1, left, top, width, height, ifx outline_only then 2 else 1, black)
+        return
+    }
+    cx := left + width / 2
+    cy := top + height / 2
+    rx := width / 2
+    ry := height / 2
+    if rx < 1 || ry < 1 { return }
+    k := base_key
+    for row: 0..height-1 {
+        dy := (top + row) - cy
+        ady := ifx dy < 0 then -dy else dy
+        span: s32 = 0
+        if shape == Model.Diamond {
+            if ady <= ry { span = rx * (ry - ady) / ry }
+        } else {
+            // Oval: x = rx * sqrt(1 - (dy/ry)^2), integer approximation
+            rem := ry * ry - ady * ady
+            if rem >= 0 {
+                target := rx * rx * rem / (ry * ry)
+                s: s32 = 0
+                while (s + 1) * (s + 1) <= target { s += 1 }
+                span = s
+            }
+        }
+        if span <= 0 {
+            Box.Draw(session, .{.key = k, .bounds = .{cast(float32)cx, cast(float32)(top + row), 1.0, 1.0}, .fill = black})
+            k += 1
+        } else if outline_only {
+            Box.Draw(session, .{.key = k, .bounds = .{cast(float32)(cx - span), cast(float32)(top + row), 2.0, 1.0}, .fill = black})
+            Box.Draw(session, .{.key = k + 1, .bounds = .{cast(float32)(cx + span - 1), cast(float32)(top + row), 2.0, 1.0}, .fill = black})
+            k += 2
+        } else {
+            Box.Draw(session, .{.key = k, .bounds = .{cast(float32)(cx - span), cast(float32)(top + row),
+                cast(float32)(span * 2 + 1), 1.0}, .fill = fill})
+            Box.Draw(session, .{.key = k + 1, .bounds = .{cast(float32)(cx - span), cast(float32)(top + row), 1.0, 1.0}, .fill = black})
+            Box.Draw(session, .{.key = k + 2, .bounds = .{cast(float32)(cx + span), cast(float32)(top + row), 1.0, 1.0}, .fill = black})
+            k += 3
+        }
+    }
+}
+
+// --- Multi-line editor helpers ---
+
+EditorInsert :: (text: string) {
+    if text.count == 0 { return }
+    was_empty := editor_text.count == 0
+    old_len := editor_text.count
+    if editor_cursor > old_len { editor_cursor = old_len }
+    if !VecResize(editor_text, old_len + text.count) { return }
+    // Shift tail right
+    i := old_len - 1
+    while i >= editor_cursor {
+        editor_text[i + text.count] = editor_text[i]
+        i -= 1
+    }
+    for j: 0..text.count-1 { editor_text[editor_cursor + j] = text[j] }
+    editor_cursor += text.count
+    EditorChanged(was_empty)
+}
+
+EditorBackspace :: () {
+    if editor_cursor <= 0 || editor_text.count == 0 { return }
+    was_empty := editor_text.count == 0
+    for i: editor_cursor..editor_text.count-1 { editor_text[i - 1] = editor_text[i] }
+    editor_cursor -= 1
+    unused VecResize(editor_text, editor_text.count - 1)
+    EditorChanged(was_empty)
+}
+
+EditorDelete :: () {
+    if editor_cursor >= editor_text.count { return }
+    was_empty := editor_text.count == 0
+    for i: editor_cursor+1..editor_text.count-1 { editor_text[i - 1] = editor_text[i] }
+    unused VecResize(editor_text, editor_text.count - 1)
+    EditorChanged(was_empty)
+}
+
+EditorChanged :: (was_empty: bool) {
+    dirty = true
+    now_empty := editor_text.count == 0
+    if now_empty != was_empty {
+        if now_empty { curr_mark = 0 } else { curr_mark = 1 }
+    }
+}
+
+HandleEditorKeys :: (session: Session) {
+    if !sched_ready || !editor_focused || modal_mode != 0 { return }
+    typed: [256]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    if text.count > 0 { EditorInsert(text) }
+    if key == KeyBackspace { EditorBackspace() }
+    else if key == KeyDelete { EditorDelete() }
+    else if key == KeyEnter { EditorInsert("\n") }
+    else if key == KeyLeft && editor_cursor > 0 { editor_cursor -= 1 }
+    else if key == KeyRight && editor_cursor < editor_text.count { editor_cursor += 1 }
+    else if key == KeyHome {
+        while editor_cursor > 0 && editor_text[editor_cursor - 1] != 10 { editor_cursor -= 1 }
+    } else if key == KeyEnd {
+        while editor_cursor < editor_text.count && editor_text[editor_cursor] != 10 { editor_cursor += 1 }
+    }
+}
+
+// Move the schedule text view to the pointer's place on the scrollbar.
+ScrollTo :: (py: float32, top: s32, height: s32) {
+    visible: s32 = (height - 8) / 16
+    if visible < 1 { visible = 1 }
+    most: s32 = total_lines - visible
+    if most < 1 { editor_scroll = 0; return }
+    frac := (py - cast(float32)(top + 2)) / cast(float32)(height - 4)
+    if frac < 0.0 { frac = 0.0 }
+    if frac > 1.0 { frac = 1.0 }
+    editor_scroll = cast(s32)(frac * cast(float32)most)
+}
+
+// --- Main draw & input ---
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    win_w := cast(s32)bounds.width
+    win_h := cast(s32)bounds.height
+    pointer := PointerSample(session)
+    px := pointer.x
+    py := pointer.y
+
+    // Layout coordinates
+    grid_x: s32 = (win_w - GridW) / 2
+    if grid_x < Pad { grid_x = Pad }
+    cal_top: s32 = TopBarH + Pad
+    grid_y: s32 = cal_top + CalHeadH + 2
+    sched_top: s32 = grid_y + GridH + Pad + 4
+    text_top: s32 = sched_top + SchedHeadH + 4
+    text_h: s32 = win_h - text_top - Pad
+    if text_h < 40 { text_h = 40 }
+
+    // Button rectangles
+    show_x: s32 = win_w - Pad - 46
+    set_x: s32 = show_x - 42
+    fwd_m_x: s32 = grid_x + GridW - 28
+    bwd_m_x: s32 = fwd_m_x - 30
+    fwd_d_x: s32 = win_w - Pad - 28
+    bwd_d_x: s32 = fwd_d_x - 30
+    del_x: s32 = Pad + 4
+    save_x: s32 = del_x + 36
+    mark_col_x: s32 = save_x + 44
+    mark_shape_x: s32 = mark_col_x + 24
+
+    year, month, day := Model.DateYMD(current_date)
+    mdays, first_wday := Model.MonthInfo(month, year)
+
+    // Handle pointer & keyboard
+    if modal_mode == 0 {
+        HandleEditorKeys(session)
+        if pointer.pressed {
+            pressed_btn = BtnNone
+            pressed_day = -1
+            if Inside(px, py, set_x, Pad, 38, 20) { pressed_btn = BtnSet }
+            else if Inside(px, py, show_x, Pad, 46, 20) { pressed_btn = BtnShow }
+            else if Inside(px, py, bwd_m_x, cal_top + 2, 26, 20) { pressed_btn = BtnBwdMonth }
+            else if Inside(px, py, fwd_m_x, cal_top + 2, 26, 20) { pressed_btn = BtnFwdMonth }
+            else if sched_ready && Inside(px, py, win_w - Pad - 16, text_top + 2, ScrollbarW + 2, text_h - 4) {
+                scroll_drag = true
+                ScrollTo(py, text_top, text_h)
+            }
+            else if Inside(px, py, grid_x, grid_y + CellH, GridW, CellH * 6) {
+                col := (cast(s32)px - grid_x) / CellW
+                row := (cast(s32)py - (grid_y + CellH)) / CellH
+                d := row * 7 + col - first_wday + 1
+                if d >= 1 && d <= mdays { pressed_day = d }
+            } else if sched_ready {
+                if Inside(px, py, del_x, sched_top + 4, 32, 20) && editor_text.count > 0 { pressed_btn = BtnDel }
+                else if Inside(px, py, save_x, sched_top + 4, 40, 20) && dirty { pressed_btn = BtnSave }
+                else if curr_mark > 0 && Inside(px, py, mark_col_x, sched_top + 4, 20, 20) { pressed_btn = BtnMarkCol }
+                else if curr_mark > 0 && Inside(px, py, mark_shape_x, sched_top + 4, 20, 20) { pressed_btn = BtnMarkShape }
+                else if Inside(px, py, bwd_d_x, sched_top + 4, 26, 20) { pressed_btn = BtnBwdDay }
+                else if Inside(px, py, fwd_d_x, sched_top + 4, 26, 20) { pressed_btn = BtnFwdDay }
+                else if Inside(px, py, Pad + 4, text_top, win_w - Pad * 2 - 8, text_h) {
+                    editor_focused = true
+                    editor_cursor = editor_text.count
+                }
+            }
+        }
+        if pointer.released {
+            if pressed_btn == BtnSet && Inside(px, py, set_x, Pad, 38, 20) { OpenSetTime() }
+            else if pressed_btn == BtnShow && Inside(px, py, show_x, Pad, 46, 20) { SelectDate(TodayDate()) }
+            else if pressed_btn == BtnBwdMonth && Inside(px, py, bwd_m_x, cal_top + 2, 26, 20) { SelectDate(Model.DecMonth(current_date)) }
+            else if pressed_btn == BtnFwdMonth && Inside(px, py, fwd_m_x, cal_top + 2, 26, 20) { SelectDate(Model.IncMonth(current_date)) }
+            else if pressed_btn == BtnBwdDay && Inside(px, py, bwd_d_x, sched_top + 4, 26, 20) { SelectDate(Model.AddDays(current_date, -1)) }
+            else if pressed_btn == BtnFwdDay && Inside(px, py, fwd_d_x, sched_top + 4, 26, 20) { SelectDate(Model.AddDays(current_date, 1)) }
+            else if pressed_btn == BtnSave && Inside(px, py, save_x, sched_top + 4, 40, 20) { unused SaveCurrent() }
+            else if pressed_btn == BtnDel && Inside(px, py, del_x, sched_top + 4, 32, 20) {
+                if editor_text.count > 0 {
+                    unused VecResize(editor_text, 0)
+                    editor_cursor = 0
+                    curr_mark = 0
+                    dirty = true
+                }
+            } else if pressed_btn == BtnMarkCol && Inside(px, py, mark_col_x, sched_top + 4, 20, 20) {
+                if curr_mark > 0 { curr_mark = Model.CycleColor(curr_mark); dirty = true }
+            } else if pressed_btn == BtnMarkShape && Inside(px, py, mark_shape_x, sched_top + 4, 20, 20) {
+                if curr_mark > 0 { curr_mark = Model.CycleShape(curr_mark); dirty = true }
+            } else if pressed_day > 0 {
+                col := (cast(s32)px - grid_x) / CellW
+                row := (cast(s32)py - (grid_y + CellH)) / CellH
+                d := row * 7 + col - first_wday + 1
+                if d == pressed_day { SelectDate(Model.YMDDate(year, month, d)) }
+            }
+            pressed_btn = BtnNone
+            pressed_day = -1
+            scroll_drag = false
+        }
+        if scroll_drag && pointer.down { ScrollTo(py, text_top, text_h) }
+    }
+
+    // Background
+    Box.Draw(session, .{.key = 1, .bounds = bounds, .fill = face})
+
+    // Top bar: clock + Set + Show
+    _, cm, cd, cw, ch, cmin, csec := CurrentClockParts()
+    clk: Vec(u8); defer VecFree(clk)
+    digits: [24]u8
+    unused BuilderAppend(clk, DayName(cw))
+    unused BuilderAppend(clk, " ")
+    unused BuilderAppend(clk, MonthName(cm))
+    unused BuilderAppend(clk, " ")
+    unused BuilderAppend(clk, FormatInteger(cast(s64)cd, digits[:]))
+    unused BuilderAppend(clk, " ")
+    Model.FormatTwo(*clk, ch)
+    unused VecPush(clk, 58)
+    Model.FormatTwo(*clk, cmin)
+    unused VecPush(clk, 46)
+    Model.FormatTwo(*clk, csec)
+    Text.Draw(session, .{.key = 2, .bounds = .{cast(float32)Pad, cast(float32)Pad,
+        cast(float32)(set_x - Pad - 4), 20.0}, .text = TextView(clk[:]), .size = 12,
+        .vertical_align = .TextAlignCenter})
+    DrawButton(session, 10, BtnSet, set_x, Pad, 38, 20, "Set", modal_mode == 0, px, py)
+    DrawButton(session, 20, BtnShow, show_x, Pad, 46, 20, "Show", modal_mode == 0, px, py)
+
+    // Calendar raised frame
+    Bevel(session, 30, Pad, cal_top, win_w - Pad * 2, CalHeadH + GridH + 6, false)
+    ym_buf: Vec(u8); defer VecFree(ym_buf)
+    Model.FormatFour(*ym_buf, year)
+    unused VecPush(ym_buf, 47)
+    Model.FormatTwo(*ym_buf, month + 1)
+    Text.Draw(session, .{.key = 36, .bounds = .{cast(float32)grid_x, cast(float32)(cal_top + 2),
+        cast(float32)(bwd_m_x - grid_x - 6), 20.0}, .text = TextView(ym_buf[:]), .size = 13,
+        .align = .TextAlignEnd, .vertical_align = .TextAlignCenter})
+    DrawButton(session, 40, BtnBwdMonth, bwd_m_x, cal_top + 2, 26, 20, "<<", modal_mode == 0, px, py)
+    DrawButton(session, 50, BtnFwdMonth, fwd_m_x, cal_top + 2, 26, 20, ">>", modal_mode == 0, px, py)
+
+    // Weekday headers
+    for wd: cast(s32)0..6 {
+        Text.Draw(session, .{.key = cast(u64)(60 + wd), .bounds = .{cast(float32)(grid_x + wd * CellW),
+            cast(float32)grid_y, cast(float32)CellW, cast(float32)CellH}, .text = DayName(wd),
+            .size = 12, .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+    }
+
+    // Days of month
+    for d: cast(s32)1..mdays {
+        slot := first_wday + d - 1
+        col := slot % 7
+        row := slot / 7
+        cx := grid_x + col * CellW
+        cy := grid_y + (row + 1) * CellH
+        cell_date := Model.YMDDate(year, month, d)
+        mark: s32 = 0
+        if cell_date == current_date && sched_ready {
+            mark = curr_mark
+        } else if sched_ready {
+            idx := FindEntry(cell_date)
+            if idx >= 0 { mark = sched_entries[idx].mark }
+        }
+        if mark > 0 {
+            sh, mc := Model.KindToShapeCol(mark)
+            DrawShape(session, cast(u64)(1000 + d * 120), cx + 2, cy + 1, CellW - 4, CellH - 2,
+                      sh, MarkColor(mc), false)
+        }
+        if sched_ready && d == day {
+            Outline(session, cast(u64)(5000 + d * 8), cx + 1, cy + 1, CellW - 2, CellH - 2, 3, black)
+        }
+        Text.Draw(session, .{.key = cast(u64)(5500 + d), .bounds = .{cast(float32)cx, cast(float32)cy,
+            cast(float32)CellW, cast(float32)CellH}, .text = FormatInteger(cast(s64)d, digits[:]),
+            .size = 12, .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+    }
+
+    // Schedule panel
+    if sched_ready {
+        Bevel(session, 6000, Pad, sched_top, win_w - Pad * 2, win_h - sched_top - Pad, false)
+        DrawButton(session, 6010, BtnDel, del_x, sched_top + 4, 32, 20, "Del",
+                   modal_mode == 0 && editor_text.count > 0, px, py)
+        DrawButton(session, 6020, BtnSave, save_x, sched_top + 4, 40, 20, "Save",
+                   modal_mode == 0 && dirty, px, py)
+        if curr_mark > 0 {
+            sh, mc := Model.KindToShapeCol(curr_mark)
+            DrawShape(session, 6100, mark_col_x, sched_top + 5, 18, 18, Model.Square, MarkColor(mc), false)
+            DrawShape(session, 6200, mark_shape_x, sched_top + 5, 18, 18, sh, face, true)
+        }
+        ymd_buf: Vec(u8); defer VecFree(ymd_buf)
+        Model.FormatFour(*ymd_buf, year)
+        unused VecPush(ymd_buf, 47)
+        Model.FormatTwo(*ymd_buf, month + 1)
+        unused VecPush(ymd_buf, 47)
+        Model.FormatTwo(*ymd_buf, day)
+        Text.Draw(session, .{.key = 6030, .bounds = .{cast(float32)(bwd_d_x - 84), cast(float32)(sched_top + 4),
+            80.0, 20.0}, .text = TextView(ymd_buf[:]), .size = 12, .align = .TextAlignEnd,
+            .vertical_align = .TextAlignCenter})
+        DrawButton(session, 6040, BtnBwdDay, bwd_d_x, sched_top + 4, 26, 20, "<<", modal_mode == 0, px, py)
+        DrawButton(session, 6050, BtnFwdDay, fwd_d_x, sched_top + 4, 26, 20, ">>", modal_mode == 0, px, py)
+
+        // Multi-line text area
+        tx: s32 = Pad + 4
+        tw: s32 = win_w - Pad * 2 - 8
+        Box.Draw(session, .{.key = 6500, .bounds = .{cast(float32)tx, cast(float32)text_top,
+            cast(float32)tw, cast(float32)text_h}, .fill = white})
+        Bevel(session, 6501, tx, text_top, tw, text_h, true)
+
+        // Render lines of editor_text (simple newline + width wrap at ~42 chars)
+        line_h: s32 = 16
+        max_cols: s64 = cast(s64)((tw - ScrollbarW - 8) / 7)
+        if max_cols < 12 { max_cols = 12 }
+        line_idx: s32 = 0
+        pos: s64 = 0
+        cur_line: s32 = 0
+        cur_col: s64 = 0
+        found_cursor := false
+        while true {
+            line_start := pos
+            line_end := pos
+            while line_end < editor_text.count && editor_text[line_end] != 10 && (line_end - line_start) < max_cols {
+                line_end += 1
+            }
+            if !found_cursor && editor_cursor >= line_start && editor_cursor <= line_end {
+                cur_line = line_idx
+                cur_col = editor_cursor - line_start
+                found_cursor = true
+            }
+            ly := text_top + 4 + (line_idx - editor_scroll) * line_h
+            if ly >= text_top + 2 && ly + line_h <= text_top + text_h - 2 {
+                if line_end > line_start {
+                    Text.Draw(session, .{.key = cast(u64)(6600 + line_idx),
+                        .bounds = .{cast(float32)(tx + 6), cast(float32)ly, cast(float32)(tw - ScrollbarW - 8), cast(float32)line_h},
+                        .text = TextView(editor_text[line_start:line_end]), .size = 12})
+                }
+            }
+            line_idx += 1
+            if line_end >= editor_text.count { break }
+            if editor_text[line_end] == 10 { pos = line_end + 1 } else { pos = line_end }
+            if pos == editor_text.count && editor_text[line_end] == 10 {
+                // Trailing empty line after newline
+                if !found_cursor && editor_cursor == pos {
+                    cur_line = line_idx
+                    cur_col = 0
+                    found_cursor = true
+                }
+                break
+            }
+        }
+        total_lines = line_idx
+        // Scrollbar: a raised face track and a thumb sized by the lines shown.
+        sb_x: s32 = tx + tw - ScrollbarW
+        track_top: s32 = text_top + 2
+        track_h: s32 = text_h - 4
+        Box.Draw(session, .{.key = 6700, .bounds = .{cast(float32)sb_x, cast(float32)track_top,
+            cast(float32)ScrollbarW, cast(float32)track_h}, .fill = face})
+        Bevel(session, 6701, sb_x, track_top, ScrollbarW, track_h, true)
+        visible: s32 = (text_h - 8) / line_h
+        if visible < 1 { visible = 1 }
+        most: s32 = total_lines - visible
+        thumb_h: s32 = track_h - 6
+        if most > 0 {
+            thumb_h = (track_h - 6) * visible / total_lines
+            if thumb_h < 12 { thumb_h = 12 }
+            if editor_scroll > most { editor_scroll = most }
+            track_room := track_h - 6 - thumb_h
+            thumb_y := track_top + 3 + track_room * editor_scroll / most
+            Box.Draw(session, .{.key = 6710, .bounds = .{cast(float32)(sb_x + 2), cast(float32)thumb_y,
+                cast(float32)(ScrollbarW - 4), cast(float32)thumb_h}, .fill = active})
+            Bevel(session, 6711, sb_x + 2, thumb_y, ScrollbarW - 4, thumb_h, false)
+        }
+        if editor_focused && modal_mode == 0 {
+            cy := text_top + 4 + (cur_line - editor_scroll) * line_h
+            if cy >= text_top + 2 && cy + line_h <= text_top + text_h - 2 {
+                Box.Draw(session, .{.key = 6990, .bounds = .{cast(float32)(tx + 6 + cast(s32)cur_col * 7),
+                    cast(float32)cy, 1.0, cast(float32)(line_h - 2)}, .fill = black})
+            }
+        }
+    }
+
+    // Modal overlay: Set Time (1) or Notice (2)
+    if modal_mode == 1 {
+        mw: s32 = 250
+        mh: s32 = 126
+        mx := (win_w - mw) / 2
+        my := (win_h - mh) / 2
+        Box.Draw(session, .{.key = 7000, .bounds = .{cast(float32)mx, cast(float32)my,
+            cast(float32)mw, cast(float32)mh}, .fill = face})
+        Outline(session, 7001, mx, my, mw, mh, 2, black)
+        Text.Draw(session, .{.key = 7010, .bounds = .{cast(float32)(mx + 8), cast(float32)(my + 6),
+            cast(float32)(mw - 16), 18.0}, .text = "Set Time", .size = 13})
+        Text.Draw(session, .{.key = 7011, .bounds = .{cast(float32)(mx + 8), cast(float32)(my + 30),
+            124.0, 24.0}, .text = "Date (YYYY/MM/DD):", .size = 11, .vertical_align = .TextAlignCenter})
+        Text.Draw(session, .{.key = 7012, .bounds = .{cast(float32)(mx + 8), cast(float32)(my + 60),
+            124.0, 24.0}, .text = "Time (HH:MM.SS):", .size = 11, .vertical_align = .TextAlignCenter})
+        typed: [128]u8
+        text := TypedTextTake(session, typed[:])
+        key := KeyboardTake(session)
+        mods := KeyboardModifiers(session)
+        de := Field.Draw(session, Field.StateProps(date_field, .{.key = 7020, .focus_id = 7020,
+            .bounds = .{cast(float32)(mx + 134), cast(float32)(my + 28), 106.0, 26.0},
+            .max_bytes = 32, .input = TextFieldInputFor(key, mods, text)}))
+        unused Field.StateApplyResult(*date_field, de)
+        te := Field.Draw(session, Field.StateProps(time_field, .{.key = 7021, .focus_id = 7021,
+            .bounds = .{cast(float32)(mx + 134), cast(float32)(my + 58), 106.0, 26.0},
+            .max_bytes = 32, .input = TextFieldInputFor(key, mods, text)}))
+        unused Field.StateApplyResult(*time_field, te)
+
+        ok_x := mx + mw - 122
+        cancel_x := mx + mw - 62
+        by := my + mh - 28
+        DrawButton(session, 7030, BtnModalOk, ok_x, by, 52, 22, "Set", true, px, py)
+        DrawButton(session, 7040, BtnModalCancel, cancel_x, by, 54, 22, "Cancel", true, px, py)
+        if pointer.pressed {
+            if Inside(px, py, ok_x, by, 52, 22) { pressed_btn = BtnModalOk }
+            else if Inside(px, py, cancel_x, by, 54, 22) { pressed_btn = BtnModalCancel }
+        }
+        if pointer.released {
+            if pressed_btn == BtnModalOk && Inside(px, py, ok_x, by, 52, 22) { ApplySetTime() }
+            else if pressed_btn == BtnModalCancel && Inside(px, py, cancel_x, by, 54, 22) {
+                if settime_fd >= 0 { unused IO.Close(settime_fd); settime_fd = -1 }
+                modal_mode = 0
+            }
+            pressed_btn = BtnNone
+        }
+    } else if modal_mode == 2 {
+        mw: s32 = 250
+        mh: s32 = 84
+        mx := (win_w - mw) / 2
+        my := (win_h - mh) / 2
+        Box.Draw(session, .{.key = 7100, .bounds = .{cast(float32)mx, cast(float32)my,
+            cast(float32)mw, cast(float32)mh}, .fill = face})
+        Outline(session, 7101, mx, my, mw, mh, 2, black)
+        Text.Draw(session, .{.key = 7110, .bounds = .{cast(float32)(mx + 8), cast(float32)(my + 10),
+            cast(float32)(mw - 16), 36.0}, .text = TextView(notice_buf[:]), .size = 12})
+        ok_x := mx + (mw - 54) / 2
+        by := my + mh - 28
+        DrawButton(session, 7120, BtnModalOk, ok_x, by, 54, 22, "OK", true, px, py)
+        if pointer.pressed && Inside(px, py, ok_x, by, 54, 22) { pressed_btn = BtnModalOk }
+        if pointer.released {
+            if pressed_btn == BtnModalOk && Inside(px, py, ok_x, by, 54, 22) { modal_mode = 0 }
+            pressed_btn = BtnNone
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    date_field.bytes = date_bytes[:]
+    time_field.bytes = time_bytes[:]
+    GuestTime.LoadZone()
+    target := SchedDefault
+    argc := Args.OperandCount()
+    i: s32 = 0
+    while i < argc {
+        arg := Args.Operand(i)
+        if arg == "-f" {
+            if i + 1 >= argc {
+                print("usage: calendar [-f font] [/mnt/schedule | schedfile]\n")
+                return 1
+            }
+            i += 2
+            continue
+        }
+        if arg.count > 0 && arg[0] == 45 {
+            print("usage: calendar [-f font] [/mnt/schedule | schedfile]\n")
+            return 1
+        }
+        target = arg
+        break
+    }
+
+    LoadSchedule(target)
+    today := TodayDate()
+    current_date = -1
+    SelectDate(today)
+    if today < 19700002 { OpenSetTime() }
+
+    w := cast(s32)(ifx sched_ready then WinWSched else WinWNoSched)
+    h := cast(s32)(ifx sched_ready then WinHSched else WinHNoSched)
+    rc := Surface.RunRetained(.{.title = "Calendar", .width = w, .height = h}, Draw, 1000)
+    if sched_ready && dirty { unused SaveCurrent() }
+    if settime_fd >= 0 { unused IO.Close(settime_fd) }
+    return rc
+}

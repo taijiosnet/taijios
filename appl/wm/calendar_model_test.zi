@@ -1,0 +1,95 @@
+// Check calendar_model against the recorded Dis Calendar outcomes.
+Model :: #import "calendar_model";
+Fixture :: #import "calendar_cases_fixture";
+#import "std/vec"
+#import "std/number_text"
+
+NextWord :: (text: string, at: *s64) -> string {
+    while at.* < text.count && text[at.*] == 32 { at.* += 1 }
+    start := at.*
+    while at.* < text.count && text[at.*] != 32 { at.* += 1 }
+    return text[start:at.*]
+}
+
+Int :: (text: string) -> s64 {
+    v, _ := IntegerPrefix(text)
+    return v
+}
+
+#program_export
+main :: () -> s32 {
+    src := Fixture.Games
+    pos: s64 = 0
+    checked: s32 = 0
+    while pos < src.count {
+        end := pos
+        while end < src.count && src[end] != 10 { end += 1 }
+        line := src[pos:end]
+        pos = end + 1
+        if line.count == 0 || line[0] == 35 { continue }
+        at: s64 = 0
+        kind := NextWord(line, *at)
+        if kind == "monthinfo" {
+            y := cast(s32)Int(NextWord(line, *at))
+            m := cast(s32)Int(NextWord(line, *at))
+            ed := cast(s32)Int(NextWord(line, *at))
+            ew := cast(s32)Int(NextWord(line, *at))
+            d, w := Model.MonthInfo(m, y)
+            if d != ed || w != ew { print("monthinfo % % got % % want % %\n", y, m, d, w, ed, ew); return 1 }
+        } else if kind == "incmonth" {
+            a := cast(s32)Int(NextWord(line, *at))
+            want := cast(s32)Int(NextWord(line, *at))
+            got := Model.IncMonth(a)
+            if got != want { print("incmonth % got % want %\n", a, got, want); return 1 }
+        } else if kind == "decmonth" {
+            a := cast(s32)Int(NextWord(line, *at))
+            want := cast(s32)Int(NextWord(line, *at))
+            got := Model.DecMonth(a)
+            if got != want { print("decmonth % got % want %\n", a, got, want); return 1 }
+        } else if kind == "adddays" {
+            a := cast(s32)Int(NextWord(line, *at))
+            delta := cast(s32)Int(NextWord(line, *at))
+            want := cast(s32)Int(NextWord(line, *at))
+            got := Model.AddDays(a, delta)
+            if got != want { print("adddays % % got % want %\n", a, delta, got, want); return 1 }
+        } else if kind == "mark" {
+            k := cast(s32)Int(NextWord(line, *at))
+            es := cast(s32)Int(NextWord(line, *at))
+            ec := cast(s32)Int(NextWord(line, *at))
+            enc := cast(s32)Int(NextWord(line, *at))
+            ens := cast(s32)Int(NextWord(line, *at))
+            s, c := Model.KindToShapeCol(k)
+            nc := Model.CycleColor(k)
+            ns := Model.CycleShape(k)
+            if s != es || c != ec || nc != enc || ns != ens {
+                print("mark % got % % % % want % % % %\n", k, s, c, nc, ns, es, ec, enc, ens); return 1
+            }
+        } else if kind == "settime" {
+            dt := NextWord(line, *at)
+            tm := NextWord(line, *at)
+            eok := Int(NextWord(line, *at)) != 0
+            eep := Int(NextWord(line, *at))
+            res := Model.ParseSetTime(dt, tm)
+            if res.ok != eok || (eok && res.epoch != eep) {
+                print("settime % % got % % want % %\n", dt, tm, res.ok, res.epoch, eok, eep); return 1
+            }
+        } else {
+            print("unknown case %\n", kind); return 1
+        }
+        checked += 1
+    }
+    // Also verify entry parse + format + rawdbfs round-trip.
+    parsed := Model.ParseBody("20231114 1\nTeam standup")
+    if !parsed.ok || parsed.date != 20231014 || parsed.mark != 1 || parsed.body_start != 11 {
+        print("ParseBody failed\n"); return 1
+    }
+    buf: Vec(u8); defer VecFree(buf)
+    Model.FormatEntry(*buf, parsed.date, parsed.mark, "Team standup")
+    if TextView(buf[:]) != "20231114 1\nTeam standup" { print("FormatEntry failed\n"); return 1 }
+    raw: Vec(u8); defer VecFree(raw)
+    Model.AppendRawRecord(*raw, TextView(buf[:]))
+    rc, rd, rok := Model.ParseRawHeader(TextView(raw[:10]))
+    if !rok || rc != 23 || rd != 23 { print("RawHeader failed % % %\n", rok, rc, rd); return 1 }
+    print("Calendar matched % reference cases\n", checked)
+    return 0
+}

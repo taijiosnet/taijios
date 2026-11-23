@@ -47,8 +47,8 @@ if {ftest -f /dis/wm/taskmgr.zx} {
 }
 menu System 'Memory Monitor' {wmrun zxrun -p -w /dis/wm/memory.zx}
 menu System About         {wmrun zxrun -w /dis/wm/about.zx}
-menu Utilities Manual       {wmrun wm/man}
-menu Utilities Coffee       {wmrun wm/coffee}
+menu Utilities Manual       {wmrun zxrun -w /dis/man.zx}
+menu Utilities Coffee       {wmrun zxrun -w /dis/coffee.zx}
 if {ftest -f /dis/wm/colors.zx} {
 	menu Utilities Colours  {wmrun zxrun -w /dis/wm/colors.zx}
 } {

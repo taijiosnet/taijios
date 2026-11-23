@@ -121,6 +121,8 @@ def generate_desktop_icons(output):
             if size <= 256:
                 shutil.copyfile(directory / (original+'.rgba'), directory / (alias+'.rgba'))
 
+COMMAND_APPS = {'wm/coffee': '/dis/coffee.zx', 'wm/man': '/dis/man.zx'}
+
 NAMES = {
     'about': 'About TaijiOS', 'avi': 'AVI Player', 'bounce': 'Bounce', 'brutus': 'Brutus',
     'c4': 'Connect Four', 'calendar': 'Calendar', 'clock': 'Clock', 'coffee': 'Coffee',
@@ -164,7 +166,7 @@ def generate_catalog(output):
     for source in sorted((ROOT / 'appl/wm').glob('*.b')):
         if source.stem not in exclude:
             apps['wm/' + source.stem] = False
-    for name in ('about', 'clock', 'counter', 'dir', 'explorer', 'logwindow', 'memory', 'polyhedra', 'snake', 'stopwatch', 'sweeper', 'taskmgr', 'tetris', 'view'):
+    for name in ('about', 'coffee', 'clock', 'counter', 'dir', 'explorer', 'logwindow', 'man', 'memory', 'calendar', 'polyhedra', 'snake', 'stopwatch', 'sweeper', 'taskmgr', 'tetris', 'view'):
         apps['wm/' + name] = False
     for source in sorted((ROOT / 'appl/cmd').rglob('*.b')):
         relative = source.relative_to(ROOT / 'appl/cmd').with_suffix('').as_posix()
@@ -180,6 +182,7 @@ def generate_catalog(output):
         program = '/dis/' + relative + '.dis'
         if relative == 'wm/view' or (ROOT / ('dis/' + relative + '.zx')).exists():
             program = '/dis/' + relative + '.zx'
+        program = COMMAND_APPS.get(relative, program)
         if relative == 'wm/task':
             hidden = True
         if relative.startswith('wm/'):

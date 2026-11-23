@@ -710,6 +710,10 @@ def check_catalog_apps(emulator, root, env):
     for bundle in sorted((ROOT / 'dis/wm').glob('*.zx')):
         if bundle.stem not in ('rill', 'desktop_panel', 'wm'):
             shutil.copy2(bundle, bundles / bundle.name)
+    # Coffee and Man are Tcl/Tk apps installed under /dis, not /dis/wm.
+    for name in ('coffee', 'man'):
+        if (ROOT / 'dis' / f'{name}.zx').exists():
+            shutil.copy2(ROOT / 'dis' / f'{name}.zx', root / 'dis' / f'{name}.zx')
     # Colours and Date are built here until the installer ships them.
     for name, module, hosts in (('colors', 'colors', ('taijios_draw',)), ('date', 'date_window', ('taijios_files',))):
         if not (bundles / f'{name}.zx').exists():
@@ -726,7 +730,7 @@ def check_catalog_apps(emulator, root, env):
         if program.endswith('.dis') and (root / program[1:]).with_suffix('.zx').exists():
             text = text.replace(program, program[:-4] + '.zx')
         (root / 'lib/apps' / entry.name).write_text(text, encoding='utf-8')
-    for name in ('fonts', 'icons', 'lib/rill'):
+    for name in ('fonts', 'icons', 'lib/rill', 'man'):
         if (ROOT / name).exists():
             (root / name).symlink_to(ROOT / name, target_is_directory=True)
     # Polyhedra reads its solid database from /lib, so the minimal guest root ships it too.
