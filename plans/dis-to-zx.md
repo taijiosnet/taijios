@@ -803,9 +803,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/disk/format.dis | appl/cmd/disk/format.b | module/format.m | - |  |
-| dis/disk/ftl.dis | appl/cmd/disk/ftl.b |  | - |  |
-| dis/disk/kfs.dis | appl/cmd/disk/kfs.b |  | - |  |
+| dis/disk/kfs.dis | appl/cmd/disk/kfs.b |  | - | blocked: 9P server needs file2chan/spawn/channels in ZX host API |
 | dis/fs/and.dis | appl/cmd/fs/and.b |  | - |  |
 | dis/fs/bundle.dis | appl/cmd/fs/bundle.b | module/bundle.m | - |  |
 | dis/fs/chstat.dis | appl/cmd/fs/chstat.b |  | - |  |

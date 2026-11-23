@@ -429,8 +429,6 @@ appl
 		disdep.b
 		disdump.b
 		disk
-			format.b
-			ftl.b
 			kfs.b
 			mkfile
 			prep

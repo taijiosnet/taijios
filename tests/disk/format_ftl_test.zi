@@ -1,0 +1,89 @@
+// Guest parity test for disk/format and disk/ftl.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/disk tests/disk/format_ftl_test.zi -- [EMU] [PREFIX] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/fmtftl";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "disk/";
+    suffix := ifx argc > 3 then TextFromCString(argv[3]) else "";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/fmtftl/work") ||
+        !CreateDirectory("build/dis-legacy-math/fmtftl/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Small file for disk/format and 4 KiB input file for disk/ftl
+    unused WriteEntireFile("build/dis-legacy-math/fmtftl/work/hello.txt", "hello fat12\n");
+    kfs_in: Vec(u8);
+    for i: 0..4095 { VecPush(kfs_in, cast(u8)((i * 37 + 11) & 0xFF)) }
+    unused WriteEntireFile("build/dis-legacy-math/fmtftl/work/in.bin", BuilderFinish(kfs_in));
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. disk/format -df -l TAIJI floppy.img hello.txt
+    BuilderPrint(*script, "%format% -df -l TAIJI floppy.img hello.txt > ../result/fmt.out >[2] ../result/fmt.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/fmt.st\n");
+    // 2. disk/ftl 65536 16384 in.bin ftl.img (4 erase units of 16 KiB)
+    BuilderPrint(*script, "%ftl% 65536 16384 in.bin ftl.img > ../result/ftl.out >[2] ../result/ftl.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/ftl.st\n");
+    unused WriteEntireFile("build/dis-legacy-math/fmtftl/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("fmt.st") == "\n", "format status");
+    Expect(Result("fmt.err") == "add hello.txt at clust 2\nadd hello.txt at clust 2\n", "format stderr");
+    fimg, fok := ReadEntireFile("build/dis-legacy-math/fmtftl/work/floppy.img");
+    Expect(fok && fimg.count == 1474560 && fimg[0] == 0xEB && fimg[1] == 0x3C && fimg[2] == 0x90 &&
+        fimg[43:54] == "TAIJI      " && fimg[54:62] == "FAT12   " && fimg[510] == 0x55 && fimg[511] == 0xAA,
+        "format floppy.img FAT12 header");
+
+    Expect(Result("ftl.st") == "\n", "ftl status");
+    Expect(Result("ftl.err") == "", "ftl stderr");
+    Expect(Result("ftl.out") == "16rb000:16r1000:16r10000\n88:8:128 in 512b blocks\n", "ftl stdout");
+    ftlimg, ftlok := ReadEntireFile("build/dis-legacy-math/fmtftl/work/ftl.img");
+    Expect(ftlok && ftlimg.count == 65536 && ftlimg[8:14] == "FTL100" && ftlimg[40:44] == "Inf1", "ftl.img header");
+
+    if failures != 0 {
+        print("format_ftl_test: % failures\n", failures);
+        return 1;
+    }
+    print("format_ftl_test: all checks passed\n");
+    return 0;
+}
