@@ -80,6 +80,19 @@ PoolSet :: (v: *SVal, at: s32) {
     v.items_count = cast(s32)(pool.count - cast(s64)at);
 }
 
+// A list extended with one more item: a fresh range holding the previous
+// items copied after everything the parser has pushed since, then the new
+// item. Extending the old range in place would also take in the words of a
+// block or generator reduced between the two, which get their own lists.
+PoolWiden :: (prev: SVal, item: s32) -> s32 {
+    prev_at := prev.items_at;
+    prev_count := prev.items_count;
+    at := PoolStart();
+    for i: 0..cast(s64)prev_count - 1 { PoolAdd(pool[cast(s64)prev_at + i]) }
+    PoolAdd(item);
+    return at
+}
+
 // The list a value names, into out.
 PoolList :: (v: SVal, out: *Vec(s32)) {
     VecClear(<<out);
@@ -473,8 +486,7 @@ Reduce2 :: (p: *Parser, prod: s32, stack: []Stack, yypt: s32, yyp: s32, out: *SV
         yyval.cmd = -1;
     } else if prod == 39 {
         // asimple: asimple item
-        at := stack[yypt - 1].val.items_at;
-        PoolAdd(stack[yypt].val.item);
+        at := PoolWiden(stack[yypt - 1].val, stack[yypt].val.item);
         yyval = EmptyVal();
         yyval.items_at = at;
         yyval.items_count = cast(s32)(pool.count - cast(s64)at);
@@ -518,8 +530,7 @@ Reduce2 :: (p: *Parser, prod: s32, stack: []Stack, yypt: s32, yyp: s32, out: *SV
         yyval.cmd = -1;
     } else if prod == 53 {
         // list: list witem
-        at := stack[yypt - 1].val.items_at;
-        PoolAdd(stack[yypt].val.item);
+        at := PoolWiden(stack[yypt - 1].val, stack[yypt].val.item);
         yyval = EmptyVal();
         yyval.items_at = at;
         yyval.items_count = cast(s32)(pool.count - cast(s64)at);

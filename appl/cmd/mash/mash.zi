@@ -107,47 +107,45 @@ Dump :: (c: s32) {
 main :: () -> s32 {
     unused BindDiagnostic(Diagnose);
     ResetEnv(*context.env);
-    // -i starts the internal mode that runs one list for another mash.
     count := Args.OperandCount();
-    if count > 0 && Args.Operand(0) == "-i" {
-        if count < 2 { return Usage() }
-        words: Vec(Text);
-        for k: 1..count - 1 { PushText(*words, TextCopy(TextView(Args.Operand(k)))) }
-        status: Text = RunWords(*context, *words, true);
-        return Finish(TextView(status))
-    }
+    // -i starts the internal mode that runs one list for another mash: the
+    // words follow it and are not options.
+    internal := count > 0 && Args.Operand(0) == "-i";
+    if internal && count < 2 { return Usage() }
     interactive := false;
     ctxtflags: s32 = 0;
     carg: Text;
     hascarg := false;
     i: s32 = 0;
-    while i < count {
-        a := Args.Operand(i);
-        if a.count == 0 || a[0] != #char "-" { break }
-        j: s64 = 1;
-        while j < a.count {
-            c := a[j];
-            if c == #char "d" { ctxtflags |= EDUMPING }
-            else if c == #char "e" { ctxtflags |= ERAISE }
-            else if c == #char "n" { ctxtflags |= ENOXEQ }
-            else if c == #char "x" { ctxtflags |= EECHO }
-            else if c == #char "c" {
-                if j < a.count - 1 {
-                    unused BuilderAppend(carg.bytes, a[j + 1:]);
-                } else if i + 1 >= count || Args.Operand(i + 1) == "" {
-                    return Usage();
+    if !internal {
+        while i < count {
+            a := Args.Operand(i);
+            if a.count == 0 || a[0] != #char "-" { break }
+            j: s64 = 1;
+            while j < a.count {
+                c := a[j];
+                if c == #char "d" { ctxtflags |= EDUMPING }
+                else if c == #char "e" { ctxtflags |= ERAISE }
+                else if c == #char "n" { ctxtflags |= ENOXEQ }
+                else if c == #char "x" { ctxtflags |= EECHO }
+                else if c == #char "c" {
+                    if j < a.count - 1 {
+                        unused BuilderAppend(carg.bytes, a[j + 1:]);
+                    } else if i + 1 >= count || Args.Operand(i + 1) == "" {
+                        return Usage();
+                    } else {
+                        i += 1;
+                        unused BuilderAppend(carg.bytes, Args.Operand(i));
+                    }
+                    hascarg = true;
+                    break;
                 } else {
-                    i += 1;
-                    unused BuilderAppend(carg.bytes, Args.Operand(i));
+                    return Usage();
                 }
-                hascarg = true;
-                break;
-            } else {
-                return Usage();
+                j += 1;
             }
-            j += 1;
+            i += 1;
         }
-        i += 1;
     }
     // The grammar runs each statement as it reduces it, so the shell is
     // always at top level: a ":" dependency is legal, as in mash.
@@ -165,6 +163,14 @@ main :: () -> s32 {
     parser.act.xeq = XeqStatement;
     parser.act.mksimple = MkSimple;
     parser.act.mkcmd = MkCmd;
+    // The internal mode: one list for another mash, with the builtins the
+    // parent's words name, as a generator or pipeline element needs.
+    if internal {
+        words: Vec(Text);
+        for k: 1..count - 1 { PushText(*words, TextCopy(TextView(Args.Operand(k)))) }
+        status: Text = RunWords(*context, *words, true);
+        return Finish(TextView(status))
+    }
     if hascarg {
         lex: Lexer;
         InitString(*lex, TextView(carg));

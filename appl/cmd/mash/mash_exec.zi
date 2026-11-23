@@ -539,26 +539,26 @@ CmdWords :: (c: s32) -> Vec(Text) {
 // the path the command reads or writes.
 //
 // The pipe itself is served from /tmp/pipes, as the ZX shell's own named
-// pipes are. What is not right yet is the argument list the generator sits
-// in: the parse's item pool is shared with the block's own words, so a
-// command that takes the generator as an operand also sees those words.
-// The pipe path is appended last, so a command that reads its last operand
-// still works.
+// pipes are: the child holds data1 on the stream it writes (<{}) or reads
+// (>{}), and the word handed back names data, the other end, for the
+// command the generator sits in.
 PipeGen :: (x: *Exec, c: s32, write: bool) -> s32 {
     dir, ok := NamedPipe(x);
     if !ok { return -1 }
     // "data" is the end the command uses; "data1" the one the child holds.
+    // Each end reads and writes, as the shell's own pipes do.
     other: Vec(u8);
     BuilderPrint(*other, "%/data1", TextView(dir));
-    h := Io.Open(TextView(other[:]), 1);
+    h := Io.Open(TextView(other[:]), 2);
     if h < 0 {
         msg: Vec(u8);
         BuilderPrint(*msg, "mash: cannot open %: %\n", TextView(other[:]), Io.Error());
         ExecError(x, TextView(msg[:]));
         return -1
     }
+    // <{} producer: its output is the pipe. >{} consumer: its input is.
     childfd: s32 = 1;
-    if !write { childfd = 0 }
+    if write { childfd = 0 }
     s: Saved;
     SaveFds(x, *s);
     x.env.fds[childfd] = h;

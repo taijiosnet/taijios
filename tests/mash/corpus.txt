@@ -170,3 +170,11 @@ depends;
 script:
 load make;
 make /build/tests/mash/nothing-here;
+
+=== a generator word among a command's operands
+script:
+quote x <{ quote a b } y;
+
+=== a generator word before the operands
+script:
+quote <{ quote a b } y;

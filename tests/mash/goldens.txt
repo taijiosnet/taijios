@@ -132,3 +132,11 @@ err:
 status: \n
 out: don't know how to make /build/tests/mash/nothing-here\n
 err: 
+=== a generator word among a command's operands
+status: \n
+out: x $pipe y\n
+err: 
+=== a generator word before the operands
+status: \n
+out: $pipe y\n
+err: 

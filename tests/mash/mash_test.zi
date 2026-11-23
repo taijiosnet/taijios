@@ -135,6 +135,48 @@ Path :: (kind: string, name: string, index: s64) -> Text {
     return BuilderFinish(out);
 }
 
+// The digits from at on, as the offset after them.
+Digits :: (s: string, at: s64) -> s64 {
+    while at < s.count && s[at] >= #char "0" && s[at] <= #char "9" { at += 1 }
+    return at
+}
+
+// The length of a generator's pipe name at the start of s, 0 when there is
+// none. mash.dis serves the pipe as /chan/mash.<pid>.<n>; mash.zx serves it
+// from /tmp/pipes as mash.<n>/data, like the ZX shell's own pipes. The name
+// is the serving shell's choice, so both compare as $pipe.
+PipeNameLen :: (s: string) -> s64 {
+    if TextHasPrefix(s, "/chan/mash.") {
+        at := Digits(s, 11);
+        if at > 11 && at < s.count && s[at] == #char "." {
+            end := Digits(s, at + 1);
+            if end > at + 1 { return end }
+        }
+        return 0
+    }
+    if TextHasPrefix(s, "/tmp/pipes/mash.") {
+        at := Digits(s, 16);
+        if at > 16 && TextHasPrefix(s[at:], "/data") { return at + 5 }
+    }
+    return 0
+}
+
+NormalizePipes :: (s: string) -> Text {
+    out: Vec(u8);
+    i: s64 = 0;
+    while i < s.count {
+        n := PipeNameLen(s[i:]);
+        if n > 0 {
+            unused BuilderAppend(out, "$pipe");
+            i += n;
+            continue
+        }
+        VecPush(out, s[i]);
+        i += 1
+    }
+    return BuilderFinish(out)
+}
+
 Prepare :: (kind: string, shell: string) -> bool {
     dir: Vec(u8);
     BuilderPrint(*dir, "%/%", WORK, kind);
@@ -195,7 +237,7 @@ Result :: (kind: string, what: string, index: s64) -> Text {
     BuilderPrint(*w, "%/%", GUESTWORK, kind);
     // TextReplace's result borrows the text, so copy it out.
     replaced := TextReplace(text, TextView(w[:]), "$W");
-    return TextCopy(replaced);
+    return NormalizePipes(replaced);
 }
 
 Check :: (kind: string, index: s64, what: string, got: string, want: string) {
