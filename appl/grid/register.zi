@@ -1,0 +1,148 @@
+// Register and export a 9P/Styx grid service with /mnt/registry,
+// ported from appl/grid/register.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Dial :: #import "taijios_dial"
+using Namespace :: #import "taijios_namespace"
+using Proc :: #import "taijios_process"
+using Announce :: #import "announce"
+using Reg :: #import "registry_client"
+using Model :: #import "register_model"
+
+CloseIfOpen :: (fd: s32) {
+    if fd >= 0 { unused IO.Close(fd) }
+}
+
+Usage :: () -> s32 {
+    print("usage: register [-u maxusers] [-e exit threshold] [-a attributes] { program }\n");
+    unused Args.SetFailure("usage");
+    return 2;
+}
+
+Error :: (msg: string) -> s32 {
+    print("register: %\n", msg);
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    arg_buf: [64]string;
+    n_args := ifx argc > 64 then 64 else argc;
+    for i: 0..cast(s64)n_args-1 {
+        arg_buf[i] = Args.Operand(cast(s32)i);
+    }
+
+    cfg: Model.Config;
+    if !Model.ParseArgs(arg_buf[:n_args], *cfg) { return Usage() }
+
+    unused Namespace.Fork();
+
+    if cfg.want_memory {
+        mem_raw: Text;
+        unused Announce.ReadSmallFile("/dev/memory", *mem_raw);
+        mem_val: Text;
+        Model.FormatMemoryMB(TextView(mem_raw), *mem_val);
+        Reg.AttrListSet(*cfg.attrs, "memory", TextView(mem_val));
+    }
+
+    sysname_raw: Text;
+    unused Announce.ReadSmallFile("/dev/sysname", *sysname_raw);
+    sysname := Announce.TrimTrailingNewline(TextView(sysname_raw));
+
+    tmp_name: Text;
+    if !Reg.AttrListGet(*cfg.attrs, "name", *tmp_name) {
+        Reg.AttrListSet(*cfg.attrs, "name", sysname);
+    }
+
+    myaddr: Text;
+    ann_dir: Text;
+    ann_ctl: s32 = -1;
+    if cfg.myaddr.bytes.count == 0 {
+        ctl, ok := Announce.Announce(*myaddr, *ann_dir);
+        if !ok { return Error("cannot announce") }
+        ann_ctl = ctl;
+    } else {
+        handles: [2]s32 = .[-1, -1];
+        dir_buf: [Dial.DirectoryBytes]u8;
+        if Dial.Announce(TextView(cfg.myaddr), handles[:], dir_buf[:]) != 0 {
+            return Error("cannot announce");
+        }
+        ann_ctl = handles[1];
+        dlen: s64 = 0;
+        while dlen < dir_buf.count && dir_buf[dlen] != 0 { dlen += 1 }
+        unused BuilderAppend(ann_dir.bytes, TextView(dir_buf[:dlen]));
+        Model.ResolveWildcardAddr(TextView(cfg.myaddr), sysname, *myaddr);
+    }
+    defer CloseIfOpen(ann_ctl);
+
+    reg_fd := Reg.RegisterService(TextView(myaddr), *cfg.attrs, false);
+    if reg_fd < 0 {
+        return Error("Could not find or register with registry");
+    }
+    defer CloseIfOpen(reg_fd);
+
+    // Start the service command connected to a pipe (popen).
+    pipe_fds: [2]s32 = .[-1, -1];
+    if Namespace.Pipe(pipe_fds[:]) != 0 { return Error("pipe failed") }
+    prog_path := TextView(cfg.prog_args[0]);
+    child_ops: [Model.MAX_PROG_ARGS]string;
+    for i: 1..cast(s64)cfg.prog_argc-1 {
+        child_ops[i - 1] = TextView(cfg.prog_args[i]);
+    }
+    launch := Proc.StartWith(prog_path, child_ops[:cfg.prog_argc - 1], pipe_fds[0], -1, -1);
+    unused IO.Close(pipe_fds[0]);
+    if launch.id <= 0 {
+        unused IO.Close(pipe_fds[1]);
+        return Error("cannot start program");
+    }
+    mountfd := pipe_fds[1];
+    defer CloseIfOpen(mountfd);
+
+    // Listen and proxy connections.
+    nusers: s32 = 0;
+    while true {
+        call_handles: [2]s32 = .[-1, -1];
+        call_dir_buf: [Dial.DirectoryBytes]u8;
+        if Dial.Listen(TextView(ann_dir), call_handles[:], call_dir_buf[:]) != 0 {
+            return Error("listen failed");
+        }
+        clen: s64 = 0;
+        while clen < call_dir_buf.count && call_dir_buf[clen] != 0 { clen += 1 }
+        call_dir := TextView(call_dir_buf[:clen]);
+
+        if cfg.maxusers != -1 && nusers >= cfg.maxusers {
+            print("register: maxusers (%) exceeded!\n", nusers);
+            if call_handles[1] >= 0 {
+                unused IO.Write(call_handles[1], "reject server overloaded");
+                unused IO.Close(call_handles[1]);
+            }
+            continue;
+        }
+        dfd := Dial.Accept(call_dir);
+        if call_handles[1] >= 0 { unused IO.Close(call_handles[1]) }
+        if dfd < 0 { continue }
+
+        rem_path: Text;
+        unused BuilderAppend(rem_path.bytes, call_dir);
+        unused BuilderAppend(rem_path.bytes, "/remote");
+        rem_raw: Text;
+        remote := "unknown";
+        if Announce.ReadSmallFile(TextView(rem_path), *rem_raw) {
+            remote = Announce.TrimTrailingNewline(TextView(rem_raw));
+        }
+
+        if Namespace.Mount(mountfd, -1, "/n/register_srv", Namespace.Replace | Namespace.AllowCreate, remote) != 0 {
+            print("register: proxy mount failed: %\n", Namespace.Error());
+            unused IO.Close(dfd);
+            continue;
+        }
+        nusers += 1;
+        if Namespace.Export(dfd, "/n/register_srv", false) != 0 {
+            nusers -= 1;
+            unused IO.Close(dfd);
+        }
+    }
+    return 0;
+}

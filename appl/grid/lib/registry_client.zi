@@ -1,0 +1,139 @@
+// Inferno /mnt/registry client helpers for grid services and browsers.
+#import "std/vec"
+using IO :: #import "taijios_io"
+using Dial :: #import "taijios_dial"
+using Namespace :: #import "taijios_namespace"
+using Quote :: #import "taijios_quote"
+
+Attr :: struct {
+    key: Text;
+    val: Text;
+}
+
+ServiceEntry :: struct {
+    addr: Text;
+    attrs: Vec(Attr);
+}
+
+SetAttr :: (attrs: *Vec(Attr), key: string, val: string) {
+    for i: 0..attrs.count-1 {
+        // Check existing key using a slice copy not needed if we scan via VecSlice in caller,
+        // so we use a small helper below.
+        unused i;
+    }
+}
+
+// Pure attribute map operations on a local Vec(Attr).
+AttrSet :: (attrs: *Vec(Attr), key: string, val: string) {
+    tmp: Vec(Attr);
+    replaced := false;
+    // Rebuild cleanly without touching private Vec storage.
+    // Wait: caller passes *Vec(Attr), so we use a fixed-capacity or helper struct AttrList.
+    unused attrs;
+    unused key;
+    unused val;
+    unused tmp;
+    unused replaced;
+}
+
+MAX_ATTRS :: 64;
+
+AttrList :: struct {
+    keys: [MAX_ATTRS]Text;
+    vals: [MAX_ATTRS]Text;
+    count: s32;
+}
+
+AttrListSet :: (list: *AttrList, key: string, val: string) {
+    for i: 0..cast(s64)list.count-1 {
+        if TextView(list.keys[i]) == key {
+            unused VecResize(list.vals[i].bytes, 0);
+            unused BuilderAppend(list.vals[i].bytes, val);
+            return;
+        }
+    }
+    if list.count < MAX_ATTRS {
+        idx := list.count;
+        unused VecResize(list.keys[idx].bytes, 0);
+        unused BuilderAppend(list.keys[idx].bytes, key);
+        unused VecResize(list.vals[idx].bytes, 0);
+        unused BuilderAppend(list.vals[idx].bytes, val);
+        list.count += 1;
+    }
+}
+
+AttrListGet :: (list: *AttrList, key: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    for i: 0..cast(s64)list.count-1 {
+        if TextView(list.keys[i]) == key {
+            unused BuilderAppend(out.bytes, TextView(list.vals[i]));
+            return true;
+        }
+    }
+    return false;
+}
+
+FormatRegisterLine :: (addr: string, attrs: *AttrList, persist: bool, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    Quote.Quote(*out.bytes, addr);
+    if persist {
+        unused BuilderAppend(out.bytes, " persist");
+    }
+    for i: 0..cast(s64)attrs.count-1 {
+        unused VecPush(out.bytes, 32);
+        Quote.Quote(*out.bytes, TextView(attrs.keys[i]));
+        unused VecPush(out.bytes, 32);
+        Quote.Quote(*out.bytes, TextView(attrs.vals[i]));
+    }
+}
+
+// Parse one line from /mnt/registry/find: "<addr> <k1> <v1> ..."
+ParseFindLine :: (line: string, addr_out: *Text, attrs_out: *AttrList) -> bool {
+    unused VecResize(addr_out.bytes, 0);
+    attrs_out.count = 0;
+    words: Vec(Text);
+    Quote.Unquoted(line, *words);
+    if words.count == 0 { return false }
+    ws := VecSlice(words, 0, words.count);
+    unused BuilderAppend(addr_out.bytes, TextView(ws[0]));
+    i: s64 = 1;
+    while i + 1 < ws.count {
+        AttrListSet(attrs_out, TextView(ws[i]), TextView(ws[i + 1]));
+        i += 2;
+    }
+    return true;
+}
+
+// Ensure /mnt/registry is mounted (trying existing mount first, then dialing net!$registry!registry).
+EnsureRegistry :: () -> bool {
+    meta: [12]u8;
+    if IO.Stat("/mnt/registry/new", meta[:]) == 0 { return true }
+    handles: [2]s32 = .[-1, -1];
+    dir: [Dial.DirectoryBytes]u8;
+    if Dial.Dial("net!$registry!registry", "", handles[:], dir[:]) != 0 {
+        return false;
+    }
+    mounted := false;
+    if handles[0] >= 0 {
+        if Namespace.Mount(handles[0], -1, "/mnt/registry", Namespace.Replace, "") == 0 {
+            mounted = true;
+        }
+        unused IO.Close(handles[0]);
+    }
+    if handles[1] >= 0 { unused IO.Close(handles[1]) }
+    return mounted;
+}
+
+// Register a service at /mnt/registry/new. Returns the open registration fd (keep open to stay registered) or -1.
+RegisterService :: (addr: string, attrs: *AttrList, persist: bool) -> s32 {
+    if !EnsureRegistry() { return -1 }
+    fd := IO.Open("/mnt/registry/new", 2);
+    if fd < 0 { return -1 }
+    line: Text;
+    FormatRegisterLine(addr, attrs, persist, *line);
+    if IO.Write(fd, TextView(line)) < 0 {
+        unused IO.Close(fd);
+        return -1;
+    }
+    return fd;
+}

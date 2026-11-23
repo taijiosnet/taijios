@@ -1,0 +1,60 @@
+// Table-driven unit tests for appl/grid/lib/{announce,registry_client}.zi and register_model.zi.
+#import "std/vec"
+using Announce :: #import "announce"
+using Reg :: #import "registry_client"
+using Model :: #import "register_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    out: Text;
+    Expect(Announce.FormatAnnouncedAddr("node1\n", "127.0.0.1!6677\n", *out), "FormatAnnouncedAddr ok");
+    Expect(TextView(out) == "tcp!node1!6677", "FormatAnnouncedAddr value");
+    Expect(!Announce.FormatAnnouncedAddr("node1", "badlocal", *out), "FormatAnnouncedAddr invalid");
+
+    Model.ResolveWildcardAddr("tcp!*!7777", "alpha", *out);
+    Expect(TextView(out) == "tcp!alpha!7777", "ResolveWildcardAddr wildcard");
+    Model.ResolveWildcardAddr("tcp!beta!7777", "alpha", *out);
+    Expect(TextView(out) == "tcp!beta!7777", "ResolveWildcardAddr explicit");
+
+    Model.FormatMemoryMB("1048576 33554432 0 0 main", *out);
+    Expect(TextView(out) == "32mb", "FormatMemoryMB 32mb");
+    Model.FormatMemoryMB("", *out);
+    Expect(TextView(out) == "not known", "FormatMemoryMB empty");
+
+    // Registry line format & parse round-trip
+    attrs: Reg.AttrList;
+    Reg.AttrListSet(*attrs, "proto", "styx");
+    Reg.AttrListSet(*attrs, "resource", "Cpu Pool");
+    Reg.FormatRegisterLine("tcp!node1!6677", *attrs, false, *out);
+    parsed_addr: Text;
+    parsed_attrs: Reg.AttrList;
+    Expect(Reg.ParseFindLine(TextView(out), *parsed_addr, *parsed_attrs), "ParseFindLine");
+    Expect(TextView(parsed_addr) == "tcp!node1!6677", "ParseFindLine addr");
+    res: Text;
+    found := Reg.AttrListGet(*parsed_attrs, "resource", *res);
+    Expect(found && TextView(res) == "Cpu Pool", "ParseFindLine attr");
+
+    // Register CLI parsing
+    args: [7]string = .["-m", "-u", "4", "-a", "name", "worker1", "{ export /tmp }"];
+    cfg: Model.Config;
+    Expect(Model.ParseArgs(args[:], *cfg), "ParseArgs valid");
+    Expect(cfg.want_memory && cfg.maxusers == 4 && cfg.prog_argc == 2, "ParseArgs fields");
+    Expect(TextView(cfg.prog_args[0]) == "export" && TextView(cfg.prog_args[1]) == "/tmp", "ParseArgs prog");
+    nm: Text;
+    nm_ok := Reg.AttrListGet(*cfg.attrs, "name", *nm);
+    Expect(nm_ok && TextView(nm) == "worker1", "ParseArgs custom attr");
+
+    bad_args: [2]string = .["-u", "0"];
+    Expect(!Model.ParseArgs(bad_args[:], *cfg), "ParseArgs reject -u 0");
+
+    if failures == 0 { print("register_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

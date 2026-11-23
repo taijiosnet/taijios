@@ -10,7 +10,6 @@ TARG=\
 		find.dis\
 		query.dis\
 		readjpg.dis\
-		register.dis\
 		reglisten.dis\
 		regstyxlisten.dis\
 		remotelogon.dis\
@@ -65,5 +64,13 @@ $DISBIN/usercreatesrv.zx: usercreatesrv.zx
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 usercreatesrv.zx "$staged" && mv "$staged" "$target"
 
-install:V: $DISBIN/jpg2bit.zx $DISBIN/usercreatesrv.zx
+register.zx: register.zi register_model.zi lib/announce.zi lib/registry_client.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi ../lib/taijios_quote.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path lib --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry register:main -o $target register.zi
+
+$DISBIN/register.zx: register.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 register.zx "$staged" && mv "$staged" "$target"
+
+install:V: $DISBIN/jpg2bit.zx $DISBIN/usercreatesrv.zx $DISBIN/register.zx
 

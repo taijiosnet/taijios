@@ -1,0 +1,72 @@
+// Announce a local TCP service on an ephemeral port and return its
+// "tcp!<sysname>!<port>" address, ported from appl/grid/lib/announce.b.
+#import "std/vec"
+using IO :: #import "taijios_io"
+using Dial :: #import "taijios_dial"
+
+ReadSmallFile :: (path: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [8192]u8;
+    n := IO.Read(fd, buf[:]);
+    unused IO.Close(fd);
+    if n <= 0 { return false }
+    unused BuilderAppend(out.bytes, TextView(buf[:n]));
+    return true;
+}
+
+TrimTrailingNewline :: (s: string) -> string {
+    end := s.count;
+    while end > 0 && (s[end - 1] == 10 || s[end - 1] == 13) { end -= 1 }
+    return s[:end];
+}
+
+// Format "tcp!<sysname>!<port>" from sysname and local endpoint string (e.g. "127.0.0.1!12345").
+FormatAnnouncedAddr :: (sysname: string, local: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    last_bang: s64 = -1;
+    for i: 0..local.count-1 {
+        if local[i] == 33 { last_bang = i }
+    }
+    if last_bang < 0 || last_bang + 1 >= local.count { return false }
+    port := TrimTrailingNewline(local[last_bang + 1:]);
+    if port.count == 0 { return false }
+    sname := TrimTrailingNewline(sysname);
+    unused BuilderAppend(out.bytes, "tcp!");
+    unused BuilderAppend(out.bytes, sname);
+    unused BuilderAppend(out.bytes, "!");
+    unused BuilderAppend(out.bytes, port);
+    return true;
+}
+
+// Announce on tcp!*!0 and return (addr, ctl_fd, conn_dir, ok).
+Announce :: (addr_out: *Text, dir_out: *Text) -> (ctl_fd: s32, ok: bool) {
+    unused VecResize(addr_out.bytes, 0);
+    unused VecResize(dir_out.bytes, 0);
+    sysname: Text;
+    unused ReadSmallFile("/dev/sysname", *sysname);
+
+    handles: [2]s32 = .[-1, -1];
+    dir_buf: [Dial.DirectoryBytes]u8;
+    if Dial.Announce("tcp!*!0", handles[:], dir_buf[:]) != 0 {
+        return -1, false;
+    }
+    dlen: s64 = 0;
+    while dlen < dir_buf.count && dir_buf[dlen] != 0 { dlen += 1 }
+    unused BuilderAppend(dir_out.bytes, TextView(dir_buf[:dlen]));
+
+    local_path: Text;
+    unused BuilderAppend(local_path.bytes, TextView(<<dir_out));
+    unused BuilderAppend(local_path.bytes, "/local");
+    local: Text;
+    if !ReadSmallFile(TextView(local_path), *local) {
+        if handles[1] >= 0 { unused IO.Close(handles[1]) }
+        return -1, false;
+    }
+    if !FormatAnnouncedAddr(TextView(sysname), TextView(local), addr_out) {
+        if handles[1] >= 0 { unused IO.Close(handles[1]) }
+        return -1, false;
+    }
+    return handles[1], true;
+}

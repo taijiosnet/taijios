@@ -1,0 +1,157 @@
+// Pure argument parsing, address resolution, and memory formatting for grid/register,
+// ported from appl/grid/register.b.
+#import "std/vec"
+#import "std/number_text"
+using Reg :: #import "registry_client"
+
+MAX_PROG_ARGS :: 32;
+
+Config :: struct {
+    attrs: Reg.AttrList;
+    maxusers: s32;
+    autoexit: s32;
+    myaddr: Text;
+    want_memory: bool;
+    prog_args: [MAX_PROG_ARGS]Text;
+    prog_argc: s32;
+}
+
+ParseInt :: (s: string) -> (val: s32, ok: bool) {
+    if s.count == 0 { return 0, false }
+    i: s64 = 0;
+    neg := false;
+    if s[0] == 45 { neg = true; i = 1 }
+    if i >= s.count || s[i] < 48 || s[i] > 57 { return 0, false }
+    v: s64 = 0;
+    while i < s.count && s[i] >= 48 && s[i] <= 57 {
+        v = v * 10 + cast(s64)(s[i] - 48);
+        i += 1;
+    }
+    if i != s.count { return 0, false }
+    return cast(s32)(ifx neg then -v else v), true;
+}
+
+// Tokenize "{ program args... }" by "{} \t\n".
+TokenizeProgram :: (s: string, out_args: []Text) -> s32 {
+    count: s32 = 0;
+    i: s64 = 0;
+    while i < s.count && cast(s64)count < out_args.count {
+        while i < s.count && (s[i] == 123 || s[i] == 125 || s[i] == 32 || s[i] == 9 || s[i] == 10 || s[i] == 13) {
+            i += 1;
+        }
+        if i >= s.count { break }
+        start := i;
+        while i < s.count && s[i] != 123 && s[i] != 125 && s[i] != 32 && s[i] != 9 && s[i] != 10 && s[i] != 13 {
+            i += 1;
+        }
+        unused VecResize(out_args[count].bytes, 0);
+        unused BuilderAppend(out_args[count].bytes, s[start:i]);
+        count += 1;
+    }
+    return count;
+}
+
+// Format /dev/memory contents into "<N>mb" (matching register.b memory()).
+FormatMemoryMB :: (mem_text: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    // Second whitespace-delimited token is total bytes.
+    i: s64 = 0;
+    tok: s32 = 0;
+    while i < mem_text.count {
+        while i < mem_text.count && (mem_text[i] == 32 || mem_text[i] == 9 || mem_text[i] == 10 || mem_text[i] == 13) { i += 1 }
+        if i >= mem_text.count { break }
+        start := i;
+        while i < mem_text.count && mem_text[i] != 32 && mem_text[i] != 9 && mem_text[i] != 10 && mem_text[i] != 13 { i += 1 }
+        if tok == 1 {
+            bytes_v, ok := ParseInt(mem_text[start:i]);
+            if ok {
+                mb := cast(s64)bytes_v / (1024 * 1024);
+                buf: [24]u8;
+                unused BuilderAppend(out.bytes, FormatInteger(mb, buf[:]));
+                unused BuilderAppend(out.bytes, "mb");
+                return;
+            }
+            break;
+        }
+        tok += 1;
+    }
+    unused BuilderAppend(out.bytes, "not known");
+}
+
+// Rewrite wildcard address like "tcp!*!6677" to "tcp!<sysname>!6677".
+ResolveWildcardAddr :: (myaddr: string, sysname: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    has_star := false;
+    for i: 0..myaddr.count-1 {
+        if myaddr[i] == 42 { has_star = true; break }
+    }
+    if !has_star {
+        unused BuilderAppend(out.bytes, myaddr);
+        return;
+    }
+    b1: s64 = -1;
+    b2: s64 = -1;
+    for i: 0..myaddr.count-1 {
+        if myaddr[i] == 33 {
+            if b1 < 0 { b1 = i }
+            else { b2 = i; break }
+        }
+    }
+    if b1 >= 0 && b2 > b1 {
+        unused BuilderAppend(out.bytes, "tcp!");
+        unused BuilderAppend(out.bytes, sysname);
+        unused BuilderAppend(out.bytes, "!");
+        unused BuilderAppend(out.bytes, myaddr[b2 + 1:]);
+        return;
+    }
+    unused BuilderAppend(out.bytes, myaddr);
+}
+
+ParseArgs :: (args: []string, cfg: *Config) -> bool {
+    cfg.attrs.count = 0;
+    Reg.AttrListSet(*cfg.attrs, "proto", "styx");
+    Reg.AttrListSet(*cfg.attrs, "auth", "none");
+    Reg.AttrListSet(*cfg.attrs, "resource", "Cpu Pool");
+    cfg.maxusers = -1;
+    cfg.autoexit = 0;
+    unused VecResize(cfg.myaddr.bytes, 0);
+    cfg.want_memory = false;
+    cfg.prog_argc = 0;
+
+    i: s64 = 0;
+    while i < args.count {
+        a := args[i];
+        if a.count < 2 || a[0] != 45 { break }
+        i += 1;
+        if a == "--" { break }
+        if a == "-m" {
+            cfg.want_memory = true;
+        } else if a == "-u" {
+            if i >= args.count { return false }
+            v, ok := ParseInt(args[i]);
+            if !ok || v <= 0 { return false }
+            cfg.maxusers = v;
+            i += 1;
+        } else if a == "-e" {
+            if i >= args.count { return false }
+            v, ok := ParseInt(args[i]);
+            if !ok || v < 0 { return false }
+            cfg.autoexit = v;
+            i += 1;
+        } else if a == "-A" {
+            if i >= args.count { return false }
+            unused VecResize(cfg.myaddr.bytes, 0);
+            unused BuilderAppend(cfg.myaddr.bytes, args[i]);
+            i += 1;
+        } else if a == "-a" {
+            if i + 1 >= args.count { return false }
+            Reg.AttrListSet(*cfg.attrs, args[i], args[i + 1]);
+            i += 2;
+        } else {
+            return false;
+        }
+    }
+    if i >= args.count { return false }
+    cfg.prog_argc = TokenizeProgram(args[i], cfg.prog_args[:]);
+    return cfg.prog_argc > 0;
+}
