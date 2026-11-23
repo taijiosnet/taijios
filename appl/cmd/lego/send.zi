@@ -1,0 +1,40 @@
+// lego/send portnum XX...: send raw hex bytes to a Lego RCX over IR serial.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Proto :: #import "lego_proto";
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 2 {
+        Cli.PrintLine("usage: send portnum XX...");
+        return 0;
+    }
+    port := Args.Operand(0);
+    cmd: Vec(u8);
+    for i: 1..count - 1 {
+        arg := Args.Operand(i);
+        b, ok := Proto.ParseHexArg(arg);
+        if !ok {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "bad arg %\n\n", arg);
+            unused Cli.WriteAll(1, BuilderFinish(msg));
+            return 0;
+        }
+        VecPush(cmd, b);
+    }
+    serport: Vec(u8);
+    BuilderPrint(*serport, "/dev/eia%", port);
+    wfd := Io.OpenFile(BuilderFinish(serport), 1);
+    if wfd < 0 {
+        Cli.PrintLine("");
+        return 0;
+    }
+    pkt: Vec(u8);
+    Proto.EncodeRcxPacket(cmd[:], *pkt);
+    unused Io.WriteBytes(wfd, TextView(pkt[:]));
+    unused Io.CloseFile(wfd);
+    Cli.PrintLine("");
+    return 0;
+}

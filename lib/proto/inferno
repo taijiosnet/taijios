@@ -568,16 +568,7 @@ appl
 		itreplay.b
 		kill.b
 		lego
-			clock.b
-			clockface.b
-			firmdl.b
-			link.b
 			mkfile
-			rcxsend.b
-			rcxsend.m
-			send.b
-			timers.b
-			timers.m
 		limbo
 			arg.m
 			asm.b
@@ -797,16 +788,10 @@ appl
 			regpoll.b
 			runrstyx.sh
 		lego
-			clockface.b
 			clockreg.sh
-			firmdl.b
 			legolink.b
 			mkfile
-			rcxsend.b
-			rcxsend.m
 			styx.srec
-			timers.b
-			timers.m
 		mkfile
 		ns
 			mkfile

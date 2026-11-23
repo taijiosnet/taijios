@@ -1,23 +1,24 @@
 <../../../mkconfig
 
 TARG=\
-	clock.dis\
-	clockface.dis\
-	firmdl.dis\
-	link.dis\
-	rcxsend.dis\
-	send.dis\
-	timers.dis\
 
 SYSMODULES=\
-	sys.m\
-	draw.m\
-	bufio.m\
 
 MODULES=\
-	rcxsend.m\
-	timers.m\
 
 DISBIN=$ROOT/dis/lego
 
 <$ROOT/mkfiles/mkdis
+
+ZXCOMMANDS=clock clockface firmdl link send
+ZXUTIL=lego_proto.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

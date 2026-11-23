@@ -1,0 +1,38 @@
+// lego/clockface [-v] legodir: drive Lego RCX clock hands via motor/sensor files.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    idx: s32 = 0;
+    if idx < count && Args.Operand(idx) == "-v" { idx += 1 }
+    if count - idx != 1 {
+        Cli.PrintLine("usage: [-v] legodir");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    legodir := Args.Operand(idx);
+    hmpath: Vec(u8);
+    BuilderPrint(*hmpath, "%/motor/0", legodir);
+    mmpath: Vec(u8);
+    BuilderPrint(*mmpath, "%/motor/2", legodir);
+    ampath: Vec(u8);
+    BuilderPrint(*ampath, "%/motor/012", legodir);
+    hm := Io.OpenFile(BuilderFinish(hmpath), 1);
+    mm := Io.OpenFile(BuilderFinish(mmpath), 1);
+    am := Io.OpenFile(BuilderFinish(ampath), 1);
+    if hm < 0 || mm < 0 || am < 0 {
+        if hm >= 0 { unused Io.CloseFile(hm) }
+        if mm >= 0 { unused Io.CloseFile(mm) }
+        if am >= 0 { unused Io.CloseFile(am) }
+        Cli.PrintLine("cannot open motor files");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    unused Io.CloseFile(hm);
+    unused Io.CloseFile(mm);
+    unused Io.CloseFile(am);
+    return 0;
+}

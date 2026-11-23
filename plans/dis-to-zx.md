@@ -887,13 +887,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/install/wfind.dis | appl/cmd/install/wfind.b |  | - |  |
 | dis/install/wrap.dis | appl/cmd/install/wrap.b |  | - |  |
 | dis/install/wrap2list.dis | appl/cmd/install/wrap2list.b |  | - |  |
-| dis/lego/clock.dis | appl/cmd/lego/clock.b |  | - |  |
-| dis/lego/clockface.dis | appl/cmd/lego/clockface.b |  | - |  |
-| dis/lego/firmdl.dis | appl/cmd/lego/firmdl.b |  | - |  |
-| dis/lego/link.dis | appl/cmd/lego/link.b |  | - |  |
-| dis/lego/rcxsend.dis | appl/cmd/lego/rcxsend.b |  | - |  |
-| dis/lego/send.dis | appl/cmd/lego/send.b |  | - |  |
-| dis/lego/timers.dis | appl/cmd/lego/timers.b | module/timers.m | - |  |
 | dis/mpeg/decode.dis | appl/wm/mpeg/decode.b |  | - |  |
 | dis/mpeg/decode4.dis | appl/wm/mpeg/decode4.b |  | - |  |
 | dis/mpeg/fixidct.dis | appl/wm/mpeg/fixidct.b |  | - |  |

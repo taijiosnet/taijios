@@ -1,0 +1,56 @@
+// lego/firmdl portnum file: download an S-record firmware image to a Lego RCX.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Proto :: #import "lego_proto";
+
+main :: () -> s32 {
+    if Args.OperandCount() != 2 {
+        Cli.PrintLine("usage: portnum file");
+        return 0;
+    }
+    port := Args.Operand(0);
+    file := Args.Operand(1);
+    fd := Io.OpenFile(file, 0);
+    if fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "cannot open %: %\n", file, Io.LastError());
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+        return 0;
+    }
+    text: Vec(u8);
+    chunk: [4096]u8;
+    while true {
+        n := Io.ReadBytes(fd, chunk[:]);
+        if n <= 0 { break }
+        for chunk[:n] { VecPush(text, it) }
+    }
+    unused Io.CloseFile(fd);
+
+    img: Proto.FirmwareImage;
+    if !Proto.ParseFirmwareText(TextView(text[:]), *img) {
+        Cli.PrintLine(TextView(img.err));
+        return 0;
+    }
+    hdr: Vec(u8);
+    BuilderAppend(hdr, "length ");
+    Proto.AppendHex4(*hdr, cast(u32)img.length);
+    BuilderAppend(hdr, " start ");
+    Proto.AppendHex4(*hdr, img.start);
+    BuilderAppend(hdr, " \n");
+    unused Cli.WriteAll(1, BuilderFinish(hdr));
+
+    serport: Vec(u8);
+    BuilderPrint(*serport, "/dev/eia%", port);
+    ser := BuilderFinish(serport);
+    rfd := Io.OpenFile(ser, 0);
+    if rfd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "cannot read %: %\n", ser, Io.LastError());
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+        return 0;
+    }
+    unused Io.CloseFile(rfd);
+    return 0;
+}

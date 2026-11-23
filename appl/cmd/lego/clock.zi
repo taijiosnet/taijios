@@ -1,0 +1,18 @@
+// lego/clock: client for /chan/clockface.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+main :: () -> s32 {
+    fd := Io.OpenFile("/chan/clockface", 2);
+    if fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "open /chan/clockface failed: %\n", Io.LastError());
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+        unused Args.SetFailure("clockface");
+        return 1;
+    }
+    unused Io.CloseFile(fd);
+    return 0;
+}
