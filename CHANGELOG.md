@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Snake only as ZX and remove its Dis version.
+
 - Open Inferno images and GIF pictures in the ZX image viewer, and remove the Dis viewer.
 
 - Ship the Directory Browser only as ZX and remove its Dis version.

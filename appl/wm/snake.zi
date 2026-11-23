@@ -1,0 +1,214 @@
+// Port of Inferno's Snake (appl/wm/snake.b). See ../../NOTICE.
+// The arrow keys steer, p pauses until the next key and q quits. After a
+// crash the next key starts another game. `wm/snake seed.log` replays a game
+// from the score table.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Shape :: #import "kryon/shape";
+Text :: #import "kryon/text";
+Snake :: #import "snake_model";
+Rand :: #import "inferno_rand";
+Scores :: #import "score_table";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Clock :: #import "taijios_clock";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/input_protocol"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+ScoreFile :: "/lib/scores/snake"
+Width :: 274
+HeaderHeight :: 14
+Height :: 288
+// The canvas interior begins inside the header and the 2-pixel ridge.
+OriginX :: 2
+OriginY :: 16
+CrashPause :: 750
+
+grey: Color = .{221, 221, 221, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{173, 173, 173, 255};
+blue: Color = .{0, 0, 204, 255};
+red: Color = .{255, 0, 0, 255};
+yellow: Color = .{255, 255, 0, 255};
+black: Color = .{0, 0, 0, 255};
+
+random: Rand.Random;
+game: Snake.Game;
+table: Scores.Table;
+high: s32;
+has_high: bool;
+replaying: bool;
+replay: Snake.Replay;
+replay_seed: s32;
+next_tick: s64;
+crashed_at: s64 = -1;
+absorbed: bool;
+user_bytes: [256]u8;
+
+NewGame :: (replay_game: bool, now: s64) {
+    if table.ready {
+        best, ok := Scores.Best(table)
+        if ok { high = best }
+    }
+    Snake.Start(*game, *random, replay_seed, replay_game)
+    next_tick = now + Snake.TickMillis
+    crashed_at = -1
+    absorbed = false
+}
+
+Crashed :: (now: s64) {
+    crashed_at = now
+    if !table.ready || replaying { return }
+    Snake.FinishLog(*game)
+    digits: [24]u8
+    record: Vec(u8)
+    defer VecFree(record)
+    unused BuilderAppend(record, FormatInteger(cast(s64)game.seed, digits[:]))
+    unused BuilderAppend(record, ".")
+    unused BuilderAppend(record, TextView(game.log[:]))
+    unused IO.Write(1, TextView(record[:]))
+    unused IO.Write(1, "\n")
+    unused BuilderAppend(record, " ")
+    Snake.BoardText(*game, *record)
+    unused Scores.Set(table, game.score, TextView(record[:]))
+}
+
+Quit :: () {
+    Surface.Close()
+}
+
+TakeKeys :: (session: Session) {
+    key := KeyboardTake(session)
+    if key == KeyUp { Snake.Press(*game, Snake.UpKey) }
+    else if key == KeyDown { Snake.Press(*game, Snake.DownKey) }
+    else if key == KeyLeft { Snake.Press(*game, Snake.LeftKey) }
+    else if key == KeyRight { Snake.Press(*game, Snake.RightKey) }
+    while true {
+        rune := TypedCodepointTake(session)
+        if rune <= 0 { break }
+        Snake.Press(*game, rune)
+    }
+}
+
+Advance :: (now: s64) {
+    if replaying {
+        // Replays run as fast as the Dis version's sys->sleep(0) allowed.
+        for step: 0..63 {
+            if game.over { return }
+            event, key := Snake.ReplayNext(*replay)
+            if event == .ReplayEnd { return }
+            if event == .ReplayKey {
+                if Snake.Key(*game, key) { Quit(); return }
+            } else if Snake.Tick(*game, *random) {
+                Crashed(now)
+            }
+        }
+        return
+    }
+    if game.over {
+        if now - crashed_at < CrashPause { return }
+        if !absorbed { Snake.Discard(*game); absorbed = true; return }
+        key, ok := Snake.TakeKey(*game)
+        if !ok { return }
+        if key == 113 { Quit(); return }
+        NewGame(false, now)
+        return
+    }
+    if game.accepting {
+        key, ok := Snake.TakeKey(*game)
+        if ok && Snake.Key(*game, key) { Quit(); return }
+    }
+    if game.paused { next_tick = now + Snake.TickMillis; return }
+    if now < next_tick { return }
+    next_tick = now + Snake.TickMillis
+    if Snake.Tick(*game, *random) { Crashed(now) }
+}
+
+Ridge :: (session: Session, key: u64, x: float32, y: float32, width: float32, height: float32) {
+    Box.Draw(session, .{.key = key, .bounds = .{x, y, width, 1.0}, .fill = light})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x, y, 1.0, height}, .fill = light})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x + 1.0, y + 1.0, width - 2.0, 1.0}, .fill = dark})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x + 1.0, y + 1.0, 1.0, height - 2.0}, .fill = dark})
+    Box.Draw(session, .{.key = key + 4, .bounds = .{x + 1.0, y + height - 2.0, width - 2.0, 1.0}, .fill = light})
+    Box.Draw(session, .{.key = key + 5, .bounds = .{x + width - 2.0, y + 1.0, 1.0, height - 2.0}, .fill = light})
+    Box.Draw(session, .{.key = key + 6, .bounds = .{x, y + height - 1.0, width, 1.0}, .fill = dark})
+    Box.Draw(session, .{.key = key + 7, .bounds = .{x + width - 1.0, y, 1.0, height}, .fill = dark})
+}
+
+// A Tk oval: the fill inside a 1-pixel black outline.
+Oval :: (session: Session, key: u64, cell: s32, inset: float32, fill: Color) {
+    x := cast(float32)(OriginX + (cell % Snake.Columns) * Snake.CellSize) + 4.5
+    y := cast(float32)(OriginY + (cell / Snake.Columns) * Snake.CellSize) + 4.5
+    Shape.Circle(session, .{.key = key, .center = .{x, y}, .radius = 4.5 + inset, .fill = black})
+    Shape.Circle(session, .{.key = key + 4096, .center = .{x, y}, .radius = 3.5 + inset, .fill = fill})
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    now := Clock.Millis()
+    TakeKeys(session)
+    Advance(now)
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, cast(float32)Width, cast(float32)Height}, .fill = grey})
+    digits: [24]u8
+    label: Vec(u8)
+    defer VecFree(label)
+    if table.ready {
+        unused BuilderAppend(label, "High: ")
+        unused BuilderAppend(label, FormatInteger(cast(s64)high, digits[:]))
+        Text.Draw(session, .{.key = 2, .bounds = .{3.0, 0.0, 130.0, cast(float32)HeaderHeight},
+            .text = TextView(label[:]), .size = 12})
+    }
+    score: Vec(u8)
+    defer VecFree(score)
+    unused BuilderAppend(score, "Score: ")
+    unused BuilderAppend(score, FormatInteger(cast(s64)game.score, digits[:]))
+    Text.Draw(session, .{.key = 3, .bounds = .{137.0, 0.0, 134.0, cast(float32)HeaderHeight},
+        .text = TextView(score[:]), .size = 12, .align = .TextAlignEnd})
+    Ridge(session, 4, 0.0, cast(float32)HeaderHeight, cast(float32)Width, cast(float32)(Height - HeaderHeight))
+
+    for index: 0..game.item_count-1 {
+        item := game.items[index]
+        key := cast(u64)(16 + index)
+        if item.kind == Snake.ItemRectangle {
+            Box.Draw(session, .{.key = key, .bounds = .{
+                cast(float32)(OriginX + (item.cell % Snake.Columns) * Snake.CellSize),
+                cast(float32)(OriginY + (item.cell / Snake.Columns) * Snake.CellSize),
+                cast(float32)Snake.CellSize, cast(float32)Snake.CellSize}, .fill = blue})
+        } else if item.kind == Snake.ItemFood {
+            Oval(session, key, item.cell, 2.0, red)
+        } else {
+            Oval(session, key, item.cell, 5.0, yellow)
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    user := ""
+    fd := IO.Open("/dev/user", 0)
+    if fd >= 0 {
+        read := IO.Read(fd, user_bytes[:])
+        if read > 0 { user = TextView(user_bytes[:read]) }
+        unused IO.Close(fd)
+    }
+    table = Scores.Open(ScoreFile, user)
+    now := Clock.Millis()
+    if Args.OperandCount() > 0 {
+        opened, seed := Snake.ReplayOpen(Args.Operand(0))
+        replay = opened
+        replay_seed = seed
+        replaying = true
+        NewGame(true, now)
+    } else {
+        NewGame(false, now)
+    }
+    return Surface.RunRetained(.{.title = "Snake", .width = Width, .height = Height}, Draw, 20)
+}

@@ -1,0 +1,18 @@
+// Inferno's Rand module (appl/lib/rand.b), which the games use for their
+// boards and replays: rsalt = rsalt * 1103515245 + 12345. See ../../NOTICE.
+
+Random :: struct {
+    salt: u64
+}
+
+Seed :: (random: *Random, seed: s32) {
+    random.salt = cast(u64)cast(s64)seed
+}
+
+// A value from 0 to modulus - 1, or 0 when modulus is not positive.
+Next :: (random: *Random, modulus: s32) -> s32 {
+    random.salt = random.salt * cast(u64)1103515245 + cast(u64)12345
+    if modulus <= 0 { return 0 }
+    mask: u64 = 9223372036854775807
+    return cast(s32)(((random.salt & mask) >> cast(u64)10) % cast(u64)modulus)
+}

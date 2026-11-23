@@ -389,6 +389,18 @@ heap in a private Xvfb display.
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/appl/cmd/tcltk" python3 -u appl/wm/kryon_apps_test.py
 ```
 
+### Play the ZX games
+
+`(cd appl/wm && mk install-kryon-zx)` also installs the games rewritten from
+their Limbo versions. Snake keeps the arrow keys, `p` to pause and `q` to quit,
+records each crash with its replay in `/lib/scores/snake`, and replays a
+recorded game with `wm/snake seed.log`. Its test compares the rules and the
+window with games recorded from the Dis Snake.
+
+```sh
+python3 -u appl/wm/snake_zx_test.py
+```
+
 ### Build and run ZX Task Manager
 
 Build the guest target in the canonical Task Manager repository and install its

@@ -45,7 +45,6 @@ TARG=\
 	sendmail.dis\
 	sh.dis\
 	smenu.dis\
-	snake.dis\
 	sweeper.dis\
 	task.dis\
 	telnet.dis\
@@ -152,6 +151,14 @@ install-date-zx:V: $DISBIN/date.zx
 install-stopwatch-zx:V: $DISBIN/stopwatch.zx
 
 install-kryon-zx:V: $DISBIN/clock.zx $DISBIN/stopwatch.zx $DISBIN/counter.zx $DISBIN/view.zx install-colors-zx install-date-zx
+
+# Desktop games and tools rewritten from their Limbo versions.
+WMAPP_HOSTS=--module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock
+
+snake.zx: snake.zi snake_model.zi score_table.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project $WMAPP_HOSTS --entry snake:main -o $target snake.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

@@ -1,0 +1,162 @@
+// Inferno's score table (appl/lib/scoretable.b) for the guest games: one
+// "user score other..." line per entry, best first, at most ten kept.
+// See ../../NOTICE.
+IO :: #import "taijios_io";
+#import "std/vec"
+#import "std/number_text"
+
+MaxScores :: 10
+// Inferno open modes. The guest file service takes no OTRUNC, and create
+// truncates an existing file, so the table is rewritten through Create.
+ReadMode :: 0
+WriteMode :: 1
+ReadWrite :: 2
+
+FileLimit :: 65536
+
+// One parsed line; user and other are byte ranges in the file text.
+Score :: struct {
+    user_start: s64
+    user_end: s64
+    score: s32
+    other_start: s64
+    other_end: s64
+}
+
+Table :: struct {
+    path: string
+    user: string
+    ready: bool
+}
+
+// Open the file read-write, or create it, as scoretable->init does.
+Open :: (path: string, user: string) -> Table {
+    table: Table = .{path, user, false}
+    fd := IO.Open(path, ReadWrite)
+    if fd < 0 { fd = IO.Create(path, ReadWrite, 438) }
+    if fd < 0 { return table }
+    unused IO.Close(fd)
+    table.ready = true
+    return table
+}
+
+ReadAll :: (path: string, bytes: *Vec(u8)) -> bool {
+    fd := IO.Open(path, ReadMode)
+    if fd < 0 { return false }
+    defer { unused IO.Close(fd) }
+    chunk: [4096]u8
+    while bytes.count < FileLimit {
+        count := IO.Read(fd, chunk[:])
+        if count < 0 { return false }
+        if count == 0 { break }
+        unused BuilderAppend(bytes.*, TextView(chunk[:count]))
+    }
+    return true
+}
+
+Space :: (byte: u8) -> bool {
+    return byte == cast(u8)32 || byte == cast(u8)9 || byte == cast(u8)10
+}
+
+// Tokenize text[start:end] like sys->tokenize(s, " \t\n"). The score keeps
+// Limbo's `int` conversion of its leading digits; other spans the rest.
+ParseLine :: (text: string, start: s64, end: s64, score: *Score) -> bool {
+    count: s32 = 0
+    at := start
+    digits_start: s64 = 0
+    digits_end: s64 = 0
+    score.other_start = end
+    score.other_end = end
+    while at < end {
+        while at < end && Space(text[at]) { at += 1 }
+        if at >= end { break }
+        first := at
+        while at < end && !Space(text[at]) { at += 1 }
+        if count == 0 {
+            score.user_start = first
+            score.user_end = at
+        } else if count == 1 {
+            digits_start = first
+            digits_end = at
+        } else {
+            if count == 2 { score.other_start = first }
+            score.other_end = at
+        }
+        count += 1
+    }
+    if count < 2 { return false }
+    value: s64 = 0
+    negative := text[digits_start] == cast(u8)45
+    if negative { digits_start += 1 }
+    while digits_start < digits_end && text[digits_start] >= cast(u8)48 && text[digits_start] <= cast(u8)57 {
+        value = value * 10 + cast(s64)(text[digits_start] - cast(u8)48)
+        digits_start += 1
+    }
+    if negative { value = -value }
+    score.score = cast(s32)value
+    return true
+}
+
+// Every score in file order.
+Parse :: (text: string, scores: *Vec(Score)) {
+    start: s64 = 0
+    for at: cast(s64)0..text.count {
+        if at < text.count && text[at] != cast(u8)10 { continue }
+        score: Score
+        if at > start && ParseLine(text, start, at, *score) { VecPush(scores.*, score) }
+        start = at + 1
+    }
+}
+
+// The best score, which the games show as High.
+Best :: (table: Table) -> (score: s32, ok: bool) {
+    bytes: Vec(u8)
+    defer VecFree(bytes)
+    scores: Vec(Score)
+    defer VecFree(scores)
+    if !table.ready || !ReadAll(table.path, *bytes) { return 0, false }
+    Parse(TextView(bytes[:]), *scores)
+    if scores.count == 0 { return 0, false }
+    return scores[0].score, true
+}
+
+Line :: (out: *Vec(u8), user: string, score: s32, other: string) {
+    digits: [24]u8
+    unused BuilderAppend(out.*, user)
+    unused BuilderAppend(out.*, " ")
+    unused BuilderAppend(out.*, FormatInteger(cast(s64)score, digits[:]))
+    unused BuilderAppend(out.*, " ")
+    unused BuilderAppend(out.*, other)
+    unused BuilderAppend(out.*, "\n")
+}
+
+// Insert before the first lower score, keep the best ten and return the rank.
+Set :: (table: Table, score: s32, other: string) -> s32 {
+    bytes: Vec(u8)
+    defer VecFree(bytes)
+    scores: Vec(Score)
+    defer VecFree(scores)
+    if table.ready && ReadAll(table.path, *bytes) { Parse(TextView(bytes[:]), *scores) }
+    text := TextView(bytes[:])
+    out: Vec(u8)
+    defer VecFree(out)
+    rank: s32 = -1
+    written: s32 = 0
+    for index: cast(s64)0..scores.count {
+        if rank < 0 && (index == scores.count || score > scores[index].score) {
+            rank = cast(s32)index
+            if written < MaxScores { Line(*out, table.user, score, other); written += 1 }
+        }
+        if index < scores.count && written < MaxScores {
+            entry := scores[index]
+            Line(*out, text[entry.user_start:entry.user_end], entry.score, text[entry.other_start:entry.other_end])
+            written += 1
+        }
+    }
+    fd := IO.Create(table.path, WriteMode, 438)
+    if fd >= 0 {
+        unused IO.Write(fd, TextView(out[:]))
+        unused IO.Close(fd)
+    }
+    return rank
+}

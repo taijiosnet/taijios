@@ -1,0 +1,321 @@
+// The rules of Inferno's Snake (appl/wm/snake.b): a wrapping 30x30 board,
+// Inferno's Rand generator, one key per tick and the replay log that the score
+// table keeps. The canvas items are kept in creation order, as Tk draws them.
+// See ../../NOTICE.
+#import "std/vec"
+#import "std/number_text"
+#import "std/rune_text"
+Utf8 :: #import "std/utf8";
+Rand :: #import "inferno_rand";
+
+Columns :: 30
+Rows :: 30
+Cells :: 900
+// Tk's default canvas is 270 pixels high, so each cell is 270 / 30.
+CellSize :: 9
+TickMillis :: 100
+
+Empty :: 0
+Body :: 1
+Food :: 2
+Crash :: 3
+
+// Runes from module/keyboard.m.
+UpKey :: 57362
+DownKey :: 57363
+LeftKey :: 57364
+RightKey :: 57365
+
+// Tk queues at most this many unread channel messages (include/tk.h).
+QueueLimit :: 100
+
+Point :: struct {
+    x: s32
+    y: s32
+}
+
+ItemRectangle :: 0
+ItemFood :: 1
+ItemCrash :: 2
+
+Item :: struct {
+    kind: s32
+    cell: s32
+}
+
+Game :: struct {
+    board: [Cells]u8
+    items: [Cells * 2 + 1]Item
+    item_count: s32
+    body: [Cells + 1]Point
+    length: s32
+    direction: Point
+    old_direction: Point
+    last_key: s32
+    seed: s32
+    score: s32
+    grow: bool
+    paused: bool
+    accepting: bool
+    over: bool
+    crash: Point
+    ticks: s32
+    log: Vec(u8)
+    queue: [QueueLimit]s32
+    queue_head: s32
+    queue_count: s32
+}
+
+CellIndex :: (point: Point) -> s32 {
+    return point.y * Columns + point.x
+}
+
+AddItem :: (game: *Game, kind: s32, cell: s32) {
+    if game.item_count >= cast(s32)game.items.count { return }
+    game.items[game.item_count] = .{kind, cell}
+    game.item_count += 1
+}
+
+// Delete every canvas item tagged with the cell, like `.c delete b.x.y`.
+DeleteItems :: (game: *Game, cell: s32) {
+    kept: s32 = 0
+    for index: 0..game.item_count-1 {
+        if game.items[index].cell == cell && game.items[index].kind != ItemCrash { continue }
+        game.items[kept] = game.items[index]
+        kept += 1
+    }
+    game.item_count = kept
+}
+
+Make :: (game: *Game, point: Point) -> bool {
+    cell := CellIndex(point)
+    if game.board[cell] == cast(u8)Body { return false }
+    AddItem(game, ItemRectangle, cell)
+    game.board[cell] = cast(u8)Body
+    return true
+}
+
+MakeFood :: (game: *Game, point: Point) -> bool {
+    cell := CellIndex(point)
+    if game.board[cell] == cast(u8)Body { return false }
+    AddItem(game, ItemFood, cell)
+    game.board[cell] = cast(u8)Food
+    return true
+}
+
+PlaceFood :: (game: *Game, random: *Rand.Random) {
+    while true {
+        x := Rand.Next(random, Columns)
+        y := Rand.Next(random, Rows)
+        if MakeFood(game, .{x, y}) { return }
+    }
+}
+
+// Start a game. A replay supplies its seed; otherwise the shared generator
+// chooses one, as the Dis version did with rand->rand(16r7fffffff).
+Start :: (game: *Game, random: *Rand.Random, replay_seed: s32, replay: bool) {
+    seed := Rand.Next(random, 2147483647)
+    if replay { seed = replay_seed }
+    Rand.Seed(random, seed)
+    VecClear(game.log)
+    for cell: 0..Cells-1 { game.board[cell] = cast(u8)Empty }
+    game.item_count = 0
+    game.score = 0
+    game.ticks = 0
+    game.grow = false
+    game.paused = false
+    game.over = false
+    game.crash = .{}
+    game.queue_head = 0
+    game.queue_count = 0
+    game.seed = seed
+    game.direction = .{1, 0}
+    game.old_direction = game.direction
+    game.last_key = 114
+    game.accepting = true
+    game.length = 5
+    for i: cast(s32)0..4 {
+        game.body[i] = .{Columns / 2 + i, Rows / 2}
+        unused Make(game, game.body[i])
+    }
+    PlaceFood(game, random)
+}
+
+// Queue a key as Tk's `send` does; a full queue drops it.
+Press :: (game: *Game, key: s32) {
+    if game.queue_count >= QueueLimit { return }
+    game.queue[(game.queue_head + game.queue_count) % QueueLimit] = key
+    game.queue_count += 1
+}
+
+Discard :: (game: *Game) {
+    game.queue_head = 0
+    game.queue_count = 0
+}
+
+TakeKey :: (game: *Game) -> (key: s32, ok: bool) {
+    if game.queue_count == 0 { return 0, false }
+    key := game.queue[game.queue_head]
+    game.queue_head = (game.queue_head + 1) % QueueLimit
+    game.queue_count -= 1
+    return key, true
+}
+
+// Handle one key while the game accepts one. It returns true for q (quit).
+Key :: (game: *Game, key: s32) -> bool {
+    if game.paused { game.paused = false }
+    game.accepting = false
+    next := game.direction
+    if key == UpKey { next = .{0, -1} }
+    else if key == DownKey { next = .{0, 1} }
+    else if key == LeftKey { next = .{-1, 0} }
+    else if key == RightKey { next = .{1, 0} }
+    else if key == 113 { return true }
+    else if key == 112 {
+        game.paused = true
+        game.accepting = true
+    }
+    same := next.x == game.direction.x && next.y == game.direction.y
+    reverse := next.x == -game.direction.x && next.y == -game.direction.y
+    if !same && !reverse {
+        game.last_key = key
+        game.direction = next
+    }
+    return false
+}
+
+AppendCount :: (game: *Game, count: s32) {
+    digits: [24]u8
+    unused BuilderAppend(game.log, FormatInteger(cast(s64)count, digits[:]))
+}
+
+AppendRune :: (game: *Game, rune: s32) {
+    encoded: [4]u8
+    count := EncodeRune(rune, encoded[:])
+    unused BuilderAppend(game.log, TextView(encoded[:count]))
+}
+
+// One tick of the game. It returns true when the snake ran into itself.
+Tick :: (game: *Game, random: *Rand.Random) -> bool {
+    if game.over || game.paused { return false }
+    if game.old_direction.x != game.direction.x || game.old_direction.y != game.direction.y {
+        AppendCount(game, game.ticks)
+        AppendRune(game, game.last_key)
+        game.ticks = 0
+        game.old_direction = game.direction
+    }
+    game.ticks += 1
+    if game.grow {
+        game.length += 1
+        game.grow = false
+    } else {
+        tail := CellIndex(game.body[0])
+        game.board[tail] = cast(u8)Empty
+        DeleteItems(game, tail)
+        for i: 0..game.length-2 { game.body[i] = game.body[i + 1] }
+    }
+    head := game.body[game.length - 2]
+    next: Point = .{(head.x + game.direction.x + Columns) % Columns, (head.y + game.direction.y + Rows) % Rows}
+    game.body[game.length - 1] = next
+    cell := CellIndex(next)
+    food := game.board[cell] == cast(u8)Food
+    game.accepting = true
+    if !Make(game, next) {
+        AddItem(game, ItemCrash, cell)
+        game.crash = next
+        game.over = true
+        return true
+    }
+    if food {
+        game.score += 1
+        game.grow = true
+        PlaceFood(game, random)
+    }
+    return false
+}
+
+// The score table record of a crashed game: the log ends with the ticks
+// since the last turn and the board marks the crash.
+FinishLog :: (game: *Game) {
+    game.board[CellIndex(game.crash)] = cast(u8)Crash
+    AppendCount(game, game.ticks)
+}
+
+// board2s: "30.30." and one digit per cell, column by column within a row.
+BoardText :: (game: *Game, out: *Vec(u8)) {
+    unused BuilderAppend(out.*, "30.30.")
+    digit: [1]u8
+    for y: cast(s32)0..Rows-1 {
+        for x: cast(s32)0..Columns-1 {
+            digit[0] = cast(u8)48 + game.board[y * Columns + x]
+            unused BuilderAppend(out.*, TextView(digit[:]))
+        }
+    }
+}
+
+// A replay is "seed.log": the log alternates tick counts and key runes.
+Replay :: struct {
+    text: string
+    at: s64
+    ticks: s32
+    key: s32
+    finished: bool
+}
+
+ReplayEvent :: enum {
+    ReplayTick :: 0
+    ReplayKey :: 1
+    ReplayEnd :: 2
+}
+
+// Limbo's `int replay`: leading digits, then everything after the first dot.
+ReplayOpen :: (text: string) -> (replay: Replay, seed: s32) {
+    seed: s64 = 0
+    at: s64 = 0
+    negative := at < text.count && text[at] == cast(u8)45
+    if negative { at += 1 }
+    while at < text.count && text[at] >= cast(u8)48 && text[at] <= cast(u8)57 {
+        seed = seed * 10 + cast(s64)(text[at] - cast(u8)48)
+        at += 1
+    }
+    if negative { seed = -seed }
+    dot: s64 = 0
+    while dot < text.count && text[dot] != cast(u8)46 { dot += 1 }
+    replay: Replay
+    if dot < text.count { replay.text = text[dot + 1:] } else { replay.text = text }
+    replay.ticks = -1
+    return replay, cast(s32)seed
+}
+
+// The next event in the order replayproc sent them, then one more tick.
+ReplayNext :: (replay: *Replay) -> (event: ReplayEvent, key: s32) {
+    if replay.ticks > 0 {
+        replay.ticks -= 1
+        return .ReplayTick, 0
+    }
+    if replay.finished { return .ReplayEnd, 0 }
+    if replay.ticks == 0 && replay.key != 0 {
+        key := replay.key
+        replay.key = 0
+        replay.ticks = -1
+        return .ReplayKey, key
+    }
+    if replay.at >= replay.text.count && replay.ticks == 0 {
+        replay.finished = true
+        return .ReplayTick, 0
+    }
+    count: s32 = 0
+    while replay.at < replay.text.count && replay.text[replay.at] >= cast(u8)48 && replay.text[replay.at] <= cast(u8)57 {
+        count = count * 10 + cast(s32)(replay.text[replay.at] - cast(u8)48)
+        replay.at += 1
+    }
+    replay.ticks = count
+    if replay.at < replay.text.count {
+        unit := Utf8.Decode(replay.text, cast(s32)replay.at)
+        replay.key = cast(s32)unit.value
+        replay.at = cast(s64)unit.after
+    } else {
+        replay.key = 0
+    }
+    return ReplayNext(replay)
+}

@@ -1,0 +1,91 @@
+// Replays the games recorded from the Dis Snake (snake_games.expected) through
+// the Ziran rules and compares the final boards and scores.
+Snake :: #import "snake_model";
+Rand :: #import "inferno_rand";
+Fixture :: #import "snake_games_fixture";
+#import "std/vec"
+
+Field :: (line: string, index: s32) -> string {
+    at: s64 = 0
+    for field: 0..index {
+        start := at
+        while at < line.count && line[at] != cast(u8)32 { at += 1 }
+        if field == index { return line[start:at] }
+        at += 1
+    }
+    return ""
+}
+
+Number :: (text: string) -> s32 {
+    value: s32 = 0
+    for i: cast(s64)0..text.count-1 { value = value * 10 + cast(s32)(text[i] - cast(u8)48) }
+    return value
+}
+
+// Play a replay as replayproc fed it to the Dis game, stopping at the crash.
+Play :: (replay_text: string, game: *Snake.Game, random: *Rand.Random) {
+    replay, seed := Snake.ReplayOpen(replay_text)
+    Snake.Start(game, random, seed, true)
+    while !game.over {
+        event, key := Snake.ReplayNext(*replay)
+        if event == .ReplayEnd { return }
+        if event == .ReplayKey {
+            if game.accepting { unused Snake.Key(game, key) } else { Snake.Press(game, key) }
+        } else {
+            unused Snake.Tick(game, random)
+        }
+    }
+}
+
+random: Rand.Random;
+game: Snake.Game;
+paused: Snake.Game;
+
+main :: () -> s32 {
+    games: s32 = 0
+    text := Fixture.Games
+    start: s64 = 0
+    joined: Vec(u8)
+    defer VecFree(joined)
+    for at: cast(s64)0..text.count-1 {
+        if text[at] != cast(u8)10 { continue }
+        piece := text[start:at]
+        start = at + 1
+        // The generated fixture continues a long line after a trailing backslash.
+        if piece.count > 0 && piece[piece.count-1] == cast(u8)92 {
+            unused BuilderAppend(joined, piece[:piece.count-1])
+            continue
+        }
+        unused BuilderAppend(joined, piece)
+        defer VecClear(joined)
+        line := TextView(joined[:])
+        if line.count == 0 || line[0] == cast(u8)35 { continue }
+        Play(Field(line, 1), *game, *random)
+        if game.over { game.board[Snake.CellIndex(game.crash)] = cast(u8)Snake.Crash }
+        board: Vec(u8)
+        defer VecFree(board)
+        Snake.BoardText(*game, *board)
+        if TextView(board[:]) != Field(line, 2) || game.score != Number(Field(line, 0)) {
+            print("game % differs: score %\n", games + 1, game.score)
+            return 1
+        }
+        games += 1
+    }
+    // A session's first game draws the generator's first seed, 12, like the replay 12.0p.
+    fresh: Rand.Random
+    Snake.Start(*game, *fresh, 0, false)
+    if game.seed != 12 || game.item_count != 6 { return 2 }
+    Play("12.0p", *paused, *random)
+    if !paused.paused || paused.items[5].cell != game.items[5].cell { return 3 }
+    // A reversal is ignored, a turn is logged with its tick count and q quits.
+    if Snake.Key(*game, Snake.LeftKey) || game.direction.x != 1 { return 4 }
+    unused Snake.Tick(*game, *fresh)
+    if Snake.Key(*game, Snake.UpKey) || game.direction.y != -1 { return 5 }
+    unused Snake.Tick(*game, *fresh)
+    // The log holds the tick count and the Up rune U+E012 in UTF-8.
+    log := TextView(game.log[:])
+    if log.count != 4 || log[0] != cast(u8)49 || log[1] != cast(u8)238 || log[2] != cast(u8)128 ||
+       log[3] != cast(u8)146 || !Snake.Key(*game, 113) { return 6 }
+    print("Snake replayed % recorded Dis games to the same boards and scores\n", games)
+    return 0
+}
