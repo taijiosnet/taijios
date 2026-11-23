@@ -9,9 +9,15 @@
 // Blank lines and lines starting with # are ignored. A file named on its own
 // line is always packed, even when a "-" line would skip it.
 //
+// The list holds no app lines. PACKROOT takes those from the preinstall
+// manifest named by its APPS argument (lib/preinstall.list in the site build),
+// so the apps the browser root ships are the apps the desktop catalog ships.
+// An app row prints `lazy PATH` or `PATH` according to its `first-run` column.
+//
 // The bundle is "TJR1", a u32 entry count, then per entry a u8 kind
 // (0 file, 1 directory), a u16 path length, the path, a u32 size and the
 // file's bytes, little-endian. site/js/taiji-emu.js unpacks it.
+#import "rootlist"
 #import "std/byte_text_linux"
 #import "std/file"
 #import "std/file_tree_linux"
@@ -22,7 +28,10 @@
 Pack :: struct {
     out: *Vec(u8)
     skips: Vec(string)
+    packed: Vec(string)
     count: s64
+    largest: s64
+    largest_path: string
 }
 
 PutU16 :: (out: *Vec(u8), value: s64) {
@@ -45,13 +54,23 @@ Entry :: (pack: *Pack, kind: u8, path: string, bytes: string) -> bool {
     return true
 }
 
+// A file reached twice, such as a root app inside the listed dis tree, is
+// packed once: the guest unpacks entries into the same path.
 AddFile :: (pack: *Pack, path: string) -> bool {
+    for pack.packed {
+        if it == path { return true }
+    }
     bytes, ok := ReadEntireFile(path)
     if !ok || !Entry(pack, 0, path, bytes) {
         out: Vec(u8)
         BuilderPrint(*out, "rootpack: cannot pack %\n", path)
         unused PrintError(BuilderFinish(out))
         return false
+    }
+    VecPush(pack.packed, TextDetach(TextCopy(path)))
+    if bytes.count > pack.largest {
+        pack.largest = bytes.count
+        pack.largest_path = TextDetach(TextCopy(path))
     }
     return true
 }
@@ -83,19 +102,46 @@ AddTree :: (pack: *Pack, directory: string) -> bool {
 
 #scope_export
 // Packs the entries LIST names into BUNDLE and returns how many it packed;
-// LAZY receives the paths of "lazy" lines.
-PackRoot :: (list: string, bundle: *Vec(u8), lazy: *Vec(string)) -> (files: s64, ok: bool) {
+// LAZY receives the paths of "lazy" lines. The app rows APPS holds are packed
+// as if LIST had named them, after LIST's own lines. LARGEST names the biggest
+// packed file, so a build over its budget can say what grew.
+PackRoot :: (list: string, apps: string, bundle: *Vec(u8), lazy: *Vec(string),
+             largest_path: *Vec(u8)) -> (files: s64, ok: bool) {
     text, read := ReadEntireFile(list)
     if !read { return 0, false }
+    app_lines: Vec(u8)
+    app_problem: Vec(u8)
+    rows, listed := RootLines(apps, *app_lines, *app_problem)
+    if !listed {
+        out: Vec(u8)
+        if app_problem.count != 0 {
+            BuilderAppend(out, "rootpack: ")
+            BuilderAppend(out, BuilderFinish(app_problem))
+        } else {
+            BuilderAppend(out, "rootpack: cannot read ")
+            BuilderAppend(out, apps)
+            BuilderAppend(out, "\n")
+        }
+        unused PrintError(BuilderFinish(out))
+        return 0, false
+    }
+    unused rows
     pack: Pack
     pack.out = bundle
     BuilderAppend(<<bundle, "TJR1")
     PutU32(bundle, 0)
     lines := TextLines(text)
+    app_text: Text = TextFromBuilder(app_lines)
+    app_views := TextLines(TextView(app_text))
     for lines {
         line := TextTrim(it)
         if line.count > 2 && line[0:2] == "- " { VecPush(pack.skips, TextTrim(line[2:])) }
         // A file left on the server is never also packed.
+        if TextHasPrefix(line, "lazy ") { VecPush(pack.skips, TextTrim(line[5:])) }
+    }
+    for app_views {
+        line := TextTrim(it)
+        if line.count == 0 || line[0] == #char "#" { continue }
         if TextHasPrefix(line, "lazy ") { VecPush(pack.skips, TextTrim(line[5:])) }
     }
     for lines {
@@ -115,7 +161,17 @@ PackRoot :: (list: string, bundle: *Vec(u8), lazy: *Vec(string)) -> (files: s64,
             return 0, false
         }
     }
+    for app_views {
+        line := TextTrim(it)
+        if line.count == 0 || line[0] == #char "#" { continue }
+        if TextHasPrefix(line, "lazy ") {
+            VecPush(<<lazy, TextDetach(TextCopy(TextTrim(line[5:]))))
+            continue
+        }
+        if !AddFile(*pack, line) { return 0, false }
+    }
     count := pack.count
     for 0..3 { bundle.*[4 + it] = cast(u8)((count >> (8 * it)) & 255) }
+    BuilderAppend(<<largest_path, pack.largest_path)
     return count, true
 }

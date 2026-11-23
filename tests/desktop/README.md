@@ -162,3 +162,26 @@ the manifest may name an app before it ships. The test asserts that every
 present row's `Exec` and `TryExec` name its bundle, that an absent row emits
 nothing, that desktop IDs stay stable, and that a second run is byte-identical.
 It never writes outside the output root it is given.
+
+`preinstall_test.py` checks the bundles the same manifest names:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 tests/desktop/preinstall_test.py lib/preinstall.list
+```
+
+It reads each bundle's ZX container directly: the header must be format
+revision 28, and every `abi` line in the host-interface section must name a
+capability module and function that TaijiOS grants. The granted set is copied
+from `zxbindings` in `emu/port/zx.c` and listed in
+[`plans/ecosystem-preinstall.md`](../../plans/ecosystem-preinstall.md), Section
+A. Capability module names match either exactly or as `p<16 hex>_<module>`,
+which is how package builds qualify a module. A row whose `size` and `sha256`
+are empty and whose bundle is absent is skipped, matching the catalog
+generator; a present bundle must match the size the manifest records. The
+default run also builds the negative fixtures: a `guest_window` bundle that
+must be refused, a copy rewritten to revision 27 that must be refused, a
+missing path, and a `first-run` value other than `root` or `lazy`. It needs
+`ziran` on `PATH` for those; `--no-fixtures` skips them.
+
+`plans/ecosystem-preinstall.md` is the reference for the manifest format, the
+granted capability set and the first-download budget the site build enforces.

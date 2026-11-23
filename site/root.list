@@ -1,21 +1,28 @@
 # Guest files in the browser's root bundle (site/tools/rootpack.zi).
-# The Rill desktop, its window manager, every Dis program and the ZX
-# commands load at boot. The large graphical ZX applications below stay on
-# the server until first opened.
+#
+# This file names the guest root's structure and the ZX libraries the emulator
+# installs. It does not name app bundles: those come from lib/preinstall.list,
+# whose first-run column decides whether a bundle ships in the first download
+# (root) or stays on the server until first open (lazy). Rill and the desktop
+# panel are root; every other application is lazy.
+#
+# `- .zx` keeps the Dis tree from packing ZX bundles as a side effect of the
+# directory walk. The porting lanes build app bundles into dis/, and packing
+# them all would put tens of megabytes into the first download. A bundle
+# reaches the guest root only by being named in the manifest, and the emulator's
+# own libraries by being named below.
 
 dis
 - .sbl
+- .zx
 
-lazy dis/wm/about.zx
-lazy dis/wm/clock.zx
-lazy dis/wm/counter.zx
-lazy dis/wm/stopwatch.zx
-lazy dis/wm/memory.zx
-lazy dis/wm/logwindow.zx
-lazy dis/wm/dir.zx
-lazy dis/wm/taskmgr.zx
-lazy dis/wm/view.zx
-lazy dis/wm/explorer.zx
+# The three ZX libraries emu/port/zx.c installs for the window manager.
+dis/lib/window_chrome.zx
+dis/lib/winplace.zx
+dis/lib/wm_policy.zx
+
+# Dis programs served on first open. They are not catalog applications, so the
+# preinstall manifest does not describe them.
 lazy dis/tclsh.zx
 lazy dis/tcltk.zx
 lazy dis/coffee.zx

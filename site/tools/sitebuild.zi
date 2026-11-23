@@ -1,12 +1,19 @@
 // sitebuild: assembles taijios.net in OUTPUT from site/ and the web emulator.
 //
-//   sitebuild OUTPUT EMULATOR_DIR
+//   sitebuild OUTPUT EMULATOR_DIR [--preinstall MANIFEST]
 //
 // Run it from the TaijiOS root. The pages, styles, scripts and images in
 // site/ are copied as they are. OUTPUT/emu receives the emulator script, the
-// gzip-compressed wasm, the guest root bundle packed from site/root.list,
-// and manifest.json with each file's size and SHA-256. The build fails when
-// the published text mentions the retired Plan 9 fork or its v86 image.
+// gzip-compressed wasm, the guest root bundle packed from site/root.list and
+// the preinstall manifest's app lines, and manifest.json with each file's size
+// and SHA-256. The build fails when the published text mentions the retired
+// Plan 9 fork or its v86 image.
+//
+// It also measures the first download and refuses to publish past a budget:
+// root.tjr.gz alone may be at most ROOT_BUDGET bytes and root.tjr.gz plus the
+// wasm, the emulator script and the page at most FIRST_BUDGET bytes. Both are
+// printed on every run, and the failure names the file that grew so the fix
+// goes to the largest contributor instead of the budget.
 #import "retired"
 #import "rootpack"
 #import "std/byte_text_linux"
@@ -16,6 +23,10 @@
 #import "std/process_run_linux"
 #import "std/stdio_linux"
 #import "std/text_tools"
+
+// 6.5 MB for the guest root and 8 MB for everything the first page fetches.
+ROOT_BUDGET :: 6815744
+FIRST_BUDGET :: 8388608
 
 #scope_file
 Join :: (a: string, b: string) -> string {
@@ -64,11 +75,53 @@ ManifestEntry :: (out: *Vec(u8), directory: string, name: string, last: bool) ->
     return true
 }
 
+// Bytes in DIR and everything below it, for the page the first visit fetches.
+TreeBytes :: (directory: string) -> s64 {
+    info := PathStatus(directory, false)
+    if info.kind == .File { return info.size }
+    if info.kind != .Directory { return 0 }
+    names: Vec(string)
+    if !ListDirectory(directory, *names) { return 0 }
+    total: s64 = 0
+    for names {
+        total += TreeBytes(Join(Join(directory, "/"), it))
+    }
+    return total
+}
+
+// (bytes, name) of the largest file at PATH or below it.
+Largest :: (path: string) -> (bytes: s64, name: string) {
+    info := PathStatus(path, false)
+    if info.kind == .File { return info.size, path }
+    if info.kind != .Directory { return 0, path }
+    names: Vec(string)
+    if !ListDirectory(path, *names) { return 0, path }
+    best: s64 = 0
+    where := path
+    for names {
+        child := Join(Join(path, "/"), it)
+        size, name := Largest(child)
+        if size > best {
+            best = size
+            where = name
+        }
+    }
+    return best, where
+}
+
 #scope_export
 main :: (argc: s32, argv: **u8) -> s32 {
-    if argc != 3 { unused PrintError("usage: sitebuild OUTPUT EMULATOR_DIR\n"); return 2 }
+    if argc < 3 || argc > 5 { unused PrintError("usage: sitebuild OUTPUT EMULATOR_DIR [--preinstall MANIFEST]\n"); return 2 }
     output := TextFromCString(argv[1])
     emulator := TextFromCString(argv[2])
+    apps: string = "lib/preinstall.list"
+    if argc > 3 {
+        if argc != 5 || TextFromCString(argv[3]) != "--preinstall" {
+            unused PrintError("usage: sitebuild OUTPUT EMULATOR_DIR [--preinstall MANIFEST]\n")
+            return 2
+        }
+        apps = TextFromCString(argv[4])
+    }
     if !IsFile("site/root.list") { return Fail("run sitebuild from the TaijiOS root") }
     unused RemoveTree(output)
     if !CreateDirectories(output) { return Fail("cannot create ", output) }
@@ -91,8 +144,10 @@ main :: (argc: s32, argv: **u8) -> s32 {
 
     bundle: Vec(u8)
     lazy: Vec(string)
-    files, packed := PackRoot("site/root.list", *bundle, *lazy)
+    largest: Vec(u8)
+    files, packed := PackRoot("site/root.list", apps, *bundle, *lazy, *largest)
     if !packed { return 1 }
+    LargestGuest := BuilderFinish(largest)
     raw := Join(emu, "/root.tjr")
     if !WriteEntireFile(raw, TextFromBytes(bundle[:])) || !Gzip(raw, Join(emu, "/root.tjr.gz")) { return Fail("cannot compress the root bundle") }
     unused RemoveFile(raw)
@@ -116,6 +171,35 @@ main :: (argc: s32, argv: **u8) -> s32 {
     BuilderAppend(manifest, TextFromBytes(lazy_json[:]))
     BuilderAppend(manifest, "  ]\n}\n")
     if !WriteEntireFile(Join(emu, "/manifest.json"), BuilderFinish(manifest)) { return Fail("cannot write manifest.json") }
+
+    // The first visit fetches the page, the emulator and the root bundle. The
+    // wasm is measured compressed because that is what goes over the wire. The
+    // page is everything the build publishes that is not OUTPUT/emu.
+    root_bytes := PathStatus(Join(emu, "/root.tjr.gz")).size
+    wasm_bytes := PathStatus(Join(emu, "/taijios.wasm.gz")).size
+    script_bytes := PathStatus(Join(emu, "/taijios.js")).size
+    page_bytes: s64 = 0
+    for sources {
+        if Private(it) { continue }
+        page_bytes += TreeBytes(Join(Join(output, "/"), it))
+    }
+    first_bytes := root_bytes + wasm_bytes + script_bytes + page_bytes
+    measured: Vec(u8)
+    BuilderPrint(*measured, "sitebuild: root.tjr.gz % of % bytes; first download % of % bytes (% wasm, % script, % page)\n",
+        root_bytes, ROOT_BUDGET, first_bytes, FIRST_BUDGET, wasm_bytes, script_bytes, page_bytes)
+    unused WriteOutput(BuilderFinish(measured))
+    if root_bytes > ROOT_BUDGET {
+        return Fail("root.tjr.gz is over its budget; the largest guest file is ", LargestGuest)
+    }
+    if first_bytes > FIRST_BUDGET {
+        if wasm_bytes >= page_bytes && wasm_bytes >= script_bytes && wasm_bytes >= root_bytes {
+            return Fail("the first download is over budget; taijios.wasm.gz is the largest part")
+        }
+        if page_bytes >= script_bytes && page_bytes >= root_bytes {
+            return Fail("the first download is over budget; the page is the largest part")
+        }
+        return Fail("the first download is over budget; the largest guest file is ", LargestGuest)
+    }
     out: Vec(u8)
     BuilderPrint(*out, "sitebuild: % guest files (% bytes) and % fetched on demand in %\n", files, bundle.count, lazy.count, output)
     unused WriteOutput(BuilderFinish(out))

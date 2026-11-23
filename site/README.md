@@ -22,7 +22,40 @@ make -C site live     # compare https://taijios.net/ with build/site and boot it
 
 Requirements: Emscripten (`EMSDK`, default `~/emsdk`), the Ziran checkout
 (`ZIRAN_ROOT`), `ziran`, `gzip`, `chromium` and `tesseract`, and the built
-guest in `dis/`, including the ZX bundles `root.list` names.
+guest in `dis/`, including the ZX bundles the preinstall manifest names.
+
+## What ships in the first download
+
+The apps in the browser root are not listed in `root.list`. `sitebuild` reads
+`lib/preinstall.list`, the same manifest `tools/generate-app-catalog.py
+--preinstall` uses for the desktop catalog, and packs each app row according to
+its `first-run` column: `root` ships in the first download and `lazy` stays on
+the server until first open. Rill and the desktop panel are `root`; every other
+application is `lazy`. Adding an application to the desktop menu therefore
+cannot silently change the web root, and the two cannot name different app sets.
+`root.list` keeps only what is not an app: the Dis tree, the three ZX libraries
+`emu/port/zx.c` installs, `lib/`, icons, fonts and the directories to create.
+Its `- .zx` line keeps the Dis tree walk from packing app bundles into the root
+as a side effect; a bundle reaches the root only by being named in the manifest.
+
+`sitebuild` measures the first download on every run and refuses to publish
+past a budget: `emu/root.tjr.gz` alone may be at most 6.5 MB (6,815,744 bytes)
+and `root.tjr.gz` plus `taijios.wasm.gz`, `taijios.js` and the page at most
+8 MB (8,388,608 bytes). It prints both numbers and, when one is over, exits
+non-zero naming the largest packed guest file, so the fix goes to the file that
+grew rather than to the budget:
+
+```text
+sitebuild: root.tjr.gz 5541290 of 6815744 bytes; first download 6705588 of 8388608 bytes (799476 wasm, 53271 script, 311551 page)
+sitebuild: 2130 guest files (19871384 bytes) and 22 fetched on demand in build/site
+```
+
+Pass `--preinstall MANIFEST` to measure a different manifest, which is how an
+oversized fixture is checked:
+
+```sh
+tools/sitebuild/sitebuild "$SCRATCH/site" build/web/emu --preinstall "$SCRATCH/big.list"
+```
 
 ## Deploying
 

@@ -1,0 +1,72 @@
+// rootlist: the app lines of the browser root bundle, from the manifest.
+//
+// `site/root.list` names the hand-written parts of the guest root: the Dis
+// tree, lib/, icons and the directories to create. It holds no app lines. The
+// apps come from `lib/preinstall.list`, which is also what the desktop catalog
+// reads, so the web root cannot ship a different app set from the desktop.
+//
+// A row whose ninth column is `root` prints on its own line and ships in the
+// first download; a `lazy` row prints behind `lazy ` and stays on the server
+// until its first open. A row whose bundle is not present in this checkout
+// prints nothing, exactly like the catalog generator: the entry and the file
+// appear on the same build.
+#import "std/file"
+#import "std/file_tree_linux"
+#import "std/text_tools"
+
+// Column INDEX of a tab-separated LINE, or "" when there is no such column.
+Column :: (line: string, index: s64) -> string {
+    at: s64 = 0
+    column: s64 = 0
+    start: s64 = 0
+    while at <= line.count {
+        if at == line.count || line[at] == #char "\t" {
+            if column == index { return line[start:at] }
+            column += 1
+            start = at + 1
+        }
+        at += 1
+    }
+    return ""
+}
+
+// The guest path a manifest row installs, without its leading slash.
+GuestPath :: (line: string) -> string {
+    path := Column(line, 1)
+    if path.count > 0 && path[0] == #char "/" { return path[1:path.count] }
+    return path
+}
+
+#scope_export
+// Appends the app lines MANIFEST calls for and returns how many emitted.
+// PROBLEM names the first row that is not a well-formed manifest row.
+RootLines :: (manifest: string, out: *Vec(u8), problem: *Vec(u8)) -> (rows: s64, ok: bool) {
+    text, read := ReadEntireFile(manifest)
+    if !read { return 0, false }
+    emitted: s64 = 0
+    for TextLines(text) {
+        line := TextTrim(it)
+        if line.count == 0 || line[0] == #char "#" { continue }
+        bundle := GuestPath(line)
+        first_run := Column(line, 8)
+        if bundle.count == 0 || Column(line, 2) == "" {
+            BuilderAppend(<<problem, "not a preinstall row with nine tab-separated columns: ")
+            BuilderAppend(<<problem, line)
+            BuilderAppend(<<problem, "\n")
+            return 0, false
+        }
+        if first_run != "root" && first_run != "lazy" {
+            BuilderAppend(<<problem, bundle)
+            BuilderAppend(<<problem, " names first-run ")
+            BuilderAppend(<<problem, first_run)
+            BuilderAppend(<<problem, "; expected root or lazy\n")
+            return 0, false
+        }
+        if !IsFile(bundle) { continue }
+        if first_run == "lazy" { BuilderAppend(<<out, "lazy ") }
+        BuilderAppend(<<out, bundle)
+        BuilderAppend(<<out, "\n")
+        emitted += 1
+    }
+    return emitted, true
+}

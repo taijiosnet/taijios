@@ -33,7 +33,7 @@ ZX_CFLAGS := -O2 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm -DZIRAN_COMPA
 .PHONY: site emu ziran-wasm tools test deploy live clean
 
 site: emu $(TOOLS)/sitebuild/sitebuild
-	cd $(ROOT) && $(TOOLS)/sitebuild/sitebuild build/site $(BUILD)/emu
+	cd $(ROOT) && $(TOOLS)/sitebuild/sitebuild build/site $(BUILD)/emu --preinstall lib/preinstall.list
 
 emu: ziran-wasm $(TOOLS)/mkweb/mkweb
 	cd $(ROOT) && $(TOOLS)/mkweb/mkweb $(BUILD)/emu $(ZIRAN_ROOT)/include $(ZX_ARCHIVE) $(JOBS)
@@ -48,7 +48,7 @@ tools: $(TOOLS)/mkweb/mkweb $(TOOLS)/sitebuild/sitebuild $(TOOLS)/sitetest/sitet
 $(TOOLS)/mkweb/mkweb: $(ROOT)/emu/Web/mkweb.zi $(ROOT)/emu/Web/jobs.zi
 	cd $(ROOT) && ziran build --target=c --exe --entry mkweb:main --root emu/Web -o build/web/tools/mkweb emu/Web/mkweb.zi
 
-$(TOOLS)/sitebuild/sitebuild: tools/sitebuild.zi tools/rootpack.zi tools/retired.zi
+$(TOOLS)/sitebuild/sitebuild: tools/sitebuild.zi tools/rootpack.zi tools/rootlist.zi tools/retired.zi
 	cd $(ROOT) && ziran build --target=c --exe --entry sitebuild:main --root site/tools -o build/web/tools/sitebuild site/tools/sitebuild.zi
 
 $(TOOLS)/sitetest/sitetest: tools/sitetest.zi tools/browser.zi tools/ocr.zi tools/serve.zi tools/retired.zi tools/live.zi tools/firefox.zi
