@@ -1,20 +1,33 @@
 <../../../../../mkconfig
 
-TARG=\
-	Acid.dis\
-	Acid0.dis\
-#	acid.dis\
-#	awin.dis\
-#	util.dis\
-#	win.dis\
+ZXCMD=$ROOT/appl/cmd
+BIN=$ROOT/acme/acid
 
-MODULES=\
+ZXTARG=\
+	Acid.zx\
+	Acid0.zx\
 
-SYSMODULES=\
-	sh.m\
-	sys.m\
-	draw.m\
+ZXBIN=${ZXTARG:%=$BIN/%}
 
-DISBIN=$ROOT/acme/acid
+all:V:	$ZXTARG
 
-<$ROOT/mkfiles/mkdis
+install:V:	$ZXBIN
+
+install-zx:V:	$ZXBIN
+
+clean:V:
+	rm -f $ZXTARG
+
+nuke:V:	clean
+	rm -f $ZXBIN
+
+Acid.zx:	Acid.zi $ZXCMD/taijios_args.zi $ZXCMD/taijios_io.zi $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry Acid:main -o $target Acid.zi
+
+Acid0.zx:	Acid0.zi mkfile
+	zi2zx --root . --entry Acid0:main -o $target Acid0.zi
+
+$BIN/%.zx:	%.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 $stem.zx "$staged" && mv "$staged" "$target"

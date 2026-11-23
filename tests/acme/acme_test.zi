@@ -17,7 +17,7 @@ Case :: struct {
 
 WORK :: "build/tests/acme/main";
 
-cases: [22]Case = Case.[
+cases: [24]Case = Case.[
     .{
         name = "edit-usage",
         script = "/acme/edit/e.zx\n/acme/edit/a.zx\n/acme/edit/c.zx\n/acme/edit/d.zx extra\n/acme/edit/g.zx\n/acme/edit/i.zx\n/acme/edit/p.zx bad\n/acme/edit/pipe.zx\n/acme/edit/x.zx\n",
@@ -148,6 +148,18 @@ cases: [22]Case = Case.[
         name = "bin-winm",
         script = "/acme/dis/cd.zx /acme\n/acme/dis/winm.zx echo hi-winm\ncat /mnt/acme/3/tag\necho ''\ncat /mnt/acme/3/body\n",
         out = " Send Delete\nhi-winm\n",
+        err = "",
+    },
+    .{
+        name = "acid-usage",
+        script = "/acme/acid/Acid.zx\n/acme/acid/Acid0.zx\n",
+        out = "",
+        err = "usage : Acid pid\n",
+    },
+    .{
+        name = "acid-launch",
+        script = "/acme/dis/cd.zx /acme\n/acme/acid/Acid.zx 42\ncat /mnt/acme/3/tag\n",
+        out = " Send Delete",
         err = "",
     },
 ];

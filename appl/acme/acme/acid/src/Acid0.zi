@@ -1,0 +1,5 @@
+// acme/acid/Acid0: stub matching Acid0.b (unimplemented Limbo stub).
+#program_export
+main :: () -> s32 {
+    return 0;
+}

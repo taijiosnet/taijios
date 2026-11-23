@@ -1,4 +1,4 @@
-# 15. Acme helper binaries outside dis/ - 5 rows
+# 15. Acme helper binaries outside dis/ - 3 rows
 
 Owner: Acme helpers outside dis/ (acme lane)
 
@@ -8,8 +8,6 @@ Tracked `.dis` helper binaries installed outside `dis/` by the acme build (mkfil
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| acme/acid/Acid.dis | appl/acme/acme/acid/src/Acid.b |  | - |  |
-| acme/acid/Acid0.dis | appl/acme/acme/acid/src/Acid0.b |  | - |  |
 | acme/mail/Mail.dis | appl/acme/acme/mail/src/Mail.b |  | - |  |
 | acme/mail/Mailpop3.dis | appl/acme/acme/mail/src/Mailpop3.b |  | - |  |
 | acme/mail/mkbox.dis | appl/acme/acme/mail/mkbox.b |  | - | mkfile source in appl/acme/acme/mail/, not src/ |

@@ -1,0 +1,29 @@
+// acme/acid/Acid: launch Acid0 inside an acme win window.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Process :: #import "taijios_process";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 1 {
+        unused Io.WriteBytes(2, "usage : Acid pid\n");
+        return 0;
+    }
+    ops: Vec(string);
+    unused VecPush(ops, "/acme/acid/Acid0.zx");
+    unused VecPush(ops, "acid");
+    unused VecPush(ops, "-l");
+    unused VecPush(ops, "Acid");
+    for i: 0..count - 1 {
+        unused VecPush(ops, TextDetach(TextCopy(Args.Operand(i))));
+    }
+    out := Process.Run("/acme/dis/win.zx", ops[:]);
+    if out.status < 0 && out.error.count > 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "/acme/dis/win: %\n", out.error);
+        unused Io.WriteBytes(2, BuilderFinish(msg));
+    }
+    return 0;
+}
