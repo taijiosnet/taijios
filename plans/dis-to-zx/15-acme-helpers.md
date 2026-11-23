@@ -1,4 +1,4 @@
-# 15. Acme helper binaries outside dis/ - 13 rows
+# 15. Acme helper binaries outside dis/ - 5 rows
 
 Owner: Acme helpers outside dis/ (acme lane)
 
@@ -10,14 +10,6 @@ Tracked `.dis` helper binaries installed outside `dis/` by the acme build (mkfil
 |---|---|---|---|---|
 | acme/acid/Acid.dis | appl/acme/acme/acid/src/Acid.b |  | - |  |
 | acme/acid/Acid0.dis | appl/acme/acme/acid/src/Acid0.b |  | - |  |
-| acme/dis/adiff.dis | appl/acme/acme/bin/src/adiff.b |  | - |  |
-| acme/dis/agrep.dis | appl/acme/acme/bin/src/agrep.b |  | - |  |
-| acme/dis/awd.dis | appl/acme/acme/bin/src/awd.b |  | - |  |
-| acme/dis/cd.dis | appl/acme/acme/bin/src/cd.b |  | - |  |
-| acme/dis/new.dis | appl/acme/acme/bin/src/new.b |  | - |  |
-| acme/dis/spout.dis | appl/acme/acme/bin/src/spout.b |  | - |  |
-| acme/dis/win.dis | appl/acme/acme/bin/src/win.b |  | - |  |
-| acme/dis/winm.dis | appl/acme/acme/bin/src/winm.b |  | - |  |
 | acme/mail/Mail.dis | appl/acme/acme/mail/src/Mail.b |  | - |  |
 | acme/mail/Mailpop3.dis | appl/acme/acme/mail/src/Mailpop3.b |  | - |  |
 | acme/mail/mkbox.dis | appl/acme/acme/mail/mkbox.b |  | - | mkfile source in appl/acme/acme/mail/, not src/ |

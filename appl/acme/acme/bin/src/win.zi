@@ -1,0 +1,7 @@
+// acme/dis/win: run an interactive command in an acme window (sets $acmewin).
+Win :: #import "win_common";
+
+#program_export
+main :: () -> s32 {
+    return Win.RunWin(true, "/acme/dis/win.zx");
+}

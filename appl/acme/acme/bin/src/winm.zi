@@ -1,0 +1,7 @@
+// acme/dis/winm: run an interactive command in an acme window.
+Win :: #import "win_common";
+
+#program_export
+main :: () -> s32 {
+    return Win.RunWin(false, "/acme/dis/winm.zx");
+}

@@ -1,0 +1,48 @@
+// acme/dis/cd: change directory and update /dev/acme/ctl tag name and dumpdir.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Bin :: #import "bin_common";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count > 1 {
+        Bin.PrintErr("Usage: cd [directory]\n");
+        return 0;
+    }
+    target: string;
+    if count == 0 {
+        t: Vec(u8);
+        BuilderPrint(*t, "/usr/%", Bin.ReadUser());
+        target = Bin.CopyStr(BuilderFinish(t));
+    } else {
+        target = Args.Operand(0);
+    }
+
+    if Io.Chdir(target) < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "cd: %: %\n", target, Io.LastError());
+        Bin.PrintErr(BuilderFinish(msg));
+        return 0;
+    }
+
+    fd := Io.OpenFile("/dev/acme/ctl", Bin.OWRITE);
+    if fd < 0 { return 0 }
+    dir := Io.Cwd();
+
+    name_cmd: Vec(u8);
+    BuilderPrint(*name_cmd, "name %", dir);
+    if dir.count == 0 || dir[dir.count - 1] != #char "/" {
+        unused VecPush(name_cmd, #char "/");
+    }
+    unused BuilderAppend(name_cmd, "-sh\n");
+    unused Bin.WriteAll(fd, BuilderFinish(name_cmd));
+
+    dump_cmd: Vec(u8);
+    BuilderPrint(*dump_cmd, "dumpdir %\n", dir);
+    unused Bin.WriteAll(fd, BuilderFinish(dump_cmd));
+
+    unused Io.CloseFile(fd);
+    return 0;
+}

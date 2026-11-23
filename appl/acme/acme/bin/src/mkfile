@@ -1,22 +1,62 @@
 <../../../../../mkconfig
 
-TARG=\
-	win.dis\
-	winm.dis\
-	adiff.dis\
-	agrep.dis\
-	new.dis\
-	spout.dis\
-	awd.dis\
-	cd.dis\
+ZXCMD=$ROOT/appl/cmd
+BIN=$ROOT/acme/dis
 
-MODULES=\
-	
-SYSMODULES=\
-	sh.m\
-	sys.m\
-	draw.m\
+ZXTARG=\
+	adiff.zx\
+	agrep.zx\
+	awd.zx\
+	cd.zx\
+	new.zx\
+	spout.zx\
+	win.zx\
+	winm.zx\
 
-DISBIN=$ROOT/acme/dis
+ZXBIN=${ZXTARG:%=$BIN/%}
 
-<$ROOT/mkfiles/mkdis
+COMMON=bin_common.zi $ZXCMD/taijios_args.zi $ZXCMD/taijios_io.zi $ZXCMD/taijios_process.zi
+HOSTS=--bind-host taijios_args --bind-host taijios_io --bind-host taijios_process
+PROCHOSTS=$HOSTS
+NSHOSTS=$PROCHOSTS --bind-host taijios_namespace
+
+all:V:	$ZXTARG
+
+install:V:	$ZXBIN
+
+install-zx:V:	$ZXBIN
+
+clean:V:
+	rm -f $ZXTARG
+
+nuke:V:	clean
+	rm -f $ZXBIN
+
+awd.zx:	awd.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry awd:main -o $target awd.zi
+
+cd.zx:	cd.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry cd:main -o $target cd.zi
+
+spout.zx:	spout.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry spout:main -o $target spout.zi
+
+agrep.zx:	agrep.zi $COMMON $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD $PROCHOSTS --entry agrep:main -o $target agrep.zi
+
+new.zx:	new.zi $COMMON $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD $PROCHOSTS --entry new:main -o $target new.zi
+
+adiff.zx:	adiff.zi $COMMON $ZXCMD/taijios_namespace.zi $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD $NSHOSTS --entry adiff:main -o $target adiff.zi
+
+win.zx:	win.zi win_common.zi $COMMON $ZXCMD/taijios_namespace.zi $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD $NSHOSTS --entry win:main -o $target win.zi
+
+winm.zx:	winm.zi win_common.zi $COMMON $ZXCMD/taijios_namespace.zi $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD $NSHOSTS --entry winm:main -o $target winm.zi
+
+$BIN/%.zx:	%.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 $stem.zx "$staged" && mv "$staged" "$target"

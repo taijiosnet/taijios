@@ -1,0 +1,134 @@
+// acme/dis/adiff: run diff into a new acme window with clickable file:line headers.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Namespace :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+Bin :: #import "bin_common";
+
+FindAcd :: (s: string) -> s64 {
+    for i: 0..s.count - 1 {
+        c := s[i];
+        if c == #char "a" || c == #char "c" || c == #char "d" { return i }
+    }
+    return -1;
+}
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 2 {
+        Bin.PrintErr("usage: adiff file1 file2\n");
+        return 0;
+    }
+    ncfd := Io.OpenFile("/chan/new/ctl", Bin.OREAD);
+    if ncfd < 0 {
+        Bin.PrintErr("cannot open ctl file\n");
+        return 0;
+    }
+    nbuf: [128]u8;
+    nr := Io.ReadBytes(ncfd, nbuf[:]);
+    unused Io.CloseFile(ncfd);
+    if nr <= 0 {
+        Bin.PrintErr("cannot open ctl file\n");
+        return 0;
+    }
+    id := Bin.ParseInt(TextView(nbuf[:nr]));
+
+    f1 := Bin.CopyStr(Args.Operand(0));
+    f2 := Bin.CopyStr(Args.Operand(1));
+    d1, ok1 := Bin.IsDir(f1);
+    if !ok1 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "cannot stat %\n", f1);
+        Bin.PrintErr(BuilderFinish(msg));
+        return 0;
+    }
+    d2, ok2 := Bin.IsDir(f2);
+    if !ok2 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "cannot stat %\n", f2);
+        Bin.PrintErr(BuilderFinish(msg));
+        return 0;
+    }
+    if d1 {
+        t: Vec(u8);
+        BuilderPrint(*t, "%/%", f1, Bin.Basename(f2));
+        f1 = Bin.CopyStr(BuilderFinish(t));
+    } else if d2 {
+        t: Vec(u8);
+        BuilderPrint(*t, "%/%", f2, Bin.Basename(f1));
+        f2 = Bin.CopyStr(BuilderFinish(t));
+    }
+
+    ctl_path: Vec(u8);
+    BuilderPrint(*ctl_path, "/chan/%/ctl", id);
+    icfd := Io.OpenFile(BuilderFinish(ctl_path), Bin.OWRITE);
+    if icfd < 0 {
+        Bin.PrintErr("cannot open control file\n");
+        return 0;
+    }
+
+    name_cmd: Vec(u8);
+    BuilderPrint(*name_cmd, "name %/-diff-%\n", Io.Cwd(), f1);
+    unused Bin.WriteAll(icfd, BuilderFinish(name_cmd));
+
+    fds: [2]s32;
+    if Namespace.Pipe(fds[:]) < 0 {
+        unused Io.CloseFile(icfd);
+        Bin.PrintErr("can't pipe\n");
+        return 0;
+    }
+
+    body_path: Vec(u8);
+    BuilderPrint(*body_path, "/chan/%/body", id);
+    bfd := Io.OpenFile(BuilderFinish(body_path), Bin.OWRITE);
+    if bfd < 0 {
+        unused Io.CloseFile(fds[0]);
+        unused Io.CloseFile(fds[1]);
+        unused Io.CloseFile(icfd);
+        Bin.PrintErr("cannot open body file\n");
+        return 0;
+    }
+
+    resolved := Bin.ResolveCommand("diff");
+    if resolved.count == 0 {
+        unused Io.CloseFile(fds[0]);
+        unused Io.CloseFile(fds[1]);
+        unused Io.CloseFile(bfd);
+        unused Io.CloseFile(icfd);
+        Bin.PrintErr("diff: file does not exist\n");
+        return 0;
+    }
+
+    devnull := Io.OpenFile("/dev/null", Bin.OREAD);
+    dargs := string.[f1, f2];
+    launch := Bin.StartResolved(resolved, dargs[:], devnull, fds[1], fds[1]);
+    if devnull >= 0 { unused Io.CloseFile(devnull) }
+    unused Io.CloseFile(fds[1]);
+
+    if launch.id > 0 {
+        reader: Bin.LineReader;
+        reader.handle = fds[0];
+        while true {
+            s, ok := Bin.ReadLine(*reader);
+            if !ok { break }
+            if s.count > 0 && s[0] >= #char "1" && s[0] <= #char "9" {
+                idx := FindAcd(s);
+                if idx >= 0 {
+                    out: Vec(u8);
+                    BuilderPrint(*out, "%:% % %:%", f1, s[0:idx], s[idx:idx + 1], f2, s[idx + 1:]);
+                    unused Bin.WriteAll(bfd, BuilderFinish(out));
+                    continue;
+                }
+            }
+            unused Bin.WriteAll(bfd, s);
+        }
+        unused Process.Wait(launch.id);
+    }
+
+    unused Io.CloseFile(fds[0]);
+    unused Io.CloseFile(bfd);
+    unused Bin.WriteAll(icfd, "clean\n");
+    unused Io.CloseFile(icfd);
+    return 0;
+}

@@ -17,7 +17,7 @@ Case :: struct {
 
 WORK :: "build/tests/acme/main";
 
-cases: [14]Case = Case.[
+cases: [22]Case = Case.[
     .{
         name = "edit-usage",
         script = "/acme/edit/e.zx\n/acme/edit/a.zx\n/acme/edit/c.zx\n/acme/edit/d.zx extra\n/acme/edit/g.zx\n/acme/edit/i.zx\n/acme/edit/p.zx bad\n/acme/edit/pipe.zx\n/acme/edit/x.zx\n",
@@ -102,6 +102,54 @@ cases: [14]Case = Case.[
         out = "HELLO world\n",
         err = "",
     },
+    .{
+        name = "bin-spout",
+        script = "echo '.PP\nHello it''s \\fBbold\\fP world!' | /acme/dis/spout.zx\n",
+        out = ":#4,#9:Hello\n:#10,#14:it's\n:#18,#22:bold\n:#26,#31:world\n",
+        err = "",
+    },
+    .{
+        name = "bin-agrep",
+        script = "/acme/dis/cd.zx /build/tests/acme/main/bin\n/acme/dis/agrep.zx foo /mnt/acme/1/body\n",
+        out = "mock-grep:-n:foo:/mnt/acme/1/body:/dev/null\n",
+        err = "",
+    },
+    .{
+        name = "bin-awd",
+        script = "/acme/dis/cd.zx /acme/edit\n/acme/dis/awd.zx rc\ncat /mnt/acme/1/ctl\n",
+        out = "name /acme/edit/-sh\ndumpdir /acme/edit\nname /acme/edit/-rc\ndumpdir /acme/edit\n",
+        err = "",
+    },
+    .{
+        name = "bin-cd",
+        script = "/acme/dis/cd.zx /acme/edit\ncat /mnt/acme/1/ctl\n/acme/dis/cd.zx a b\n",
+        out = "name /acme/edit/-sh\ndumpdir /acme/edit\n",
+        err = "Usage: cd [directory]\n",
+    },
+    .{
+        name = "bin-new",
+        script = "/acme/dis/cd.zx /acme\n/acme/dis/new.zx echo hello-from-new\ncat /mnt/acme/3/ctl\ncat /mnt/acme/3/body\n",
+        out = "name /acme/-echo\nclean\nhello-from-new\n",
+        err = "",
+    },
+    .{
+        name = "bin-adiff",
+        script = "/acme/dis/cd.zx /build/tests/acme/main/bin\n/acme/dis/adiff.zx /build/tests/acme/main/f1.txt /build/tests/acme/main/f2.txt\ncat /mnt/acme/3/ctl\ncat /mnt/acme/3/body\n",
+        out = "name /build/tests/acme/main/bin/-diff-/build/tests/acme/main/f1.txt\nclean\n/build/tests/acme/main/f1.txt:2 c /build/tests/acme/main/f2.txt:2\n< old\n---\n> new\n",
+        err = "",
+    },
+    .{
+        name = "bin-win",
+        script = "/acme/dis/cd.zx /acme\n/acme/dis/win.zx echo hi-win\ncat /mnt/acme/3/tag\necho ''\ncat /mnt/acme/3/body\n",
+        out = " Send Delete\nhi-win\n",
+        err = "",
+    },
+    .{
+        name = "bin-winm",
+        script = "/acme/dis/cd.zx /acme\n/acme/dis/winm.zx echo hi-winm\ncat /mnt/acme/3/tag\necho ''\ncat /mnt/acme/3/body\n",
+        out = " Send Delete\nhi-winm\n",
+        err = "",
+    },
 ];
 
 failures: s64 = 0;
@@ -132,7 +180,30 @@ BuildMock :: () -> bool {
     }
     ch := string.["chmod", "755", "build/tests/acme/mock_acme.zx"];
     ch_run: ProcessRun;
-    return RunProcess(.{arguments = ch[:]}, *ch_run) && ch_run.code == 0;
+    if !RunProcess(.{arguments = ch[:]}, *ch_run) || ch_run.code != 0 { return false }
+
+    // Tiny pure-ZX mock grep & diff for testing agrep.zx and adiff.zx without Dis utilities.
+    gcmd := string.[
+        "zi2zx", "--root", "build/tests/acme/main/bin", "--module-path", "appl/cmd",
+        "--bind-host", "taijios_args", "--bind-host", "taijios_io",
+        "--entry", "grep:main", "-o", "build/tests/acme/main/bin/grep.zx",
+        "build/tests/acme/main/bin/grep.zi",
+    ];
+    grun: ProcessRun;
+    if !RunProcess(.{arguments = gcmd[:]}, *grun) || grun.code != 0 { return false }
+
+    dcmd := string.[
+        "zi2zx", "--root", "build/tests/acme/main/bin", "--module-path", "appl/cmd",
+        "--bind-host", "taijios_io",
+        "--entry", "diff:main", "-o", "build/tests/acme/main/bin/diff.zx",
+        "build/tests/acme/main/bin/diff.zi",
+    ];
+    drun: ProcessRun;
+    if !RunProcess(.{arguments = dcmd[:]}, *drun) || drun.code != 0 { return false }
+
+    ch2 := string.["chmod", "755", "build/tests/acme/main/bin/grep.zx", "build/tests/acme/main/bin/diff.zx"];
+    ch2_run: ProcessRun;
+    return RunProcess(.{arguments = ch2[:]}, *ch2_run) && ch2_run.code == 0;
 }
 
 Prepare :: () -> bool {
@@ -141,7 +212,7 @@ Prepare :: () -> bool {
     unused CreateDirectory("build/tests");
     unused CreateDirectory("build/tests/acme");
     if !CreateDirectory(WORK) { return false }
-    dirs := string.["cases", "result", "mnt", "mnt/acme"];
+    dirs := string.["cases", "result", "mnt", "mnt/acme", "dev", "dev/acme", "bin"];
     for dirs {
         p: Vec(u8);
         BuilderPrint(*p, "%/%", WORK, it);
@@ -150,6 +221,22 @@ Prepare :: () -> bool {
     for i: 0..cases.count - 1 {
         if !WriteEntireFile(Path("cases", "script", i), cases[i].script) { return false }
     }
+    f1: Vec(u8);
+    BuilderPrint(*f1, "%/f1.txt", WORK);
+    if !WriteEntireFile(BuilderFinish(f1), "same\nold\n") { return false }
+    f2: Vec(u8);
+    BuilderPrint(*f2, "%/f2.txt", WORK);
+    if !WriteEntireFile(BuilderFinish(f2), "same\nnew\n") { return false }
+
+    grep_src := "#import \"std/vec\";\nusing Args :: #import \"taijios_args\";\nusing Io :: #import \"taijios_io\";\n#program_export\nmain :: () -> s32 {\n    out: Vec(u8);\n    unused BuilderAppend(out, \"mock-grep\");\n    for i: 0..Args.OperandCount()-1 { BuilderPrint(*out, \":%\", Args.Operand(i)); }\n    unused VecPush(out, #char \"\\n\");\n    unused Io.WriteBytes(1, BuilderFinish(out));\n    return 0;\n}\n";
+    gp: Vec(u8);
+    BuilderPrint(*gp, "%/bin/grep.zi", WORK);
+    if !WriteEntireFile(BuilderFinish(gp), grep_src) { return false }
+
+    diff_src := "using Io :: #import \"taijios_io\";\n#program_export\nmain :: () -> s32 {\n    unused Io.WriteBytes(1, \"2c2\\n< old\\n---\\n> new\\n\");\n    return 0;\n}\n";
+    dp: Vec(u8);
+    BuilderPrint(*dp, "%/bin/diff.zi", WORK);
+    if !WriteEntireFile(BuilderFinish(dp), diff_src) { return false }
     return true;
 }
 
@@ -186,7 +273,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest_driver: Vec(u8);
     BuilderPrint(*guest_driver, "/%", dp);
-    command := string.["timeout", "120", emu, "-r", TextView(root), "/dis/sh.zx", BuilderFinish(guest_driver)];
+    command := string.["timeout", "120", emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest_driver)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("cannot start %\n", emu);

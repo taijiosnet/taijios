@@ -10,21 +10,39 @@ Process :: #import "taijios_process";
 
 NODE_ROOT :: 0;
 NODE_INDEX :: 1;
+NODE_NEW_DIR :: 2;
+NODE_NEW_CTL :: 3;
 NODE_W1_DIR :: 10;
 NODE_W1_ADDR :: 11;
 NODE_W1_BODY :: 12;
 NODE_W1_CTL :: 13;
 NODE_W1_DATA :: 14;
+NODE_W1_TAG :: 15;
+NODE_W1_EVENT :: 16;
+NODE_W1_CONSCTL :: 17;
 NODE_W2_DIR :: 20;
 NODE_W2_ADDR :: 21;
 NODE_W2_BODY :: 22;
 NODE_W2_CTL :: 23;
 NODE_W2_DATA :: 24;
+NODE_W2_TAG :: 25;
+NODE_W2_EVENT :: 26;
+NODE_W2_CONSCTL :: 27;
+NODE_W3_DIR :: 30;
+NODE_W3_ADDR :: 31;
+NODE_W3_BODY :: 32;
+NODE_W3_CTL :: 33;
+NODE_W3_DATA :: 34;
+NODE_W3_TAG :: 35;
+NODE_W3_EVENT :: 36;
+NODE_W3_CONSCTL :: 37;
 
 Window :: struct {
     id: s32;
     name: string;
     body: Vec(u8);
+    ctl_log: Vec(u8);
+    tag_log: Vec(u8);
     dot0: s32;
     dot1: s32;
     addr0: s32;
@@ -44,13 +62,16 @@ Server :: struct {
     msg: [8192]u8;
     rep: [8192]u8;
     used: s64;
-    wins: [2]Window;
+    wins: [3]Window;
+    win3_active: bool;
 }
 
 InitWin :: (w: *Window, id: s32, name: string, initial: string) {
     w.id = id;
     w.name = name;
     VecClear(w.body);
+    VecClear(w.ctl_log);
+    VecClear(w.tag_log);
     for c: initial { unused VecPush(w.body, c) }
     w.dot0 = 0;
     w.dot1 = 0;
@@ -275,6 +296,8 @@ WriteCtl :: (w: *Window, text: string) -> bool {
         cmd := text[at:end];
         at = ifx end < text.count then end + 1 else end;
         if cmd.count == 0 { continue }
+        unused BuilderAppend(w.ctl_log, cmd);
+        unused VecPush(w.ctl_log, #char "\n");
         if cmd == "addr=dot" {
             w.addr0 = w.dot0;
             w.addr1 = w.dot1;
@@ -286,7 +309,11 @@ WriteCtl :: (w: *Window, text: string) -> bool {
             w.lim1 = w.addr1;
             w.has_limit = true;
         } else if cmd == "mark" || cmd == "nomark" || cmd == "clean" {
-            // Accepted no-op for test server.
+            // Accepted.
+        } else if (cmd.count >= 5 && cmd[0:5] == "name ") ||
+                  (cmd.count >= 8 && cmd[0:8] == "dumpdir ") ||
+                  (cmd.count >= 5 && cmd[0:5] == "dump ") {
+            // Accepted window control commands.
         } else {
             return false;
         }
@@ -346,19 +373,25 @@ PutText :: (srv: *Server, t: string) {
 }
 
 IsDir :: (node: s32) -> bool {
-    return node == NODE_ROOT || node == NODE_W1_DIR || node == NODE_W2_DIR;
+    return node == NODE_ROOT || node == NODE_NEW_DIR || node == NODE_W1_DIR || node == NODE_W2_DIR || node == NODE_W3_DIR;
 }
 
 NodeName :: (node: s32) -> string {
     if node == NODE_ROOT { return "/" }
     if node == NODE_INDEX { return "index" }
+    if node == NODE_NEW_DIR { return "new" }
+    if node == NODE_NEW_CTL { return "ctl" }
     if node == NODE_W1_DIR { return "1" }
     if node == NODE_W2_DIR { return "2" }
+    if node == NODE_W3_DIR { return "3" }
     leaf := node % 10;
     if leaf == 1 { return "addr" }
     if leaf == 2 { return "body" }
     if leaf == 3 { return "ctl" }
     if leaf == 4 { return "data" }
+    if leaf == 5 { return "tag" }
+    if leaf == 6 { return "event" }
+    if leaf == 7 { return "consctl" }
     return "";
 }
 
@@ -424,31 +457,45 @@ Assign :: (srv: *Server, fid: s64, node: s32) -> bool {
 
 WalkOne :: (cur: s32, name: string) -> s32 {
     if name == ".." {
-        if cur == NODE_W1_DIR || cur == NODE_W2_DIR || cur == NODE_INDEX { return NODE_ROOT }
-        if cur >= 11 && cur <= 14 { return NODE_W1_DIR }
-        if cur >= 21 && cur <= 24 { return NODE_W2_DIR }
+        if cur == NODE_W1_DIR || cur == NODE_W2_DIR || cur == NODE_W3_DIR || cur == NODE_NEW_DIR || cur == NODE_INDEX { return NODE_ROOT }
+        if cur == NODE_NEW_CTL { return NODE_NEW_DIR }
+        if cur >= 11 && cur <= 17 { return NODE_W1_DIR }
+        if cur >= 21 && cur <= 27 { return NODE_W2_DIR }
+        if cur >= 31 && cur <= 37 { return NODE_W3_DIR }
         return NODE_ROOT;
     }
     if cur == NODE_ROOT {
         if name == "index" { return NODE_INDEX }
+        if name == "new" { return NODE_NEW_DIR }
+        if name == "ctl" { return NODE_W1_CTL }
         if name == "1" { return NODE_W1_DIR }
         if name == "2" { return NODE_W2_DIR }
+        if name == "3" { return NODE_W3_DIR }
         return -1;
     }
-    if cur == NODE_W1_DIR || cur == NODE_W2_DIR {
+    if cur == NODE_NEW_DIR {
+        if name == "ctl" { return NODE_NEW_CTL }
+        return -1;
+    }
+    if cur == NODE_W1_DIR || cur == NODE_W2_DIR || cur == NODE_W3_DIR {
         base := cur;
         if name == "addr" { return base + 1 }
         if name == "body" { return base + 2 }
         if name == "ctl" { return base + 3 }
         if name == "data" { return base + 4 }
+        if name == "tag" { return base + 5 }
+        if name == "event" { return base + 6 }
+        if name == "consctl" { return base + 7 }
         return -1;
     }
     return -1;
 }
 
 WinForNode :: (srv: *Server, node: s32) -> *Window {
+    if node == NODE_NEW_CTL { return *srv.wins[2] }
     if node >= 10 && node < 20 { return *srv.wins[0] }
     if node >= 20 && node < 30 { return *srv.wins[1] }
+    if node >= 30 && node < 40 { return *srv.wins[2] }
     return null;
 }
 
@@ -552,6 +599,24 @@ Step :: (srv: *Server, wait: bool) -> s32 {
                 Put(srv, cast(u64)rem, 4);
                 for k: 0..rem - 1 { srv.rep[srv.used] = data[offset + k]; srv.used += 1 }
             }
+        } else if nd == NODE_NEW_CTL {
+            // Reading /mnt/acme/new/ctl returns window 3's ctl header (starts with "%11d ").
+            hdr: Vec(u8);
+            Pad11(*hdr, 3);
+            Pad11(*hdr, 0);
+            Pad11(*hdr, 0);
+            Pad11(*hdr, 0);
+            Pad11(*hdr, 0);
+            data := BuilderFinish(hdr);
+            Begin(srv, 117, tag);
+            if offset >= data.count {
+                Put(srv, 0, 4);
+            } else {
+                rem := data.count - offset;
+                if rem > count { rem = count }
+                Put(srv, cast(u64)rem, 4);
+                for k: 0..rem - 1 { srv.rep[srv.used] = data[offset + k]; srv.used += 1 }
+            }
         } else {
             w := WinForNode(srv, nd);
             leaf := nd % 10;
@@ -578,6 +643,28 @@ Step :: (srv: *Server, wait: bool) -> s32 {
                     Put(srv, cast(u64)rem, 4);
                     for k: 0..rem - 1 { srv.rep[srv.used] = w.body[offset + k]; srv.used += 1 }
                 }
+            } else if leaf == 3 {
+                // ctl read returns logged ctl commands (so tests can inspect name/dumpdir/clean).
+                Begin(srv, 117, tag);
+                if offset >= w.ctl_log.count {
+                    Put(srv, 0, 4);
+                } else {
+                    rem := w.ctl_log.count - offset;
+                    if rem > count { rem = count }
+                    Put(srv, cast(u64)rem, 4);
+                    for k: 0..rem - 1 { srv.rep[srv.used] = w.ctl_log[offset + k]; srv.used += 1 }
+                }
+            } else if leaf == 5 {
+                // tag read returns logged tag writes.
+                Begin(srv, 117, tag);
+                if offset >= w.tag_log.count {
+                    Put(srv, 0, 4);
+                } else {
+                    rem := w.tag_log.count - offset;
+                    if rem > count { rem = count }
+                    Put(srv, cast(u64)rem, 4);
+                    for k: 0..rem - 1 { srv.rep[srv.used] = w.tag_log[offset + k]; srv.used += 1 }
+                }
             } else if leaf == 4 {
                 // data: read from w.addr0, advancing w.addr0 by runes read.
                 b0 := RuneToByteOffset(w.body[:], w.addr0);
@@ -595,7 +682,11 @@ Step :: (srv: *Server, wait: bool) -> s32 {
                     for k: 0..rem - 1 { srv.rep[srv.used] = w.body[b0 + k]; srv.used += 1 }
                     w.addr0 += RuneCount(w.body[b0:b0 + rem]);
                 }
+            } else if leaf == 6 {
+                // event: block (no events yet) so win/winm stay alive until child exits.
+                return 1;
             } else {
+                // consctl: EOF
                 Begin(srv, 117, tag);
                 Put(srv, 0, 4);
             }
@@ -605,7 +696,7 @@ Step :: (srv: *Server, wait: bool) -> s32 {
         nd := srv.node[slot];
         w := WinForNode(srv, nd);
         payload := TextView(m[23:23 + count]);
-        leaf := nd % 10;
+        leaf := ifx nd == NODE_NEW_CTL then 3 else nd % 10;
         if w == null {
             Refuse(srv, tag, "permission denied");
         } else if leaf == 1 {
@@ -615,6 +706,11 @@ Step :: (srv: *Server, wait: bool) -> s32 {
             } else {
                 Refuse(srv, tag, "address out of range");
             }
+        } else if leaf == 2 {
+            // Append to body.
+            for c: payload { unused VecPush(w.body, c) }
+            Begin(srv, 119, tag);
+            Put(srv, cast(u64)count, 4);
         } else if leaf == 3 {
             if WriteCtl(w, payload) {
                 Begin(srv, 119, tag);
@@ -626,8 +722,13 @@ Step :: (srv: *Server, wait: bool) -> s32 {
             WriteData(w, payload);
             Begin(srv, 119, tag);
             Put(srv, cast(u64)count, 4);
+        } else if leaf == 5 {
+            for c: payload { unused VecPush(w.tag_log, c) }
+            Begin(srv, 119, tag);
+            Put(srv, cast(u64)count, 4);
         } else {
-            Refuse(srv, tag, "permission denied");
+            Begin(srv, 119, tag);
+            Put(srv, cast(u64)count, 4);
         }
     } else if kind == 120 {
         srv.fid[slot] = -1;
@@ -658,6 +759,7 @@ main :: () -> s32 {
     for i: 0..srv.fid.count - 1 { srv.fid[i] = -1 }
     InitWin(*srv.wins[0], 1, "/test/alpha.txt", "one foo\ntwo bar\nthree foo\n");
     InitWin(*srv.wins[1], 2, "/test/beta.txt", "hello world\n");
+    InitWin(*srv.wins[2], 3, "", "");
 
     unused Namespace.Fork();
     if Namespace.Bind("/build/tests/acme/main/mnt", "/mnt", Namespace.Before) != 0 {
@@ -683,6 +785,8 @@ main :: () -> s32 {
         return 1;
     }
     unused Namespace.Bind("/mnt/acme", "/chan", Namespace.Before);
+    unused Namespace.Bind("/build/tests/acme/main/dev", "/dev", Namespace.Before);
+    unused Namespace.Bind("/mnt/acme", "/dev/acme", Namespace.Replace);
 
     args := string.[script];
     child := Process.Start("/dis/sh.zx", args[:]);

@@ -1,0 +1,64 @@
+// acme/dis/new: run a command with stdout/stderr redirected to a new acme window.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Process :: #import "taijios_process";
+Bin :: #import "bin_common";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 1 { return 0 }
+
+    ncfd := Io.OpenFile("/mnt/acme/new/ctl", Bin.OREAD);
+    if ncfd < 0 { return 0 }
+    nbuf: [128]u8;
+    nr := Io.ReadBytes(ncfd, nbuf[:]);
+    unused Io.CloseFile(ncfd);
+    if nr <= 0 { return 0 }
+    id := Bin.ParseInt(TextView(nbuf[:nr]));
+
+    ctl_path: Vec(u8);
+    BuilderPrint(*ctl_path, "/mnt/acme/%/ctl", id);
+    icfd := Io.OpenFile(BuilderFinish(ctl_path), Bin.OWRITE);
+    if icfd < 0 { return 0 }
+
+    cmd := Bin.CopyStr(Args.Operand(0));
+    base := Bin.Basename(cmd);
+    name_cmd: Vec(u8);
+    BuilderPrint(*name_cmd, "name %/-%\n", Io.Cwd(), base);
+    unused Bin.WriteAll(icfd, BuilderFinish(name_cmd));
+
+    body_path: Vec(u8);
+    BuilderPrint(*body_path, "/mnt/acme/%/body", id);
+    bfd := Io.OpenFile(BuilderFinish(body_path), Bin.OWRITE);
+    if bfd < 0 {
+        unused Io.CloseFile(icfd);
+        return 0;
+    }
+
+    resolved := Bin.ResolveCommand(cmd);
+    if resolved.count == 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: file does not exist\n", cmd);
+        unused Bin.WriteAll(bfd, BuilderFinish(msg));
+    } else {
+        ops: Vec(string);
+        for i: 1..count - 1 {
+            unused VecPush(ops, Bin.CopyStr(Args.Operand(i)));
+        }
+        launch := Bin.StartResolved(resolved, ops[:], -1, bfd, bfd);
+        if launch.id > 0 {
+            unused Process.Wait(launch.id);
+        } else {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: %\n", cmd, launch.error);
+            unused Bin.WriteAll(bfd, BuilderFinish(msg));
+        }
+    }
+
+    unused Io.CloseFile(bfd);
+    unused Bin.WriteAll(icfd, "clean\n");
+    unused Io.CloseFile(icfd);
+    return 0;
+}

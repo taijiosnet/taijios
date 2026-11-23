@@ -1,0 +1,134 @@
+// acme/dis/spout: emit acme-addressed words for spell checking.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Bin :: #import "bin_common";
+
+IsAlpha :: (c: u8) -> bool {
+    return (c >= #char "a" && c <= #char "z") || (c >= #char "A" && c <= #char "Z");
+}
+
+ByteAt :: (s: string, idx: s64) -> u8 {
+    if idx < 0 || idx >= s.count { return 0 }
+    return s[idx];
+}
+
+SpoutFile :: (fd: s32, name: string) {
+    reader: Bin.LineReader;
+    reader.handle = fd;
+    n: s32 = 0;
+    wn: s32 = 0;
+    out: Vec(u8);
+
+    while true {
+        raw, ok := Bin.ReadLine(*reader);
+        if !ok { break }
+        line_buf: Vec(u8);
+        unused BuilderAppend(line_buf, raw);
+        if line_buf.count == 0 || line_buf[line_buf.count - 1] != #char "\n" {
+            unused VecPush(line_buf, #char "\n");
+        }
+        s := Bin.CopyStr(BuilderFinish(line_buf));
+
+        start: s64 = 0;
+        if s[0] == #char "." {
+            c: s64 = 0;
+            while c < 3 && c < s.count && s[c] > #char " " {
+                n += 1;
+                c += 1;
+            }
+            start = c;
+        }
+        s = s[start:];
+
+        inword := false;
+        w: s64 = 0;
+        t: s64 = 0;
+        while t < s.count {
+            c := s[t];
+            wordchar := IsAlpha(c);
+            if inword && !wordchar {
+                if c == #char "'" && IsAlpha(ByteAt(s, t + 1)) {
+                    n += 1;
+                    t += 1;
+                    continue;
+                }
+                m := t - w;
+                if m > 1 {
+                    BuilderPrint(*out, "%:#%,#%:%\n", name, wn, n, s[w:w + m]);
+                    if out.count >= 4096 {
+                        unused Bin.WriteAll(1, TextView(out[:]));
+                        VecClear(out);
+                    }
+                }
+                inword = false;
+            } else if !inword && wordchar {
+                wn = n;
+                w = t;
+                inword = true;
+            }
+
+            if c == #char "\\" && (IsAlpha(ByteAt(s, t + 1)) || ByteAt(s, t + 1) == #char "(") {
+                nxt := ByteAt(s, t + 1);
+                skip: s64 = 2;
+                if nxt == #char "(" {
+                    skip = 4;
+                } else if nxt == #char "f" {
+                    skip = ifx ByteAt(s, t + 2) == #char "(" then 5 else 3;
+                } else if nxt == #char "s" {
+                    c2 := ByteAt(s, t + 2);
+                    if c2 == #char "+" || c2 == #char "-" {
+                        skip = ifx ByteAt(s, t + 3) == #char "(" then 6 else 4;
+                    } else if c2 == #char "(" {
+                        skip = 5;
+                    } else if c2 == #char "1" || c2 == #char "2" || c2 == #char "3" {
+                        skip = 4;
+                    } else {
+                        skip = 3;
+                    }
+                }
+                while skip > 0 && t < s.count {
+                    if s[t] == #char "\n" { break }
+                    n += 1;
+                    t += 1;
+                    skip -= 1;
+                }
+                continue;
+            }
+
+            // Advance by one UTF-8 rune for rune offset n.
+            bw: s64 = 1;
+            if (c & 0xE0) == 0xC0 && t + 2 <= s.count { bw = 2 }
+            else if (c & 0xF0) == 0xE0 && t + 3 <= s.count { bw = 3 }
+            else if (c & 0xF8) == 0xF0 && t + 4 <= s.count { bw = 4 }
+            n += 1;
+            t += bw;
+            if c == #char "\n" { break }
+        }
+    }
+    if out.count > 0 {
+        unused Bin.WriteAll(1, BuilderFinish(out));
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 {
+        SpoutFile(0, "");
+        return 0;
+    }
+    for i: 0..count - 1 {
+        path := Args.Operand(i);
+        fd := Io.OpenFile(path, Bin.OREAD);
+        if fd < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "spell: can't open %: %\n", path, Io.LastError());
+            Bin.PrintErr(BuilderFinish(msg));
+            continue;
+        }
+        SpoutFile(fd, path);
+        unused Io.CloseFile(fd);
+    }
+    return 0;
+}

@@ -1,0 +1,24 @@
+// acme/dis/agrep: run grep -n <args...> /dev/null.
+#import "std/vec";
+using Args :: #import "taijios_args";
+Process :: #import "taijios_process";
+Bin :: #import "bin_common";
+
+#program_export
+main :: () -> s32 {
+    resolved := Bin.ResolveCommand("grep");
+    if resolved.count == 0 {
+        Bin.PrintErr("grep: file does not exist\n");
+        return 0;
+    }
+    ops: Vec(string);
+    unused VecPush(ops, "-n");
+    count := Args.OperandCount();
+    for i: 0..count - 1 {
+        unused VecPush(ops, Bin.CopyStr(Args.Operand(i)));
+    }
+    unused VecPush(ops, "/dev/null");
+    launch := Bin.StartResolved(resolved, ops[:], -1, -1, -1);
+    if launch.id > 0 { unused Process.Wait(launch.id) }
+    return 0;
+}
