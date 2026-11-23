@@ -744,7 +744,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/demo/lego/legolink.dis | appl/demo/lego/legolink.b |  | - |  |
 | dis/demo/lego/rcxsend.dis | appl/demo/lego/rcxsend.b |  | - |  |
 | dis/demo/lego/timers.dis | appl/demo/lego/timers.b | module/timers.m | - |  |
-| dis/demo/ns/ns.dis | appl/demo/ns/ns.b |  | - |  |
 | dis/demo/odbc/odbcmnt.dis | appl/demo/odbc/odbcmnt.b |  | - |  |
 | dis/demo/whiteboard/wbsrv.dis | appl/demo/whiteboard/wbsrv.b |  | - |  |
 | dis/demo/whiteboard/whiteboard.dis | appl/demo/whiteboard/whiteboard.b |  | - |  |

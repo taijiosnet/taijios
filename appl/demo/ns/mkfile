@@ -1,7 +1,6 @@
 <../../../mkconfig
 
 TARG=\
-		ns.dis\
 
 SHTARG=\
 		runns.sh\
@@ -9,17 +8,21 @@ SHTARG=\
 MODULES=\
 
 SYSMODULES= \
-	arg.m\
-	draw.m\
-	sh.m\
-	sys.m\
 
 DISBIN=$ROOT/dis/demo/ns
 
 <$ROOT/mkfiles/mkdis
 
+ns.zx: ns.zi ns_model.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi ../../cmd/taijios_process.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process --entry ns:main -o $target ns.zi
+
+$DISBIN/ns.zx: ns.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 ns.zx "$staged" && mv "$staged" "$target"
+
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES
+install:V:	$SHFILES $DISBIN/ns.zx
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 

@@ -1,0 +1,91 @@
+// Export a composed namespace over fd 0, ported from appl/demo/ns/ns.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Namespace :: #import "taijios_namespace"
+using Process :: #import "taijios_process"
+using Model :: #import "ns_model"
+
+OREAD :: 0;
+DMDIR_777 :: -2147483137; // DMDIR (0x80000000) | 0777
+
+CreateDirTree :: (path: string) -> bool {
+    npath: Text;
+    i: s64 = 0;
+    while i < path.count {
+        while i < path.count && path[i] == 47 { i += 1 }
+        if i >= path.count { break }
+        start := i;
+        while i < path.count && path[i] != 47 { i += 1 }
+        unused BuilderAppend(npath.bytes, "/");
+        unused BuilderAppend(npath.bytes, path[start:i]);
+        cur := TextView(npath);
+        meta: [12]u8;
+        if IO.Stat(cur, meta[:]) != 0 {
+            fd := IO.Create(cur, OREAD, DMDIR_777);
+            if fd < 0 { return false }
+            unused IO.Close(fd);
+        }
+    }
+    return true;
+}
+
+RunMemfs :: () -> bool {
+    ops: [1]string = .["/n/remote"];
+    meta: [12]u8;
+    memfs_path := ifx IO.Stat("/dis/memfs.zx", meta[:]) == 0 then "/dis/memfs.zx" else "/dis/memfs.dis";
+    outcome := Process.Run(memfs_path, ops[:]);
+    return outcome.status >= 0 && outcome.error.count == 0;
+}
+
+main :: () -> s32 {
+    unused Namespace.Unmount("", "/n/remote");
+
+    argc := Args.OperandCount();
+    arg_list: Vec(string);
+    for i: 0..cast(s64)argc-1 {
+        unused VecPush(arg_list, Args.Operand(cast(s32)i));
+    }
+
+    opts: Model.Options;
+    if !Model.ParseArgs(VecSlice(arg_list, 0, arg_list.count), *opts) {
+        print("usage: ns [-v] [-r relpath] paths...\n");
+        unused Args.SetFailure("usage");
+        return 2;
+    }
+
+    if opts.paths.count == 0 {
+        print("error no namespace selected\n");
+        return 0;
+    }
+
+    if !RunMemfs() {
+        print("error MemFS mount failed\n");
+        return 1;
+    }
+
+    rel := TextView(opts.relpath);
+    bindpath: Text;
+    for i: 0..opts.paths.count-1 {
+        nspath := TextView(opts.paths[i]);
+        if Model.MapBindPath(nspath, rel, *bindpath) {
+            bp := TextView(bindpath);
+            if CreateDirTree(bp) {
+                if Namespace.Bind(nspath, bp, Namespace.Before | Namespace.AllowCreate) == -1 {
+                    if Namespace.Bind(nspath, bp, Namespace.Before) == -1 {
+                        print("error bind failed %: %\n", bp, Namespace.Error());
+                    } else if opts.verbose {
+                        print("data nspath %\n", nspath);
+                    }
+                } else if opts.verbose {
+                    print("data nspath %\n", nspath);
+                }
+            } else {
+                print("error create failed %\n", bp);
+            }
+        }
+    }
+
+    unused Namespace.Export(0, "/n/remote", true);
+    return 0;
+}

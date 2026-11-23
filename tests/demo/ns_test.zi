@@ -1,0 +1,46 @@
+// Table-driven unit tests for appl/demo/ns/ns_model.zi.
+#import "std/vec"
+using Model :: #import "ns_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+MapCase :: struct {
+    nspath: string;
+    relpath: string;
+    ok: bool;
+    expected: string;
+}
+
+main :: () -> s32 {
+    opts: Model.Options;
+    args1: [4]string = .["-v", "-r", "/usr", "/usr/alice"];
+    Expect(Model.ParseArgs(args1[:], *opts), "parse -v -r /usr /usr/alice");
+    Expect(opts.verbose && TextView(opts.relpath) == "/usr/" && opts.paths.count == 1 && TextView(opts.paths[0]) == "/usr/alice/", "parsed fields");
+
+    args_bad_flag: [1]string = .["-z"];
+    Expect(!Model.ParseArgs(args_bad_flag[:], *opts), "reject unknown flag");
+
+    args_missing_r: [1]string = .["-r"];
+    Expect(!Model.ParseArgs(args_missing_r[:], *opts), "reject missing -r arg");
+
+    map_cases: [3]MapCase = MapCase.[
+        .{nspath = "/usr/alice/", relpath = "/usr/", ok = true, expected = "/n/remote/alice/"},
+        .{nspath = "/lib/ebook/", relpath = "", ok = true, expected = "/n/remote//lib/ebook/"},
+        .{nspath = "/etc/hosts/", relpath = "/usr/", ok = false, expected = ""},
+    ];
+    out: Text;
+    for map_cases {
+        ok := Model.MapBindPath(it.nspath, it.relpath, *out);
+        Expect(ok == it.ok && (!ok || TextView(out) == it.expected), it.nspath);
+    }
+
+    if failures == 0 { print("ns_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}
