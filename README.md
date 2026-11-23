@@ -237,6 +237,17 @@ actual dimensions. `taijios_wm.SetCursor` applies a packed Inferno cursor bitmap
 while the app's window has focus. Pass zero dimensions and an empty bitmap to
 restore the default cursor.
 
+### Build and run the ZX image viewer
+
+`appl/wm/view.zi` shows PNG, JPEG, GIF and Inferno image files, fitted to the
+window or zoomed. Inferno images (`.bit`) are read as libdraw reads them: plain
+or compressed, with a channel descriptor or an old ldepth header, including
+the colour map. GIF shows its first frame with its transparency. Build it with
+`(cd appl/wm && mk view.zx)` and open a file with
+`zxrun -w /dis/wm/view.zx /icons/inferno.bit`. `tests/desktop/image_document_test.zi`
+compares the decoded pixels of every Inferno image format in the tree with what
+Inferno's own Draw produced, and the tree's GIFs with Pillow's first frame.
+
 ### Build and run ZX Clock
 
 Use the Kryon revision pinned in `appl/wm/ziran.lock` when building Clock.

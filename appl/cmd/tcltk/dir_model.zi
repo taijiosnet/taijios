@@ -131,7 +131,7 @@ EntryKind :: (listing: *Listing, index: s64) -> Kind {
 Program :: (kind: Kind, path: string) -> string {
     if kind == .Folder { return "/dis/wm/dir.zx" }
     if kind == .Executable { return path }
-    if kind == .Picture { return "/dis/wm/view.dis" }
+    if kind == .Picture { return "/dis/wm/view.zx" }
     return "/dis/wm/edit.dis";
 }
 

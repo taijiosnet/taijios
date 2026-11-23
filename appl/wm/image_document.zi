@@ -1,5 +1,7 @@
 PNG :: #import "std/png_linux";
 JPEG :: #import "std/jpeg";
+GIF :: #import "gif_image";
+Bitmap :: #import "inferno_image";
 CRC :: #import "std/zip";
 #import "std/image"
 
@@ -98,7 +100,24 @@ DecodeWithProgress :: (bytes: []u8, progress: ImageProgress) -> Document {
         result.format = "JPEG"
         result.error = JpegAdmission(bytes)
         if result.error == "" { result.image = JPEG.ReadJPEGWithProgress(bytes, progress) }
-    } else { result.error = "Unsupported image format; open a PNG or JPEG file" }
+    } else if GIF.Looks(bytes) {
+        result.format = "GIF"
+        width, height, ok := GIF.ScreenSize(bytes)
+        if !ok { result.error = "Malformed GIF header" }
+        else if !Admit(width, height) { result.error = "Image exceeds the 4096-pixel side or 2-megapixel limit" }
+        else {
+            result.error = GIF.Decode(bytes, *result.image)
+        }
+    } else if Bitmap.Looks(bytes) {
+        result.format = "Inferno image"
+        header: Bitmap.Header
+        unused Bitmap.ReadHeader(bytes, *header)
+        if !Admit(header.right-header.left, header.bottom-header.top) {
+            result.error = "Image exceeds the 4096-pixel side or 2-megapixel limit"
+        } else {
+            result.error = Bitmap.Decode(bytes, *result.image)
+        }
+    } else { result.error = "Unsupported image format; open a PNG, JPEG, GIF or Inferno image" }
     if result.error == "" && !ImageValid(*result.image) { result.error = "Malformed or unsupported image data" }
     return result
 }

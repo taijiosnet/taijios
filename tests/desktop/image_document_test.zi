@@ -4,6 +4,32 @@ JPEG :: #import "std/jpeg";
 #import "std/image"
 #import "std/file"
 
+CRC :: #import "std/zip";
+
+// Decode a file through the viewer and compare its pixels with a CRC-32 of
+// what a reference decoder produced. For Inferno images that is Inferno's own
+// Draw, drawing the file into r8g8b8 (blue, green, red bytes). For GIF it is
+// Pillow's first frame as RGBA with transparent pixels cleared.
+Matches :: (path: string, format: string, width: s32, height: s32, crc: u32) -> bool {
+    bytes: Vec(u8); defer VecFree(bytes)
+    if !ReadFileInto(path, *bytes) { return false }
+    document := D.Decode(bytes[:]); defer VecFree(document.image.pixels)
+    if document.error != "" || document.format != format { print("%: % %\n", path, document.format, document.error); return false }
+    if document.image.width != width || document.image.height != height { return false }
+    sum := cast(u32)0xffffffff
+    if format == "GIF" { sum = CRC.ZipCRC32Update(sum, document.image.pixels[:]) }
+    else {
+        bgr: [3]u8
+        for i: cast(s64)0..document.image.pixels.count/4-1 {
+            bgr[0] = document.image.pixels[i*4+2]; bgr[1] = document.image.pixels[i*4+1]; bgr[2] = document.image.pixels[i*4]
+            sum = CRC.ZipCRC32Update(sum, bgr[:])
+        }
+    }
+    sum ^= cast(u32)0xffffffff
+    if sum != crc { print("%: CRC % not %\n", path, sum, crc) }
+    return sum == crc
+}
+
 #program_export
 main :: () -> s32 {
     unused CreateDirectory("build/desktop-registry/images")
@@ -62,6 +88,36 @@ main :: () -> s32 {
     if !VecResizeBounded(excessive, 8388609, 8388609) { return 18 }
     rejected := D.Decode(excessive[:]); defer VecFree(rejected.image.pixels)
     if rejected.error == "" { return 19 }
+    // Every Inferno image format in the tree: compressed grey, old ldepth 0 and
+    // 3 (inverted bits), the colour map, 24-bit colour, and a plain 16-bit
+    // image whose rectangle starts at 160,160.
+    if !Matches("icons/minicharon/back.bit", "Inferno image", 10, 8, 0x14cc26d9) { return 20 }
+    if !Matches("icons/tk/debug/closed.bit", "Inferno image", 13, 13, 0x6d003a77) { return 21 }
+    if !Matches("lib/strokes/digits.bit", "Inferno image", 200, 300, 0x5d12c0c4) { return 22 }
+    if !Matches("icons/tk/file.bit", "Inferno image", 40, 30, 0xaf9f5e1d) { return 23 }
+    if !Matches("icons/monitor/browsemask.bit", "Inferno image", 15, 15, 0xd1148a58) { return 24 }
+    if !Matches("icons/penguin.bit", "Inferno image", 161, 209, 0x386e4c28) { return 25 }
+    if !Matches("icons/inferno.bit", "Inferno image", 300, 207, 0xb73419a0) { return 26 }
+    // GIF: an interlaced picture with a transparent colour, and the GIFs in the tree.
+    if !Matches("tests/desktop/interlaced.gif", "GIF", 37, 23, 2395954842) { return 27 }
+    if !Matches("doc/limbotk/f1.gif", "GIF", 299, 24, 2025682603) { return 28 }
+    if !Matches("doc/limbotk/f2.gif", "GIF", 310, 210, 2702451149) { return 29 }
+    if !Matches("services/webget/inferno.gif", "GIF", 233, 75, 3695199128) { return 30 }
+    if !Matches("services/webget/smallinferno.gif", "GIF", 150, 48, 3797876854) { return 31 }
+    if !Matches("services/webget/vnlogo.gif", "GIF", 121, 110, 2115683368) { return 32 }
+    // Truncated input fails cleanly.
+    bitmap: Vec(u8); defer VecFree(bitmap)
+    gif: Vec(u8); defer VecFree(gif)
+    if !ReadFileInto("icons/tk/file.bit", *bitmap) || !ReadFileInto("doc/limbotk/f2.gif", *gif) { return 33 }
+    for size: cast(s64)0..bitmap.count-1 {
+        part := D.Decode(bitmap[:size]); defer VecFree(part.image.pixels)
+        if part.error == "" { return 34 }
+    }
+    // A cut GIF either fails or shows the rows that arrived on the full screen.
+    for size: cast(s64)0..gif.count-2 {
+        part := D.Decode(gif[:size]); defer VecFree(part.image.pixels)
+        if part.error == "" && (part.image.width != 310 || part.image.height != 210) { return 35 }
+    }
     print("TAIJI_IMAGE_DOCUMENT_OK\n")
     return 0
 }

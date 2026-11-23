@@ -34,7 +34,7 @@ Load :: (session: Session) {
     document.image.width = 0; document.image.height = 0; document.format = ""; document.error = ""
     scroll_x = 0; scroll_y = 0; zoom = 0
     path := TextView(path_bytes[:path_field.length])
-    if path == "" { document.error = "Choose a PNG or JPEG file"; return }
+    if path == "" { document.error = "Choose a PNG, JPEG, GIF or Inferno image file"; return }
     metadata: [12]u8
     if IO.Stat(path, metadata[:]) != 0 { document.error = "Cannot read this file"; return }
     length: s64

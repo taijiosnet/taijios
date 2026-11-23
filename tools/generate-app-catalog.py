@@ -164,7 +164,7 @@ def generate_catalog(output):
     for source in sorted((ROOT / 'appl/wm').glob('*.b')):
         if source.stem not in exclude:
             apps['wm/' + source.stem] = False
-    for name in ('about', 'clock', 'counter', 'dir', 'explorer', 'logwindow', 'memory', 'stopwatch', 'taskmgr'):
+    for name in ('about', 'clock', 'counter', 'dir', 'explorer', 'logwindow', 'memory', 'stopwatch', 'taskmgr', 'view'):
         apps['wm/' + name] = False
     for source in sorted((ROOT / 'appl/cmd').rglob('*.b')):
         relative = source.relative_to(ROOT / 'appl/cmd').with_suffix('').as_posix()
@@ -192,7 +192,7 @@ def generate_catalog(output):
         description = DESCRIPTIONS.get(name, title)
         text += f'Comment={description}\nIcon=taiji-{icon}\nExec={program}{arguments}\nTryExec={program}\n'
         if relative == 'wm/view':
-            text += 'MimeType=image/png;image/jpeg;\n'
+            text += 'MimeType=image/png;image/jpeg;image/gif;\n'
         text += f'Terminal={str(terminal).lower()}\nCategories={category};\nKeywords=TaijiOS;{name};\n'
         if hidden:
             text += 'NoDisplay=true\n'

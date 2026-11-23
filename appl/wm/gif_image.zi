@@ -1,0 +1,243 @@
+// GIF87a and GIF89a pictures: the first frame on the logical screen, with
+// its palette, transparency and interlacing.
+#import "std/vec"
+#import "std/image"
+
+// Whether the bytes start with a GIF signature.
+Looks :: (bytes: []u8) -> bool {
+    return bytes.count >= 6 && TextView(bytes[:3]) == "GIF" && (TextView(bytes[3:6]) == "87a" || TextView(bytes[3:6]) == "89a");
+}
+
+// The logical screen size, for admission before decoding.
+ScreenSize :: (bytes: []u8) -> (width: s32, height: s32, ok: bool) {
+    if !Looks(bytes) || bytes.count < 13 { return 0, 0, false }
+    return Word(bytes, 6), Word(bytes, 8), true;
+}
+
+// Decode the first frame into an RGBA picture the size of the logical
+// screen. Pixels the frame leaves out, and transparent ones, stay clear.
+// Returns "" or the reason; the caller frees the picture either way.
+Decode :: (bytes: []u8, picture: *Image) -> string {
+    width, height, ok := ScreenSize(bytes);
+    if !ok { return "Malformed GIF header" }
+    if width <= 0 || height <= 0 { return "Empty GIF image" }
+    flags := bytes[10];
+    at: s64 = 13;
+    global: []u8;
+    if (flags & 128) != 0 {
+        size := cast(s64)3 << cast(s64)((flags & 7) + 1);
+        if bytes.count - at < size { return "Truncated GIF palette" }
+        global = bytes[at:at + size];
+        at += size;
+    }
+    transparent: s32 = -1;
+    while at < bytes.count {
+        kind := bytes[at];
+        at += 1;
+        if kind == 59 { break }
+        if kind == 33 {
+            if at >= bytes.count { return "Truncated GIF extension" }
+            label := bytes[at];
+            at += 1;
+            if label == 249 && bytes.count - at >= 6 && bytes[at] >= 4 {
+                transparent = ifx (bytes[at + 1] & 1) != 0 then cast(s32)bytes[at + 4] else -1;
+            }
+            skipped, problem := SkipBlocks(bytes, at);
+            if problem != "" { return problem }
+            at = skipped;
+            continue;
+        }
+        if kind != 44 { return "Malformed GIF block" }
+        if bytes.count - at < 9 { return "Truncated GIF image" }
+        left := Word(bytes, at); top := Word(bytes, at + 2);
+        frame_width := Word(bytes, at + 4); frame_height := Word(bytes, at + 6);
+        frame_flags := bytes[at + 8];
+        at += 9;
+        palette := global;
+        if (frame_flags & 128) != 0 {
+            size := cast(s64)3 << cast(s64)((frame_flags & 7) + 1);
+            if bytes.count - at < size { return "Truncated GIF palette" }
+            palette = bytes[at:at + size];
+            at += size;
+        }
+        if palette.count == 0 { return "GIF image has no palette" }
+        if at >= bytes.count { return "Truncated GIF image" }
+        minimum := cast(s32)bytes[at];
+        at += 1;
+        if minimum < 2 || minimum > 8 { return "Malformed GIF image data" }
+        size, problem := BlockBytes(bytes, at);
+        if problem != "" { return problem }
+        data: Vec(u8);
+        defer VecFree(data);
+        if !VecResize(data, size) { return "Image exceeds the memory limit" }
+        CopyBlocks(bytes, at, data[:]);
+        count := cast(s64)frame_width * frame_height;
+        indices: Vec(u8);
+        defer VecFree(indices);
+        if !VecResize(indices, count) { return "Image exceeds the memory limit" }
+        problem = Expand(data[:], minimum, indices[:]);
+        if problem != "" { return problem }
+        if !Clear(picture, width, height) { return "Image exceeds the memory limit" }
+        interlaced := (frame_flags & 64) != 0;
+        for row: 0 .. cast(s64)frame_height - 1 {
+            y := cast(s64)top + ifx interlaced then Interlaced(row, frame_height) else row;
+            if y < 0 || y >= height { continue }
+            for column: 0 .. cast(s64)frame_width - 1 {
+                x := cast(s64)left + column;
+                if x < 0 || x >= width { continue }
+                index := cast(s64)indices[row * frame_width + column];
+                if index == cast(s64)transparent || index * 3 + 2 >= palette.count { continue }
+                out := (y * width + x) * 4;
+                picture.pixels[out] = palette[index * 3];
+                picture.pixels[out + 1] = palette[index * 3 + 1];
+                picture.pixels[out + 2] = palette[index * 3 + 2];
+                picture.pixels[out + 3] = 255;
+            }
+        }
+        return "";
+    }
+    return "GIF file has no image";
+}
+
+#scope_file
+
+Word :: (bytes: []u8, at: s64) -> s32 {
+    return cast(s32)bytes[at] | cast(s32)bytes[at + 1] << 8;
+}
+
+SkipBlocks :: (bytes: []u8, at: s64) -> (at: s64, error: string) {
+    while true {
+        if at >= bytes.count { return at, "Truncated GIF data" }
+        size := cast(s64)bytes[at];
+        at += 1;
+        if size == 0 { return at, "" }
+        if bytes.count - at < size { return at, "Truncated GIF data" }
+        at += size;
+    }
+    return at, "";
+}
+
+// The bytes in a run of data sub-blocks.
+BlockBytes :: (bytes: []u8, at: s64) -> (size: s64, error: string) {
+    total: s64 = 0;
+    while true {
+        if at >= bytes.count { return 0, "Truncated GIF data" }
+        size := cast(s64)bytes[at];
+        at += 1;
+        if size == 0 { return total, "" }
+        if bytes.count - at < size { return 0, "Truncated GIF data" }
+        total += size;
+        at += size;
+    }
+    return total, "";
+}
+
+CopyBlocks :: (bytes: []u8, at: s64, out: []u8) {
+    written: s64 = 0;
+    while written < out.count {
+        size := cast(s64)bytes[at];
+        at += 1;
+        for i: 0 .. size - 1 { out[written + i] = bytes[at + i] }
+        written += size;
+        at += size;
+    }
+}
+
+// Size a picture and make every pixel clear.
+Clear :: (picture: *Image, width: s32, height: s32) -> bool {
+    if !VecResize(picture.pixels, cast(s64)width * height * 4) { return false }
+    for i: 0 .. picture.pixels.count - 1 { picture.pixels[i] = 0 }
+    picture.width = width;
+    picture.height = height;
+    return true;
+}
+
+// The source row stored at an interlaced position: rows 0, 8, 16..., then
+// 4, 12..., then 2, 6..., then the odd rows.
+Interlaced :: (row: s64, height: s32) -> s64 {
+    h := cast(s64)height;
+    first := (h + 7) / 8;
+    if row < first { return row * 8 }
+    row -= first;
+    second := (h + 3) / 8;
+    if row < second { return row * 8 + 4 }
+    row -= second;
+    third := (h + 1) / 4;
+    if row < third { return row * 4 + 2 }
+    return (row - third) * 2 + 1;
+}
+
+// Variable-width LZW, least significant bit first, up to 12-bit codes.
+Limit :: 4096;
+
+Expand :: (data: []u8, minimum: s32, out: []u8) -> string {
+    prefix: [Limit]s32;
+    suffix: [Limit]u8;
+    first: [Limit]u8;
+    length: [Limit]s32;
+    clear := cast(s32)1 << minimum;
+    finish := clear + 1;
+    for i: 0 .. cast(s64)clear - 1 {
+        prefix[i] = -1; suffix[i] = cast(u8)i; first[i] = cast(u8)i; length[i] = 1;
+    }
+    next := clear + 2;
+    width := minimum + 1;
+    previous: s32 = -1;
+    written: s64 = 0;
+    buffer: u32 = 0;
+    held: s32 = 0;
+    at: s64 = 0;
+    while written < out.count {
+        while held < width {
+            if at >= data.count { return ifx written > 0 then "" else "Truncated GIF image data" }
+            buffer |= cast(u32)data[at] << cast(u32)held;
+            at += 1;
+            held += 8;
+        }
+        code := cast(s32)(buffer & ((cast(u32)1 << cast(u32)width) - 1));
+        buffer >>= cast(u32)width;
+        held -= width;
+        if code == clear {
+            next = clear + 2; width = minimum + 1; previous = -1;
+            continue;
+        }
+        if code == finish { break }
+        if previous < 0 {
+            if code >= clear { return "Malformed GIF image data" }
+            out[written] = cast(u8)code;
+            written += 1;
+            previous = code;
+            continue;
+        }
+        entry := code;
+        if code > next || (code == next && next >= Limit) { return "Malformed GIF image data" }
+        if code == next {
+            // The code being defined: the previous string and its own first byte.
+            entry = previous;
+        }
+        // Write the string backwards from its end.
+        size := cast(s64)length[entry];
+        total := size + ifx code == next then cast(s64)1 else cast(s64)0;
+        if written + total > out.count { total = out.count - written }
+        end := written + size;
+        k := entry;
+        position := end - 1;
+        while k >= 0 {
+            if position < out.count { out[position] = suffix[k] }
+            position -= 1;
+            k = prefix[k];
+        }
+        if code == next && end < out.count { out[end] = first[previous] }
+        if next < Limit {
+            prefix[next] = previous;
+            suffix[next] = first[entry];
+            first[next] = first[previous];
+            length[next] = length[previous] + 1;
+            next += 1;
+            if next == (cast(s32)1 << width) && width < 12 { width += 1 }
+        }
+        written += total;
+        previous = code;
+    }
+    return "";
+}

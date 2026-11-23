@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Open Inferno images and GIF pictures in the ZX image viewer, and remove the Dis viewer.
+
 - Ship the Directory Browser only as ZX and remove its Dis version.
 
 - Report RSA keys from taijios_keyring as the Limbo Keyring does, including a negative private exponent, and accept 0 rounds and key sizes from 8 bits.

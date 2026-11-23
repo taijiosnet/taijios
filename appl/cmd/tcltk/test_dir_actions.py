@@ -112,8 +112,9 @@ def capture_file(browser, index):
                 # The editor's first line begins under the menu row.
                 box = (left+10, bottom+17, left+278, bottom+35)
             else:
-                center = (left+right)//2
-                box = (center-19, bottom, center+19, bottom+30)
+                # The image viewer fits the picture into its area below the path
+                # and zoom rows; the picture holds the only black there.
+                box = (left+8, bottom+84, right-8, bottom+484)
             ink = glyphs(image.crop(box), BLACK)
             if ink:
                 return title, ink
@@ -218,6 +219,10 @@ def main():
             overlay = root / "wm"
             overlay.mkdir()
             shutil.copyfile(image, overlay / "dir.zx")
+            # Pictures open in the viewer built from this tree: (cd appl/wm && mk view.zx).
+            viewer = ROOT / "appl/wm/view.zx"
+            assert viewer.exists(), "build the image viewer first: (cd appl/wm && mk view.zx)"
+            shutil.copyfile(viewer, overlay / "view.zx")
             launcher += f"bind -b {guest(overlay)} /dis/wm; "
         launcher += "zxrun -w /dis/wm/dir.zx"
         folder, editor, picture, module = run_actions(env, args.emulator, launcher, directory, sink, stock=False)

@@ -1,0 +1,245 @@
+// Inferno image files, as image(6) describes and libdraw reads them: a
+// 60-byte header with a channel descriptor or an old ldepth and the image
+// rectangle, then the rows, or "compressed\n", the header and compressed blocks.
+#import "std/vec"
+#import "std/image"
+Map :: #import "color_map";
+
+Header :: struct {
+    channels: [8]u8;    // Channel letters: r g b k a m x, most significant first.
+    bits: [8]s32;
+    count: s64;
+    depth: s32;         // Bits per pixel.
+    old: bool;          // An ldepth header, whose data bits are inverted.
+    compressed: bool;
+    left: s32;
+    top: s32;
+    right: s32;
+    bottom: s32;
+    data: s64;          // Offset of the first row or block.
+}
+
+// Whether the bytes start like an Inferno image file.
+Looks :: (bytes: []u8) -> bool {
+    header: Header;
+    return ReadHeader(bytes, *header) == "";
+}
+
+// Parse the header. Returns "" or the reason it is not an Inferno image.
+ReadHeader :: (bytes: []u8, header: *Header) -> string {
+    at: s64 = 0;
+    header.compressed = bytes.count >= 11 && TextView(bytes[:11]) == "compressed\n";
+    if header.compressed { at = 11 }
+    if bytes.count - at < 60 { return "Truncated Inferno image header" }
+    field := bytes[at:at + 12];
+    if field[11] != 32 { return "Malformed Inferno image header" }
+    // An old header holds a single ldepth digit at the end of its first field.
+    header.old = true;
+    for i: 0 .. 9 { if field[i] != 32 { header.old = false } }
+    header.count = 0;
+    if header.old {
+        ldepth := cast(s32)field[10] - 48;
+        if ldepth < 0 || ldepth > 3 { return "Malformed Inferno image header" }
+        header.channels[0] = ifx ldepth == 3 then cast(u8)109 else cast(u8)107;
+        header.bits[0] = cast(s32)1 << ldepth;
+        header.count = 1;
+    } else {
+        // The descriptor is right-justified in its field.
+        i: s64 = 0;
+        while i < 11 && field[i] == 32 { i += 1 }
+        while i < 11 && field[i] != 32 {
+            letter := field[i];
+            if letter != 114 && letter != 103 && letter != 98 && letter != 107 && letter != 97 && letter != 109 && letter != 120 {
+                return "Unsupported Inferno image channels";
+            }
+            i += 1;
+            bits: s32 = 0;
+            digits: s64 = 0;
+            while i < 11 && field[i] >= 48 && field[i] <= 57 { bits = bits * 10 + cast(s32)field[i] - 48; i += 1; digits += 1 }
+            if digits == 0 || bits == 0 || bits > 8 || header.count == 8 { return "Unsupported Inferno image channels" }
+            header.channels[header.count] = letter;
+            header.bits[header.count] = bits;
+            header.count += 1;
+        }
+        while i < 11 { if field[i] != 32 { return "Malformed Inferno image header" } i += 1 }
+    }
+    header.depth = 0;
+    for i: 0 .. header.count - 1 { header.depth += header.bits[i] }
+    if header.depth != 1 && header.depth != 2 && header.depth != 4 && header.depth % 8 != 0 { return "Unsupported Inferno image depth" }
+    values: [4]s32;
+    for n: 0 .. 3 {
+        value, ok := Number(bytes[at + 12 * (n + 1):at + 12 * (n + 2)]);
+        if !ok { return "Malformed Inferno image header" }
+        values[n] = value;
+    }
+    header.left = values[0]; header.top = values[1]; header.right = values[2]; header.bottom = values[3];
+    if header.left > header.right || header.top > header.bottom { return "Malformed Inferno image rectangle" }
+    header.data = at + 60;
+    return "";
+}
+
+// Decode into RGBA. The caller checks the size with ReadHeader first, and
+// frees the picture whether or not this returns "".
+Decode :: (bytes: []u8, picture: *Image) -> string {
+    header: Header;
+    problem := ReadHeader(bytes, *header);
+    if problem != "" { return problem }
+    width := header.right - header.left;
+    height := header.bottom - header.top;
+    if width == 0 || height == 0 { return "Empty Inferno image" }
+    line := LineBytes(*header);
+    rows: Vec(u8);
+    defer VecFree(rows);
+    if !VecResize(rows, line * cast(s64)height) { return "Image exceeds the memory limit" }
+    if header.compressed {
+        problem = Expand(bytes, *header, line, rows[:]);
+        if problem != "" { return problem }
+    } else {
+        if bytes.count - header.data < rows.count { return "Truncated Inferno image" }
+        for i: 0 .. rows.count - 1 { rows[i] = bytes[header.data + i] }
+    }
+    // Old images store inverted bits: 0 was white.
+    if header.old { for i: 0 .. rows.count - 1 { rows[i] ^= cast(u8)255 } }
+    if !VecResize(picture.pixels, cast(s64)width * height * 4) { return "Image exceeds the memory limit" }
+    picture.width = width;
+    picture.height = height;
+    start := FirstBit(*header);
+    for y: 0 .. height - 1 {
+        row := rows[cast(s64)y * line:cast(s64)(y + 1) * line];
+        for x: 0 .. width - 1 {
+            bit := cast(s64)(header.left + x) * header.depth - start;
+            Store(*header, Pixel(row, bit, header.depth), picture.pixels[(cast(s64)y * width + x) * 4:]);
+        }
+    }
+    return "";
+}
+
+#scope_file
+
+Number :: (field: []u8) -> (value: s32, ok: bool) {
+    i: s64 = 0;
+    while i < field.count && field[i] == 32 { i += 1 }
+    negative := i < field.count && field[i] == 45;
+    if negative { i += 1 }
+    value: s64 = 0;
+    digits: s64 = 0;
+    while i < field.count && field[i] >= 48 && field[i] <= 57 {
+        value = value * 10 + cast(s64)field[i] - 48;
+        if value > 1000000 { return 0, false }
+        i += 1;
+        digits += 1;
+    }
+    while i < field.count && field[i] == 32 { i += 1 }
+    if digits == 0 || i != field.count { return 0, false }
+    return cast(s32)(ifx negative then -value else value), true;
+}
+
+// libdraw's unitsperline with 8-bit units: the bytes a row occupies,
+// starting at the byte that holds its first pixel.
+LineBytes :: (header: *Header) -> s64 {
+    d := cast(s64)header.depth;
+    if header.left >= 0 { return (cast(s64)header.right * d + 7) / 8 - cast(s64)header.left * d / 8 }
+    return (-cast(s64)header.left * d + 7) / 8 + (cast(s64)header.right * d + 7) / 8;
+}
+
+// The bit position, counted from x = 0, of a row's first byte.
+FirstBit :: (header: *Header) -> s64 {
+    d := cast(s64)header.depth;
+    if header.left >= 0 { return cast(s64)header.left * d / 8 * 8 }
+    return -((-cast(s64)header.left * d + 7) / 8 * 8);
+}
+
+// Pixels under 8 bits pack from the high bit; wider ones are little-endian.
+Pixel :: (row: []u8, bit: s64, depth: s32) -> u32 {
+    if depth < 8 {
+        byte := row[bit / 8];
+        shift := cast(u32)(8 - depth - cast(s32)(bit % 8));
+        return (cast(u32)byte >> shift) & ((cast(u32)1 << cast(u32)depth) - 1);
+    }
+    value: u32 = 0;
+    at := bit / 8;
+    for i: 0 .. cast(s64)depth / 8 - 1 { value |= cast(u32)row[at + i] << cast(u32)(8 * i) }
+    return value;
+}
+
+// Widen a channel to 8 bits by repeating its bits, as memdraw does.
+Widen :: (value: u32, bits: s32) -> u8 {
+    if bits >= 8 { return cast(u8)(value >> cast(u32)(bits - 8)) }
+    result: u32 = 0;
+    filled: s32 = 0;
+    while filled < 8 {
+        result = (result << cast(u32)bits) | value;
+        filled += bits;
+    }
+    return cast(u8)(result >> cast(u32)(filled - 8));
+}
+
+Store :: (header: *Header, value: u32, out: []u8) {
+    red: u8 = 0; green: u8 = 0; blue: u8 = 0; alpha: u8 = 255;
+    shift: u32 = 0;
+    i := header.count - 1;
+    while i >= 0 {
+        bits := header.bits[i];
+        field := (value >> shift) & ((cast(u32)1 << cast(u32)bits) - 1);
+        shift += cast(u32)bits;
+        letter := header.channels[i];
+        if letter == 114 { red = Widen(field, bits) }
+        else if letter == 103 { green = Widen(field, bits) }
+        else if letter == 98 { blue = Widen(field, bits) }
+        else if letter == 107 { red = Widen(field, bits); green = red; blue = red }
+        else if letter == 97 { alpha = Widen(field, bits) }
+        else if letter == 109 {
+            rgb := Map.At(cast(s32)field);
+            red = cast(u8)rgb.red; green = cast(u8)rgb.green; blue = cast(u8)rgb.blue;
+        }
+        i -= 1;
+    }
+    out[0] = red; out[1] = green; out[2] = blue; out[3] = alpha;
+}
+
+// Each block names the row it ends at and its byte count. A byte from 128
+// starts a run of that many minus 127 literal bytes; a smaller one copies
+// (byte >> 2) + 3 bytes from up to 1024 bytes back in the block's output.
+History :: 1024;
+
+Expand :: (bytes: []u8, header: *Header, line: s64, rows: []u8) -> string {
+    at := header.data;
+    y := header.top;
+    out: s64 = 0;
+    while y < header.bottom {
+        if bytes.count - at < 24 { return "Truncated Inferno image block" }
+        last, ok := Number(bytes[at:at + 12]);
+        count, ok2 := Number(bytes[at + 12:at + 24]);
+        at += 24;
+        if !ok || !ok2 || last <= y || last > header.bottom || count <= 0 || cast(s64)count > bytes.count - at {
+            return "Malformed Inferno image block";
+        }
+        end := out + cast(s64)(last - y) * line;
+        start := out;
+        block := bytes[at:at + cast(s64)count];
+        i: s64 = 0;
+        while out < end {
+            if i >= block.count { return "Truncated Inferno image block" }
+            code := block[i];
+            i += 1;
+            if code >= 128 {
+                run := cast(s64)code - 127;
+                if block.count - i < run || end - out < run { return "Malformed Inferno image block" }
+                for k: 0 .. run - 1 { rows[out + k] = block[i + k] }
+                i += run;
+                out += run;
+            } else {
+                if i >= block.count { return "Truncated Inferno image block" }
+                back := (cast(s64)code & 3) * 256 + cast(s64)block[i] + 1;
+                i += 1;
+                run := (cast(s64)code >> 2) + 3;
+                if back > out - start || back > History || end - out < run { return "Malformed Inferno image block" }
+                for k: 0 .. run - 1 { rows[out + k] = rows[out - back + k] }
+                out += run;
+            }
+        }
+        at += cast(s64)count;
+        y = last;
+    }
+    return "";
+}
