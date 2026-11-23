@@ -901,8 +901,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/lego/rcxsend.dis | appl/cmd/lego/rcxsend.b |  | - |  |
 | dis/lego/send.dis | appl/cmd/lego/send.b |  | - |  |
 | dis/lego/timers.dis | appl/cmd/lego/timers.b | module/timers.m | - |  |
-| dis/mpc/qconfig.dis | appl/cmd/mpc/qconfig.b |  | - |  |
-| dis/mpc/qflash.dis | appl/cmd/mpc/qflash.b |  | - |  |
 | dis/mpeg/decode.dis | appl/wm/mpeg/decode.b |  | - |  |
 | dis/mpeg/decode4.dis | appl/wm/mpeg/decode4.b |  | - |  |
 | dis/mpeg/fixidct.dis | appl/wm/mpeg/fixidct.b |  | - |  |

@@ -1,0 +1,132 @@
+// qconfig [-D] [-f flash] [-param value ...]: write MPC8xx boot and plan9.ini
+// configuration descriptors into a flash device or image file.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Flash :: #import "mpc_flash";
+
+Usage :: () -> s32 {
+    unused Cli.WriteAll(2, "Usage: qconfig [-D] [-f flash] [-param value ...]\n");
+    return 0;
+}
+
+Fail :: (msg: string, damaged: bool) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "qconfig: %", msg);
+    if !damaged {
+        BuilderAppend(out, "; flash not modified\n");
+    } else {
+        BuilderAppend(out, "; flash might now be invalid\n");
+    }
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    return 0;
+}
+
+Plonk :: (out_fd: s32, where: s64, val: []u8, debug: bool) -> bool {
+    if debug {
+        line: Vec(u8);
+        BuilderAppend(line, "write #");
+        Flash.AppendHexMin(*line, cast(u32)where);
+        BuilderPrint(*line, " [%]:", val.count);
+        for val {
+            VecPush(line, #char " ");
+            Flash.AppendHex2(*line, it);
+        }
+        VecPush(line, #char "\n");
+        unused Cli.WriteAll(1, BuilderFinish(line));
+    }
+    unused Io.SeekFile(out_fd, where, 0);
+    wrote := Io.WriteBytes(out_fd, TextView(val));
+    if wrote != cast(s32)val.count {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "bad flash write: %", Io.LastError());
+        unused Fail(BuilderFinish(msg), false);
+        return false;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    flash := "#F/flash/flash";
+    debug := false;
+    vgasize: Text;
+    console: Text;
+    baud: Text;
+    ea: Text;
+    BuilderAppend(vgasize.bytes, "vgasize=640x480x8\n");
+    BuilderAppend(console.bytes, "console=0 lcd\n");
+    BuilderAppend(baud.bytes, "baud=9600\n");
+    BuilderAppend(ea.bytes, "ea=08003e400080\n");
+
+    count := Args.OperandCount();
+    i: s32 = 0;
+    while i < count {
+        a := Args.Operand(i);
+        if a.count == 0 || a[0] != #char "-" { break }
+        if a == "-f" {
+            i += 1;
+            if i >= count { return Usage() }
+            flash = Args.Operand(i);
+        } else if a == "-D" {
+            debug = true;
+        } else {
+            name := a[1:];
+            idx := Flash.ParamIndex(name);
+            if idx < 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "unknown config parameter: %", a);
+                return Fail(BuilderFinish(msg), false);
+            }
+            i += 1;
+            if i >= count { return Usage() }
+            val := Args.Operand(i);
+            entry: Vec(u8);
+            BuilderPrint(*entry, "%=%\n", name, val);
+            if idx == Flash.C_SCREEN {
+                VecClear(vgasize.bytes);
+                BuilderAppend(vgasize.bytes, TextView(entry[:]));
+            } else if idx == Flash.C_CONSOLE {
+                VecClear(console.bytes);
+                BuilderAppend(console.bytes, TextView(entry[:]));
+            } else if idx == Flash.C_BAUD {
+                VecClear(baud.bytes);
+                BuilderAppend(baud.bytes, TextView(entry[:]));
+            } else if idx == Flash.C_EA {
+                VecClear(ea.bytes);
+                BuilderAppend(ea.bytes, TextView(entry[:]));
+            }
+        }
+        i += 1;
+    }
+    if i < count { return Usage() }
+
+    out_fd := Io.OpenFile(flash, 2);
+    if out_fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open % for read/write: %", flash, Io.LastError());
+        return Fail(BuilderFinish(msg), false);
+    }
+
+    desc: Vec(u8);
+    Flash.MakeDesc(0, 128 * 1024, Flash.TBOOT, *desc);
+    if !Plonk(out_fd, Flash.FLASHSEG - Flash.FASIZE, desc[:], debug) {
+        unused Io.CloseFile(out_fd);
+        return 0;
+    }
+
+    bconf: Vec(u8);
+    Flash.BuildConfig(TextView(vgasize), TextView(console), TextView(baud), TextView(ea), *bconf);
+    if debug {
+        unused Cli.WriteAll(1, TextView(bconf[:]));
+    }
+
+    Flash.MakeDesc(128 * 1024, cast(u32)bconf.count, Flash.TCONF, *desc);
+    if !Plonk(out_fd, Flash.FLASHSEG - Flash.FASIZE * 2, desc[:], debug) {
+        unused Io.CloseFile(out_fd);
+        return 0;
+    }
+    unused Plonk(out_fd, 128 * 1024, bconf[:], debug);
+    unused Io.CloseFile(out_fd);
+    return 0;
+}

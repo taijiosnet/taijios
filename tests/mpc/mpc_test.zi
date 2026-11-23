@@ -1,0 +1,167 @@
+// Table-driven tests for mpc/qconfig and mpc/qflash descriptor encoding,
+// offset parsing, and guest execution on flash image files.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root appl/cmd/mpc tests/mpc/mpc_test.zi -- [EMU]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+using Flash :: #import "mpc_flash"
+
+WORK :: "build/dis-legacy-math/mpc";
+
+OffsetCase :: struct {
+    text: string;
+    ok: bool;
+    val: s64;
+}
+
+offset_cases: [8]OffsetCase = OffsetCase.[
+    .{text = "0", ok = true, val = 0},
+    .{text = "256", ok = true, val = 256},
+    .{text = "0100", ok = true, val = 64},
+    .{text = "0x100", ok = true, val = 256},
+    .{text = "16r1a", ok = true, val = 26},
+    .{text = "-5", ok = false},
+    .{text = "0xzz", ok = false},
+    .{text = "12abc", ok = false},
+];
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+HexBytes :: (data: []u8) -> Text {
+    out: Vec(u8);
+    for data {
+        if it_index > 0 { VecPush(out, #char " ") }
+        Flash.AppendHex2(*out, it);
+    }
+    return BuilderFinish(out);
+}
+
+TestFlashLib :: () {
+    for offset_cases {
+        v, ok := Flash.ParseOffset(it.text);
+        Expect(ok == it.ok, it.text);
+        if it.ok { Expect(v == it.val, it.text) }
+    }
+
+    desc: Vec(u8);
+    Flash.MakeDesc(0, 128 * 1024, Flash.TBOOT, *desc);
+    h1: Text = HexBytes(desc[:]);
+    Expect(TextView(h1) == "ff ff ff ff 00 00 00 00 02 00 00 01 f1 a5 5a 1f", "boot descriptor");
+
+    Flash.MakeDesc(128 * 1024, 114, Flash.TCONF, *desc);
+    h2: Text = HexBytes(desc[:]);
+    Expect(TextView(h2) == "ff ff ff ff 00 02 00 00 00 00 72 02 f1 a5 5a 1f", "conf descriptor");
+
+    cfg: Vec(u8);
+    Flash.BuildConfig("vgasize=800x600x8\n", "console=0\n", "baud=115200\n", "ea=112233445566\n", *cfg);
+    Expect(cfg.count > 0 && cfg[cfg.count - 1] == 0, "config NUL terminated");
+    Expect(TextView(cfg[:cfg.count - 1]) == "#plan9.ini\nvgasize=800x600x8\nconsole=0\nbaud=115200\nether0=type=SCC port=2 ea=112233445566\n", "config body");
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+TestGuest :: (emu: string, qconfig_cmd: string, qflash_cmd: string, check_qflash_write: bool) {
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/mpc/work") ||
+        !CreateDirectory("build/dis-legacy-math/mpc/result") {
+        failures += 1;
+        print("FAIL: cannot prepare %\n", WORK);
+        return;
+    }
+    // Prepare a 768 KiB flash image and a small payload file.
+    zeros: Vec(u8);
+    for i: 0..3 * 262144 - 1 { VecPush(zeros, 0xFF) }
+    unused WriteEntireFile("build/dis-legacy-math/mpc/work/flash.img", BuilderFinish(zeros));
+    unused WriteEntireFile("build/dis-legacy-math/mpc/work/flash.imgctl", "");
+    unused WriteEntireFile("build/dis-legacy-math/mpc/work/payload.bin", "KERNELDATA012345");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1: qconfig writes descriptors and config into flash.img with -D
+    BuilderPrint(*script, "% -D -f flash.img -baud 115200 -ea 010203040506 > ../result/qc.out >[2] ../result/qc.err\n", qconfig_cmd);
+    // 2: qconfig unknown parameter
+    BuilderPrint(*script, "% -bogus 1 > ../result/qc_bad.out >[2] ../result/qc_bad.err\n", qconfig_cmd);
+    // 3: qflash bad offset
+    BuilderPrint(*script, "% -o 0xzz payload.bin > ../result/qf_off.out >[2] ../result/qf_off.err\n", qflash_cmd);
+    // 4: qflash missing file
+    BuilderPrint(*script, "% missing.bin > ../result/qf_miss.out >[2] ../result/qf_miss.err\n", qflash_cmd);
+    if check_qflash_write {
+        // 5: qflash writing payload to flash.img
+        BuilderPrint(*script, "% -f flash.img -o 16 payload.bin > ../result/qf_ok.out >[2] ../result/qf_ok.err\n", qflash_cmd);
+    }
+    unused WriteEntireFile("build/dis-legacy-math/mpc/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        failures += 1;
+        print("FAIL: cannot start %\n", emu);
+        return;
+    }
+
+    qc_err := Result("qc.err");
+    Expect(qc_err == "", "qconfig -f flash.img stderr empty");
+    qc_out := Result("qc.out");
+    Expect(qc_out.count > 0, "qconfig -D stdout non-empty");
+
+    img, img_ok := ReadEntireFile("build/dis-legacy-math/mpc/work/flash.img");
+    Expect(img_ok && img.count >= 262144, "flash.img readable");
+    if img_ok && img.count >= 262144 {
+        // Boot descriptor at 262144 - 16
+        boot_desc: [16]u8;
+        for i: 0..15 { boot_desc[i] = img[262144 - 16 + i] }
+        hb: Text = HexBytes(boot_desc[:]);
+        Expect(TextView(hb) == "ff ff ff ff 00 00 00 00 02 00 00 01 f1 a5 5a 1f", "flash.img boot descriptor");
+        // Config string at 131072
+        Expect(img[131072:131083] == "#plan9.ini\n", "flash.img plan9.ini header");
+    }
+
+    if check_qflash_write {
+        qf_out := Result("qf_ok.out");
+        qf_err := Result("qf_ok.err");
+        Expect(qf_err == "", "qflash write stderr empty");
+        Expect(qf_out == "writing 16 bytes to flash.img at #040010\nwrote 16 bytes from payload.bin to flash flash.img (#040000-#040010)\n", "qflash write stdout");
+        if img_ok && img.count >= 262160 + 16 {
+            Expect(img[262144 + 16:262144 + 32] == "KERNELDATA012345", "flash.img payload written at 0x40010");
+        }
+        ctl, ctl_ok := ReadEntireFile("build/dis-legacy-math/mpc/work/flash.imgctl");
+        Expect(ctl_ok && ctl == "erase 524288", "flash.imgctl received erase command");
+    }
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    qc := ifx argc > 2 then TextFromCString(argv[2]) else "mpc/qconfig";
+    qf := ifx argc > 3 then TextFromCString(argv[3]) else "mpc/qflash";
+    check_write := !(argc > 4 && TextFromCString(argv[4]) == "dis");
+    TestFlashLib();
+    TestGuest(emu, qc, qf, check_write);
+    if failures != 0 {
+        print("mpc_test: % failures\n", failures);
+        return 1;
+    }
+    print("mpc_test: all checks passed\n");
+    return 0;
+}

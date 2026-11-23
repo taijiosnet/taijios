@@ -1,0 +1,313 @@
+// qflash [-b] [-o offset] [-f flashdev] file: write a kernel or boot image
+// into an MPC8xx flash device or image file.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Stat :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+using Flash :: #import "mpc_flash";
+
+Usage :: () -> s32 {
+    unused Cli.WriteAll(2, "Usage: qflash [-b] [-o offset] [-f flashdev] file\n");
+    return 0;
+}
+
+Fail :: (msg: string, damaged: bool) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "qflash: %", msg);
+    if !damaged {
+        BuilderAppend(out, "; flash not modified\n");
+    } else {
+        BuilderAppend(out, "; flash might now be invalid\n");
+    }
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    return 0;
+}
+
+SavedSpan :: struct {
+    addr: s64;
+    data: Vec(u8);
+}
+
+SaveFlash :: (flash: string, base: s64, limit: s64, span: *SavedSpan) -> bool {
+    span.addr = base;
+    VecClear(span.data);
+    fd := Io.OpenFile(flash, 0);
+    if fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open % for reading: %", flash, Io.LastError());
+        unused Fail(BuilderFinish(msg), false);
+        return false;
+    }
+    nb := limit - base;
+    if nb <= 0 {
+        unused Io.CloseFile(fd);
+        return true;
+    }
+    if Io.SeekFile(fd, base, 0) != base {
+        unused Io.CloseFile(fd);
+        msg: Vec(u8);
+        BuilderAppend(msg, "can't seek to #");
+        Flash.AppendHex6(*msg, cast(u32)base);
+        BuilderPrint(*msg, " to save flash contents: %", Io.LastError());
+        unused Fail(BuilderFinish(msg), false);
+        return false;
+    }
+    chunk: [8192]u8;
+    while span.data.count < nb {
+        need := nb - span.data.count;
+        if need > chunk.count { need = chunk.count }
+        got := Io.ReadBytes(fd, chunk[:need]);
+        if got <= 0 {
+            unused Io.CloseFile(fd);
+            msg: Vec(u8);
+            BuilderAppend(msg, "can't read flash #");
+            Flash.AppendHex6(*msg, cast(u32)base);
+            BuilderAppend(msg, " to #");
+            Flash.AppendHex6(*msg, cast(u32)limit);
+            BuilderPrint(*msg, ": %", Io.LastError());
+            unused Fail(BuilderFinish(msg), false);
+            return false;
+        }
+        for chunk[:got] { VecPush(span.data, it) }
+    }
+    unused Io.CloseFile(fd);
+    info: Vec(u8);
+    BuilderPrint(*info, "saved % bytes at #", span.data.count);
+    Flash.AppendHex6(*info, cast(u32)base);
+    VecPush(info, #char "\n");
+    unused Cli.WriteAll(1, BuilderFinish(info));
+    return true;
+}
+
+EraseSeg :: (flash: string, seg: s64) -> bool {
+    ctlpath: Vec(u8);
+    BuilderPrint(*ctlpath, "%ctl", flash);
+    ctl := Io.OpenFile(BuilderFinish(ctlpath), 1);
+    if ctl < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %ctl: %\n", flash, Io.LastError());
+        unused Fail(BuilderFinish(msg), false);
+        return false;
+    }
+    cmd: Vec(u8);
+    BuilderPrint(*cmd, "erase %", seg * Flash.FLASHSEG);
+    wrote := Io.WriteBytes(ctl, BuilderFinish(cmd));
+    unused Io.CloseFile(ctl);
+    if wrote < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't erase flash % segment %: %\n", flash, seg, Io.LastError());
+        unused Fail(BuilderFinish(msg), false);
+        return false;
+    }
+    return true;
+}
+
+RestoreSpan :: (out_fd: s32, flash: string, span: *SavedSpan) -> bool {
+    n := span.data.count;
+    if n == 0 { return true }
+    info: Vec(u8);
+    BuilderPrint(*info, "restoring % bytes at #", n);
+    Flash.AppendHex6(*info, cast(u32)span.addr);
+    VecPush(info, #char "\n");
+    unused Cli.WriteAll(1, BuilderFinish(info));
+    if Io.SeekFile(out_fd, span.addr, 0) != span.addr {
+        msg: Vec(u8);
+        BuilderAppend(msg, "can't seek to #");
+        Flash.AppendHex6(*msg, cast(u32)span.addr);
+        BuilderPrint(*msg, " on %: %", flash, Io.LastError());
+        unused Fail(BuilderFinish(msg), true);
+        return false;
+    }
+    r := Io.WriteBytes(out_fd, TextView(span.data[:]));
+    if r < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "error writing %: %", flash, Io.LastError());
+        unused Fail(BuilderFinish(msg), true);
+        return false;
+    }
+    if cast(s64)r != n {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "short write on % at byte %/%", flash, r, n);
+        unused Fail(BuilderFinish(msg), true);
+        return false;
+    }
+    done: Vec(u8);
+    BuilderPrint(*done, "restored % bytes at #", n);
+    Flash.AppendHex6(*done, cast(u32)span.addr);
+    VecPush(done, #char "\n");
+    unused Cli.WriteAll(1, BuilderFinish(done));
+    return true;
+}
+
+main :: () -> s32 {
+    reg_base: s64 = Flash.FLASHSEG;
+    reg_limit: s64 = Flash.FLASHSEG + 2 * Flash.FLASHSEG;
+    flash := "#F/flash/flash";
+    offset: s64 = 0;
+    save := false;
+
+    count := Args.OperandCount();
+    i: s32 = 0;
+    while i < count {
+        a := Args.Operand(i);
+        if a.count == 0 || a[0] != #char "-" { break }
+        if a == "-b" {
+            reg_base = 0;
+            reg_limit = Flash.FLASHSEG;
+            offset = 0x100 - 32;
+            save = true;
+        } else if a == "-h" {
+            reg_limit += Flash.FLASHSEG;
+        } else if a == "-f" {
+            i += 1;
+            if i >= count { return Usage() }
+            flash = Args.Operand(i);
+        } else if a == "-o" {
+            i += 1;
+            if i >= count { return Usage() }
+            s := Args.Operand(i);
+            v, ok := Flash.ParseOffset(s);
+            if !ok || v < 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "bad offset: %", s);
+                return Fail(BuilderFinish(msg), false);
+            }
+            offset = v;
+        } else if a == "-s" {
+            save = true;
+        } else {
+            return Usage();
+        }
+        i += 1;
+    }
+    if i >= count { return Usage() }
+    fname := Args.Operand(i);
+
+    fd := Io.OpenFile(fname, 0);
+    if fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", fname, Io.LastError());
+        return Fail(BuilderFinish(msg), false);
+    }
+    sbuf: [Stat.BufferSize]u8;
+    info := Stat.DescriptorInfo(fd, sbuf[:]);
+    if info.size == 0 {
+        unused Io.CloseFile(fd);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't stat %: %", fname, Io.LastError());
+        return Fail(BuilderFinish(msg), false);
+    }
+    length := info.length;
+    avail := reg_limit - (reg_base + offset);
+    if length > avail {
+        unused Io.CloseFile(fd);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "% contents % bytes, exceeds flash region % bytes", fname, length, avail);
+        return Fail(BuilderFinish(msg), false);
+    }
+
+    where := reg_base + offset;
+    span_before: SavedSpan;
+    span_after: SavedSpan;
+    if save {
+        if !SaveFlash(flash, reg_base, where, *span_before) {
+            unused Io.CloseFile(fd);
+            return 0;
+        }
+        if !SaveFlash(flash, where + length, reg_limit, *span_after) {
+            unused Io.CloseFile(fd);
+            return 0;
+        }
+    }
+
+    seg := (reg_base + offset) / Flash.FLASHSEG;
+    end_seg := reg_limit / Flash.FLASHSEG;
+    while seg < end_seg {
+        if !EraseSeg(flash, seg) {
+            unused Io.CloseFile(fd);
+            return 0;
+        }
+        seg += 1;
+    }
+
+    out_fd := Io.OpenFile(flash, 1);
+    if out_fd < 0 {
+        unused Io.CloseFile(fd);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open % for writing: %", flash, Io.LastError());
+        return Fail(BuilderFinish(msg), false);
+    }
+    if Io.SeekFile(out_fd, where, 0) != where {
+        unused Io.CloseFile(fd);
+        unused Io.CloseFile(out_fd);
+        msg: Vec(u8);
+        BuilderAppend(msg, "can't seek to #");
+        Flash.AppendHex6(*msg, cast(u32)where);
+        BuilderPrint(*msg, " on flash: %", Io.LastError());
+        return Fail(BuilderFinish(msg), false);
+    }
+    if length > 0 {
+        m: Vec(u8);
+        BuilderPrint(*m, "writing % bytes to % at #", length, flash);
+        Flash.AppendHex6(*m, cast(u32)where);
+        VecPush(m, #char "\n");
+        unused Cli.WriteAll(1, BuilderFinish(m));
+    }
+
+    buf: [8192]u8;
+    total: s64 = 0;
+    damaged := false;
+    while true {
+        n := Io.ReadBytes(fd, buf[:]);
+        if n < 0 {
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(out_fd);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "error reading %: %", fname, Io.LastError());
+            return Fail(BuilderFinish(msg), damaged);
+        }
+        if n == 0 { break }
+        if total + cast(s64)n > avail {
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(out_fd);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "file % too big for region of % bytes", fname, avail);
+            return Fail(BuilderFinish(msg), damaged);
+        }
+        r := Io.WriteBytes(out_fd, TextView(buf[:n]));
+        damaged = true;
+        if r != n {
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(out_fd);
+            msg: Vec(u8);
+            if r < 0 {
+                BuilderPrint(*msg, "error writing % at byte %: %", flash, total, Io.LastError());
+            } else {
+                BuilderPrint(*msg, "short write on % at byte %", flash, total);
+            }
+            return Fail(BuilderFinish(msg), damaged);
+        }
+        total += cast(s64)n;
+    }
+
+    done: Vec(u8);
+    BuilderPrint(*done, "wrote % bytes from % to flash % (#", total, fname, flash);
+    Flash.AppendHex6(*done, cast(u32)reg_base);
+    BuilderAppend(done, "-#");
+    Flash.AppendHex6(*done, cast(u32)(reg_base + total));
+    BuilderAppend(done, ")\n");
+    unused Cli.WriteAll(1, BuilderFinish(done));
+
+    if save {
+        if !RestoreSpan(out_fd, flash, *span_after) {
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(out_fd);
+            return 0;
+        }
+        unused RestoreSpan(out_fd, flash, *span_before);
+    }
+    unused Io.CloseFile(fd);
+    unused Io.CloseFile(out_fd);
+    return 0;
+}

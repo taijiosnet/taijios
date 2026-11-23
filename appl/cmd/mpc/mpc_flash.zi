@@ -1,0 +1,138 @@
+// MPC8xx flash descriptor encoding, plan9.ini config formatting, and offset parsing.
+#import "std/vec";
+
+FLASHSEG :: 262144; // 256 * 1024
+FASIZE :: 16;
+
+TDEAD :: 0;
+TBOOT :: 1;
+TCONF :: 2;
+TNONE :: 0xFF;
+
+C_TAG :: 0;
+C_SCREEN :: 1;
+C_CONSOLE :: 2;
+C_BAUD :: 3;
+C_ETHER :: 4;
+C_EA :: 5;
+C_END :: 6;
+
+MakeDesc :: (base: u32, length: u32, tag: u8, out: *Vec(u8)) {
+    VecClear(<<out);
+    // Fcheck: 4 bytes of 0xFF
+    VecPush(<<out, 0xFF);
+    VecPush(<<out, 0xFF);
+    VecPush(<<out, 0xFF);
+    VecPush(<<out, 0xFF);
+    // Fbase: 4 bytes big-endian
+    VecPush(<<out, cast(u8)((base >> 24) & 0xFF));
+    VecPush(<<out, cast(u8)((base >> 16) & 0xFF));
+    VecPush(<<out, cast(u8)((base >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(base & 0xFF));
+    // Flen: 3 bytes big-endian (low 24 bits)
+    VecPush(<<out, cast(u8)((length >> 16) & 0xFF));
+    VecPush(<<out, cast(u8)((length >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(length & 0xFF));
+    // Ftag
+    VecPush(<<out, tag);
+    // Fsig: F1 A5 5A 1F
+    VecPush(<<out, 0xF1);
+    VecPush(<<out, 0xA5);
+    VecPush(<<out, 0x5A);
+    VecPush(<<out, 0x1F);
+}
+
+ParamIndex :: (name: string) -> s32 {
+    if name == "vgasize" { return C_SCREEN }
+    if name == "console" { return C_CONSOLE }
+    if name == "ea" { return C_EA }
+    if name == "baud" { return C_BAUD }
+    return -1;
+}
+
+BuildConfig :: (vgasize: string, console: string, baud: string, ea: string, out: *Vec(u8)) {
+    VecClear(<<out);
+    BuilderAppend(<<out, "#plan9.ini\n");
+    BuilderAppend(<<out, vgasize);
+    BuilderAppend(<<out, console);
+    BuilderAppend(<<out, baud);
+    BuilderAppend(<<out, "ether0=type=SCC port=2 ");
+    BuilderAppend(<<out, ea);
+    VecPush(<<out, 0);
+}
+
+DigitVal :: (c: u8, base: s32) -> s32 {
+    v: s32 = -1;
+    if c >= #char "0" && c <= #char "9" {
+        v = cast(s32)(c - #char "0");
+    } else if c >= #char "a" && c <= #char "f" {
+        v = cast(s32)(c - #char "a") + 10;
+    } else if c >= #char "A" && c <= #char "F" {
+        v = cast(s32)(c - #char "A") + 10;
+    }
+    if v >= base { return -1 }
+    return v;
+}
+
+ParseBase :: (s: string, base: s32) -> (val: s64, ok: bool) {
+    if s.count == 0 { return 0, true }
+    i: s64 = 0;
+    if s[0] == #char "-" { return -1, false }
+    if s[0] == #char "+" { i = 1 }
+    val: s64 = 0;
+    while i < s.count {
+        d := DigitVal(s[i], base);
+        if d < 0 { return 0, false }
+        val = val * cast(s64)base + cast(s64)d;
+        i += 1;
+    }
+    return val, true;
+}
+
+// Parses 16r..., 0x..., 0... (octal), or decimal non-negative offset.
+ParseOffset :: (s: string) -> (val: s64, ok: bool) {
+    if s.count == 0 { return 0, false }
+    if s.count >= 3 && s[0] == #char "1" && s[1] == #char "6" && s[2] == #char "r" {
+        return ParseBase(s[3:], 16);
+    }
+    if s.count >= 2 && s[0] == #char "0" && s[1] == #char "x" {
+        return ParseBase(s[2:], 16);
+    }
+    if s[0] == #char "0" {
+        return ParseBase(s[1:], 8);
+    }
+    return ParseBase(s, 10);
+}
+
+AppendHex2 :: (out: *Vec(u8), v: u8) {
+    digits := "0123456789abcdef";
+    VecPush(<<out, digits[(v >> 4) & 0xF]);
+    VecPush(<<out, digits[v & 0xF]);
+}
+
+AppendHex6 :: (out: *Vec(u8), v: u32) {
+    digits := "0123456789abcdef";
+    for shift: 0..5 {
+        n := (v >> cast(u32)((5 - shift) * 4)) & 0xF;
+        VecPush(<<out, digits[n]);
+    }
+}
+
+AppendHexMin :: (out: *Vec(u8), v: u32) {
+    digits := "0123456789abcdef";
+    if v == 0 {
+        VecPush(<<out, #char "0");
+        return;
+    }
+    buf: [8]u8;
+    n := 0;
+    x := v;
+    while x > 0 {
+        buf[n] = digits[x & 0xF];
+        x >>= 4;
+        n += 1;
+    }
+    for i: 0..n - 1 {
+        VecPush(<<out, buf[n - 1 - i]);
+    }
+}

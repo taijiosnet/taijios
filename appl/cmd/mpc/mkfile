@@ -1,14 +1,22 @@
 <../../../mkconfig
 
 TARG=\
-	qconfig.dis\
-	qflash.dis\
 
 SYSMODULES=\
-	sys.m\
-	draw.m\
-	string.m\
 
 DISBIN=$ROOT/dis/mpc
 
 <$ROOT/mkfiles/mkdis
+
+ZXCOMMANDS=qconfig qflash
+ZXUTIL=mpc_flash.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"
