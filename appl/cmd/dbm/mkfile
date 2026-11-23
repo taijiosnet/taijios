@@ -1,19 +1,22 @@
 <../../../mkconfig
 
 TARG=\
-	fetch.dis\
-	delete.dis\
-	keys.dis\
-	list.dis\
-	store.dis\
 
 SYSMODULES=\
-	arg.m\
-	sys.m\
-	draw.m\
-	bufio.m\
-	dbm.m\
 
 DISBIN=$ROOT/dis/dbm
 
 <$ROOT/mkfiles/mkdis
+
+ZXCOMMANDS=delete fetch keys list store
+ZXUTIL=../../lib/dbm.zi ../../lib/taijios_quote.zi ../zx_cli.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

@@ -1,0 +1,433 @@
+// Classic dbm (.pag / .dir) hash database library, matching Inferno's Dbm module.
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Stat :: #import "taijios_stat";
+
+BYTESIZ :: 8;
+SHORTSIZ :: 2;
+PBLKSIZ :: 512;
+DBLKSIZ :: 8192;
+
+OREAD :: 0;
+OWRITE :: 1;
+ORDWR :: 2;
+
+Dbf :: struct {
+    pagf: s32;
+    dirf: s32;
+    flags: s32;
+    maxbno: s64;
+    bitno: s64;
+    hmask: u32;
+    blkno: u32;
+    pagbno: s64;
+    pagbuf: [512]u8;
+    dirbno: s64;
+    dirbuf: [8192]u8;
+}
+
+hitab: [16]u32 = .[
+    61, 57, 53, 49, 45, 41, 37, 33,
+    29, 25, 21, 17, 13,  9,  5,  1,
+];
+
+hltab_lo: [32]u32 = .[
+    0x3100D2BF, 0x3118E3DE, 0x34AB1372, 0x2807A847,
+    0x1633F566, 0x2143B359, 0x26D56488, 0x3B9E6F59,
+    0x37755656, 0x3089CA7B, 0x18E92D85, 0x0CD0E9D8,
+    0x1A9E3B54, 0x3EAA902F, 0x0D9BFAAE, 0x2F32B45B,
+    0x31ED6102, 0x3D3C8398, 0x146660E3, 0x0F8D4B76,
+    0x02C77A5F, 0x146C8799, 0x1C47F51F, 0x249F8F36,
+    0x24772043, 0x1FBC1E4D, 0x1E86B3FA, 0x37DF36A6,
+    0x16ED30E4, 0x02C3148E, 0x216E5929, 0x0636B34E,
+];
+
+hltab_hi: [32]u32 = .[
+    0x317F9F56, 0x15F09D70, 0x131026FB, 0x38C784B1,
+    0x29AC3305, 0x2B485DC5, 0x3C049DDC, 0x35A9FBCD,
+    0x31D5373B, 0x2B246799, 0x0A2923D3, 0x08A96E9D,
+    0x30031A9F, 0x08F525B5, 0x33611C06, 0x2409DB98,
+    0x0CA4FEB2, 0x1000B71E, 0x30566E32, 0x39447D31,
+    0x194E3752, 0x08233A95, 0x0F38FE36, 0x29C7CD57,
+    0x0F7B3A39, 0x328E8A16, 0x1E7D1388, 0x0FBA78F5,
+    0x274C7E7C, 0x1E8BE65C, 0x2FA0B0BB, 0x1EB6C371,
+];
+
+HlTab :: (idx: u32) -> u32 {
+    i := idx & 0x3F;
+    if i < 32 { return hltab_lo[i] }
+    return hltab_hi[i - 32];
+}
+
+CalcHash :: (item: []u8) -> u32 {
+    hashl: u32 = 0;
+    hashi: u32 = 0;
+    for item {
+        f: u32 = cast(u32)it;
+        hashi += hitab[f & 0xF];
+        hashl += HlTab(hashi);
+        f >>= 4;
+        hashi += hitab[f & 0xF];
+        hashl += HlTab(hashi);
+    }
+    return hashl;
+}
+
+GetS :: (buf: []u8, sh: s64) -> s64 {
+    off := sh * SHORTSIZ;
+    return (cast(s64)buf[off] << 8) | cast(s64)buf[off + 1];
+}
+
+PutS :: (buf: []u8, sh: s64, v: s64) {
+    off := sh * SHORTSIZ;
+    buf[off] = cast(u8)((v >> 8) & 0xFF);
+    buf[off + 1] = cast(u8)(v & 0xFF);
+}
+
+InitDbf :: (db: *Dbf, pf: s32, df: s32, flags: s32) {
+    db.pagf = pf;
+    db.dirf = df;
+    db.flags = flags & 3;
+    db.bitno = 0;
+    db.hmask = 0;
+    db.blkno = 0;
+    db.pagbno = -1;
+    db.dirbno = -1;
+    sbuf: [Stat.BufferSize]u8;
+    info := Stat.DescriptorInfo(df, sbuf[:]);
+    length: s64 = ifx info.size > 0 then info.length else 0;
+    db.maxbno = length * BYTESIZ - 1;
+}
+
+Create :: (db: *Dbf, file: string, mode: s32) -> bool {
+    ppath: Vec(u8);
+    BuilderPrint(*ppath, "%.pag", file);
+    pf := Io.CreateFile(BuilderFinish(ppath), ORDWR, mode);
+    if pf < 0 { return false }
+    dpath: Vec(u8);
+    BuilderPrint(*dpath, "%.dir", file);
+    df := Io.CreateFile(BuilderFinish(dpath), ORDWR, mode);
+    if df < 0 {
+        unused Io.CloseFile(pf);
+        return false;
+    }
+    InitDbf(db, pf, df, ORDWR);
+    return true;
+}
+
+Open :: (db: *Dbf, file: string, flags_in: s32) -> bool {
+    flags := flags_in;
+    if (flags & 3) == OWRITE {
+        flags = (flags & ~3) | ORDWR;
+    }
+    ppath: Vec(u8);
+    BuilderPrint(*ppath, "%.pag", file);
+    pf := Io.OpenFile(BuilderFinish(ppath), flags);
+    if pf < 0 { return false }
+    dpath: Vec(u8);
+    BuilderPrint(*dpath, "%.dir", file);
+    df := Io.OpenFile(BuilderFinish(dpath), flags);
+    if df < 0 {
+        unused Io.CloseFile(pf);
+        return false;
+    }
+    InitDbf(db, pf, df, flags);
+    return true;
+}
+
+Close :: (db: *Dbf) {
+    if db.pagf >= 0 { unused Io.CloseFile(db.pagf); db.pagf = -1 }
+    if db.dirf >= 0 { unused Io.CloseFile(db.dirf); db.dirf = -1 }
+}
+
+IsRdOnly :: (db: *Dbf) -> bool {
+    return db.flags == OREAD;
+}
+
+ReadBlock :: (fd: s32, buf: []u8) -> bool {
+    nr := Io.ReadBytes(fd, buf);
+    if nr == 0 {
+        for i: 0..buf.count - 1 { buf[i] = 0 }
+        return true;
+    }
+    return cast(s64)nr == buf.count;
+}
+
+WriteBlock :: (fd: s32, buf: []u8) -> bool {
+    return cast(s64)Io.WriteBytes(fd, TextView(buf)) == buf.count;
+}
+
+ChkBlk :: (buf: []u8) -> bool {
+    t: s64 = PBLKSIZ;
+    ne := GetS(buf, 0);
+    for i: 0..ne - 1 {
+        v := GetS(buf, i + 1);
+        if v > t { return false }
+        t = v;
+    }
+    return t >= (ne + 1) * SHORTSIZ;
+}
+
+GetBit :: (db: *Dbf) -> s32 {
+    if db.bitno > db.maxbno { return 0 }
+    n := cast(u8)(db.bitno % BYTESIZ);
+    bn := db.bitno / BYTESIZ;
+    i := bn % DBLKSIZ;
+    b := bn / DBLKSIZ;
+    if b != db.dirbno {
+        unused Io.SeekFile(db.dirf, b * DBLKSIZ, 0);
+        unused ReadBlock(db.dirf, db.dirbuf[:]);
+        db.dirbno = b;
+    }
+    if (db.dirbuf[i] & (cast(u8)1 << n)) != 0 { return 1 }
+    return 0;
+}
+
+SetBit :: (db: *Dbf) {
+    if db.bitno > db.maxbno {
+        db.maxbno = db.bitno;
+        unused GetBit(db);
+    }
+    n := cast(u8)(db.bitno % BYTESIZ);
+    bn := db.bitno / BYTESIZ;
+    i := bn % DBLKSIZ;
+    b := bn / DBLKSIZ;
+    db.dirbuf[i] |= cast(u8)1 << n;
+    unused Io.SeekFile(db.dirf, b * DBLKSIZ, 0);
+    unused WriteBlock(db.dirf, db.dirbuf[:]);
+    db.dirbno = b;
+}
+
+Access :: (db: *Dbf, hash: u32) -> bool {
+    db.hmask = 0;
+    while true {
+        db.blkno = hash & db.hmask;
+        db.bitno = cast(s64)db.blkno + cast(s64)db.hmask;
+        if GetBit(db) == 0 { break }
+        db.hmask = (db.hmask << 1) + 1;
+    }
+    if cast(s64)db.blkno != db.pagbno {
+        unused Io.SeekFile(db.pagf, cast(s64)db.blkno * PBLKSIZ, 0);
+        if !ReadBlock(db.pagf, db.pagbuf[:]) { return false }
+        if !ChkBlk(db.pagbuf[:]) { return false }
+        db.pagbno = cast(s64)db.blkno;
+    }
+    return true;
+}
+
+MakDatum :: (buf: []u8, n: s64) -> (data: []u8, ok: bool) {
+    ne := GetS(buf, 0);
+    if n < 0 || n >= ne { return buf[:0], false }
+    t: s64 = PBLKSIZ;
+    if n > 0 { t = GetS(buf, n) }
+    v := GetS(buf, n + 1);
+    return buf[v:t], true;
+}
+
+CmpDatum :: (d1: []u8, d2: []u8) -> s32 {
+    if d1.count != d2.count { return cast(s32)(d1.count - d2.count) }
+    for i: 0..d1.count - 1 {
+        if d1[i] != d2[i] { return cast(s32)d1[i] - cast(s32)d2[i] }
+    }
+    return 0;
+}
+
+DelItem :: (buf: []u8, n: s64) {
+    ne := GetS(buf, 0);
+    if n < 0 || n >= ne { return }
+    i1 := GetS(buf, n + 1);
+    i2: s64 = PBLKSIZ;
+    if n > 0 { i2 = GetS(buf, n) }
+    i3 := GetS(buf, ne);
+    if i2 > i1 {
+        while i1 > i3 {
+            i1 -= 1;
+            i2 -= 1;
+            buf[i2] = buf[i1];
+            buf[i1] = 0;
+        }
+    }
+    i2 -= i1;
+    k := n + 1;
+    while k < ne {
+        PutS(buf, k, GetS(buf, k + 1) + i2);
+        k += 1;
+    }
+    PutS(buf, 0, ne - 1);
+    PutS(buf, ne, 0);
+}
+
+AddItem :: (buf: []u8, item: []u8) -> s64 {
+    i1: s64 = PBLKSIZ;
+    ne := GetS(buf, 0);
+    if ne > 0 { i1 = GetS(buf, ne) }
+    i1 -= item.count;
+    i2 := (ne + 2) * SHORTSIZ;
+    if i1 <= i2 { return -1 }
+    PutS(buf, ne + 1, i1);
+    for i: 0..item.count - 1 { buf[i1 + i] = item[i] }
+    PutS(buf, 0, ne + 1);
+    return ne;
+}
+
+Split :: (db: *Dbf, key: []u8, dat: []u8) -> bool {
+    if key.count + dat.count + 3 * SHORTSIZ >= PBLKSIZ { return false }
+    ovfbuf: [512]u8;
+    i: s64 = 0;
+    while true {
+        item, ok := MakDatum(db.pagbuf[:], i);
+        if !ok { break }
+        if (CalcHash(item) & (db.hmask + 1)) != 0 {
+            unused AddItem(ovfbuf[:], item);
+            DelItem(db.pagbuf[:], i);
+            val, vok := MakDatum(db.pagbuf[:], i);
+            if !vok { return false }
+            unused AddItem(ovfbuf[:], val);
+            DelItem(db.pagbuf[:], i);
+            continue;
+        }
+        i += 2;
+    }
+    unused Io.SeekFile(db.pagf, cast(s64)db.blkno * PBLKSIZ, 0);
+    unused WriteBlock(db.pagf, db.pagbuf[:]);
+    db.pagbno = cast(s64)db.blkno;
+    unused Io.SeekFile(db.pagf, (cast(s64)db.blkno + cast(s64)db.hmask + 1) * PBLKSIZ, 0);
+    unused WriteBlock(db.pagf, ovfbuf[:]);
+    SetBit(db);
+    return true;
+}
+
+Fetch :: (db: *Dbf, key: []u8, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    if !Access(db, CalcHash(key)) { return false }
+    i: s64 = 0;
+    while true {
+        item, ok := MakDatum(db.pagbuf[:], i);
+        if !ok { return false }
+        if CmpDatum(key, item) == 0 {
+            val, vok := MakDatum(db.pagbuf[:], i + 1);
+            if !vok { return false }
+            for val { VecPush(<<out, it) }
+            return true;
+        }
+        i += 2;
+    }
+    return false;
+}
+
+Delete :: (db: *Dbf, key: []u8) -> s32 {
+    if IsRdOnly(db) { return -1 }
+    if !Access(db, CalcHash(key)) { return -1 }
+    i: s64 = 0;
+    while true {
+        item, ok := MakDatum(db.pagbuf[:], i);
+        if !ok { return -1 }
+        if CmpDatum(key, item) == 0 {
+            DelItem(db.pagbuf[:], i);
+            DelItem(db.pagbuf[:], i);
+            break;
+        }
+        i += 2;
+    }
+    unused Io.SeekFile(db.pagf, cast(s64)db.blkno * PBLKSIZ, 0);
+    unused WriteBlock(db.pagf, db.pagbuf[:]);
+    db.pagbno = cast(s64)db.blkno;
+    return 0;
+}
+
+Store :: (db: *Dbf, key: []u8, dat: []u8, replace: bool) -> s32 {
+    if IsRdOnly(db) { return -1 }
+    while true {
+        if !Access(db, CalcHash(key)) { return -1 }
+        i: s64 = 0;
+        while true {
+            item, ok := MakDatum(db.pagbuf[:], i);
+            if !ok { break }
+            if CmpDatum(key, item) == 0 {
+                if !replace { return 1 }
+                DelItem(db.pagbuf[:], i);
+                DelItem(db.pagbuf[:], i);
+                break;
+            }
+            i += 2;
+        }
+        idx := AddItem(db.pagbuf[:], key);
+        if idx >= 0 {
+            if AddItem(db.pagbuf[:], dat) >= 0 { break }
+            DelItem(db.pagbuf[:], idx);
+        }
+        if !Split(db, key, dat) { return -1 }
+    }
+    unused Io.SeekFile(db.pagf, cast(s64)db.blkno * PBLKSIZ, 0);
+    unused WriteBlock(db.pagf, db.pagbuf[:]);
+    db.pagbno = cast(s64)db.blkno;
+    return 0;
+}
+
+HashInc :: (db: *Dbf, hash_in: u32) -> u32 {
+    hash := hash_in & db.hmask;
+    bit := db.hmask + 1;
+    while true {
+        bit >>= 1;
+        if bit == 0 { return 0 }
+        if (hash & bit) == 0 { return hash | bit }
+        hash &= ~bit;
+    }
+    return 0;
+}
+
+FirstHash :: (db: *Dbf, hash_in: u32, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    hash := hash_in;
+    while true {
+        if !Access(db, hash) { return false }
+        bitem, has_b := MakDatum(db.pagbuf[:], 0);
+        if has_b {
+            i: s64 = 2;
+            while true {
+                item, ok := MakDatum(db.pagbuf[:], i);
+                if !ok { break }
+                if CmpDatum(bitem, item) < 0 { bitem = item }
+                i += 2;
+            }
+            for bitem { VecPush(<<out, it) }
+            return true;
+        }
+        hash = HashInc(db, hash);
+        if hash == 0 { return false }
+    }
+    return false;
+}
+
+FirstKey :: (db: *Dbf, out: *Vec(u8)) -> bool {
+    return FirstHash(db, 0, out);
+}
+
+NextKey :: (db: *Dbf, key: []u8, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    hash := CalcHash(key);
+    if !Access(db, hash) { return false }
+    has_b := false;
+    bitem: []u8;
+    i: s64 = 0;
+    while true {
+        item, ok := MakDatum(db.pagbuf[:], i);
+        if !ok { break }
+        if CmpDatum(key, item) <= 0 {
+            i += 2;
+            continue;
+        }
+        if !has_b || CmpDatum(bitem, item) < 0 {
+            bitem = item;
+            has_b = true;
+        }
+        i += 2;
+    }
+    if has_b {
+        for bitem { VecPush(<<out, it) }
+        return true;
+    }
+    hash = HashInc(db, hash);
+    if hash == 0 { return false }
+    return FirstHash(db, hash, out);
+}

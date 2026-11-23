@@ -1,0 +1,41 @@
+// dbm/list file: list all key/value pairs in a dbm database.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Dbm :: #import "dbm";
+
+main :: () -> s32 {
+    if Args.OperandCount() < 1 {
+        unused Cli.WriteAll(2, "usage: dbm/list file\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    file := Args.Operand(0);
+    db: Dbm.Dbf;
+    if !Dbm.Open(*db, file, Dbm.OREAD) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "dbm/list: %: %\n", file, Io.LastError());
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        unused Args.SetFailure("open");
+        return 1;
+    }
+    key: Vec(u8);
+    next: Vec(u8);
+    val: Vec(u8);
+    ok := Dbm.FirstKey(*db, *key);
+    while ok {
+        unused Dbm.Fetch(*db, key[:], *val);
+        line: Vec(u8);
+        BuilderAppend(line, TextView(key[:]));
+        VecPush(line, #char "\t");
+        BuilderAppend(line, TextView(val[:]));
+        VecPush(line, #char "\n");
+        unused Cli.WriteAll(1, BuilderFinish(line));
+        ok = Dbm.NextKey(*db, key[:], *next);
+        VecClear(key);
+        for next { VecPush(key, it) }
+    }
+    Dbm.Close(*db);
+    return 0;
+}

@@ -1,0 +1,34 @@
+// dbm/fetch file key: fetch a key's value from a dbm database.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Dbm :: #import "dbm";
+
+main :: () -> s32 {
+    if Args.OperandCount() < 2 {
+        unused Cli.WriteAll(2, "usage: dbm/fetch file key\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    file := Args.Operand(0);
+    db: Dbm.Dbf;
+    if !Dbm.Open(*db, file, Dbm.OREAD) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "dbm/fetch: %: %\n", file, Io.LastError());
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        unused Args.SetFailure("open");
+        return 1;
+    }
+    key := Args.Operand(1);
+    kbytes: Vec(u8);
+    BuilderAppend(kbytes, key);
+    data: Vec(u8);
+    if !Dbm.Fetch(*db, kbytes[:], *data) {
+        unused Cli.WriteAll(2, "not found\n");
+    } else {
+        unused Cli.WriteAll(1, TextView(data[:]));
+    }
+    Dbm.Close(*db);
+    return 0;
+}

@@ -1,0 +1,93 @@
+// dbm/store file [key value]: store key/value pairs into a dbm database.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Lines :: #import "zx_lines";
+using Quote :: #import "taijios_quote";
+using Dbm :: #import "dbm";
+
+StoreOne :: (db: *Dbm.Dbf, key: string, dat: string) -> s32 {
+    kb: Vec(u8);
+    vb: Vec(u8);
+    BuilderAppend(kb, key);
+    BuilderAppend(vb, dat);
+    r := Dbm.Store(db, kb[:], vb[:], false);
+    if r < 0 {
+        unused Cli.WriteAll(2, "bad store\n");
+    } else if r != 0 {
+        msg: Vec(u8);
+        Quote.Quote(*msg, key);
+        BuilderAppend(msg, " exists\n");
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+    }
+    return r;
+}
+
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 1 {
+        unused Cli.WriteAll(2, "usage: dbm/store file [key value]\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    file := Args.Operand(0);
+    db: Dbm.Dbf;
+    if !Dbm.Open(*db, file, Dbm.ORDWR) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "dbm/store: %: %\n", file, Io.LastError());
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        unused Args.SetFailure("open");
+        return 1;
+    }
+    if count == 1 {
+        had_err := false;
+        reader: Lines.LineReader;
+        reader.handle = 0;
+        line: Vec(u8);
+        while Lines.ReadLine(*reader, *line) {
+            if line.count == 0 {
+                unused Cli.WriteAll(2, "dbm/store: bad input\n");
+                Dbm.Close(*db);
+                unused Args.SetFailure("error");
+                return 1;
+            }
+            s := TextView(line[:line.count - 1]);
+            sep: s64 = -1;
+            for i: 0..s.count - 1 {
+                if s[i] == #char " " || s[i] == #char "\t" {
+                    sep = i;
+                    break;
+                }
+            }
+            if sep <= 0 {
+                unused Cli.WriteAll(2, "dbm/store: bad input\n");
+                Dbm.Close(*db);
+                unused Args.SetFailure("error");
+                return 1;
+            }
+            key := s[:sep];
+            val := s[sep + 1:];
+            if StoreOne(*db, key, val) != 0 { had_err = true }
+        }
+        Dbm.Close(*db);
+        if had_err {
+            unused Args.SetFailure("store");
+            return 1;
+        }
+        return 0;
+    }
+    if count < 3 {
+        Dbm.Close(*db);
+        unused Cli.WriteAll(2, "usage: dbm/store file [key value]\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    r := StoreOne(*db, Args.Operand(1), Args.Operand(2));
+    Dbm.Close(*db);
+    if r != 0 {
+        unused Args.SetFailure("store");
+        return 1;
+    }
+    return 0;
+}

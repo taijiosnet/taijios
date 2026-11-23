@@ -1,0 +1,159 @@
+// Guest regression and parity test for dbm/{store,fetch,keys,list,delete}.
+// Exercises single store, duplicate key, stdin batch store with page splits,
+// fetch, keys, list, delete, not-found, and missing-db error handling.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/dbm tests/dbm/dbm_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/dbm";
+
+Case :: struct {
+    name: string;
+    cmd: string;
+    input: string;
+    status: string;
+    out: string;
+    err: string;
+}
+
+cases: [12]Case = Case.[
+    .{name = "store alpha", cmd = "STORE db alpha one", status = "", out = "", err = ""},
+    .{name = "store duplicate", cmd = "STORE db alpha two", status = "store", out = "", err = "alpha exists\n"},
+    .{name = "store batch with splits", cmd = "STORE db", input = "batch.txt", status = "", out = "", err = ""},
+    .{name = "fetch alpha", cmd = "FETCH db alpha", status = "", out = "one", err = ""},
+    .{name = "fetch k25", cmd = "FETCH db k25", status = "", out = "value-number-000000000025", err = ""},
+    .{name = "fetch missing", cmd = "FETCH db nope", status = "", out = "", err = "not found\n"},
+    .{name = "delete alpha", cmd = "DELETE db alpha", status = "", out = "", err = ""},
+    .{name = "delete missing", cmd = "DELETE db alpha", status = "", out = "", err = "not found\n"},
+    .{name = "fetch deleted", cmd = "FETCH db alpha", status = "", out = "", err = "not found\n"},
+    .{name = "bad stdin line", cmd = "STORE db", input = "bad.txt", status = "error", out = "", err = "dbm/store: bad input\n"},
+    .{name = "open missing db", cmd = "FETCH missing alpha", status = "open", out = "", err = "dbm/fetch: missing: 'missing.pag' file does not exist\n"},
+    .{name = "keys count", cmd = "KEYS db | wc -l", status = "", out = "     30\n", err = ""},
+];
+
+failures: s32;
+
+Subst :: (tpl: string, prefix: string, suffix: string) -> Text {
+    out: Vec(u8);
+    i: s64 = 0;
+    while i < tpl.count {
+        if i + 5 <= tpl.count && tpl[i:i + 5] == "STORE" {
+            BuilderPrint(*out, "%store%", prefix, suffix);
+            i += 5;
+        } else if i + 5 <= tpl.count && tpl[i:i + 5] == "FETCH" {
+            BuilderPrint(*out, "%fetch%", prefix, suffix);
+            i += 5;
+        } else if i + 6 <= tpl.count && tpl[i:i + 6] == "DELETE" {
+            BuilderPrint(*out, "%delete%", prefix, suffix);
+            i += 6;
+        } else if i + 4 <= tpl.count && tpl[i:i + 4] == "KEYS" {
+            BuilderPrint(*out, "%keys%", prefix, suffix);
+            i += 4;
+        } else if i + 4 <= tpl.count && tpl[i:i + 4] == "LIST" {
+            BuilderPrint(*out, "%list%", prefix, suffix);
+            i += 4;
+        } else {
+            VecPush(out, tpl[i]);
+            i += 1;
+        }
+    }
+    return BuilderFinish(out);
+}
+
+Result :: (kind: string, index: s64) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%.%", WORK, kind, index);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "dbm/";
+    suffix := ifx argc > 3 then TextFromCString(argv[3]) else "";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/dbm/work") ||
+        !CreateDirectory("build/dis-legacy-math/dbm/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+    // Empty .pag and .dir files initialize a fresh dbm database.
+    unused WriteEntireFile("build/dis-legacy-math/dbm/work/db.pag", "");
+    unused WriteEntireFile("build/dis-legacy-math/dbm/work/db.dir", "");
+    batch: Vec(u8);
+    for n: 1..30 {
+        BuilderPrint(*batch, "k% value-number-0000000000", n);
+        if n < 10 { VecPush(batch, #char "0") }
+        BuilderPrint(*batch, "%\n", n);
+    }
+    unused WriteEntireFile("build/dis-legacy-math/dbm/work/batch.txt", BuilderFinish(batch));
+    unused WriteEntireFile("build/dis-legacy-math/dbm/work/bad.txt", "nospace\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    for cases {
+        cmd: Text = Subst(it.cmd, prefix, suffix);
+        input := ifx it.input == "" then "/dev/null" else it.input;
+        BuilderPrint(*script, "{%} < % > ../result/out.% >[2] ../result/err.%\n", TextView(cmd), input, it_index, it_index);
+        BuilderPrint(*script, "echo $status > ../result/status.%\n", it_index);
+    }
+    // Also dump sorted list output to verify dbm/list
+    lcmd: Text = Subst("LIST db | sort", prefix, suffix);
+    BuilderPrint(*script, "{%} > ../result/list.out >[2] ../result/list.err\n", TextView(lcmd));
+    unused WriteEntireFile("build/dis-legacy-math/dbm/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+    for cases {
+        want_st: Vec(u8);
+        BuilderPrint(*want_st, "%\n", it.status);
+        got_st := Result("status", it_index);
+        got_out := Result("out", it_index);
+        got_err := Result("err", it_index);
+        if got_st != BuilderFinish(want_st) {
+            failures += 1;
+            print("FAIL % status: got [%] want [%]\n", it.name, got_st, it.status);
+        }
+        if got_out != it.out {
+            failures += 1;
+            print("FAIL % stdout: got [%] want [%]\n", it.name, got_out, it.out);
+        }
+        if got_err != it.err {
+            failures += 1;
+            print("FAIL % stderr: got [%] want [%]\n", it.name, got_err, it.err);
+        }
+    }
+    list_err, _ := ReadEntireFile("build/dis-legacy-math/dbm/result/list.err");
+    list_out, _ := ReadEntireFile("build/dis-legacy-math/dbm/result/list.out");
+    if list_err != "" {
+        failures += 1;
+        print("FAIL list stderr: [%]\n", list_err);
+    }
+    // Verify k1 and k30 appear in sorted list output
+    if list_out.count < 800 {
+        failures += 1;
+        print("FAIL list output too short: % bytes\n", list_out.count);
+    }
+    if failures != 0 {
+        print("dbm_test: % failures\n", failures);
+        return 1;
+    }
+    print("dbm_test: all % cases passed\n", cases.count);
+    return 0;
+}

@@ -1,0 +1,31 @@
+// dbm/delete file key: delete key from a dbm database.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Dbm :: #import "dbm";
+
+main :: () -> s32 {
+    if Args.OperandCount() < 2 {
+        unused Cli.WriteAll(2, "usage: dbm/delete file key\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    file := Args.Operand(0);
+    db: Dbm.Dbf;
+    if !Dbm.Open(*db, file, Dbm.ORDWR) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "dbm/delete: %: %\n", file, Io.LastError());
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        unused Args.SetFailure("open");
+        return 1;
+    }
+    key := Args.Operand(1);
+    kbytes: Vec(u8);
+    BuilderAppend(kbytes, key);
+    if Dbm.Delete(*db, kbytes[:]) < 0 {
+        unused Cli.WriteAll(2, "not found\n");
+    }
+    Dbm.Close(*db);
+    return 0;
+}
