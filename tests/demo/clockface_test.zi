@@ -1,0 +1,50 @@
+// Table-driven unit tests for appl/demo/lego/clockface_model.zi.
+#import "std/vec"
+using Model :: #import "clockface_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+DistCase :: struct {
+    start: s32;
+    stop: s32;
+    expected: s32;
+}
+
+main :: () -> s32 {
+    dist_cases: [5]DistCase = DistCase.[
+        .{start = 0, stop = 30, expected = 30},
+        .{start = 0, stop = 90, expected = -30},
+        .{start = 110, stop = 10, expected = 20},
+        .{start = 10, stop = 110, expected = -20},
+        .{start = 45, stop = 45, expected = 0},
+    ];
+    for dist_cases {
+        Expect(Model.ClickDistance(it.start, it.stop, Model.NCLICKS) == it.expected, "ClickDistance");
+    }
+
+    h3, m3 := Model.Str2Clicks("3:30");
+    Expect(h3 == 35 && m3 == 60, "Str2Clicks 3:30");
+
+    h12, m12 := Model.Str2Clicks("12:00");
+    Expect(h12 == 120 && m12 == 0, "Str2Clicks 12:00");
+
+    out: Text;
+    Model.FormatTime(35, 60, *out);
+    Expect(TextView(out) == "03:30 105 180", "FormatTime 03:30");
+
+    Model.FormatTime(0, 0, *out);
+    Expect(TextView(out) == "00:00 0 0", "FormatTime 00:00");
+
+    Model.FormatTime(50, 0, *out);
+    Expect(TextView(out) == "05:00 150 0", "FormatTime 05:00");
+
+    if failures == 0 { print("clockface_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

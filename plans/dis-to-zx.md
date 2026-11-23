@@ -728,14 +728,13 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
 
-### 11. Demo - demonstration apps - 9 rows
+### 11. Demo - demonstration apps - 7 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 | dis/demo/camera/camera.dis | appl/demo/camera/camera.b |  | - |  |
 | dis/demo/camera/readjpg.dis | unknown | module/grid/readjpg.m | - |  |
 | dis/demo/camera/tkinterface.dis | appl/demo/camera/tkinterface.b |  | - |  |
-| dis/demo/lego/clockface.dis | appl/demo/lego/clockface.b |  | - |  |
 | dis/demo/lego/firmdl.dis | appl/demo/lego/firmdl.b |  | - |  |
 | dis/demo/lego/legolink.dis | appl/demo/lego/legolink.b |  | - |  |
 | dis/demo/lego/rcxsend.dis | appl/demo/lego/rcxsend.b |  | - |  |

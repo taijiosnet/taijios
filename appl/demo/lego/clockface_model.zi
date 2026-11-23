@@ -1,0 +1,91 @@
+// Pure clockface geometry, click arithmetic, and time formatting,
+// ported from appl/demo/lego/clockface.b.
+#import "std/vec"
+#import "std/number_text"
+
+ONTHRESH :: 780;
+OFFTHRESH :: 740;
+NCLICKS :: 120;
+MINCLICKS :: 2;
+HOUR_ADJUST :: 1;
+MINUTE_ADJUST :: 3;
+
+ClickDistance :: (start: s32, stop_in: s32, mod: s32) -> s32 {
+    stop := stop_in;
+    if start > stop { stop += mod }
+    d := (stop - start) % mod;
+    if d > mod / 2 { d -= mod }
+    return d;
+}
+
+NormalizePos :: (pos: s32) -> s32 {
+    p := pos % NCLICKS;
+    if p < 0 { p += NCLICKS }
+    return p;
+}
+
+ParseInt :: (s: string) -> s32 {
+    i: s64 = 0;
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 10 || s[i] == 13) { i += 1 }
+    neg := false;
+    if i < s.count && s[i] == 45 { neg = true; i += 1 }
+    v: s32 = 0;
+    while i < s.count && s[i] >= 48 && s[i] <= 57 {
+        v = v * 10 + cast(s32)(s[i] - 48);
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+Str2Clicks :: (s: string) -> (hclk: s32, mclk: s32) {
+    colon: s64 = -1;
+    for i: 0..s.count-1 {
+        if s[i] == 58 { colon = i; break }
+    }
+    h: s32 = 0;
+    m: s32 = 0;
+    if colon >= 0 {
+        h = ParseInt(s[:colon]);
+        m = ParseInt(s[colon + 1:]);
+    } else {
+        m = ParseInt(s);
+    }
+    hclk := ((h * NCLICKS) / 12) + ((m * NCLICKS) / (12 * 60));
+    mclk := (m * NCLICKS) / 60;
+    return hclk, mclk;
+}
+
+Append2Digits :: (v: s32, out: *Text) {
+    av := ifx v < 0 then -v else v;
+    unused VecPush(out.bytes, cast(u8)(48 + (av / 10) % 10));
+    unused VecPush(out.bytes, cast(u8)(48 + av % 10));
+}
+
+FormatTime :: (hpos: s32, mpos: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    h := (12 * hpos) / NCLICKS;
+    m := (60 * mpos) / NCLICKS;
+    matched := false;
+    matched_h: s32 = 0;
+    for hadj: -1..1 {
+        hpos2 := (((h + cast(s32)hadj) * NCLICKS) / 12) + ((m * NCLICKS) / (12 * 60));
+        dhpos := hpos - hpos2;
+        if dhpos >= -2 && dhpos <= 2 {
+            matched = true;
+            matched_h = h + cast(s32)hadj;
+            break;
+        }
+    }
+    if matched {
+        Append2Digits(matched_h, out);
+        unused VecPush(out.bytes, 58);
+        Append2Digits(m, out);
+    } else {
+        unused BuilderAppend(out.bytes, "??:??");
+    }
+    buf: [24]u8;
+    unused VecPush(out.bytes, 32);
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)((hpos * 360) / NCLICKS), buf[:]));
+    unused VecPush(out.bytes, 32);
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)((mpos * 360) / NCLICKS), buf[:]));
+}

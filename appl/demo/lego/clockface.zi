@@ -1,0 +1,204 @@
+// Lego Mindstorms clockface controller serving ./clockface via file2chan,
+// ported from appl/demo/lego/clockface.b.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using F2C :: #import "taijios_file2chan"
+using Model :: #import "clockface_model"
+
+OWRITE :: 1;
+ORDWR :: 2;
+SEEK_START :: 0;
+
+Hand :: struct {
+    motor: s32;
+    sensor: s32;
+    pos: s32;
+}
+
+hourhand: Hand;
+minutehand: Hand;
+lightsensor: s32 = -1;
+allmotors: s32 = -1;
+
+WriteSeek0 :: (fd: s32, msg: string) {
+    if fd < 0 { return }
+    unused IO.Seek(fd, 0, SEEK_START);
+    unused IO.Write(fd, msg);
+}
+
+ReadSensor :: (fd: s32) -> s32 {
+    if fd < 0 { return -1 }
+    buf: [16]u8;
+    unused IO.Seek(fd, 0, SEEK_START);
+    n := IO.Read(fd, buf[:]);
+    if n <= 0 { return -1 }
+    return Model.ParseInt(TextView(buf[:n]));
+}
+
+Forward :: (h: *Hand) { WriteSeek0(h.motor, "f7") }
+Reverse :: (h: *Hand) { WriteSeek0(h.motor, "r7") }
+Stop :: (h: *Hand) { WriteSeek0(h.motor, "s7") }
+StopAll :: () { WriteSeek0(allmotors, "s0s0s0") }
+ReleaseAll :: () { WriteSeek0(allmotors, "F0F0F0") }
+
+SetSensorTypes :: () {
+    WriteSeek0(hourhand.sensor, "b0");
+    WriteSeek0(minutehand.sensor, "b0");
+    WriteSeek0(lightsensor, "l0");
+}
+
+LightWait :: (on: bool) -> s32 {
+    cmd: Text;
+    buf: [24]u8;
+    unused BuilderAppend(cmd.bytes, ifx on then "l>" else "l<");
+    unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)(ifx on then Model.ONTHRESH else Model.OFFTHRESH), buf[:]));
+    WriteSeek0(lightsensor, TextView(cmd));
+    return ReadSensor(lightsensor);
+}
+
+HandWait :: (h: *Hand, clicks: s32) -> s32 {
+    cmd: Text;
+    buf: [24]u8;
+    unused BuilderAppend(cmd.bytes, "b");
+    unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)clicks, buf[:]));
+    WriteSeek0(h.sensor, TextView(cmd));
+    return ReadSensor(h.sensor);
+}
+
+ResetHand :: (h: *Hand) {
+    Forward(h);
+    unused LightWait(true);
+    Stop(h);
+    startclick := ReadSensor(h.sensor);
+    Forward(h);
+    unused LightWait(false);
+    Stop(h);
+    stopclick := ReadSensor(h.sensor);
+    h.pos = (stopclick - startclick) / 2;
+}
+
+ResetHands :: () {
+    SetSensorTypes();
+    if ReadSensor(lightsensor) > Model.OFFTHRESH {
+        Forward(*minutehand);
+        Reverse(*hourhand);
+        unused LightWait(false);
+        StopAll();
+    }
+    ResetHand(*hourhand);
+    hourhand.pos += Model.HOUR_ADJUST;
+    ResetHand(*minutehand);
+    minutehand.pos += Model.MINUTE_ADJUST;
+}
+
+SetHand :: (h: *Hand, delta_in: s32) {
+    dir: s32 = 1;
+    delta := delta_in;
+    if delta < 0 { dir = -1; delta = -delta }
+    if delta > Model.MINCLICKS {
+        if dir > 0 { Forward(h) } else { Reverse(h) }
+        unused HandWait(h, delta - Model.MINCLICKS);
+        Stop(h);
+        h.pos += dir * ReadSensor(h.sensor);
+    } else {
+        startval := ReadSensor(h.sensor);
+        if dir > 0 { Forward(h) } else { Reverse(h) }
+        Stop(h);
+        h.pos += dir * (ReadSensor(h.sensor) - startval);
+    }
+    h.pos = Model.NormalizePos(h.pos);
+}
+
+ApplyTimeCommand :: (cmd_in: string) {
+    cmd := cmd_in;
+    if cmd == "reset" || cmd == "reset\n" {
+        ResetHands();
+        cmd = "12:00";
+    }
+    hclk, mclk := Model.Str2Clicks(cmd);
+    for i: 0..5 {
+        hdelta := Model.ClickDistance(hourhand.pos, hclk, Model.NCLICKS);
+        mdelta := Model.ClickDistance(minutehand.pos, mclk, Model.NCLICKS);
+        if hdelta == 0 && mdelta == 0 { break }
+        if hdelta != 0 { SetHand(*hourhand, hdelta) }
+        if mdelta != 0 { SetHand(*minutehand, mdelta) }
+    }
+    ReleaseAll();
+}
+
+OpenRel :: (base: string, leaf: string, mode: s32) -> s32 {
+    p: Text;
+    unused BuilderAppend(p.bytes, base);
+    unused BuilderAppend(p.bytes, leaf);
+    return IO.Open(TextView(p), mode);
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        print("usage: lego_dir\n");
+        unused Args.SetFailure("usage");
+        return 2;
+    }
+    legodir: Text;
+    unused BuilderAppend(legodir.bytes, Args.Operand(0));
+    if legodir.bytes.count == 0 || legodir.bytes[legodir.bytes.count - 1] != 47 {
+        unused VecPush(legodir.bytes, 47);
+    }
+    base := TextView(legodir);
+
+    f2c: F2C.File;
+    if !F2C.Create(*f2c, ".", "clockface") {
+        print("cannot create clockface channel: %\n", IO.Error());
+        return 1;
+    }
+
+    hm := OpenRel(base, "motor/0", OWRITE);
+    mm := OpenRel(base, "motor/2", OWRITE);
+    allmotors = OpenRel(base, "motor/012", OWRITE);
+    if hm < 0 || mm < 0 || allmotors < 0 {
+        F2C.Remove(*f2c);
+        print("cannot open motor files\n");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    hb := OpenRel(base, "sensor/0", ORDWR);
+    mb := OpenRel(base, "sensor/2", ORDWR);
+    lightsensor = OpenRel(base, "sensor/1", ORDWR);
+    if hb < 0 || mb < 0 {
+        F2C.Remove(*f2c);
+        print("cannot open sensor files\n");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    hourhand = .{motor = hm, sensor = hb, pos = 0};
+    minutehand = .{motor = mm, sensor = mb, pos = 0};
+    SetSensorTypes();
+
+    req: F2C.Request;
+    while F2C.Next(*f2c, *req, true) == 1 {
+        if req.kind == F2C.Read {
+            if req.offset != 0 {
+                empty: [0]u8;
+                unused F2C.ReplyRead(*f2c, *req, empty[:]);
+            } else {
+                t: Text;
+                Model.FormatTime(hourhand.pos, minutehand.pos, *t);
+                unused F2C.ReplyRead(*f2c, *req, VecSlice(t.bytes, 0, t.bytes.count));
+            }
+        } else if req.kind == F2C.Write {
+            if req.offset != 0 {
+                unused F2C.ReplyError(*f2c, *req, "bad offset");
+            } else {
+                ApplyTimeCommand(TextView(req.data[:req.count]));
+                unused F2C.ReplyWrite(*f2c, *req, req.count);
+            }
+        }
+    }
+
+    F2C.Remove(*f2c);
+    return 0;
+}

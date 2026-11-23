@@ -1,7 +1,6 @@
 <../../../mkconfig
 
 TARG=\
-		clockface.dis\
 		firmdl.dis\
 		legolink.dis\
 		rcxsend.dis\
@@ -27,8 +26,16 @@ DISBIN=$ROOT/dis/demo/lego
 $DISBIN/%.srec:	%.srec
 	rm -f $target && cp $stem.srec $target
 
+clockface.zx: clockface.zi clockface_model.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi ../../cmd/taijios_file2chan.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --entry clockface:main -o $target clockface.zi
+
+$DISBIN/clockface.zx: clockface.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 clockface.zx "$staged" && mv "$staged" "$target"
+
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES
+install:V:	$SHFILES $DISBIN/clockface.zx
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 
