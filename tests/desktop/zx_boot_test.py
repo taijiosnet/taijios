@@ -578,6 +578,120 @@ def check_keyring(root, env, boot):
           'and new RSA, DSA and ElGamal keys encrypted, signed and verified')
 
 
+def check_image_viewer(emulator, root, env):
+    """The image viewer animates a GIF, opens further files in their own windows, and shows plumbed files."""
+    from PIL import Image, ImageChops
+    from test_logwindow import private_display
+    from test_tcltk import launch, stop, until
+
+    viewer = ROOT / 'appl/wm/view.zx'
+    assert viewer.exists(), 'build the image viewer first: (cd appl/wm && mk view.zx)'
+    (root / 'dis/wm').mkdir(parents=True, exist_ok=True)
+    shutil.copy2(viewer, root / 'dis/wm/view.zx')
+    for name in ('frames.gif', 'sample.xbm'):
+        shutil.copy2(Path(__file__).with_name(name), root / name)
+    (root / 'chan').mkdir(exist_ok=True)
+    source = Path(__file__).with_name('zx_viewer_probe.zi')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
+        '--module-path', ROOT / 'appl/cmd/tcltk', '--bind-host', 'taijios_desktop', '--bind-host', 'taijios_wm',
+        '--bind-host', 'taijios_args', '--bind-host', 'zx_surface', '--bind-host', 'taijios_io',
+        '--bind-host', 'taijios_namespace', '--entry', 'zx_viewer_probe:main', '-o', root / 'viewer.zx', source,
+    ], env=env, check=True, timeout=60)
+
+    with private_display() as display:
+        private_env = env | {'DISPLAY': display['DISPLAY']}
+        shell = launch(private_env, emulator, '-r', root, '-g', '1024x768', '/wm.zx', '--desktop', '/viewer.zx',
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        transcript = bytearray()
+
+        def desktop(*args, check=True):
+            return subprocess.run(args, env=private_env, capture_output=True, check=check, timeout=5).stdout
+
+        def marker(label):
+            def seen():
+                if select.select([shell.stdout], [], [], 0)[0]:
+                    transcript.extend(shell.stdout.read1(1024))
+                lines = [line for line in transcript.split(b'\n') if line.startswith(label.encode())]
+                return lines[0].decode().split()[1:] if lines else None
+            rects = until(seen, label, timeout=30)
+            return [tuple(map(int, rect.split(','))) for rect in rects]
+
+        def picture(window, rect):
+            x, y, w, h = rect
+            frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
+            return frame.crop((x + 8, y + 84, x + w - 8, y + h - 36))
+
+        def colours(image):
+            return {colour for _, colour in image.getcolors(image.width * image.height) or []}
+
+        def black_and_white(image):
+            return {(0, 0, 0), (255, 255, 255)} <= colours(image)
+
+        window = 'root'
+        try:
+            window = until(lambda: desktop('xdotool', 'search', '--onlyvisible', '--name',
+                                           '^inferno$', check=False).decode().strip(), 'viewer desktop window missing')
+            rects = marker('ZX_VIEWER_FILES')
+            assert len(rects) == 2, rects
+            # The second file opened in its own viewer, on top.
+            top = max(rects, key=lambda rect: rect[1])
+            until(lambda: black_and_white(picture(window, top)), 'X bitmap not shown')
+            (root / 'ack').write_bytes(b'')
+            gif = marker('ZX_VIEWER_GIF')
+            assert len(gif) == 1, gif
+
+            # Frames advance every 250 ms, but a frame can take seconds to
+            # render on a busy machine, so wait for the picture to change.
+            def gif_shown():
+                image = picture(window, gif[0])
+                return image if (0, 128, 0) in colours(image) else None
+
+            shown = until(gif_shown, 'frames.gif not shown', timeout=30)
+            until(lambda: ImageChops.difference(shown, picture(window, gif[0])).getbbox(), 'the GIF did not animate',
+                  timeout=30)
+            (root / 'ack').write_bytes(b'')
+            plumbed = marker('ZX_VIEWER_PLUMBED')
+            assert len(plumbed) == 1, plumbed
+            until(lambda: black_and_white(picture(window, plumbed[0])), 'plumbed X bitmap not shown')
+            # Save: end the path with a new letter, then press Save. Each input
+            # event costs the viewer a frame, so keep them few.
+            x, y, w, h = plumbed[0]
+            desktop('xdotool', 'windowfocus', window)
+            desktop('xdotool', 'mousemove', '--sync', '--window', window, str(x + w - 120), str(y + 24),
+                    'mousedown', '1', 'sleep', '0.15', 'mouseup', '1')
+            desktop('xdotool', 'type', '--delay', '200', 'x')
+            time.sleep(2)
+            desktop('xdotool', 'mousemove', '--sync', '--window', window, str(x + w - 46), str(y + 61),
+                    'mousedown', '1', 'sleep', '0.15', 'mouseup', '1')
+            saved = root / 'sample.xbmx'
+            until(lambda: saved.exists() and saved.stat().st_size == 60 + 13 * 7 * 3, 'Save wrote no Inferno image',
+                  timeout=60)
+            data = saved.read_bytes()
+            assert data[:60] == b'%11s %11d %11d %11d %11d ' % (b'r8g8b8', 0, 0, 13, 7), data[:60]
+            pixels = {data[i:i + 3] for i in range(60, len(data), 3)}
+            assert pixels == {b'\0\0\0', b'\xff\xff\xff'}, pixels
+            (root / 'ack').write_bytes(b'')
+            both = marker('ZX_VIEWER_PLUMBED_NEW')
+            assert len(both) == 2, both
+            (root / 'ack').write_bytes(b'')
+            until(lambda: b'ZX_VIEWER_OK' in transcript or (select.select([shell.stdout], [], [], 0)[0] and
+                  transcript.extend(shell.stdout.read1(1024))), 'viewer probe did not finish', timeout=20)
+        except (AssertionError, subprocess.SubprocessError) as error:
+            failure = ROOT / 'build/zx-smoke/viewer-failure.png'
+            shot = desktop('import', '-window', window, 'png:-', check=False)
+            if shot:
+                failure.write_bytes(shot)
+            stop(shell)
+            transcript.extend(shell.stdout.read(4096))
+            raise AssertionError((str(error), bytes(transcript[-2048:]), str(failure))) from error
+        finally:
+            stop(shell)
+            shell.stdout.close()
+    print('The ZX image viewer animated a GIF, opened a second file in its own window, showed a file '
+          'plumbed to the view port and the next in a new window, and saved an Inferno image')
+
+
 def catalog_programs(catalog):
     """Map each graphical entry the menu shows to the guest program it starts."""
     programs = {}
@@ -809,6 +923,7 @@ def main():
             check_window_manager(emulator, root, env)
             check_desktop_shell(emulator, root, env)
             check_catalog_apps(emulator, root, env)
+            check_image_viewer(emulator, root, env)
 
 
 if __name__ == '__main__':

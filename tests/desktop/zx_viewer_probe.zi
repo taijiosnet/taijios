@@ -1,0 +1,113 @@
+// A desktop shell for the image viewer: start it on an animated GIF and an X
+// bitmap, which opens in a second viewer, then start it to show the files
+// plumbed to the "view" port, the second in a new viewer. The harness checks
+// the pixels at each marker, saves a picture, and answers by creating /ack.
+Desktop :: #import "taijios_desktop";
+WM :: #import "taijios_wm";
+Surface :: #import "zx_surface";
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Served :: #import "taijios_file2chan";
+
+Fail :: (message: string) -> s32 {
+    unused Args.SetFailure(message);
+    return 1;
+}
+
+Windows :: () -> s32 {
+    state: [7]s32;
+    if Desktop.Capture(state[:]) < 0 { return -1 }
+    return state[1];
+}
+
+WaitWindows :: (count: s32) -> bool {
+    for attempt: 0 .. 400 {
+        if Windows() == count { return true }
+        unused Surface.Event(50);
+    }
+    return false;
+}
+
+Report :: (label: string) -> bool {
+    window: [9]s32;
+    title: [128]u8;
+    app_id: [128]u8;
+    count := Windows();
+    print("%", label);
+    for i: 0 .. count - 1 {
+        if Desktop.WindowAt(i, window[:], title[:], app_id[:]) && window[7] == 0 {
+            print(" %,%,%,%", window[1], window[2], window[3], window[4]);
+        }
+    }
+    print("\n");
+    for attempt: 0 .. 600 {
+        handle := IO.Open("/ack", 0);
+        if handle >= 0 {
+            unused IO.Close(handle);
+            return IO.Remove("/ack") == 0;
+        }
+        unused Surface.Event(50);
+    }
+    return false;
+}
+
+CloseAll :: () -> bool {
+    window: [9]s32;
+    title: [128]u8;
+    app_id: [128]u8;
+    count := Windows();
+    while count > 0 {
+        if !Desktop.WindowAt(0, window[:], title[:], app_id[:]) { return false }
+        if window[7] == 1 && !Desktop.WindowAction(window[0], "restore", 0, 0, 0, 0) { return false }
+        if !Desktop.WindowAction(window[0], "close", 0, 0, 0, 0) { return false }
+        count -= 1;
+        if !WaitWindows(count) { return false }
+    }
+    return true;
+}
+
+// Answer the viewer's next read of the port with one message.
+Plumb :: (port: *Served.File, message: string) -> bool {
+    for attempt: 0 .. 400 {
+        request: Served.Request;
+        if Served.Next(port, *request, false) == 1 && request.kind == Served.Read {
+            bytes: [64]u8;
+            for i: 0 .. message.count - 1 { bytes[i] = message[i] }
+            return Served.ReplyRead(port, *request, bytes[:message.count]);
+        }
+        unused Surface.Event(50);
+    }
+    return false;
+}
+
+main :: () -> s32 {
+    if !Desktop.BindDesktop() { return Fail("desktop binding denied") }
+    state: [7]s32;
+    if Desktop.Capture(state[:]) < 0 || !Surface.Open("viewer probe", state[3], state[4]) { return Fail("open desktop") }
+    // Several files: the first in this viewer, the next in a viewer of its own.
+    if WM.Launch("/dis/wm/view.zx", "view\0-f\0/frames.gif\0/sample.xbm\0") != 0 || !WaitWindows(2) {
+        return Fail("viewer windows for two files");
+    }
+    if !Report("ZX_VIEWER_FILES") { return Fail("files checked") }
+    // Hide the second viewer, which opened over the first, to watch the GIF.
+    if Desktop.Capture(state[:]) < 0 || !Desktop.WindowAction(state[2], "minimize", 0, 0, 0, 0) {
+        return Fail("hide the second viewer");
+    }
+    if !Report("ZX_VIEWER_GIF") || !CloseAll() { return Fail("animation checked") }
+    // Serve the "view" port as a plumber does. The first file, named relative
+    // to the sender's directory, opens in the viewer; the next in a new one.
+    port: Served.File;
+    if !Served.Create(*port, "/chan", "plumb.view") { return Fail("serve the view port") }
+    if WM.Launch("/dis/wm/view.zx", "view\0-i\0") != 0 { return Fail("plumbed viewer") }
+    if !Plumb(*port, "test\nview\n/\ntext\n\n10\nsample.xbm") || !WaitWindows(1) { return Fail("plumb a file") }
+    // The harness saves the picture from this window before acknowledging.
+    if !Report("ZX_VIEWER_PLUMBED") { return Fail("plumbed checked") }
+    if !Plumb(*port, "test\nview\n/\ntext\n\n11\n/frames.gif") || !WaitWindows(2) { return Fail("plumb a second file") }
+    if !Report("ZX_VIEWER_PLUMBED_NEW") { return Fail("second plumbed file checked") }
+    Served.Remove(*port);
+    if !CloseAll() { return Fail("close the plumbed viewers") }
+    unused Surface.Event(100);
+    Surface.Close();
+    print("ZX_VIEWER_OK\n");
+    return 0;
+}

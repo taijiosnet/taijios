@@ -259,7 +259,9 @@ Inferno's 256-colour map, and pictures here keep their full colour.
 Inferno image format in the tree with what Inferno's own Draw produced, the
 tree's GIFs with Pillow's first frame, an X bitmap and a PIC picture with
 Inferno's readers, each frame of a three-frame GIF with the layers it was built
-from, and Save's bytes with a file Inferno's Draw read back.
+from, and Save's bytes with a file Inferno's Draw read back. The ZX boot test
+runs the viewer on the Dis-free desktop and checks GIF animation, a second
+file's window, two plumbed files and Save.
 
 ### Build and run ZX Clock
 
