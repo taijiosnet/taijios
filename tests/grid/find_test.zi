@@ -1,0 +1,41 @@
+// Table-driven unit tests for appl/grid/find_model.zi.
+#import "std/vec"
+using Reg :: #import "registry_client"
+using Model :: #import "find_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    args: [9]string = .["-t", "Files", "-a", "resource", "Filestore", "Browse", "{ wm/dir }", "Open", "{ sh }"];
+    cfg: Model.FindConfig;
+    Expect(Model.ParseFindArgs(args[:], *cfg), "ParseFindArgs valid");
+    Expect(TextView(cfg.title) == "Files", "title");
+    Expect(cfg.cmd_count == 2, "cmd_count");
+    Expect(TextView(cfg.cmds[0].label) == "Browse" && TextView(cfg.cmds[1].label) == "Open", "cmd labels");
+    v: Text;
+    Expect(Reg.AttrListGet(*cfg.attrs, "resource", *v) && TextView(v) == "Filestore", "attr resource");
+
+    odd_args: [1]string = .["Browse"];
+    Expect(!Model.ParseFindArgs(odd_args[:], *cfg), "reject odd args");
+
+    sample := "tcp!node1!6677 name 'Data Node' resource Filestore\ntcp!node2!6678 resource Filestore\n";
+    svcs: [4]Model.ServiceItem;
+    n := Model.ParseFindOutput(sample, svcs[:]);
+    Expect(n == 2, "ParseFindOutput count");
+    Expect(TextView(svcs[0].name) == "Data Node" && TextView(svcs[0].addr) == "tcp!node1!6677", "svc 0");
+    Expect(TextView(svcs[1].name) == "tcp!node2!6678", "svc 1 fallback name");
+
+    toks: [8]Text;
+    nt := Model.TokenizeCmd("{ /dis/wm/dir /n/client }", toks[:]);
+    Expect(nt == 2 && TextView(toks[0]) == "/dis/wm/dir" && TextView(toks[1]) == "/n/client", "TokenizeCmd");
+
+    if failures == 0 { print("find_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

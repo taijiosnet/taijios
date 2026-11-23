@@ -1,0 +1,222 @@
+// Grid registry resource finder GUI, ported from appl/grid/find.b.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Dial :: #import "taijios_dial"
+using Namespace :: #import "taijios_namespace"
+using Proc :: #import "taijios_process"
+using Quote :: #import "taijios_quote"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Reg :: #import "registry_client"
+using Model :: #import "find_model"
+
+MAIN_UI :: #string END_MAIN
+frame .f
+frame .f.flb
+scrollbar .f.flb.sb1 -command {.f.flb.lb1 yview}
+listbox .f.flb.lb1 -yscrollcommand {.f.flb.sb1 set} -selectmode single -bg white
+bind .f.flb.lb1 <Double-Button-1> {find_act double}
+pack .f.flb.sb1 -fill y -side left
+pack .f.flb.lb1 -fill both -expand 1
+frame .f.fb
+label .f.status -text {}
+pack .f.flb -fill both -expand 1 -side top
+pack .f.fb -side top
+pack .f.status -side top -fill x
+pack .f -fill both -expand 1
+END_MAIN;
+
+cfg: Model.FindConfig;
+services: [Model.MAX_SERVICES]Model.ServiceItem;
+service_count: s32;
+selected_idx: s32 = 0;
+pending_action: s32 = -1; // -1 none, -2 exit, >=0 cmd index
+status_msg: Text;
+
+Usage :: () -> s32 {
+    print("usage: find [-a attributes] action1 { cmd [args...] } .. actionN { cmd [args...] }\n");
+    unused Args.SetFailure("usage");
+    return 2;
+}
+
+QueryRegistry :: (attrs: *Reg.AttrList, out_text: *Text) -> (ok: bool, err: string) {
+    unused VecResize(out_text.bytes, 0);
+    if !Reg.EnsureRegistry() {
+        return false, "Could not find registry";
+    }
+    fd := IO.Open("/mnt/registry/find", 2);
+    if fd < 0 {
+        return false, "Could not open /mnt/registry/find";
+    }
+    query: Vec(u8);
+    for i: 0..cast(s64)attrs.count-1 {
+        if query.count > 0 { unused VecPush(query, 32) }
+        Quote.Quote(*query, TextView(attrs.keys[i]));
+        unused VecPush(query, 32);
+        Quote.Quote(*query, TextView(attrs.vals[i]));
+    }
+    if IO.Write(fd, TextView(VecSlice(query, 0, query.count))) < 0 {
+        unused IO.Close(fd);
+        return false, "Registry query write failed";
+    }
+    unused IO.Seek(fd, 0, 0);
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(out_text.bytes, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    return true, "";
+}
+
+FindCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 {
+        result.code = .Error;
+        return;
+    }
+    verb := TextView(args[0]);
+    if verb == "exit" {
+        pending_action = -2;
+    } else if verb == "go" && args.count >= 2 {
+        s := TextView(args[1]);
+        v: s32 = 0;
+        for c: s {
+            if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        }
+        pending_action = v;
+    } else if verb == "double" {
+        pending_action = 0;
+    }
+}
+
+MountAndRun :: (srv_idx: s32, cmd_idx: s32) {
+    if srv_idx < 0 || srv_idx >= service_count || cmd_idx < 0 || cmd_idx >= cfg.cmd_count { return }
+    addr := TextView(services[srv_idx].addr);
+    unused Namespace.Fork();
+    handles: [2]s32 = .[-1, -1];
+    dir_buf: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(addr, "", handles[:], dir_buf[:]) != 0 {
+        unused VecResize(status_msg.bytes, 0);
+        unused BuilderAppend(status_msg.bytes, "could not connect");
+        return;
+    }
+    mounted := false;
+    if handles[0] >= 0 {
+        if Namespace.Mount(handles[0], -1, "/n/client", Namespace.Replace, "") == 0 {
+            mounted = true;
+        }
+        unused IO.Close(handles[0]);
+    }
+    if handles[1] >= 0 { unused IO.Close(handles[1]) }
+    if !mounted {
+        unused VecResize(status_msg.bytes, 0);
+        unused BuilderAppend(status_msg.bytes, "failed to mount");
+        return;
+    }
+    toks: [16]Text;
+    ntoks := Model.TokenizeCmd(TextView(cfg.cmds[cmd_idx].cmd), toks[:]);
+    if ntoks <= 0 { return }
+    ops: [16]string;
+    for i: 1..cast(s64)ntoks-1 { ops[i - 1] = TextView(toks[i]) }
+    launch := Proc.Start(TextView(toks[0]), ops[:ntoks - 1]);
+    if launch.id <= 0 {
+        unused VecResize(status_msg.bytes, 0);
+        unused BuilderAppend(status_msg.bytes, "failed to run: ");
+        unused BuilderAppend(status_msg.bytes, launch.error);
+    }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    if pending_action == -1 { return .Idle }
+    act := pending_action;
+    pending_action = -1;
+    if act == -2 {
+        unused Window.Execute(tcl, "destroy .");
+        return .Changed;
+    }
+    if service_count > 0 {
+        res := Tcl.Eval(tcl, ".f.flb.lb1 curselection");
+        if res.code == .OK && res.value.bytes.count > 0 {
+            s := TextView(res.value);
+            idx: s32 = 0;
+            for c: s {
+                if c >= 48 && c <= 57 { idx = idx * 10 + cast(s32)(c - 48) }
+                else { break }
+            }
+            selected_idx = idx;
+        }
+        MountAndRun(selected_idx, act);
+        if status_msg.bytes.count > 0 {
+            cmd: Text;
+            unused BuilderAppend(cmd.bytes, ".f.status configure -text {");
+            unused BuilderAppend(cmd.bytes, TextView(status_msg));
+            unused BuilderAppend(cmd.bytes, "}");
+            unused Window.Execute(tcl, TextView(cmd));
+            return .Changed;
+        }
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    arg_buf: [64]string;
+    n_args := ifx argc > 64 then 64 else argc;
+    for i: 0..cast(s64)n_args-1 { arg_buf[i] = Args.Operand(cast(s32)i) }
+    if !Model.ParseFindArgs(arg_buf[:n_args], *cfg) { return Usage() }
+
+    unused Namespace.Fork();
+
+    raw: Text;
+    ok, qerr := QueryRegistry(*cfg.attrs, *raw);
+    if ok {
+        service_count = Model.ParseFindOutput(TextView(raw), services[:]);
+    }
+
+    win_title: Text;
+    unused BuilderAppend(win_title.bytes, "Find ");
+    unused BuilderAppend(win_title.bytes, TextView(cfg.title));
+
+    script: Text;
+    if !ok {
+        unused BuilderAppend(script.bytes, "frame .f\nlabel .f.l -text {");
+        unused BuilderAppend(script.bytes, qerr);
+        unused BuilderAppend(script.bytes, "}\nbutton .f.b -text {Ok} -command {find_act exit}\npack .f.l .f.b -side top -padx 5 -pady 5\npack .f\n");
+    } else if service_count == 0 {
+        unused BuilderAppend(script.bytes, "frame .f\nlabel .f.l1 -text {Could not find ");
+        unused BuilderAppend(script.bytes, TextView(cfg.title));
+        unused BuilderAppend(script.bytes, "}\nlabel .f.l2 -text {Please try again later}\nbutton .f.b -text { Close } -command {find_act exit}\npack .f.l1 .f.l2 .f.b -side top -padx 10 -pady 5\npack .f\n");
+    } else {
+        unused BuilderAppend(script.bytes, MAIN_UI);
+        for i: 0..cast(s64)service_count-1 {
+            unused BuilderAppend(script.bytes, ".f.flb.lb1 insert end {");
+            unused BuilderAppend(script.bytes, TextView(services[i].name));
+            unused BuilderAppend(script.bytes, "}\n");
+        }
+        buf: [24]u8;
+        for i: 0..cast(s64)cfg.cmd_count-1 {
+            si := FormatInteger(i, buf[:]);
+            unused BuilderAppend(script.bytes, "button .f.fb.b");
+            unused BuilderAppend(script.bytes, si);
+            unused BuilderAppend(script.bytes, " -text {");
+            unused BuilderAppend(script.bytes, TextView(cfg.cmds[i].label));
+            unused BuilderAppend(script.bytes, "} -command {find_act go ");
+            unused BuilderAppend(script.bytes, si);
+            unused BuilderAppend(script.bytes, "}\npack .f.fb.b");
+            unused BuilderAppend(script.bytes, si);
+            unused BuilderAppend(script.bytes, " -side left -padx 5 -pady 5\n");
+        }
+        unused BuilderAppend(script.bytes, ".f.flb.lb1 selection set 0\n");
+    }
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "find_act", FindCmd) { return 1 }
+    return Window.RunPolled(*tcl, TextView(script), TextView(win_title), 320, 260, Start, Tick, 50);
+}

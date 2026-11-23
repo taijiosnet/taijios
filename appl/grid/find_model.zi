@@ -1,0 +1,105 @@
+// Pure CLI parsing, service list model, and command tokenization for grid/find,
+// ported from appl/grid/find.b.
+#import "std/vec"
+using Reg :: #import "registry_client"
+
+MAX_CMDS :: 16;
+MAX_SERVICES :: 128;
+
+ActionCmd :: struct {
+    label: Text;
+    cmd: Text;
+}
+
+ServiceItem :: struct {
+    addr: Text;
+    name: Text;
+    attrs: Reg.AttrList;
+}
+
+FindConfig :: struct {
+    title: Text;
+    attrs: Reg.AttrList;
+    cmds: [MAX_CMDS]ActionCmd;
+    cmd_count: s32;
+}
+
+ParseFindArgs :: (args: []string, cfg: *FindConfig) -> bool {
+    unused VecResize(cfg.title.bytes, 0);
+    unused BuilderAppend(cfg.title.bytes, "a resource");
+    cfg.attrs.count = 0;
+    cfg.cmd_count = 0;
+
+    i: s64 = 0;
+    while i < args.count {
+        a := args[i];
+        if a.count < 2 || a[0] != 45 { break }
+        i += 1;
+        if a == "--" { break }
+        if a == "-t" {
+            if i >= args.count { return false }
+            unused VecResize(cfg.title.bytes, 0);
+            unused BuilderAppend(cfg.title.bytes, args[i]);
+            i += 1;
+        } else if a == "-a" {
+            if i + 1 >= args.count { return false }
+            Reg.AttrListSet(*cfg.attrs, args[i], args[i + 1]);
+            i += 2;
+        } else {
+            return false;
+        }
+    }
+    rem := args.count - i;
+    if rem <= 0 || (rem % 2) != 0 { return false }
+    while i + 1 < args.count && cfg.cmd_count < MAX_CMDS {
+        idx := cfg.cmd_count;
+        unused VecResize(cfg.cmds[idx].label.bytes, 0);
+        unused BuilderAppend(cfg.cmds[idx].label.bytes, args[i]);
+        unused VecResize(cfg.cmds[idx].cmd.bytes, 0);
+        unused BuilderAppend(cfg.cmds[idx].cmd.bytes, args[i + 1]);
+        cfg.cmd_count += 1;
+        i += 2;
+    }
+    return cfg.cmd_count > 0;
+}
+
+// Parse newline-separated /mnt/registry/find output into ServiceItem array.
+ParseFindOutput :: (text: string, out: []ServiceItem) -> s32 {
+    count: s32 = 0;
+    i: s64 = 0;
+    while i < text.count && cast(s64)count < out.count {
+        start := i;
+        while i < text.count && text[i] != 10 { i += 1 }
+        line := text[start:i];
+        if i < text.count && text[i] == 10 { i += 1 }
+        if line.count == 0 { continue }
+        if Reg.ParseFindLine(line, *out[count].addr, *out[count].attrs) {
+            if !Reg.AttrListGet(*out[count].attrs, "name", *out[count].name) {
+                unused VecResize(out[count].name.bytes, 0);
+                unused BuilderAppend(out[count].name.bytes, TextView(out[count].addr));
+            }
+            count += 1;
+        }
+    }
+    return count;
+}
+
+// Tokenize a command string like "{ wm/dir /n/client }" into argv tokens.
+TokenizeCmd :: (cmd: string, out: []Text) -> s32 {
+    count: s32 = 0;
+    i: s64 = 0;
+    while i < cmd.count && cast(s64)count < out.count {
+        while i < cmd.count && (cmd[i] == 123 || cmd[i] == 125 || cmd[i] == 32 || cmd[i] == 9 || cmd[i] == 10 || cmd[i] == 13) {
+            i += 1;
+        }
+        if i >= cmd.count { break }
+        start := i;
+        while i < cmd.count && cmd[i] != 123 && cmd[i] != 125 && cmd[i] != 32 && cmd[i] != 9 && cmd[i] != 10 && cmd[i] != 13 {
+            i += 1;
+        }
+        unused VecResize(out[count].bytes, 0);
+        unused BuilderAppend(out[count].bytes, cmd[start:i]);
+        count += 1;
+    }
+    return count;
+}
