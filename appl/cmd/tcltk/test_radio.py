@@ -1,70 +1,16 @@
-"""Compare Tk selection widgets with Inferno tkcmd and the stock Directory Browser."""
+"""Compare Tk selection widgets with recorded Inferno tkcmd results and exercise them hosted.
+
+radio_commands.expected holds what Inferno tkcmd printed for radio_commands.tcl.
+"""
 
 import argparse
 import io
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from PIL import Image, ImageChops
-from test_about import transcript
 from test_logwindow import private_display
-from test_memory import desktop
 from test_menu import BORDER, PRESSED, inferno_window, pointer
 from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command, compile_image, interaction, until, write_fixture
-
-
-def stock_directory(env):
-    with TemporaryDirectory(dir=BUILD) as folder:
-        directory = Path(folder)
-        (directory / "subdir").mkdir()
-        (directory / "alpha").write_bytes(b"a\n")
-        (directory / "zulu").write_bytes(b"z" * 257)
-        with desktop(env, f"wm/dir /{directory.relative_to(ROOT)}"):
-            window = inferno_window(env)
-
-            def capture():
-                png = command("import", "-window", window, "png:-", env=env,
-                              capture_output=True, check=True).stdout
-                return Image.open(io.BytesIO(png)).convert("RGB")
-
-            def showing_directory():
-                image = capture()
-                return image if image.getpixel((10, 75)) != (119, 119, 119) else None
-
-            icons = until(showing_directory, "Inferno Directory Browser did not map")
-            pointer(env, window, 31, 32, "mousedown", "1")
-            probe = (1, 41, 104, 46)
-            until(lambda: ImageChops.difference(icons.crop(probe), capture().crop(probe)).getbbox(),
-                  "Directory Browser did not post Options")
-            listing = (110, 48, 289, 142)
-
-            def choose(y, *, held=False):
-                if not held:
-                    pointer(env, window, 31, y, "mousedown", "1")
-                pointer(env, window, 31, y, "sleep", "0.15", "mouseup", "1")
-
-            def changed_from(previous):
-                after = capture()
-                return after if ImageChops.difference(previous.crop(listing), after.crop(listing)).getbbox() else None
-
-            choose(177, held=True)
-            text = until(lambda: changed_from(icons), "Directory Browser did not switch to the text listing")
-            assert ImageChops.difference(icons.crop(probe), text.crop(probe)).getbbox(), "radio release dismissed Options"
-            choose(117)
-            sorted_text = until(lambda: changed_from(text), "Directory Browser did not sort the text listing by size")
-            assert ImageChops.difference(icons.crop(probe), sorted_text.crop(probe)).getbbox(), "sort dismissed Options"
-
-            pointer(env, window, 31, 198)
-            walk_indicator = (7, 189, 26, 206)
-            unchecked = until(lambda: (im if im.getpixel((27, 198)) == (237, 237, 237) else None)
-                              if (im := capture()) else None, "Walk did not highlight").crop(walk_indicator)
-            choose(198)
-            until(lambda: ImageChops.difference(unchecked, capture().crop(walk_indicator)).getbbox(),
-                  "Directory Browser Walk entry did not toggle its check indicator")
-            assert ImageChops.difference(icons.crop(probe), capture().crop(probe)).getbbox(), "check release dismissed Options"
-            pointer(env, window, 325, 290, "click", "1")
-            until(lambda: not ImageChops.difference(icons.crop(probe), capture().crop(probe)).getbbox(),
-                  "Click outside did not dismiss the Directory Browser Options")
 
 
 LETTER = (25, 47, 67)
@@ -131,31 +77,24 @@ def hosted_selection(env):
 
 def main():
     parser = argparse.ArgumentParser()
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--oracle-only", action="store_true")
-    mode.add_argument("--installed", action="store_true")
+    parser.add_argument("--installed", action="store_true")
     args = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     fixture = SOURCES / "radio_commands.tcl"
-    if not args.oracle_only:
-        write_fixture("radio_fixture.zi", f"Commands :: #string RADIO_END\n{fixture.read_text()}RADIO_END;\n")
-        model = BUILD / "radio_command_test.zx"
-        compile_image("radio_command_test", model, "--define", "TK_MENU", "--define", "TK_NO_CANVAS")
-        portable = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
-        image = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
-        if not args.installed:
-            compile_image("tcltk", image, *RUNNER_FLAGS)
+    write_fixture("radio_fixture.zi", f"Commands :: #string RADIO_END\n{fixture.read_text()}RADIO_END;\n")
+    model = BUILD / "radio_command_test.zx"
+    compile_image("radio_command_test", model, "--define", "TK_MENU", "--define", "TK_NO_CANVAS")
+    portable = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
+    image = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
+    if not args.installed:
+        compile_image("tcltk", image, *RUNNER_FLAGS)
+    lines = (SOURCES / "radio_commands.expected").read_bytes().splitlines()
+    assert lines[-1] == b"#END" and all(line.startswith(b"#") and not line.startswith(b"#!") for line in lines), lines
+    assert portable.stdout.splitlines() == [*(line[1:].decode() for line in lines), "0"] and not portable.stderr, portable
+    print(f"Ziran matched all {len(lines)} recorded Inferno tkcmd selection widget results")
     with private_display() as env:
-        lines = transcript(env, f"tkcmd < /{fixture.relative_to(ROOT)}")
-        assert lines[-1] == b"#END" and all(line.startswith(b"#") and not line.startswith(b"#!") for line in lines), lines
-        print(f"Inferno tkcmd returned {len(lines)} selection widget results")
-        stock_directory(env)
-        print("Inferno Directory Browser Options switched to text, sorted by size, and toggled Walk while posted")
-        if not args.oracle_only:
-            assert portable.stdout.splitlines() == [*(line[1:].decode() for line in lines), "0"] and not portable.stderr, portable
-            print("Ziran matched the full Inferno tkcmd selection transcript")
-            interaction(env, image, SOURCES / "radio_window.tcl", hosted_selection(env))
-            print("Hosted Tk verified press, disabled controls, live variable redraw, and radio and check menu selection")
+        interaction(env, image, SOURCES / "radio_window.tcl", hosted_selection(env))
+    print("Hosted Tk verified press, disabled controls, live variable redraw, and radio and check menu selection")
 
 
 if __name__ == "__main__":

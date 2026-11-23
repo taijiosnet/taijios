@@ -1,17 +1,24 @@
-"""Exercise the stock and native Directory Browser on a private Xvfb display."""
+"""Exercise the Directory Browser on a private Xvfb display.
+
+dir_stock_icons.png and dir_stock_text.json hold what the Dis Directory Browser
+drew for this fixture, recorded before it was removed: its icon grid, the text
+mask of each listing row, and its window titles.
+"""
 
 import argparse
 from contextlib import contextmanager
 import io
+import json
 import os
 import subprocess
+import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
+import shutil
 
 from PIL import Image
 from test_logwindow import private_display, read_output
 from test_menu import BORDER, inferno_window, pointer
-from test_tcltk import BACKGROUND, BUILD, EMU, ROOT, color_bounds, command, compile_image, launch, stop, until
+from test_tcltk import BACKGROUND, BUILD, EMU, ROOT, SOURCES, color_bounds, command, compile_image, launch, stop, until
 
 FLAGS = ("--define", "TK_MENU", "--define", "TK_BITMAP",
          "--bind-host", "zx_surface", "--bind-host", "taijios_files",
@@ -31,6 +38,11 @@ CANVAS_COLOR = (221, 221, 221)
 CANVAS_WIDTH = 390
 TILE_WIDTH = 130
 TILE_HEIGHT = 50
+# Window titles show the fixture path, so it stays the same between runs. Longer
+# names change the window width that the pointer targets assume.
+FIXTURE_ROOT = BUILD.parent / "dfixture0"
+STOCK_ICONS = SOURCES / "dir_stock_icons.png"
+STOCK_TEXT = SOURCES / "dir_stock_text.json"
 
 
 def guest(path):
@@ -52,15 +64,24 @@ def desktop(env, emulator, script):
 def fixture(root):
     day = 86400
     epoch = 1577836800
+    # With relatime, a read rewrites an access time that is older than a day or
+    # than the change time, which utime sets to now. Access times a little in the
+    # future keep their order however often the browser reads the files.
+    recent = int(time.time()) + 3600
     for name, size, accessed, modified in zip(FILES, (13, 3, 82, 23, 41), (4, 1, 2, 5, 3), (1, 3, 4, 5, 2)):
         path = root / name
         path.write_bytes(b"x" * size)
-        os.utime(path, (epoch + accessed * day, epoch + modified * day))
+        os.utime(path, (recent + accessed * 60, epoch + modified * day))
     (root / "travel").mkdir()
     (root / "vanish").mkdir()
     (root / "travel" / "inside space").write_bytes(b"outside\n")
     for index in range(25):
         (root / "travel" / f"item-{index:02d}").write_bytes(b"a\n")
+    # Fixed dates keep every listing row the same from run to run.
+    for path in (root / "travel").iterdir():
+        os.utime(path, (recent, epoch + 7 * day))
+    for name in ("travel", "vanish"):
+        os.utime(root / name, (recent + 6 * 60, epoch + 6 * day))
 
 
 def glyphs(image, *colors):
@@ -287,6 +308,32 @@ def exercise(browser):
     return known, nested[1], root_title, child_title
 
 
+def mask_json(mask):
+    return None if mask is None else [mask[0][0], mask[0][1], mask[1].hex()]
+
+
+def mask_value(value):
+    return None if value is None else ((value[0], value[1]), bytes.fromhex(value[2]))
+
+
+def stock_results():
+    recorded = json.loads(STOCK_TEXT.read_text())
+    rows = {name: mask_value(value) for name, value in recorded["rows"].items()}
+    return (Image.open(STOCK_ICONS).convert("RGB"), rows, mask_value(recorded["child"]),
+            mask_value(recorded["root_title"]), mask_value(recorded["child_title"]))
+
+
+@contextmanager
+def fixture_root():
+    shutil.rmtree(FIXTURE_ROOT, ignore_errors=True)
+    FIXTURE_ROOT.mkdir(parents=True)
+    try:
+        fixture(FIXTURE_ROOT)
+        yield FIXTURE_ROOT
+    finally:
+        shutil.rmtree(FIXTURE_ROOT, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--installed", action="store_true")
@@ -297,14 +344,8 @@ def main():
     image = (ROOT / "dis/wm" if args.installed else BUILD) / "dir.zx"
     if not args.installed:
         compile_image("dir_app", image, *FLAGS)
-    # Keep the fixture caption short enough to fit both window widths.
-    with TemporaryDirectory(prefix="d", dir=BUILD.parent) as folder, private_display() as env:
-        root = Path(folder)
-        fixture(root)
-        with desktop(env, args.emulator, f"wm/dir {guest(root)}") as app:
-            browser = Browser(env, app, stock=True)
-            stock_icons = exercise_icons(browser)
-            stock, stock_child, root_title, child_title = exercise(browser)
+    stock_icons, stock, stock_child, root_title, child_title = stock_results()
+    with fixture_root() as root, private_display() as env:
         with desktop(env, args.emulator, f"{args.launcher} -w {guest(image)} {guest(root)}") as app:
             browser = Browser(env, app, stock=False)
             native_icons = exercise_icons(browser)
@@ -323,11 +364,10 @@ def main():
             assert browser.rows() == preceding, "failed directory change replaced the visible listing"
             browser.double(BY_NAME.index("travel"))
             until(lambda: browser.title() == hosted_title, "Walk did not recover after the error")
-    print("Stock and .zx Directory Browser agree on default icon layout, mask pixels, labels and icon-based Walk")
+    print("The .zx Directory Browser matched the recorded Dis icon layout, mask pixels, labels and icon-based Walk")
     print("View changes preserve sort, Walk and selection")
-    print("Stock and .zx Directory Browser agree on text glyphs, all four sort orders, live titles, Walk and '..'")
+    print("The .zx Directory Browser matched the recorded Dis text glyphs, all four sort orders, live titles, Walk and '..'")
     print("The .zx scrollbar and selection work, and a failed Walk preserves the previous listing and title")
-
 
 if __name__ == "__main__":
     main()

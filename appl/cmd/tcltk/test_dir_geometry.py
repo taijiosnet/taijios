@@ -1,19 +1,25 @@
-"""Compare wide icon labels with stock Inferno and exercise live widening during Walk."""
+"""Compare a wide icon label with the recorded Dis Directory Browser and exercise widening during Walk.
+
+dir_long_label.json holds the label mask the Dis Directory Browser drew, recorded
+before it was removed.
+"""
 
 import argparse
 import io
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PIL import Image
 
-from test_dir import BLACK, CANVAS_COLOR, FLAGS, Browser, desktop, glyphs, guest
+from test_dir import BLACK, CANVAS_COLOR, FLAGS, Browser, desktop, glyphs, guest, mask_value
 from test_logwindow import private_display, read_output
 from test_menu import inferno_window
-from test_tcltk import BUILD, EMU, command, compile_image, until
+from test_tcltk import BUILD, EMU, SOURCES, command, compile_image, until
 
 LONG_NAME = "n" * 55 + "é-file.txt"
 WIDE_CANVAS = 530
+STOCK_LABEL = SOURCES / "dir_long_label.json"
 
 
 def wide_grid(capture):
@@ -78,12 +84,12 @@ def main():
         child.mkdir()
         (child / LONG_NAME).touch()
         (directory / "zzzzzzzzzzzz").touch()
-        expected = startup(env, args.emulator, f"wm/dir {guest(child)}")
+        expected = mask_value(json.loads(STOCK_LABEL.read_text()))
         path = "/dis/wm/dir.zx" if args.installed else guest(image)
         launcher = f"{args.launcher} -w {path}"
         actual = startup(env, args.emulator, f"{launcher} {guest(child)}")
-        assert actual == expected, "the stock and Ziran long label pixels differ"
-        print(f"Stock and Ziran draw the full {len(LONG_NAME)}-rune label on a {WIDE_CANVAS}-pixel Canvas")
+        assert actual == expected, "the Ziran long label pixels differ from the recorded Dis label"
+        print(f"Ziran draws the full {len(LONG_NAME)}-rune label on a {WIDE_CANVAS}-pixel Canvas as Dis did")
         walk(env, args.emulator, f"{launcher} {guest(directory)}", expected)
         print("Ziran widens during Walk and the same window can return through '..'")
 

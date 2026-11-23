@@ -13,6 +13,8 @@ include "tk.m";
 include	"tkclient.m";
 	tkclient: Tkclient;
 
+include "zx.m";
+include "zxrun.m";
 include "keyring.m";
 include "security.m";
 
@@ -160,8 +162,14 @@ init(ctxt: ref Draw->Context, nil: list of string)
 					sys->sprint("%r")+"}; update");
 			break;
 		}
-		wmdir := load Wm "/dis/wm/dir.dis";
-		spawn wmdir->init(ctxt, "wm/dir" :: "/n/remote" :: nil);
+		# The Directory Browser is a ZX bundle; zxrun opens it in this namespace.
+		zxrun := load Zxrun Zxrun->PATH;
+		if(zxrun == nil) {
+			tk->cmd(t, ".status configure -text {Cannot load zxrun: "+
+					sys->sprint("%r")+"}; update");
+			break;
+		}
+		spawn zxrun->init(ctxt, "zxrun" :: "-w" :: "/dis/wm/dir.zx" :: "/n/remote" :: nil);
 		return;
 	}
 }
