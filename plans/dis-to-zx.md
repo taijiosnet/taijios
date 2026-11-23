@@ -23,7 +23,7 @@ Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window m
 
 Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
 
-Catalog applications that still need the legacy chain (35): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof readmail remotelogon reversi rmtdir rt sam sendmail sh telnet unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
+Catalog applications that still need the legacy chain (30): avi bounce brutus c4 collide cprof deb edit filename getauthinfo keyboard logon mand mash mprof pen prof readmail remotelogon reversi rmtdir rt sam sendmail sh telnet unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
 
 ## Column legend
 
@@ -46,7 +46,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
-4. Legacy misc (32 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
+4. Legacy misc (2 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (0), grid (5), demo (6), ebook (0), math (0).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
@@ -137,12 +137,12 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/lib/lock.dis | appl/lib/lock.b | module/lock.m | - |  |
 | dis/lib/login.dis | appl/lib/login.b |  | - |  |
 | dis/lib/man.dis | appl/lib/man.b | module/man.m | - |  |
-| dis/lib/mash/builtins.dis | appl/cmd/mash/builtins.b |  | - |  |
+| dis/lib/mash/builtins.dis | appl/cmd/mash/builtins.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_builtins.zi); loaded only by mash.dis |
 | dis/lib/mash/history.dis | appl/cmd/mash/history.b |  | - |  |
-| dis/lib/mash/make.dis | appl/cmd/mash/make.b |  | - |  |
+| dis/lib/mash/make.dis | appl/cmd/mash/make.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_make.zi: the node builder, the dependency and rule tables, and depends/match/rules); loaded only by mash.dis |
 | dis/lib/mash/tk.dis | appl/cmd/mash/tk.b | module/tk.m | - |  |
-| dis/lib/mashlib.dis | appl/cmd/mash/mashlib.b |  | - |  |
-| dis/lib/mashparse.dis | appl/cmd/mash/mashparse.b |  | - |  |
+| dis/lib/mashlib.dis | appl/cmd/mash/mashlib.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_env.zi, mash_exec.zi, mash_value.zi); loaded only by mash.dis |
+| dis/lib/mashparse.dis | appl/cmd/mash/mashparse.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_parse.zi, mash_lex.zi: the same yacc tables and actions); loaded only by mash.dis |
 | dis/lib/memfs.dis | appl/lib/memfs.b | module/memfs.m | - |  |
 | dis/lib/mpeg.dis | appl/lib/mpeg.b | module/mpeg.m | - |  |
 | dis/lib/msgio.dis | appl/lib/msgio.b | module/msgio.m | - |  |
@@ -260,7 +260,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/fmt.dis | appl/cmd/fmt.b |  | - |  |
 | dis/fortune.dis | appl/cmd/fortune.b |  | - |  |
 | dis/freq.dis | appl/cmd/freq.b |  | - |  |
-| dis/fs.dis | appl/cmd/fs.b | module/alphabet/fs.m | - |  |
 | dis/ftest.dis | appl/cmd/ftest.b |  | - |  |
 | dis/getauthinfo.dis | appl/cmd/getauthinfo.b |  | - |  |
 | dis/gettar.dis | appl/cmd/gettar.b |  | - |  |
@@ -280,7 +279,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/m4.dis | appl/cmd/m4.b |  | - |  |
 | dis/man2html.dis | appl/cmd/man2html.b |  | - |  |
 | dis/man2txt.dis | appl/cmd/man2txt.b |  | - |  |
-| dis/mash.dis | appl/cmd/mash/mash.b |  | - |  |
+| dis/mash.dis | appl/cmd/mash/mash.b |  | - | zx-twin /dis/mash.zx (appl/cmd/mash/mash.zi and its eight modules, `mk install-zx`): mash's own grammar through the yacc tables of mashparse.b, the builtins modules compiled in (env, eval, exit, load, prompt, quote, run, status, time, whatis, and make with depends, match and rules), the make builder, and threads as guest processes. tests/mash: 32 of 33 cases match /dis/mash.dis, 1 known gap (the line number the parser reports after a failed command). Still open here: dis/lib/mash/tk.dis needs a Ziran Tk that answers Tk->cmd on a toplevel, which nothing provides today (module/tk.m has no ZX consumer and the ZX Tk lives inside a Tcl interpreter, not behind a callable binding); dis/lib/mash/history.dis needs a served file fed while the parser runs, which ZX has no threads for; the <{} and >{} pipes are served but the words of the block still reach the generator's argument list, so a command taking one as a non-final operand misreads it (the parse's item pool needs per-nested-parse scoping). Limbo loaders of Mashlib/Mashparse stay while dis/mash.dis exists. |
 | dis/mc.dis | appl/cmd/mc.b |  | - |  |
 | dis/mdb.dis | appl/cmd/mdb.b |  | - |  |
 | dis/metamorph.dis | appl/cmd/metamorph.b |  | - |  |
@@ -440,7 +439,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 48 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 43 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -452,9 +451,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/wm/brutus/mod.dis | appl/wm/brutus/mod.b |  | - |  |
 | dis/wm/brutus/table.dis | appl/wm/brutus/table.b |  | - |  |
 | dis/wm/c4.dis | appl/wm/c4.b |  | - |  |
-| dis/wm/calendar.dis | appl/wm/calendar.b |  | - |  |
 | dis/wm/chat.dis | unknown |  | - |  |
-| dis/wm/coffee.dis | appl/wm/coffee.b |  | - |  |
 | dis/wm/collide.dis | appl/wm/collide.b |  | - |  |
 | dis/wm/colors.dis | appl/wm/colors.b |  | - |  |
 | dis/wm/cprof.dis | appl/wm/cprof.b |  | - |  |
@@ -470,13 +467,10 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/wm/getauthinfo.dis | appl/wm/getauthinfo.b |  | - |  |
 | dis/wm/keyboard.dis | appl/wm/keyboard.b | module/keyboard.m | - |  |
 | dis/wm/logon.dis | appl/wm/logon.b |  | - |  |
-| dis/wm/man.dis | appl/wm/man.b | module/man.m | - |  |
 | dis/wm/mand.dis | appl/wm/mand.b |  | - |  |
 | dis/wm/mash.dis | appl/wm/mash.b |  | - |  |
-| dis/wm/mpeg.dis | appl/wm/mpeg.b | module/mpeg.m | - |  |
 | dis/wm/mprof.dis | appl/wm/mprof.b |  | - |  |
 | dis/wm/pen.dis | appl/wm/pen.b |  | - |  |
-| dis/wm/polyhedra.dis | appl/wm/polyhedra.b | module/math/polyhedra.m | - |  |
 | dis/wm/prof.dis | appl/wm/prof.b |  | - |  |
 | dis/wm/readmail.dis | appl/wm/readmail.b |  | - |  |
 | dis/wm/remotelogon.dis | appl/wm/remotelogon.b |  | - |  |
@@ -563,8 +557,8 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/alphabet/abctypes.dis | appl/alphabet/typesets/abctypes.b | module/alphabet/abctypes.m | - |  |
 | dis/alphabet/alphabet.dis | appl/alphabet/alphabet.b | module/alphabet.m | - |  |
 | dis/alphabet/alphabet.shmod.dis | appl/alphabet/alphabet.shmod.b |  | - |  |
-| dis/alphabet/endpoints.dis | appl/alphabet/auxi/endpoints.b | module/alphabet/endpoints.m | - |  |
-| dis/alphabet/endpointsrv.dis | appl/alphabet/auxi/endpointsrv.b |  | - |  |
+| dis/alphabet/endpoints.dis | appl/alphabet/auxi/endpoints.b | module/alphabet/endpoints.m | - | zx-twin: appl/alphabet/grid/endpoints.zi; its new also needs /dis/listen.zx |
+| dis/alphabet/endpointsrv.dis | appl/alphabet/auxi/endpointsrv.b |  | - | zx-twin /dis/endpointsrv.zx: appl/alphabet/endpointsrv.zi, `mk install-zx`; tests/alphabet/grid_test.sh |
 | dis/alphabet/eval.dis | appl/alphabet/eval.b |  | - |  |
 | dis/alphabet/extvalues.dis | appl/alphabet/extvalues.b | module/alphabet/extvalues.m | - |  |
 | dis/alphabet/fs.dis | appl/alphabet/typesets/fs.b | module/alphabet/fs.m | - |  |
@@ -599,12 +593,12 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/alphabet/fsfilter.dis | appl/alphabet/auxi/fsfilter.b |  | - |  |
 | dis/alphabet/fstypes.dis | appl/alphabet/typesets/fstypes.b | module/alphabet/fstypes.m | - |  |
 | dis/alphabet/grid.dis | appl/alphabet/typesets/grid.b | module/alphabet/grid.m | - |  |
-| dis/alphabet/grid/farm.dis | appl/alphabet/grid/farm.b |  | - |  |
-| dis/alphabet/grid/line2rec.dis | appl/alphabet/grid/line2rec.b |  | - |  |
-| dis/alphabet/grid/local.dis | appl/alphabet/grid/local.b |  | - |  |
-| dis/alphabet/grid/remote.dis | appl/alphabet/grid/remote.b |  | - |  |
-| dis/alphabet/grid/rexec.dis | appl/alphabet/grid/rexec.b |  | - |  |
-| dis/alphabet/gridtypes.dis | appl/alphabet/typesets/gridtypes.b | module/alphabet/gridtypes.m | - |  |
+| dis/alphabet/grid/farm.dis | appl/alphabet/grid/farm.b |  | - | blocked: needs a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus the fd/handle passing a copy needs (it is also the only consumer of records) |
+| dis/alphabet/grid/line2rec.dis | appl/alphabet/grid/line2rec.b |  | - | zx-twin: appl/alphabet/grid/line2rec.zi; tests/alphabet/grid_test.sh |
+| dis/alphabet/grid/local.dis | appl/alphabet/grid/local.b |  | - | zx-twin: appl/alphabet/grid/local.zi; tests/alphabet/grid_test.sh |
+| dis/alphabet/grid/remote.dis | appl/alphabet/grid/remote.b |  | - | blocked: needs a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus the fd/handle passing a copy needs |
+| dis/alphabet/grid/rexec.dis | appl/alphabet/grid/rexec.b |  | - | blocked: needs a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus the fd/handle passing a copy needs |
+| dis/alphabet/gridtypes.dis | appl/alphabet/typesets/gridtypes.b | module/alphabet/gridtypes.m | - | zx-twin: appl/alphabet/grid/gridtypes.zi, serves /grid with local and line2rec |
 | dis/alphabet/main/auth.dis | appl/alphabet/main/auth.b |  | - |  |
 | dis/alphabet/main/cat.dis | appl/alphabet/main/cat.b |  | - |  |
 | dis/alphabet/main/create.dis | appl/alphabet/main/create.b |  | - |  |
@@ -629,7 +623,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/alphabet/mktypeset.dis | unknown |  | - |  |
 | dis/alphabet/proxy.dis | appl/alphabet/proxy.b |  | - |  |
 | dis/alphabet/reports.dis | appl/alphabet/reports.b | module/alphabet/reports.m | - |  |
-| dis/alphabet/rexecsrv.dis | appl/alphabet/auxi/rexecsrv.b |  | - |  |
+| dis/alphabet/rexecsrv.dis | appl/alphabet/auxi/rexecsrv.b |  | - | blocked: needs a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus the fd/handle passing a copy needs |
 
 ### 9. Spree - multiuser engine family - 0 rows
 
@@ -667,42 +661,12 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 
-### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 32 rows
+### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 2 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/disk/kfs.dis | appl/cmd/disk/kfs.b |  | - | blocked: 9P server needs file2chan/spawn/channels in ZX host API |
-| dis/fs/and.dis | appl/cmd/fs/and.b |  | - |  |
-| dis/fs/bundle.dis | appl/cmd/fs/bundle.b | module/bundle.m | - |  |
-| dis/fs/chstat.dis | appl/cmd/fs/chstat.b |  | - |  |
-| dis/fs/compose.dis | appl/cmd/fs/compose.b |  | - |  |
-| dis/fs/depth.dis | appl/cmd/fs/depth.b |  | - |  |
-| dis/fs/entries.dis | appl/cmd/fs/entries.b |  | - |  |
-| dis/fs/eval.dis | appl/cmd/fs/eval.b |  | - |  |
-| dis/fs/exec.dis | appl/cmd/fs/exec.b |  | - |  |
-| dis/fs/filter.dis | appl/cmd/fs/filter.b | module/filter.m | - |  |
-| dis/fs/join.dis | appl/spree/join.b |  | - |  |
-| dis/fs/ls.dis | appl/cmd/fs/ls.b |  | - |  |
-| dis/fs/match.dis | appl/cmd/fs/match.b |  | - |  |
-| dis/fs/merge.dis | appl/cmd/fs/merge.b |  | - |  |
-| dis/fs/mergewrite.dis | appl/cmd/fs/mergewrite.b |  | - |  |
-| dis/fs/mode.dis | appl/cmd/fs/mode.b |  | - |  |
-| dis/fs/not.dis | appl/cmd/fs/not.b |  | - |  |
-| dis/fs/or.dis | appl/cmd/fs/or.b |  | - |  |
-| dis/fs/path.dis | appl/cmd/fs/path.b |  | - |  |
-| dis/fs/pipe.dis | appl/cmd/fs/pipe.b |  | - |  |
-| dis/fs/print.dis | appl/cmd/fs/print.b | module/print.m | - |  |
-| dis/fs/proto.dis | appl/cmd/fs/proto.b |  | - |  |
-| dis/fs/query.dis | appl/cmd/fs/query.b |  | - |  |
-| dis/fs/run.dis | appl/cmd/fs/run.b |  | - |  |
-| dis/fs/select.dis | appl/cmd/fs/select.b |  | - |  |
-| dis/fs/setroot.dis | appl/cmd/fs/setroot.b |  | - |  |
-| dis/fs/size.dis | appl/cmd/fs/size.b |  | - |  |
-| dis/fs/unbundle.dis | appl/cmd/fs/unbundle.b | module/unbundle.m | - |  |
-| dis/fs/void.dis | appl/cmd/fs/void.b |  | - |  |
-| dis/fs/walk.dis | appl/cmd/fs/walk.b |  | - |  |
-| dis/fs/write.dis | appl/cmd/fs/write.b |  | - |  |
-| dis/lego/clock.dis | appl/cmd/lego/clock.b |  | - | blocked: needs Tk/spawn in ZX |
+| dis/disk/kfs.dis | appl/cmd/disk/kfs.b |  | - | blocked: 3,844-line 9P file server. Ziran has no Styx codec (module/styx.m has no `.zi`; Tmsg/Rmsg pack and unpack live in libinterp/styx.c). `taijios_file2chan.zi` serves one file: Step handles version, attach, one-name walk, open, read, write, clunk, stat and a no-op wstat, and refuses create, remove, flush and multi-name walk, so it cannot serve a disk tree. kfs also starts a console server and a sync flow and calls pctl/fildes; there is no in-bundle spawn and taijios_io has no pread/pwrite |
+| dis/lego/clock.dis | appl/cmd/lego/clock.b |  | - | blocked: Tk. At the pinned tk package (4e79275) Canvas has Rectangle, Label, Line, Oval and Image items only; the face's twelve tick arcs and its hour and minute indicators use `create arc -start -extent` and `itemconfigure -start`. The widget-level binds are bare `<ButtonPress>` and `<ButtonRelease>` (only `<ButtonPress-1>` is recognized), and the app wires events through `send`/`namechan`, which the launcher lacks. The /chan/clockface reader fits PollRead |
 
 ### 15. Acme helper binaries outside dis/ - 22 rows
 
