@@ -48,6 +48,18 @@ inherit the guest namespace and standard streams. Other open descriptors stay
 with the caller. `Kill` stops a running child: the Ziran engine ends it at its
 next checkpoint, and a device read, sleep or window wait it is blocked in
 returns first. Its outcome then has status -1 and the error `killed`.
+`StartWith` starts a child whose standard input, output and error are
+`taijios_io` handles of the caller, such as one end of a pipe or a connection.
+
+ZX programs can serve and attach file trees through `appl/cmd/taijios_namespace.zi`.
+`Pipe` creates a guest pipe, `Mount` attaches the 9P server answering on a
+handle, `Bind` and `Unmount` change the namespace, and `Fork` gives the
+calling process a private copy of its namespace, as `pctl FORKNS` does.
+A file server runs in its own process: start it with `StartWith` on one end
+of a pipe and mount the other end. `taijios_io.PollRead` reads from any
+handle without waiting and returns -2 while nothing has arrived, so one
+process can watch several pipes or connections. These calls also work in ZX
+commands run from the Dis shell; starting processes needs the direct ZX guest.
 
 Build the direct ZX window manager with `(cd appl/wm && mk native_wm.zx)`.
 To run an existing ZX GUI app under it with the current Linux build, use

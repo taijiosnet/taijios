@@ -29,3 +29,9 @@ Wait :: (id: s32) -> Outcome #foreign host_api;
 // a blocked device read or window wait returns first. Poll and Wait then report
 // status -1 with the error "killed". False if the ID is unknown or finished.
 Kill :: (id: s32) -> bool #foreign host_api;
+
+// Start with the child's standard input, output and error taken from the
+// caller's taijios_io handles. Pass -1 to keep the caller's own stream in that
+// position. The child holds its own reference to each one: close a handle
+// here after the call when only the child should keep that end open.
+StartWith :: (path: string, operands: []string, input: s32, output: s32, errors: s32) -> Launch #foreign host_api;

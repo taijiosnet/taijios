@@ -938,18 +938,23 @@ struct ZxCommand {
 static ZxResult zxexecute(const char *, ZxSurface *, ZxCommand *);
 
 static int zxs32(HostValue *, int);
+static void zxioerrstr(ZxCommand *, const char *);
 
 #ifdef __linux__
-/* A windowed ZX process without Dis polls fd 0 through a reader kproc that
- * holds one chunk at a time. count is the bytes held, -2 while a read is
- * pending, 0 at end of input, and -1 after an error. */
+/* A ZX process polls a descriptor through a reader kproc that holds one chunk
+ * at a time. count is the bytes held, -2 while a read is pending, 0 at end of
+ * input, and -1 after an error. The reader waits on taken until its chunk is
+ * used up; a blocking read of the same descriptor waits on ready. */
 struct ZxStdinPump {
 	Ref ref;
 	Lock l;
 	Rendez taken;
+	Rendez ready;
 	Proc *reader;
-	int closed, offset;
+	ZxStdinPump *next;
+	int fd, closed, offset;
 	long count;
+	char err[ERRMAX];
 	uchar data[ZX_StdinChunk];
 };
 
@@ -968,6 +973,14 @@ zxstdintaken(void *arg)
 	return pump->count == -2 || pump->closed;
 }
 
+static int
+zxstdinready(void *arg)
+{
+	ZxStdinPump *pump = arg;
+
+	return pump->count != -2 || pump->closed;
+}
+
 static void
 zxstdinreader(void *arg)
 {
@@ -981,16 +994,19 @@ zxstdinreader(void *arg)
 	closed = pump->closed;
 	unlock(&pump->l);
 	while(!closed){
-		n = kread(0, bytes, sizeof(bytes));
+		n = kread(pump->fd, bytes, sizeof(bytes));
 		lock(&pump->l);
 		closed = pump->closed;
 		if(!closed){
 			if(n > 0)
 				memmove(pump->data, bytes, n);
+			else if(n < 0)
+				kgerrstr(pump->err, sizeof(pump->err));
 			pump->offset = 0;
 			pump->count = n < 0 ? -1 : n;
 		}
 		unlock(&pump->l);
+		Wakeup(&pump->ready);
 		if(closed || n <= 0)
 			break;
 		if(waserror())
@@ -1007,78 +1023,122 @@ zxstdinreader(void *arg)
 	zxstdinrelease(pump);
 }
 
+/* The command's reader for a descriptor, started on first use if asked. */
+static ZxStdinPump*
+zxstdinpump(ZxCommand *command, int fd, int create)
+{
+	ZxStdinPump *pump;
+
+	for(pump = command->stdinpump; pump != nil; pump = pump->next)
+		if(pump->fd == fd)
+			return pump;
+	if(!create)
+		return nil;
+	pump = calloc(1, sizeof(*pump));
+	if(pump == nil)
+		return nil;
+	pump->ref.ref = 2;
+	pump->count = -2;
+	pump->fd = fd;
+	if(waserror()){
+		free(pump);
+		return nil;
+	}
+	kproc("ZX reader", zxstdinreader, pump, KPDUPPG|KPDUPFDG|KPDUPENVG);
+	poperror();
+	pump->next = command->stdinpump;
+	command->stdinpump = pump;
+	return pump;
+}
+
+/* Copy held bytes into a []u8 slice. Without wait, a pending read gives -2. */
+static long
+zxstdintake(ZxCommand *command, ZxStdinPump *pump, const HostValue *buffer, int wait)
+{
+	size_t length;
+	long count, i;
+	int taken;
+
+	length = buffer->length;
+	if(length > ZX_StdinChunk)
+		length = ZX_StdinChunk;
+	if(length == 0)
+		return 0;
+	for(;;){
+		taken = 0;
+		lock(&pump->l);
+		count = pump->count;
+		if(count > 0){
+			if(count - pump->offset < (long)length)
+				length = count - pump->offset;
+			for(i = 0; i < (long)length; i++)
+				buffer->elements[i].bits = pump->data[pump->offset+i];
+			pump->offset += length;
+			if(pump->offset == count){
+				pump->count = -2;
+				taken = 1;
+			}
+			count = length;
+		}else if(count == -1)
+			snprint(command->err, sizeof(command->err), "%s", pump->err);
+		unlock(&pump->l);
+		if(taken)
+			Wakeup(&pump->taken);
+		if(count != -2 || !wait)
+			return count;
+		if(waserror()){
+			zxioerrstr(command, nil);
+			return -1;
+		}
+		Sleep(&pump->ready, zxstdinready, pump);
+		poperror();
+	}
+}
+
 static int
 zxnativestdin(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
 {
 	ZxCommand *command = context;
 	ZxStdinPump *pump;
-	size_t length;
-	long count, i;
-	int taken;
 
 	USED(module);
 	USED(function);
 	if(n != 1 || args[0].kind != HOST_SLICE || args[0].type == nil ||
 	   strcmp(args[0].type, "[]u8") != 0 || (args[0].length != 0 && args[0].elements == nil))
 		return 0;
-	length = args[0].length;
-	if(length > ZX_StdinChunk)
-		length = ZX_StdinChunk;
-	if(length == 0)
-		return zxs32(result, 0);
-	pump = command->stdinpump;
-	if(pump == nil){
-		pump = calloc(1, sizeof(*pump));
-		if(pump == nil)
-			return zxs32(result, -1);
-		pump->ref.ref = 2;
-		pump->count = -2;
-		if(waserror()){
-			free(pump);
-			return zxs32(result, -1);
-		}
-		kproc("ZX stdin", zxstdinreader, pump, KPDUPPG|KPDUPFDG|KPDUPENVG);
-		poperror();
-		command->stdinpump = pump;
-	}
-	taken = 0;
-	lock(&pump->l);
-	count = pump->count;
-	if(count > 0){
-		if(count - pump->offset < (long)length)
-			length = count - pump->offset;
-		for(i = 0; i < (long)length; i++)
-			args[0].elements[i].bits = pump->data[pump->offset+i];
-		pump->offset += length;
-		if(pump->offset == count){
-			pump->count = -2;
-			taken = 1;
-		}
-		count = length;
-	}
-	unlock(&pump->l);
-	if(taken)
-		Wakeup(&pump->taken);
-	return zxs32(result, count);
+	pump = zxstdinpump(command, 0, 1);
+	return zxs32(result, pump == nil ? -1 : zxstdintake(command, pump, args, 0));
 }
 
 /* Interrupt a pending read and drop the command's reference. */
 static void
-zxstdinclose(ZxCommand *command)
+zxstdinstop(ZxStdinPump *pump)
 {
-	ZxStdinPump *pump = command->stdinpump;
-
-	if(pump == nil)
-		return;
-	command->stdinpump = nil;
 	lock(&pump->l);
 	pump->closed = 1;
 	if(pump->reader != nil)
 		swiproc(pump->reader, 0);
 	unlock(&pump->l);
 	Wakeup(&pump->taken);
+	Wakeup(&pump->ready);
 	zxstdinrelease(pump);
+}
+
+/* Stop the reader of one descriptor, or of every descriptor when fd is -1. */
+static void
+zxstdinclose(ZxCommand *command, int fd)
+{
+	ZxStdinPump *pump, **link;
+
+	for(link = &command->stdinpump; (pump = *link) != nil; ){
+		if(fd >= 0 && pump->fd != fd){
+			link = &pump->next;
+			continue;
+		}
+		*link = pump->next;
+		zxstdinstop(pump);
+	}
 }
 #endif
 
@@ -1220,6 +1280,17 @@ zxioerror(ZxCommand *command, HostValue *result, const char *message)
 {
 	zxioerrstr(command, message);
 	return zxs32(result, -1);
+}
+
+/* The kernel descriptor behind a taijios_io handle, or -1. */
+static int
+zxhandlefd(ZxCommand *command, int handle)
+{
+	if(handle >= 0 && handle < 3)
+		return handle;
+	if(handle >= 3 && handle - 3 < command->nfd)
+		return command->fd[handle - 3];
+	return -1;
 }
 
 static int
@@ -1370,13 +1441,15 @@ zxprocessargs(ZxCommand *command, const HostValue *operands)
 	return 1;
 }
 
+/* streams names the caller's descriptors that become the child's fd 0, 1 and 2.
+ * Without it the child inherits the caller's own three. */
 static ZxProcess *
-zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int windowed)
+zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int windowed, const int *streams)
 {
 	ZxProcess *process;
 	Fgrp *parent;
 	const char *problem = nil;
-	int i;
+	int i, fd;
 
 	if(command->depth >= ZxProcessDepth){
 		snprint(result->problem, sizeof(result->problem), "ZX command nesting limit reached");
@@ -1412,16 +1485,17 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 		zxprocessrelease(process);
 		return nil;
 	}
-	/* A child inherits the standard streams, without retaining the manager's
+	/* A child gets three standard streams, without retaining the manager's
 	 * Draw connection, exclusive input channel, or other private descriptors. */
 	process->files = newfgrp(nil);
 	parent = up->env->fgrp;
 	lock(&parent->l);
-	for(i = 0; i < 3 && i <= parent->maxfd; i++){
-		if(parent->fd[i] == nil)
+	for(i = 0; i < 3; i++){
+		fd = streams != nil ? streams[i] : i;
+		if(fd < 0 || fd > parent->maxfd || parent->fd[fd] == nil)
 			continue;
-		incref(&parent->fd[i]->r);
-		process->files->fd[i] = parent->fd[i];
+		incref(&parent->fd[fd]->r);
+		process->files->fd[i] = parent->fd[fd];
 		process->files->maxfd = i;
 	}
 	unlock(&parent->l);
@@ -1459,7 +1533,7 @@ zxprocessrun(ZxCommand *command, const HostValue *args)
 	ZxProcess *process;
 	ZxResult result = {0, -1, ""};
 
-	process = zxprocessstart(command, args, &result, 0);
+	process = zxprocessstart(command, args, &result, 0, nil);
 	if(process != nil){
 		zxprocessresult(process, 1, &result);
 		zxprocessrelease(process);
@@ -1622,7 +1696,7 @@ zxprocessforget(ZxCommand *command)
 }
 
 static int
-zxprocessregister(ZxCommand *command, const HostValue *args, ZxResult *result, int windowed)
+zxprocessregister(ZxCommand *command, const HostValue *args, ZxResult *result, int windowed, const int *streams)
 {
 	ZxProcess *process;
 
@@ -1630,7 +1704,7 @@ zxprocessregister(ZxCommand *command, const HostValue *args, ZxResult *result, i
 		snprint(result->problem, sizeof(result->problem), "too many outstanding ZX processes");
 		return 0;
 	}
-	process = zxprocessstart(command, args, result, windowed);
+	process = zxprocessstart(command, args, result, windowed, streams);
 	if(process == nil)
 		return 0;
 	process->id = ++command->childid;
@@ -1647,15 +1721,24 @@ zxprocess(void *context, const char *module, const char *function,
 	ZxCommand *command = context;
 	ZxResult *outcome = &command->outcome;
 	HostField *fields = command->outfields;
-	int id;
+	int id, i, chosen, streams[3];
 
 	USED(module);
-	if(strcmp(function, "Run") == 0 || strcmp(function, "Start") == 0){
-		if(n != 2 || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE)
+	chosen = strcmp(function, "StartWith") == 0;
+	if(strcmp(function, "Run") == 0 || strcmp(function, "Start") == 0 || chosen){
+		if(n != (chosen ? 5 : 2) || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE ||
+		   (chosen && (!zxisindex(args+2) || !zxisindex(args+3) || !zxisindex(args+4))))
 			return 0;
-		if(strcmp(function, "Start") == 0){
+		if(strcmp(function, "Run") != 0){
 			*outcome = (ZxResult){0, -1, ""};
-			id = zxprocessregister(command, args, outcome, 0);
+			/* -1 keeps the caller's own stream in that position. */
+			for(i = 0; chosen && i < 3; i++){
+				streams[i] = args[2+i].integer == -1 ? i : zxhandlefd(command, args[2+i].integer);
+				if(streams[i] < 0)
+					snprint(outcome->problem, sizeof(outcome->problem), "invalid ZX file handle");
+			}
+			id = outcome->problem[0] != 0 ? 0 :
+				zxprocessregister(command, args, outcome, 0, chosen ? streams : nil);
 			fields[0] = (HostField){"id", {.kind = HOST_INTEGER, .type = "s32", .integer = id}};
 			fields[1] = (HostField){"error", {.kind = HOST_STRING, .type = "string",
 				.data = (uchar*)outcome->problem, .length = strlen(outcome->problem)}};
@@ -1908,12 +1991,7 @@ zxio(void *context, const char *module, const char *function,
 			.length = command->fdpath == nil ? 0 : strlen(command->fdpath)};
 		return 1;
 	}
-	if(handle >= 0 && handle < 3)
-		fd = handle;
-	else if(handle >= 3 && handle - 3 < command->nfd)
-		fd = command->fd[handle - 3];
-	else
-		fd = -1;
+	fd = zxhandlefd(command, handle);
 	if(strcmp(function, "Seek") == 0)
 		return zxioseek(command, fd, args, n, result);
 	if(fd < 0)
@@ -1924,8 +2002,29 @@ zxio(void *context, const char *module, const char *function,
 		if(handle < 3)
 			return zxioerror(command, result, "cannot close a standard stream");
 		command->fd[handle - 3] = -1;
+#ifdef __linux__
+		zxstdinclose(command, fd);
+#endif
 		return kclose(fd) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
 	}
+#ifdef __linux__
+	if(strcmp(function, "PollRead") == 0){
+		ZxStdinPump *pump;
+
+		if(n != 2 || !zxioslice(args+1))
+			return 0;
+		pump = zxstdinpump(command, fd, 1);
+		if(pump == nil)
+			return zxioerror(command, result, "cannot start a ZX reader");
+		count = zxstdintake(command, pump, args+1, 0);
+		if(count > 0)
+			BundleHostRenewSteps();
+		return zxs32(result, count);
+	}
+#else
+	if(strcmp(function, "PollRead") == 0)
+		return zxioerror(command, result, "this host cannot poll a descriptor");
+#endif
 	if(strcmp(function, "Sync") == 0 || strcmp(function, "RenameSameDir") == 0){
 		int renamefile = strcmp(function, "RenameSameDir") == 0;
 		char name[ZxGuestPathBytes + 1];
@@ -1964,15 +2063,27 @@ zxio(void *context, const char *module, const char *function,
 		memmove(bytes, buffer->data, length);
 		count = kfwstat(fd, bytes, length);
 	}else if(strcmp(function, "Read") == 0){
+		int polled = 0;
+
 		if(!zxioslice(buffer))
 			return 0;
-		count = length == 0 ? 0 : kread(fd, bytes, length);
+#ifdef __linux__
+		/* A descriptor that was polled keeps its bytes in order through its reader. */
+		if(zxstdinpump(command, fd, 0) != nil){
+			polled = 1;
+			count = zxstdintake(command, zxstdinpump(command, fd, 0), buffer, 1);
+			if(count < 0)
+				return zxs32(result, -1);
+		}
+#endif
+		if(!polled)
+			count = length == 0 ? 0 : kread(fd, bytes, length);
 		if(count > 0){
 			BundleHostRenewSteps();
 			if(command->surface != nil && !command->surface->imageactive)
 				command->surface->imagepermit = 1;
 		}
-		for(i = 0; i < count; i++)
+		for(i = 0; !polled && i < count; i++)
 			buffer->elements[i].bits = bytes[i];
 	}else{
 		if(buffer->kind != HOST_STRING || (length != 0 && buffer->data == nil))
@@ -1980,6 +2091,93 @@ zxio(void *context, const char *module, const char *function,
 		count = length == 0 ? 0 : kwrite(fd, (void *)buffer->data, length);
 	}
 	return count < 0 ? zxioerror(command, result, nil) : zxs32(result, count);
+}
+
+/* Namespace calls for ZX file servers and the programs that mount them. */
+static int
+zxnamespace(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	char first[ZxGuestPathBytes + 1], second[ZxGuestPathBytes + 1];
+	Pgrp *copy, *shared;
+	int ends[2], slots[2], fd, afd, binding;
+
+	USED(module);
+	if(strcmp(function, "Error") == 0){
+		if(n != 0)
+			return 0;
+		*result = (HostValue){.kind = HOST_STRING, .type = "string",
+			.data = (uchar *)command->err, .length = strlen(command->err)};
+		return 1;
+	}
+	if(strcmp(function, "Fork") == 0){
+		if(n != 0)
+			return 0;
+		/* As pctl FORKNS: this process and its later children leave the shared namespace. */
+		copy = newpgrp();
+		if(waserror()){
+			closepgrp(copy);
+			zxioerrstr(command, nil);
+			zxbool(result, 0);
+			return 1;
+		}
+		pgrpcpy(copy, up->env->pgrp);
+		poperror();
+		shared = up->env->pgrp;
+		up->env->pgrp = copy;
+		closepgrp(shared);
+		zxbool(result, 1);
+		return 1;
+	}
+	if(strcmp(function, "Pipe") == 0){
+		if(n != 1 || args[0].kind != HOST_SLICE || args[0].type == nil ||
+		   strcmp(args[0].type, "[]s32") != 0 || args[0].length < 2 || args[0].elements == nil)
+			return 0;
+		if(kpipe(ends) < 0)
+			return zxioerror(command, result, nil);
+		slots[0] = zxioslot(command);
+		if(slots[0] >= 0)
+			command->fd[slots[0]] = ends[0];
+		slots[1] = slots[0] < 0 ? -1 : zxioslot(command);
+		if(slots[1] < 0){
+			if(slots[0] >= 0)
+				command->fd[slots[0]] = -1;
+			kclose(ends[0]);
+			kclose(ends[1]);
+			return zxioerror(command, result, "too many open ZX files");
+		}
+		command->fd[slots[1]] = ends[1];
+		args[0].elements[0].integer = slots[0] + 3;
+		args[0].elements[1].integer = slots[1] + 3;
+		return zxs32(result, 0);
+	}
+	if(strcmp(function, "Mount") == 0){
+		if(n != 5 || !zxisindex(args) || !zxisindex(args+1) || args[2].kind != HOST_STRING ||
+		   !zxisindex(args+3) || args[4].kind != HOST_STRING)
+			return 0;
+		fd = zxhandlefd(command, args[0].integer);
+		afd = args[1].integer == -1 ? -1 : zxhandlefd(command, args[1].integer);
+		if(fd < 0 || (afd < 0 && args[1].integer != -1))
+			return zxioerror(command, result, "invalid ZX file handle");
+		if(!zxiopath(args+2, first) || first[0] == 0 || !zxiopath(args+4, second))
+			return zxioerror(command, result, "invalid file name");
+		/* The server answers version and attach from another process meanwhile. */
+		if(kmount(fd, afd, first, args[3].integer, second) < 0)
+			return zxioerror(command, result, nil);
+		return zxs32(result, 0);
+	}
+	binding = strcmp(function, "Bind") == 0;
+	if(!binding && strcmp(function, "Unmount") != 0)
+		return 0;
+	if(n != (binding ? 3 : 2) || args[0].kind != HOST_STRING || args[1].kind != HOST_STRING ||
+	   (binding && !zxisindex(args+2)))
+		return 0;
+	if(!zxiopath(args, first) || !zxiopath(args+1, second) || second[0] == 0 || (binding && first[0] == 0))
+		return zxioerror(command, result, "invalid file name");
+	if((binding ? kbind(first, second, args[2].integer) : kunmount(first, second)) < 0)
+		return zxioerror(command, result, nil);
+	return zxs32(result, 0);
 }
 
 static vlong
@@ -2141,7 +2339,7 @@ zxnativelaunchrequest(ZxCommand *command, ZxNativeRequest *request)
 	}
 	args[0] = (HostValue){.kind = HOST_STRING, .type = "string", .data = (const uchar*)path, .length = length};
 	args[1] = (HostValue){.kind = HOST_SLICE, .type = "[]string", .elements = argv, .length = argc};
-	return zxprocessregister(command, args, &command->outcome, ZxnApplication);
+	return zxprocessregister(command, args, &command->outcome, ZxnApplication, nil);
 }
 
 enum { ZxCursorHeader = 16, ZxCursorBytes = ZxCursorHeader + 2*ZxCursorSide*ZxCursorSide/8 };
@@ -2246,7 +2444,7 @@ zxnativemanager(void *context, const char *module, const char *function,
 			for(process = command->children; process != nil; process = process->next)
 				if(zxwindowdesktop(process->command.window))
 					return zxs32(result, 0);
-		return zxs32(result, zxprocessregister(command, args, &command->outcome, kind));
+		return zxs32(result, zxprocessregister(command, args, &command->outcome, kind, nil));
 	}
 	if(strcmp(function, "WaitActivity") == 0){
 		if(n != 0)
@@ -2818,7 +3016,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		"PresentOpaqueRows", "PresentOpaqueStrip", "PresentRGBStrip", "PointerMillis"};
 	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error",
 		"StatPacked", "FstatPacked", "WstatPacked", "FdPath", "CreateNew", "Remove", "Cwd", "Home",
-		"Sync", "RenameSameDir"};
+		"Sync", "RenameSameDir", "PollRead"};
 	static const char *desktop[] = {"BindDesktop", "Capture", "LauncherAt", "WindowAt", "Launch", "WindowAction",
 		"DesktopAction", "UnixSeconds", "TimezoneOffsetSeconds", "SetChromeRegions"};
 	BundleCapabilityAbi abi;
@@ -2874,7 +3072,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		if(!usesdis() && zxmodule(abi.module, "taijios_process")){
 			if(strcmp(abi.function, "Run") == 0 || strcmp(abi.function, "Start") == 0 ||
 			   strcmp(abi.function, "Poll") == 0 || strcmp(abi.function, "Wait") == 0 ||
-			   strcmp(abi.function, "Kill") == 0)
+			   strcmp(abi.function, "Kill") == 0 || strcmp(abi.function, "StartWith") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
 			continue;
 		}
@@ -2918,6 +3116,13 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 #endif
+		if(zxmodule(abi.module, "taijios_namespace")){
+			if(strcmp(abi.function, "Pipe") == 0 || strcmp(abi.function, "Mount") == 0 ||
+			   strcmp(abi.function, "Bind") == 0 || strcmp(abi.function, "Unmount") == 0 ||
+			   strcmp(abi.function, "Fork") == 0 || strcmp(abi.function, "Error") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxnamespace, command};
+			continue;
+		}
 		if(zxmodule(abi.module, "taijios_io")){
 			for(j = 0; j < nelem(io); j++)
 				if(strcmp(abi.function, io[j]) == 0){
@@ -3255,7 +3460,7 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 	free(command->fdpath);
 	free(command->tasks);
 #ifdef __linux__
-	zxstdinclose(command);
+	zxstdinclose(command, -1);
 	zxprocessforget(command);
 #endif
 	return result;

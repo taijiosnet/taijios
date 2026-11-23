@@ -491,6 +491,24 @@ def check_command_names(emulator, root, env, boot, operands):
     print('A command name started its ZX bundle without Dis, and a Dis module of the same name kept priority')
 
 
+def check_namespace(root, env, boot):
+    """One ZX process serves a 9P tree over a pipe; its parent mounts and reads it."""
+    source = Path(__file__).with_name('zx_namespace_probe.zi')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
+        '--bind-host', 'taijios_args', '--bind-host', 'taijios_io', '--bind-host', 'taijios_namespace',
+        '--bind-host', 'taijios_process', '--entry', 'zx_namespace_probe:main',
+        '-o', root / 'namespace.zx', source,
+    ], env=env, check=True, timeout=60)
+    for name in ('served', 'alias', 'shared', 'private'):
+        (root / 'n' / name).mkdir(parents=True)
+    result = boot('/namespace.zx')
+    assert result.returncode == 0 and 'ZX_NAMESPACE_OK' in result.stdout and not result.stderr, result
+    assert 'Initial Dis:' not in result.stdout, result
+    print('Without Dis, a ZX child served a 9P tree on a pipe given as its standard streams; its parent mounted, '
+          'read, bound and unmounted the tree, forked a namespace, and polled a pipe')
+
+
 def catalog_programs(catalog):
     """Map each graphical entry the menu shows to the guest program it starts."""
     programs = {}
@@ -713,6 +731,7 @@ def main():
         tasks = boot('/probe.zx', 'tasks')
         assert tasks.returncode == 0 and 'ZX_TASKS_OK' in tasks.stdout and not tasks.stderr, tasks
         print('Without Dis, the task list showed running ZX processes and terminated one through the kill path')
+        check_namespace(root, env, boot)
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)

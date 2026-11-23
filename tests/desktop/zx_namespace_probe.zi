@@ -1,0 +1,312 @@
+// In a guest without Dis, one process serves a small 9P tree over a pipe on
+// its standard streams, and its parent mounts the tree and reads it.
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Namespace :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+
+Self :: "/namespace.zx";
+Greeting :: "hello from ZX\n";
+Root :: 0;
+File :: 1;
+
+Fail :: (message: string) -> s32 {
+    unused Args.SetFailure(message);
+    return 1;
+}
+
+ReadFull :: (handle: s32, buffer: []u8) -> bool {
+    done: s64 = 0;
+    while done < buffer.count {
+        n := IO.Read(handle, buffer[done:]);
+        if n <= 0 { return false }
+        done += n;
+    }
+    return true;
+}
+
+WriteAll :: (handle: s32, bytes: []u8) -> bool {
+    done: s64 = 0;
+    while done < bytes.count {
+        n := IO.Write(handle, TextView(bytes[done:]));
+        if n <= 0 { return false }
+        done += n;
+    }
+    return true;
+}
+
+Same :: (bytes: []u8, text: string) -> bool {
+    if bytes.count != text.count { return false }
+    for i: 0 .. text.count - 1 { if bytes[i] != text[i] { return false } }
+    return true;
+}
+
+// The 9P server. Every reply is built in `reply` after its four size bytes.
+
+reply: [8192]u8;
+used: s64;
+
+Put :: (value: u64, width: s64) {
+    for i: 0 .. width - 1 {
+        reply[used] = cast(u8)((value >> cast(u64)(8 * i)) & 255);
+        used += 1;
+    }
+}
+
+PutAt :: (at: s64, value: u64, width: s64) {
+    end := used;
+    used = at;
+    Put(value, width);
+    used = end;
+}
+
+PutText :: (text: string) {
+    Put(cast(u64)text.count, 2);
+    for c: text { reply[used] = c; used += 1 }
+}
+
+PutQid :: (node: s32) {
+    Put(ifx node == Root then 128 else 0, 1);
+    Put(0, 4);
+    Put(cast(u64)node, 8);
+}
+
+// A stat record: its own size, then type, device, qid, mode, times, length and names.
+PutStat :: (node: s32) {
+    start := used;
+    used += 2;
+    Put(0, 2);
+    Put(0, 4);
+    PutQid(node);
+    Put(ifx node == Root then 0x800001ed else 0x1a4, 4);
+    Put(0, 4);
+    Put(0, 4);
+    Put(ifx node == Root then 0 else cast(u64)Greeting.count, 8);
+    PutText(ifx node == Root then "/" else "hello");
+    PutText("zx");
+    PutText("zx");
+    PutText("zx");
+    PutAt(start, cast(u64)(used - start - 2), 2);
+}
+
+Get :: (bytes: []u8, at: s64, width: s64) -> u64 {
+    value: u64 = 0;
+    for i: 0 .. width - 1 { value |= cast(u64)bytes[at + i] << cast(u64)(8 * i) }
+    return value;
+}
+
+Begin :: (kind: u64, tag: u64) {
+    used = 4;
+    Put(kind, 1);
+    Put(tag, 2);
+}
+
+Refuse :: (tag: u64, message: string) {
+    Begin(107, tag);
+    PutText(message);
+}
+
+Fids :: struct {
+    number: [16]s64;
+    node: [16]s32;
+}
+
+Lookup :: (fids: *Fids, number: s64) -> s32 {
+    for i: 0 .. 15 { if fids.number[i] == number { return fids.node[i] } }
+    return -1;
+}
+
+Assign :: (fids: *Fids, number: s64, node: s32) -> bool {
+    free: s64 = -1;
+    for i: 0 .. 15 {
+        if fids.number[i] == number { fids.node[i] = node; return true }
+        if fids.number[i] < 0 && free < 0 { free = i }
+    }
+    if free < 0 { return false }
+    fids.number[free] = number;
+    fids.node[free] = node;
+    return true;
+}
+
+Serve :: () -> s32 {
+    request: [8192]u8;
+    fids: Fids;
+    for i: 0 .. 15 { fids.number[i] = -1 }
+    while true {
+        if !ReadFull(0, request[:4]) { return 0 } // The client closed the connection.
+        size := cast(s64)Get(request[:], 0, 4);
+        if size < 7 || size > request.count || !ReadFull(0, request[4:size]) { return 3 }
+        kind := Get(request[:], 4, 1);
+        tag := Get(request[:], 5, 2);
+        fid := ifx size >= 11 then cast(s64)Get(request[:], 7, 4) else -1;
+        node := Lookup(*fids, fid);
+        if kind == 100 {
+            limit := Get(request[:], 7, 4);
+            Begin(101, tag);
+            Put(ifx limit > 8192 then 8192 else limit, 4);
+            PutText("9P2000");
+        } else if kind == 104 {
+            if !Assign(*fids, fid, Root) { return 4 }
+            Begin(105, tag);
+            PutQid(Root);
+        } else if node < 0 {
+            Refuse(tag, "unknown fid");
+        } else if kind == 110 {
+            target := cast(s64)Get(request[:], 11, 4);
+            names := Get(request[:], 15, 2);
+            found := node;
+            if names == 1 {
+                length := cast(s64)Get(request[:], 17, 2);
+                name := request[19:19 + length];
+                if Same(name, "..") { found = Root }
+                else if node == Root && Same(name, "hello") { found = File }
+                else { found = -1 }
+            }
+            if names > 1 || found < 0 { Refuse(tag, "file does not exist") }
+            else if !Assign(*fids, target, found) { return 4 }
+            else {
+                Begin(111, tag);
+                Put(names, 2);
+                if names == 1 { PutQid(found) }
+            }
+        } else if kind == 112 {
+            if node == File && (Get(request[:], 11, 1) & 3) != 0 { Refuse(tag, "permission denied") }
+            else {
+                Begin(113, tag);
+                PutQid(node);
+                Put(0, 4);
+            }
+        } else if kind == 116 {
+            offset := cast(s64)Get(request[:], 11, 8);
+            count := cast(s64)Get(request[:], 19, 4);
+            Begin(117, tag);
+            body := used;
+            used += 4;
+            if node == Root {
+                if offset == 0 { PutStat(File) }
+            } else {
+                i := offset;
+                while i < Greeting.count && i - offset < count {
+                    reply[used] = Greeting[i];
+                    used += 1;
+                    i += 1;
+                }
+            }
+            PutAt(body, cast(u64)(used - body - 4), 4);
+        } else if kind == 120 {
+            unused Assign(*fids, fid, -1);
+            for i: 0 .. 15 { if fids.number[i] == fid { fids.number[i] = -1 } }
+            Begin(121, tag);
+        } else if kind == 124 {
+            Begin(125, tag);
+            body := used;
+            used += 2;
+            PutStat(node);
+            PutAt(body, cast(u64)(used - body - 2), 2);
+        } else {
+            Refuse(tag, "not supported");
+        }
+        size = used;
+        PutAt(0, cast(u64)size, 4);
+        if !WriteAll(1, reply[:size]) { return 5 }
+    }
+    return 0;
+}
+
+// Answer each line read from the standard input in capitals on the standard
+// output, until the line "quit".
+Echo :: () -> s32 {
+    line: [64]u8;
+    count: s64 = 0;
+    while true {
+        if !ReadFull(0, line[count:count + 1]) { return 0 }
+        if line[count] >= #char "a" && line[count] <= #char "z" { line[count] -= 32 }
+        count += 1;
+        if line[count - 1] == 10 || count == line.count {
+            if Same(line[:count], "QUIT\n") { return 0 }
+            if !WriteAll(1, line[:count]) { return 6 }
+            count = 0;
+        }
+    }
+    return 0;
+}
+
+Greets :: (path: string) -> bool {
+    handle := IO.Open(path, 0);
+    if handle < 0 { return false }
+    bytes: [64]u8;
+    count := IO.Read(handle, bytes[:]);
+    ok := count == Greeting.count && Same(bytes[:count], Greeting) && IO.Read(handle, bytes[:]) == 0;
+    return IO.Close(handle) == 0 && ok;
+}
+
+Finished :: (id: s32) -> bool {
+    outcome := Process.Wait(id);
+    return outcome.status >= 0 && outcome.value == 0;
+}
+
+Child :: (mode: string, input: s32, output: s32) -> s32 {
+    operands: [1]string = .{mode};
+    launch := Process.StartWith(Self, operands[:], input, output, -1);
+    return launch.id;
+}
+
+main :: () -> s32 {
+    mode := ifx Args.OperandCount() > 0 then Args.Operand(0) else "";
+    if mode == "serve" { return Serve() }
+    if mode == "echo" { return Echo() }
+    if mode == "share" { return ifx Namespace.Bind("/n/served", "/n/shared", Namespace.Replace) == 0 then 0 else 7 }
+    if mode == "private" {
+        if !Namespace.Fork() { return 8 }
+        if Namespace.Bind("/n/served", "/n/private", Namespace.Replace) != 0 { return 9 }
+        return ifx Greets("/n/private/hello") then 0 else 10;
+    }
+
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 || ends[0] < 3 || ends[1] < 3 || ends[0] == ends[1] { return Fail("create a pipe") }
+    none: [0]string;
+    if Process.StartWith(Self, none[:], 99, -1, -1).id != 0 { return Fail("start with an unknown handle") }
+    server := Child("serve", ends[0], ends[0]);
+    if server <= 0 || IO.Close(ends[0]) != 0 { return Fail("start the file server on the pipe") }
+    if Namespace.Mount(ends[1], -1, "/n/missing", Namespace.Replace, "") != -1 || Namespace.Error() == "" {
+        return Fail("mount on a missing name");
+    }
+    if Namespace.Mount(ends[1], -1, "/n/served", Namespace.Replace, "") != 0 { return Fail("mount the file server") }
+    if IO.Close(ends[1]) != 0 || !Greets("/n/served/hello") { return Fail("read a file through the mount") }
+    metadata: [12]u8;
+    if IO.Stat("/n/served/hello", metadata[:]) != 0 || IO.Open("/n/served/absent", 0) != -1 {
+        return Fail("stat and walk through the mount");
+    }
+    listing := IO.Open("/n/served", 0);
+    entries: [256]u8;
+    if listing < 0 || IO.Read(listing, entries[:]) <= 2 || IO.Close(listing) != 0 { return Fail("list the mounted directory") }
+
+    if Namespace.Bind("/n/served", "/n/alias", Namespace.Replace) != 0 || !Greets("/n/alias/hello") {
+        return Fail("bind the mounted tree");
+    }
+    // A child shares this namespace until it forks its own copy.
+    if !Finished(Child("share", -1, -1)) || !Greets("/n/shared/hello") { return Fail("child bind in the shared namespace") }
+    if !Finished(Child("private", -1, -1)) || IO.Open("/n/private/hello", 0) != -1 {
+        return Fail("child bind in a forked namespace");
+    }
+
+    if Namespace.Pipe(ends[:]) != 0 { return Fail("create a second pipe") }
+    echo := Child("echo", ends[0], ends[0]);
+    answer: [8]u8;
+    if echo <= 0 || IO.Close(ends[0]) != 0 || IO.PollRead(ends[1], answer[:]) != -2 { return Fail("poll an idle pipe") }
+    // A waiting read takes the first byte; the rest of the answer is then ready to poll.
+    if IO.Write(ends[1], "ping\n") != 5 || IO.Read(ends[1], answer[:1]) != 1 || IO.PollRead(ends[1], answer[1:]) != 4 ||
+       !Same(answer[:5], "PING\n") { return Fail("echo through a child's chosen streams") }
+    if IO.Write(ends[1], "quit\n") != 5 || IO.Read(ends[1], answer[:]) != 0 || IO.PollRead(ends[1], answer[:]) != 0 {
+        return Fail("end of a polled pipe");
+    }
+    if IO.Close(ends[1]) != 0 || !Finished(echo) { return Fail("echo child did not finish") }
+
+    if Namespace.Unmount("", "/n/alias") != 0 || Namespace.Unmount("", "/n/shared") != 0 ||
+       Namespace.Unmount("", "/n/served") != 0 || IO.Open("/n/served/hello", 0) != -1 {
+        return Fail("unmount the tree");
+    }
+    if !Finished(server) { return Fail("file server did not end with its last mount") }
+    print("ZX_NAMESPACE_OK\n");
+    return 0;
+}

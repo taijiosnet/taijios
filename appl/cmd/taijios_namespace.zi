@@ -1,0 +1,36 @@
+// Guest namespace calls for ZX file servers and the programs that mount them.
+// Handles are taijios_io handles. A call that returns -1 leaves its reason in Error.
+host_api :: #system_library "host_api";
+
+#scope_export
+// Mount and bind flags, as in Sys. Add AllowCreate to Replace, Before or After.
+Replace :: 0;
+Before :: 1;
+After :: 2;
+AllowCreate :: 4;
+Cache :: 16;
+
+// Create a pipe and store its two handles. What is written to either end is
+// read from the other. Returns 0, or -1 with the slice unchanged.
+Pipe :: (ends: []s32) -> s32 #foreign host_api;
+
+// Attach the 9P server that answers on a handle at the name `old`. The handle
+// must be open for reading and writing. `afd` is an authentication handle or
+// -1. The call waits for the server's version and attach replies, so the
+// server has to run in another process. Returns 0 or -1.
+Mount :: (fd: s32, afd: s32, old: string, flags: s32, aname: string) -> s32 #foreign host_api;
+
+// Make the file or directory `new` appear at `old`. Returns 0 or -1.
+Bind :: (new: string, old: string, flags: s32) -> s32 #foreign host_api;
+
+// Undo a mount or bind at `old`. An empty `source` removes everything
+// attached there; otherwise only that file or directory. Returns 0 or -1.
+Unmount :: (source: string, old: string) -> s32 #foreign host_api;
+
+// Give the calling process a private copy of its namespace, as pctl FORKNS
+// does. Its later mounts and binds stay out of its parent's namespace, and
+// the children it starts afterwards share the copy. A child that should not
+// change its parent's namespace calls this first.
+Fork :: () -> bool #foreign host_api;
+
+Error :: () -> string #foreign host_api;

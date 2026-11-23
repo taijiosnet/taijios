@@ -11,6 +11,10 @@ Remove :: (path: string) -> s32 #foreign host_api;
 Cwd :: () -> string #foreign host_api;
 Home :: () -> string #foreign host_api;
 Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
+// Read without waiting: the bytes read, 0 at the end of the file, -2 when
+// nothing has arrived yet, or -1. It works on pipes, network connections and
+// the standard streams. Read on the same handle afterwards continues in order.
+PollRead :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 Write :: (handle: s32, data: string) -> s32 #foreign host_api;
 Seek :: (handle: s32, offset: s64, origin: s32) -> s64 #foreign host_api;
 Stat :: (path: string, metadata: []u8) -> s32 #foreign host_api;

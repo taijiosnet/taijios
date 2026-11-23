@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let ZX programs create pipes, mount 9P servers, bind and unmount names, fork their namespace, start children on chosen streams, and poll any handle without waiting.
+
 - Ship Clock and Stopwatch only as ZX and remove their Dis versions.
 
 - Open the Rill desktop without loading Dis when the emulator starts without a command and the ZX window manager is installed, start command names from their ZX bundles, and hide catalog entries that need Dis there.
