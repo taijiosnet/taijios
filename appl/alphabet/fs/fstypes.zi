@@ -5,6 +5,8 @@ And :: #import "fs/and";
 Bundle :: #import "fs/bundle";
 Chstat :: #import "fs/chstat";
 Merge :: #import "fs/merge";
+Mergewrite :: #import "fs/mergewrite";
+Proto :: #import "fs/proto";
 Unbundle :: #import "fs/unbundle";
 Write :: #import "fs/write";
 Compose :: #import "fs/compose";
@@ -34,6 +36,8 @@ Register :: () {
     Bundle.Register(reg);
     Chstat.Register(reg);
     Merge.Register(reg);
+    Mergewrite.Register(reg);
+    Proto.Register(reg);
     Unbundle.Register(reg);
     Write.Register(reg);
     Compose.Register(reg);

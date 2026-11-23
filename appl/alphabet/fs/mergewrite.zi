@@ -1,0 +1,210 @@
+// /fs/mergewrite [-vn] fs string selector -> status: merge a tree into the
+// file system at a path: of an entry the tree has and one already there,
+// the selector says which stays; an existing entry not kept is removed.
+// -v reports each change, -n only reports.
+#import "std/vec";
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Stat :: #import "taijios_stat";
+Bundle :: #import "fs/bundle";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "mergewrite", "rxsm-v-n", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("mergewrite");
+        p.run = RunMerge;
+        prod = Va.AddProducer(p);
+    }
+    flags: s64 = 0;
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "n" { flags |= NOWRITE }
+        if Al.OptLetter(call, i) == #char "v" { flags |= VERBOSE }
+    }
+    v := Va.NewValue(#char "r", prod);
+    kids := s32.[call.args[0], call.args[2]];
+    Va.SetKids(v, kids[:]);
+    Va.SetText(v, Va.ValueText(call.args[1]));
+    Va.SetErrc(v, Va.ReportStart(call.report, "mergewrite"));
+    Va.SetN0(v, flags);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+VERBOSE :: 1;
+NOWRITE :: 2;
+ASSUME :: 4;
+
+Report :: (v: s32, message: string) { Va.Report(Va.ErrcOf(v), message) }
+
+ModeText :: (prefix: string, path: string, mode: u32) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "% % ", prefix, Ty.Q(path));
+    Bundle.Octal(*out, cast(u64)mode);
+    return BuilderFinish(out);
+}
+
+RunMerge :: (v: s32) -> string {
+    src := Va.Kid(v, 0);
+    item := FsNext(src, Start);
+    if item.kind != Entry { return "" }
+    d := item.dir;
+    root := Va.ValueText(v);
+    if root.count > 0 { d.name = root }
+    unused WriteDir(v, src, d.name, d.name, d, Va.N0(v));
+    return "";
+}
+
+// fswritedir: path is the name for messages, place where the entry is in
+// the file system; answers d's item and gives the item after it.
+WriteDir :: (v: s32, src: s32, path: string, place: string, d: FsDir, flags_in: s64) -> Item {
+    flags := flags_in;
+    cmp := Va.Kid(v, 1);
+    if !IsDir(d) {
+        if (flags & VERBOSE) != 0 { Report(v, ModeText("create", path, d.mode)) }
+        if (flags & NOWRITE) != 0 { return FsNext(src, Next) }
+        h := Io.CreateFile(place, 1, cast(s32)d.mode);
+        if h < 0 {
+            next := FsNext(src, Next);
+            out: Vec(u8);
+            BuilderPrint(*out, "cannot create %, mode ", Ty.Q(path));
+            Bundle.Octal(*out, cast(u64)(d.mode | 0xC0));
+            BuilderPrint(*out, ": %", Io.LastError());
+            Report(v, BuilderFinish(out));
+            return next;
+        }
+        item := FsNext(src, Down);
+        while item.kind == Data {
+            nw := Io.WriteBytes(h, item.data);
+            if nw < item.data.count {
+                Report(v, ifx nw < 0 then Va.WithError(Al.Join("error writing ", Ty.Q(path))) else "short write");
+                unused Io.CloseFile(h);
+                return FsNext(src, Skip);
+            }
+            item = FsNext(src, Next);
+        }
+        unused Io.CloseFile(h);
+        return FsNext(src, Next);
+    }
+    made := false;
+    h: s32 = -1;
+    if (flags & VERBOSE) != 0 { Report(v, ModeText("create", path, d.mode)) }
+    if (flags & NOWRITE) != 0 {
+        if (flags & ASSUME) != 0 {
+            made = true;
+        } else {
+            h = Io.OpenFile(place, 0);
+            if h < 0 {
+                made = true;
+                flags |= ASSUME;
+            }
+        }
+    } else {
+        h = Io.CreateFile(place, 0, cast(s32)(d.mode | 0xC0));
+        made = h >= 0;
+        if h < 0 {
+            h = Io.OpenFile(place, 0);
+            if h < 0 {
+                next := FsNext(src, Next);
+                out: Vec(u8);
+                BuilderPrint(*out, "cannot create %, mode ", Ty.Q(path));
+                Bundle.Octal(*out, cast(u64)(d.mode | 0xC0));
+                BuilderPrint(*out, ": %", Io.LastError());
+                Report(v, BuilderFinish(out));
+                return next;
+            }
+        }
+    }
+    item := FsNext(src, Down);
+    entries: Vec(FsDir);
+    if !made { unused ReadDir(place, *entries) }
+    i: s64 = 0;
+    eod := false;
+    has0 := false;
+    has1 := false;
+    d0: FsDir;
+    d1: FsDir;
+    dir := Al.Join(path, "/");
+    inner := Al.Join(place, "/");
+    while true {
+        if !eod && !has0 {
+            if item.kind == Entry {
+                d0 = item.dir;
+                has0 = true;
+            } else {
+                item = FsNext(src, Next);
+                eod = true;
+            }
+        }
+        if !has1 && i < entries.count {
+            d1 = entries[i];
+            has1 = true;
+            i += 1;
+        }
+        if !has0 && !has1 { break }
+        w0 := has0;
+        w1 := has1;
+        if has0 && has1 && d0.name != d1.name {
+            if NameLess(d0.name, d1.name) { w1 = false } else { w0 = false }
+        }
+        mask: s32 = (ifx w0 then 1 else 0) | (ifx w1 then 2 else 0);
+        r := Compare(cmp, *d0, *d1, w0, w1) & mask;
+        if w1 {
+            if (r & 2) == 0 {
+                if (flags & VERBOSE) != 0 { Report(v, Al.Join3("removing ", dir, d1.name)) }
+                if (flags & NOWRITE) == 0 {
+                    if IsDir(d1) {
+                        RemoveDir(Al.Join(inner, d1.name), d1.name);
+                    } else {
+                        Remove(Al.Join(inner, d1.name), d1.name);
+                    }
+                }
+            }
+            has1 = false;
+        }
+        if w0 {
+            if (r & 1) == 0 {
+                item = FsNext(src, Next);
+            } else {
+                item = WriteDir(v, src, Al.Join(dir, d0.name), Al.Join(inner, d0.name), d0, flags);
+            }
+            has0 = false;
+        }
+    }
+    if (flags & NOWRITE) == 0 && (d.mode & 0xC0) != 0xC0 {
+        info: Stat.Info;
+        info.mode = d.mode;
+        if !Stat.Change(h, info, true, false, false, false) { Report(v, Va.WithError(Al.Join("cannot wstat ", Ty.Q(path)))) }
+    }
+    if h >= 0 { unused Io.CloseFile(h) }
+    return item;
+}
+
+// The Dis module named what it removed as seen from the directory it
+// was in.
+RemoveDir :: (place: string, name: string) {
+    entries: Vec(FsDir);
+    unused ReadDir(place, *entries);
+    for entries {
+        if IsDir(it) {
+            RemoveDir(Al.Join3(place, "/", it.name), Al.Join3(name, "/", it.name));
+        } else {
+            Remove(Al.Join3(place, "/", it.name), Al.Join3(name, "/", it.name));
+        }
+    }
+    Remove(place, name);
+}
+
+Remove :: (place: string, name: string) {
+    if Io.Remove(place) < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "mergewrite: cannot remove %: %\n", Ty.Q(name), Io.LastError());
+        unused Io.WriteBytes(2, BuilderFinish(out));
+    }
+}

@@ -1,0 +1,493 @@
+// /fs/proto [-r string] fd -> fs: the tree a proto file describes, read
+// from the fd, of the file system below a root (default /). Each line names
+// an entry, indented below its directory, with an optional mode, owner,
+// group and a file to take its place; + takes everything below, * every
+// file. Entries are given owner and group sys unless they come from a
+// mount.
+#import "std/vec";
+#import "std/option";
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "proto", "xf-rs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = FsProducer("proto", Next1) }
+    root := "";
+    if Al.OptCount(call) > 0 { root = Va.ValueText(Al.OptArg(call, 0, 0)) }
+    if root.count == 0 { root = "/" }
+    v := Va.NewValue(#char "x", prod);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "proto"));
+    p: ProtoState;
+    p.root = root;
+    VecPush(protos, p);
+    Va.SetN0(v, protos.count - 1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Star :: 1;
+Plus :: 2;
+
+// A line of the proto file and what is indented below it.
+ProtoFile :: struct {
+    name: string;
+    mode: u32;     // all ones: not given
+    owner: string;
+    group: string;
+    old: string;
+    flags: s32;
+    sub_at: s64;   // its entries are files[subs[sub_at..sub_at+sub_n-1]]
+    sub_n: s64;
+}
+
+// What the item given last was.
+NONE :: 0;
+DIRENTRY :: 1;
+FILEENTRY :: 2;
+DATA :: 3;
+FILEEND :: 4;
+DIREND :: 5;
+OVER :: 6;
+
+ProtoFrame :: struct {
+    path: string;
+    flags: s32;
+    sub_at: s64;
+    sub_n: s64;
+    entries: Vec(FsDir);
+    i: s64;
+    j: s64;
+    preventry: string;
+    // the entry being given, when it is a directory to go into
+    child_path: string;
+    child_flags: s32;
+    child_sub_at: s64;
+    child_sub_n: s64;
+}
+
+ProtoState :: struct {
+    root: string;
+    files: Vec(ProtoFile);
+    subs: Vec(s64);
+    frames: Vec(ProtoFrame);
+    last: s32;
+    fh: s32;
+    fpath: string;
+    flength: s64;
+    fread: s64;
+    // reading the proto file
+    text: string;
+    at: s64;
+    lastline: string;
+    indent: s64;
+    // the root's line
+    root_flags: s32;
+    root_sub_at: s64;
+    root_sub_n: s64;
+}
+
+protos: Vec(ProtoState);
+
+Report :: (v: s32, message: string) { Va.Report(Va.ErrcOf(v), message) }
+
+// readline: the next line indented more than indent, or none.
+ReadLine :: (p: s64, indent: s64) -> (file: ProtoFile, ok: bool) {
+    none: ProtoFile;
+    while true {
+        s: string;
+        if protos[p].lastline.count > 0 {
+            s = protos[p].lastline;
+            protos[p].lastline = "";
+        } else if protos[p].indent == -1 {
+            return none, false;
+        } else {
+            text := protos[p].text;
+            at := protos[p].at;
+            if at >= text.count {
+                protos[p].indent = -1;
+                return none, false;
+            }
+            e := at;
+            while e < text.count && text[e] != #char "\n" { e += 1 }
+            if e < text.count { e += 1 }
+            s = text[at:e];
+            protos[p].at = e;
+        }
+        spc: s64 = 0;
+        i: s64 = 0;
+        while i < s.count {
+            if s[i] == #char " " {
+                spc += 1;
+            } else if s[i] == #char "\t" {
+                spc += 8;
+            } else {
+                break;
+            }
+            i += 1;
+        }
+        if i == s.count || s[i] == #char "#" || s[i] == #char "\n" { continue }
+        if spc <= indent {
+            protos[p].lastline = s;
+            return none, false;
+        }
+        protos[p].indent = spc;
+        toks := Tokens(s);
+        f: ProtoFile;
+        f.mode = 0xFFFFFFFF;
+        f.name = Keep(GetName(toks[0], false));
+        if toks.count > 1 { f.mode = GetMode(toks[1]) }
+        if toks.count > 2 { f.owner = Keep(GetName(toks[2], true)) }
+        if toks.count > 3 { f.group = Keep(GetName(toks[3], true)) }
+        if toks.count > 4 { f.old = Keep(toks[4]) }
+        return f, true;
+    }
+    return none, false;
+}
+
+Tokens :: (s: string) -> Vec(string) {
+    out: Vec(string);
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && (s[i] == #char " " || s[i] == #char "\t" || s[i] == #char "\n") { i += 1 }
+        start := i;
+        while i < s.count && s[i] != #char " " && s[i] != #char "\t" && s[i] != #char "\n" { i += 1 }
+        if i > start { VecPush(out, s[start:i]) }
+    }
+    return out;
+}
+
+// getname: a $variable is no name (environment variables are not done).
+GetName :: (s: string, allowminus: bool) -> string {
+    if s.count == 0 { return "" }
+    if allowminus && s == "-" { return "" }
+    if s[0] == #char "$" { return "" }
+    return s;
+}
+
+// getmode: octal, as the Dis module read it; a d, a or l in front makes it
+// unreadable, so no mode.
+GetMode :: (s_in: string) -> u32 {
+    s := GetName(s_in, true);
+    if s.count == 0 { return 0xFFFFFFFF }
+    m: u32 = 0;
+    i: s64 = 0;
+    if s[i] == #char "d" {
+        m |= DMDIR;
+        i += 1;
+    }
+    if i < s.count && s[i] == #char "a" {
+        m |= DMAPPEND;
+        i += 1;
+    }
+    if i < s.count && s[i] == #char "l" {
+        m |= DMEXCL;
+        i += 1;
+    }
+    x: u32 = 0;
+    for s {
+        if it < #char "0" || it > #char "7" { return 0xFFFFFFFF }
+        x = x * 8 + cast(u32)(it - #char "0");
+    }
+    return x | m;
+}
+
+// readproto: the lines indented below indent, sorted by name, into the
+// arena; (flags, first, count).
+ReadProto :: (p: s64, indent: s64) -> (flags: s32, at: s64, n: s64) {
+    flags: s32 = 0;
+    mine: Vec(s64);
+    while true {
+        f, ok := ReadLine(p, indent);
+        if !ok { break }
+        if f.name == "*" {
+            flags |= Star;
+        } else if f.name == "+" {
+            flags |= Plus;
+        } else {
+            VecPush(protos[p].files, f);
+            k := protos[p].files.count - 1;
+            sf, sat, sn := ReadProto(p, protos[p].indent);
+            protos[p].files[k].flags = sf;
+            protos[p].files[k].sub_at = sat;
+            protos[p].files[k].sub_n = sn;
+            VecPush(mine, k);
+        }
+    }
+    // stable sort by name, as the merge sort was
+    i: s64 = 1;
+    while i < mine.count {
+        x := mine[i];
+        j := i - 1;
+        while j >= 0 && NameLess(protos[p].files[x].name, protos[p].files[mine[j]].name) {
+            mine[j + 1] = mine[j];
+            j -= 1;
+        }
+        mine[j + 1] = x;
+        i += 1;
+    }
+    at := protos[p].subs.count;
+    for mine { VecPush(protos[p].subs, it) }
+    return flags, at, mine.count;
+}
+
+Sub :: (p: s64, at: s64, i: s64) -> s64 { return protos[p].subs[at + i] }
+
+// file2dir
+File2Dir :: (p: s64, f: s64, old: FsDir, has_old: bool) -> FsDir {
+    d := NullDir();
+    if has_old {
+        if old.dtype != #char "M" {
+            d.uid = "sys";
+            d.gid = "sys";
+            x := (old.mode >> 6) & 7;
+            d.mode = old.mode | x | (x << 3);
+        } else {
+            d.uid = old.uid;
+            d.gid = old.gid;
+            d.mode = old.mode;
+        }
+        d.length = old.length;
+        d.mtime = old.mtime;
+        d.atime = old.atime;
+        d.muid = old.muid;
+        d.name = old.name;
+    }
+    if f >= 0 {
+        file := protos[p].files[f];
+        d.name = file.name;
+        if file.owner.count > 0 { d.uid = file.owner }
+        if file.group.count > 0 { d.gid = file.group }
+        if file.mode != 0xFFFFFFFF { d.mode = file.mode }
+    }
+    return d;
+}
+
+NullDir :: () -> FsDir {
+    d: FsDir;
+    d.qpath = 0xFFFFFFFFFFFFFFFF;
+    d.qvers = 0xFFFFFFFF;
+    d.qtype = 0xFF;
+    d.mode = 0xFFFFFFFF;
+    d.atime = 0xFFFFFFFF;
+    d.mtime = 0xFFFFFFFF;
+    d.length = -1;
+    d.dtype = -1;
+    d.dev = -1;
+    return d;
+}
+
+PathConcat :: (p: string, name: string) -> string {
+    if p.count > 0 && p[p.count - 1] != #char "/" { return Al.Join3(p, "/", name) }
+    return Al.Join(p, name);
+}
+
+Over :: (p: s64) -> Item {
+    if protos[p].fh >= 0 { unused Io.CloseFile(protos[p].fh) }
+    protos[p].fh = -1;
+    protos[p].last = OVER;
+    return ItemOf(Done);
+}
+
+// protowalk1 going down into path: its entries are read, then the first
+// item of its contents.
+Enter :: (v: s32, p: s64, path: string, flags: s32, sub_at: s64, sub_n: s64) -> Item {
+    f: ProtoFrame;
+    f.path = path;
+    f.flags = flags;
+    f.sub_at = sub_at;
+    f.sub_n = sub_n;
+    unused ReadDir(path, *f.entries);
+    VecPush(protos[p].frames, f);
+    k := protos[p].frames.count - 1;
+    if protos[p].frames[k].entries.count == 0 { return EndDir(p) }
+    return Advance(v, p);
+}
+
+EndDir :: (p: s64) -> Item {
+    protos[p].last = DIREND;
+    return ItemOf(End);
+}
+
+// The loop of protowalk1 from where it was, up to its next item.
+Advance :: (v: s32, p: s64) -> Item {
+    k := protos[p].frames.count - 1;
+    path := protos[p].frames[k].path;
+    n := protos[p].frames[k].entries.count;
+    sub_at := protos[p].frames[k].sub_at;
+    sub_n := protos[p].frames[k].sub_n;
+    flags := protos[p].frames[k].flags;
+    while protos[p].frames[k].i < n {
+        i := protos[p].frames[k].i;
+        a := protos[p].frames[k].entries[i];
+        useentry: s64 = 1;
+        while protos[p].frames[k].j < sub_n {
+            s := protos[p].files[Sub(p, sub_at, protos[p].frames[k].j)];
+            if s.name == protos[p].frames[k].preventry {
+                Report(v, Al.Join("duplicate entry ", PathConcat(path, s.name)));
+                protos[p].frames[k].j += 1;
+                continue;
+            }
+            if !NameLess(s.name, a.name) { break }
+            if s.old.count > 0 {
+                useentry = 0;
+                break;
+            }
+            Report(v, Al.Join(PathConcat(path, s.name), " not found"));
+            protos[p].frames[k].j += 1;
+        }
+        j := protos[p].frames[k].j;
+        foundsub := false;
+        if j < sub_n {
+            sj := protos[p].files[Sub(p, sub_at, j)];
+            foundsub = sj.name == a.name || sj.old.count > 0;
+        }
+        protos[p].frames[k].i += useentry;
+        if foundsub || (flags & Plus) != 0 || ((flags & Star) != 0 && !IsDir(a)) {
+            f: s64 = -1;
+            if foundsub {
+                f = Sub(p, sub_at, j);
+                protos[p].frames[k].j += 1;
+                protos[p].frames[k].preventry = protos[p].files[f].name;
+            }
+            name: string;
+            d: FsDir;
+            if foundsub && protos[p].files[f].old.count > 0 {
+                name = protos[p].files[f].old;
+                x, ok := StatPath(name);
+                if !ok {
+                    Report(v, Va.WithError(Al.Join("cannot stat ", Ty.Q(name))));
+                    continue;
+                }
+                d = x;
+            } else {
+                name = PathConcat(path, a.name);
+                d = a;
+            }
+            d = File2Dir(p, f, d, true);
+            if !IsDir(d) {
+                h := Io.OpenFile(name, 0);
+                if h < 0 {
+                    Report(v, Va.WithError(Al.Join("cannot open ", Ty.Q(name))));
+                    continue;
+                }
+                protos[p].fh = h;
+                protos[p].fpath = name;
+                protos[p].flength = d.length;
+                protos[p].fread = 0;
+                protos[p].last = FILEENTRY;
+                return EntryOf(d);
+            }
+            protos[p].frames[k].child_path = name;
+            if (flags & Plus) != 0 {
+                protos[p].frames[k].child_flags = Plus;
+                protos[p].frames[k].child_sub_n = 0;
+            } else {
+                protos[p].frames[k].child_flags = protos[p].files[f].flags;
+                protos[p].frames[k].child_sub_at = protos[p].files[f].sub_at;
+                protos[p].frames[k].child_sub_n = protos[p].files[f].sub_n;
+            }
+            protos[p].last = DIRENTRY;
+            return EntryOf(d);
+        }
+    }
+    return EndDir(p);
+}
+
+CloseFile :: (p: s64) {
+    if protos[p].fh >= 0 { unused Io.CloseFile(protos[p].fh) }
+    protos[p].fh = -1;
+}
+
+Block :: (v: s32, p: s64) -> Item {
+    if protos[p].fread < protos[p].flength {
+        want := protos[p].flength - protos[p].fread;
+        if want > ATOMICIO { want = ATOMICIO }
+        buffer: Vec(u8);
+        unused VecResize(buffer, want);
+        n := Io.ReadBytes(protos[p].fh, buffer[:]);
+        if n <= 0 {
+            if n < 0 {
+                Report(v, Va.WithError(Al.Join("error reading ", Ty.Q(protos[p].fpath))));
+            } else {
+                out: Vec(u8);
+                BuilderPrint(*out, "% is shorter than expected (%/%)", Ty.Q(protos[p].fpath), protos[p].fread, protos[p].flength);
+                Report(v, BuilderFinish(out));
+            }
+        } else {
+            protos[p].fread += n;
+            protos[p].last = DATA;
+            item := ItemOf(Data);
+            item.data = TextDetach(TextCopy(TextView(buffer[:n])));
+            return item;
+        }
+    }
+    protos[p].last = FILEEND;
+    return ItemOf(End);
+}
+
+// A child entry answered r: Skip ends the directory, as walk does (the Dis
+// module returned without its end).
+AfterChild :: (v: s32, p: s64, r: s32) -> Item {
+    if r == Skip { return EndDir(p) }
+    return Advance(v, p);
+}
+
+Next1 :: (v: s32, reply: s32) -> Item {
+    p := Va.N0(v);
+    last := protos[p].last;
+    if last == OVER { return ItemOf(Done) }
+    if last == NONE {
+        protos[p].fh = -1;
+        protos[p].text = Va.ReadAll(Va.Kid(v, 0));
+        flags, at, n := ReadProto(p, -1);
+        protos[p].root_flags = flags;
+        protos[p].root_sub_at = at;
+        protos[p].root_sub_n = n;
+        root: ProtoFile;
+        root.name = protos[p].root;
+        root.mode = 0xFFFFFFFF;
+        VecPush(protos[p].files, root);
+        d, ok := StatPath(protos[p].root);
+        protos[p].last = DIRENTRY;
+        return EntryOf(File2Dir(p, protos[p].files.count - 1, d, ok));
+    }
+    if reply == Quit { return Over(p) }
+    if last == DIRENTRY {
+        k := protos[p].frames.count - 1;
+        if reply != Down {
+            if k < 0 { return Over(p) }
+            return AfterChild(v, p, reply);
+        }
+        if k < 0 { return Enter(v, p, protos[p].root, protos[p].root_flags, protos[p].root_sub_at, protos[p].root_sub_n) }
+        return Enter(v, p, protos[p].frames[k].child_path, protos[p].frames[k].child_flags,
+            protos[p].frames[k].child_sub_at, protos[p].frames[k].child_sub_n);
+    }
+    if last == FILEENTRY {
+        if reply == Down { return Block(v, p) }
+        CloseFile(p);
+        return AfterChild(v, p, reply);
+    }
+    if last == DATA {
+        if reply == Skip {
+            CloseFile(p);
+            return Advance(v, p);
+        }
+        return Block(v, p);
+    }
+    if last == FILEEND {
+        CloseFile(p);
+        return Advance(v, p);
+    }
+    // the end of a directory
+    unused VecPop(protos[p].frames);
+    if protos[p].frames.count == 0 { return Over(p) }
+    return Advance(v, p);
+}
