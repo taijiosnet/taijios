@@ -1,0 +1,28 @@
+// Ackermann function benchmark (replaces appl/math/ack.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+Ack :: (m: s64, n: s64) -> s64 {
+    if m == 0 { return n + 1 }
+    if n == 0 { return Ack(m - 1, 1) }
+    return Ack(m - 1, Ack(m, n - 1));
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    m: s64 = 0;
+    n: s64 = 0;
+    if argc > 0 { m = MathUtil.ParseInt(Args.Operand(0)) }
+    if m < 0 { m = 0 }
+    if argc > 1 { n = MathUtil.ParseInt(Args.Operand(1)) }
+    if n < 0 { n = 0 }
+    t0 := MathUtil.Millisec();
+    a := Ack(m, n);
+    t1 := MathUtil.Millisec();
+    out: Vec(u8);
+    BuilderPrint(*out, "A(%, %) = % (t = % ms)\n", m, n, a, t1 - t0);
+    MathUtil.WriteOut(TextView(out[:]));
+    return 0;
+}

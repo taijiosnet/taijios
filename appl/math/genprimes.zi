@@ -1,0 +1,49 @@
+// Prime generator up to lim (replaces appl/math/genprimes.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+LIM :: 1729
+MAX :: 1000000
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    quiet := false;
+    while true {
+        ch := Arg.Option(*scan);
+        if ch == 0 { break }
+        if ch == 113 { quiet = true }
+    }
+    lim: s64 = LIM;
+    if scan.next < Args.OperandCount() {
+        lim = MathUtil.ParseInt(Args.Operand(scan.next));
+    }
+    if lim < 2 { lim = 2 }
+    if lim > MAX { lim = MAX }
+
+    is_comp: Vec(u8);
+    VecResize(is_comp, lim + 1);
+    out: Vec(u8);
+    for i: 2..lim {
+        if is_comp[i] == 0 {
+            if !quiet {
+                BuilderPrint(*out, "%\n", i);
+                if out.count >= 16384 {
+                    MathUtil.WriteOut(TextView(out[:]));
+                    VecClear(out);
+                }
+            }
+            if i <= lim / i {
+                j := i * i;
+                while j <= lim {
+                    is_comp[j] = 1;
+                    j += i;
+                }
+            }
+        }
+    }
+    if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+    return 0;
+}

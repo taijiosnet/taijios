@@ -772,13 +772,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/math/ack.dis | appl/math/ack.b |  | - |  |
-| dis/math/crackerbarrel.dis | appl/math/crackerbarrel.b |  | - |  |
-| dis/math/factor.dis | appl/math/factor.b |  | - |  |
 | dis/math/ffts.dis | appl/math/ffts.b | module/ffts.m | - |  |
-| dis/math/fibonacci.dis | appl/math/fibonacci.b |  | - |  |
-| dis/math/fit.dis | appl/math/fit.b |  | - |  |
-| dis/math/genprimes.dis | appl/math/genprimes.b |  | - |  |
 | dis/math/geodesy.dis | appl/math/geodesy.b | module/math/geodesy.m | - |  |
 | dis/math/gr.dis | appl/math/gr.b | module/gr.m | - |  |
 | dis/math/graph0.dis | appl/math/graph0.b |  | - | zx-twin |
@@ -787,13 +781,9 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/math/linbench.dis | appl/math/linbench.b |  | - | zx-twin |
 | dis/math/mersenne.dis | appl/math/mersenne.b |  | - |  |
 | dis/math/parts.dis | appl/math/parts.b |  | - |  |
-| dis/math/perms.dis | appl/math/perms.b |  | - |  |
-| dis/math/pi.dis | appl/math/pi.b |  | - |  |
 | dis/math/polyfill.dis | appl/math/polyfill.b | module/math/polyfill.m | - |  |
 | dis/math/polyhedra.dis | appl/math/polyhedra.b | module/math/polyhedra.m | - |  |
 | dis/math/powers.dis | appl/math/powers.b |  | - |  |
-| dis/math/primes.dis | appl/math/primes.b |  | - |  |
-| dis/math/sieve.dis | appl/math/sieve.b |  | - |  |
 
 ### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 72 rows
 

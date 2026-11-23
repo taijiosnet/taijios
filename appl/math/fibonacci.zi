@@ -1,0 +1,23 @@
+// Fibonacci numbers up to 32-bit signed overflow (replaces appl/math/fibonacci.b).
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+main :: () -> s32 {
+    out: Vec(u8);
+    x: s64 = 1;
+    y: s64 = 1;
+    i: s64 = 0;
+    while true {
+        if x > 2147483647 { break }
+        BuilderPrint(*out, "F(%) = %\n", i, x);
+        if i >= 1 {
+            nx := x + y;
+            y = x;
+            x = nx;
+        }
+        i += 1;
+    }
+    MathUtil.WriteOut(TextView(out[:]));
+    return 0;
+}

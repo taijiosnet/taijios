@@ -1,0 +1,143 @@
+// Guest parity test for standalone dis/math CLI tools:
+// ack, fibonacci, genprimes, perms, crackerbarrel, factor, primes, sieve, pi, fit.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/math tests/math/math_cli_test.zi -- [EMU] [PREFIX] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/mathcli";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+StartsWith :: (s: string, prefix: string) -> bool {
+    if s.count < prefix.count { return false }
+    return s[0:prefix.count] == prefix
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "/dis/math/";
+    suffix := ifx argc > 3 then TextFromCString(argv[3]) else ".dis";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/mathcli/work") ||
+        !CreateDirectory("build/dis-legacy-math/mathcli/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Input files for fit, factor (stdin), pi (picmp)
+    unused WriteEntireFile("build/dis-legacy-math/mathcli/work/fit.dat",
+        "0 1\n1 3\n2 7\n3 13\n4 21\n");
+    unused WriteEntireFile("build/dis-legacy-math/mathcli/work/factor.in",
+        "60\n97\n0\n");
+    unused WriteEntireFile("build/dis-legacy-math/mathcli/work/pi_a.txt", "3.14159\n");
+    unused WriteEntireFile("build/dis-legacy-math/mathcli/work/pi_b.txt", "3.14159\n");
+    unused WriteEntireFile("build/dis-legacy-math/mathcli/work/pi_c.txt", "3.14259\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. ack
+    BuilderPrint(*script, "%ack% 3 4 > ../result/ack.out >[2] ../result/ack.err\n", prefix, suffix);
+    // 2. fibonacci
+    BuilderPrint(*script, "%fibonacci% > ../result/fib.out >[2] ../result/fib.err\n", prefix, suffix);
+    // 3. genprimes
+    BuilderPrint(*script, "%genprimes% 30 > ../result/genp.out >[2] ../result/genp.err\n", prefix, suffix);
+    BuilderPrint(*script, "%genprimes% -q 30 > ../result/genpq.out >[2] ../result/genpq.err\n", prefix, suffix);
+    // 4. perms
+    BuilderPrint(*script, "%perms% 3 > ../result/perms.out >[2] ../result/perms.err\n", prefix, suffix);
+    BuilderPrint(*script, "%perms% -0 2 > ../result/perms0.out >[2] ../result/perms0.err\n", prefix, suffix);
+    // 5. crackerbarrel
+    BuilderPrint(*script, "%crackerbarrel% 1 > ../result/cb.out >[2] ../result/cb.err\n", prefix, suffix);
+    // 6. factor (args + stdin)
+    BuilderPrint(*script, "%factor% 12 360 1000003 > ../result/fac_args.out >[2] ../result/fac_args.err\n", prefix, suffix);
+    BuilderPrint(*script, "%factor% < factor.in > ../result/fac_in.out >[2] ../result/fac_in.err\n", prefix, suffix);
+    // 7. primes
+    BuilderPrint(*script, "%primes% 10 50 > ../result/primes1.out >[2] ../result/primes1.err\n", prefix, suffix);
+    BuilderPrint(*script, "%primes% 220 260 > ../result/primes2.out >[2] ../result/primes2.err\n", prefix, suffix);
+    // 8. sieve (all 5 algorithms)
+    BuilderPrint(*script, "%sieve% -a 0 50 > ../result/sieve0.out >[2] ../result/sieve0.err\n", prefix, suffix);
+    BuilderPrint(*script, "%sieve% -a 1 50 > ../result/sieve1.out >[2] ../result/sieve1.err\n", prefix, suffix);
+    BuilderPrint(*script, "%sieve% -a 2 50 > ../result/sieve2.out >[2] ../result/sieve2.err\n", prefix, suffix);
+    BuilderPrint(*script, "%sieve% -a 3 50 > ../result/sieve3.out >[2] ../result/sieve3.err\n", prefix, suffix);
+    BuilderPrint(*script, "%sieve% -a 4 50 > ../result/sieve4.out >[2] ../result/sieve4.err\n", prefix, suffix);
+    // 9. pi (digits + picmp)
+    BuilderPrint(*script, "%pi% 30 > ../result/pi30.out >[2] ../result/pi30.err\n", prefix, suffix);
+    BuilderPrint(*script, "%pi% pi_a.txt pi_b.txt > ../result/picmp_eq.out >[2] ../result/picmp_eq.err\n", prefix, suffix);
+    BuilderPrint(*script, "%pi% pi_a.txt pi_c.txt > ../result/picmp_ne.out >[2] ../result/picmp_ne.err\n", prefix, suffix);
+    // 10. fit (degree 2 + verbose)
+    BuilderPrint(*script, "%fit% -d 2 fit.dat > ../result/fit2.out >[2] ../result/fit2.err\n", prefix, suffix);
+    BuilderPrint(*script, "%fit% -d 2 -v fit.dat > ../result/fit2v.out >[2] ../result/fit2v.err\n", prefix, suffix);
+    unused WriteEntireFile("build/dis-legacy-math/mathcli/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(StartsWith(Result("ack.out"), "A(3, 4) = 125 (t = "), "ack 3 4");
+    Expect(StartsWith(Result("fib.out"), "F(0) = 1\nF(1) = 1\nF(2) = 2\n") &&
+        Contains(Result("fib.out"), "F(45) = 1836311903\n"), "fibonacci");
+    Expect(Result("genp.out") == "2\n3\n5\n7\n11\n13\n17\n19\n23\n29\n", "genprimes 30");
+    Expect(Result("genpq.out") == "", "genprimes -q 30");
+    Expect(Result("perms.out") == " 1 2 3\n 1 3 2\n 2 1 3\n 2 3 1\n 3 1 2\n 3 2 1\n", "perms 3");
+    Expect(Result("perms0.out") == " 0 1\n 1 0\n", "perms -0 2");
+    Expect(Contains(Result("cb.out"), "Minimum pegs: 1\n"), "crackerbarrel");
+    Expect(Result("fac_args.out") == "12\n     2\n     2\n     3\n\n360\n     2\n     2\n     2\n     3\n     3\n     5\n\n1000003\n     1000003\n\n", "factor args");
+    Expect(Result("fac_in.out") == "60\n     2\n     2\n     3\n     5\n\n97\n     97\n\n", "factor stdin");
+    Expect(Result("primes1.out") == "11\n13\n17\n19\n23\n29\n31\n37\n41\n43\n47\n", "primes 10 50");
+    Expect(Result("primes2.out") == "223\n227\n229\n233\n239\n241\n251\n257\n", "primes 220 260");
+    sieve_exp := "2\n3\n5\n7\n11\n13\n17\n19\n23\n29\n31\n37\n41\n43\n47\n15 primes < 50\n";
+    Expect(Result("sieve0.out") == sieve_exp, "sieve -a 0 50");
+    Expect(Result("sieve1.out") == sieve_exp, "sieve -a 1 50");
+    Expect(Result("sieve2.out") == sieve_exp, "sieve -a 2 50");
+    Expect(Result("sieve3.out") == sieve_exp, "sieve -a 3 50");
+    Expect(Result("sieve4.out") == sieve_exp, "sieve -a 4 50");
+    Expect(StartsWith(Result("pi30.out"), "π ≅ 3.141592653589793238462643383279"), "pi 30");
+    Expect(Result("picmp_eq.out") == "", "pi cmp equal");
+    Expect(Result("picmp_ne.out") == "pi_a.txt pi_c.txt differ at byte 4(1 2)\n", "pi cmp diff");
+    Expect(Result("fit2.out") == "y = x^2+x+1.000000\n", "fit -d 2");
+    Expect(Contains(Result("fit2v.out"), "root mean squared error = 0.000000\ny = x^2+x+1.000000\n"), "fit -d 2 -v");
+
+    if failures != 0 {
+        print("math_cli_test: % failures\n", failures);
+        return 1;
+    }
+    print("math_cli_test: all checks passed\n");
+    return 0;
+}

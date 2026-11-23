@@ -1,0 +1,86 @@
+// Factor integers into primes (replaces appl/math/factor.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+WHLEN :: 48
+
+wheel: [48]float64 = .[
+    2.0, 10.0, 2.0, 4.0, 2.0, 4.0, 6.0, 2.0,
+    6.0, 4.0, 2.0, 4.0, 6.0, 6.0, 2.0, 6.0,
+    4.0, 2.0, 6.0, 4.0, 6.0, 8.0, 4.0, 2.0,
+    4.0, 2.0, 4.0, 8.0, 6.0, 4.0, 6.0, 2.0,
+    4.0, 6.0, 2.0, 6.0, 6.0, 4.0, 2.0, 4.0,
+    6.0, 2.0, 6.0, 4.0, 2.0, 4.0, 2.0, 10.0
+];
+
+FactorNum :: (out: *Vec(u8), n_in: float64) {
+    n := n_in;
+    BuilderPrint(out, "%\n", cast(s64)n);
+    if n == 0.0 { return }
+    s := MathUtil.Sqrt(n) + 1.0;
+    small: [4]float64 = .[2.0, 3.0, 5.0, 7.0];
+    for si: 0..3 {
+        p := small[si];
+        while true {
+            q := n / p;
+            iq := cast(s64)q;
+            if q - cast(float64)iq != 0.0 { break }
+            BuilderPrint(out, "     %\n", cast(s64)p);
+            n = cast(float64)iq;
+            s = MathUtil.Sqrt(n) + 1.0;
+        }
+    }
+    d: float64 = 1.0;
+    i: s64 = 1;
+    while true {
+        d += wheel[i];
+        while true {
+            q := n / d;
+            iq := cast(s64)q;
+            if q - cast(float64)iq != 0.0 { break }
+            BuilderPrint(out, "     %\n", cast(s64)d);
+            n = cast(float64)iq;
+            s = MathUtil.Sqrt(n) + 1.0;
+        }
+        i += 1;
+        if i >= WHLEN {
+            i = 0;
+            if d > s { break }
+        }
+    }
+    if n > 1.0 {
+        BuilderPrint(out, "     %\n", cast(s64)n);
+    }
+    unused BuilderAppend(out.*, "\n");
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    out: Vec(u8);
+    if argc > 0 {
+        for i: 0..argc - 1 {
+            n := MathUtil.ParseF64(Args.Operand(cast(s32)i));
+            FactorNum(*out, n);
+        }
+        MathUtil.WriteOut(TextView(out[:]));
+        return 0;
+    }
+    stdin_all: Vec(u8);
+    MathUtil.ReadAllHandle(0, *stdin_all);
+    s := TextView(stdin_all[:]);
+    pos: s64 = 0;
+    while pos < s.count {
+        end := pos;
+        while end < s.count && s[end] != 10 { end += 1 }
+        line := s[pos:end];
+        if end < s.count { end += 1 }
+        pos = end;
+        n := MathUtil.ParseF64(line);
+        if n <= 0.0 { break }
+        FactorNum(*out, n);
+    }
+    if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+    return 0;
+}

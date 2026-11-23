@@ -1,0 +1,240 @@
+// Fit a polynomial to a set of points (replaces appl/math/fit.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+MAXPTS :: 512
+MAXDEG :: 16
+EPS: float64 = 0.0000005;
+
+IsN :: (r: float64, n: s64) -> bool {
+    s := r - cast(float64)n;
+    if s < 0.0 { s = -s }
+    return s < EPS;
+}
+
+Fact :: (n: s64) -> float64 {
+    f: float64 = 1.0;
+    for i: 1..n { f *= cast(float64)i }
+    return f;
+}
+
+Comb :: (n: s64, r: s64) -> float64 {
+    f: float64 = 1.0;
+    for i: 0..r - 1 { f *= cast(float64)(n - i) }
+    return f / Fact(r);
+}
+
+Det :: (mat: []float64, stride: s64, n: s64) -> float64 {
+    if n == 0 { return 1.0 }
+    if n == 1 { return mat[0] }
+    if n == 2 { return mat[0] * mat[stride + 1] - mat[1] * mat[stride] }
+    sub: Vec(float64);
+    VecResize(sub, (n - 1) * (n - 1));
+    d: float64 = 0.0;
+    s: float64 = 1.0;
+    for k: 0..n - 1 {
+        for i: 0..n - 2 {
+            for j: 0..n - 2 {
+                col := j;
+                if j >= k { col = j + 1 }
+                sub[i * (n - 1) + j] = mat[(i + 1) * stride + col];
+            }
+        }
+        d += s * mat[k] * Det(sub[:], n - 1, n - 1);
+        s = -s;
+    }
+    return d;
+}
+
+Fatal :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "fit: %\n", msg);
+    MathUtil.WriteErr(TextView(out[:]));
+    return 0;
+}
+
+NextToken :: (s: string, pos: *s64) -> (tok: string, ok: bool) {
+    while pos.* < s.count && MathUtil.IsSpaceByte(cast(u8)s[pos.*]) {
+        pos.* += 1;
+    }
+    if pos.* >= s.count { return "", false }
+    start := pos.*;
+    while pos.* < s.count && !MathUtil.IsSpaceByte(cast(u8)s[pos.*]) {
+        pos.* += 1;
+    }
+    return s[start:pos.*], true;
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    p: s64 = 1;
+    verbose := false;
+    while true {
+        o := Arg.Option(*scan);
+        if o == 0 { break }
+        if o == 100 {
+            av, ok := Arg.Value(*scan);
+            if ok { p = MathUtil.ParseInt(av) }
+        } else if o == 118 {
+            verbose = true;
+        } else {
+            msg: Vec(u8);
+            unused BuilderAppend(msg, "bad option ");
+            VecPush(msg, o);
+            return Fatal(TextView(msg[:]));
+        }
+    }
+
+    input: Vec(u8);
+    if scan.next < Args.OperandCount() {
+        path := Args.Operand(scan.next);
+        ok := MathUtil.ReadAllFile(path, *input);
+        if !ok {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "cannot open %", path);
+            return Fatal(TextView(msg[:]));
+        }
+    } else {
+        MathUtil.ReadAllHandle(0, *input);
+    }
+
+    xd: [512]float64;
+    yd: [512]float64;
+    n: s64 = 0;
+    src := TextView(input[:]);
+    pos: s64 = 0;
+    while true {
+        xs, okx := NextToken(src, *pos);
+        if !okx { break }
+        ys, oky := NextToken(src, *pos);
+        if !oky { return Fatal("missing value") }
+        if n >= MAXPTS { return Fatal("too many points") }
+        xd[n] = MathUtil.ParseF64(xs);
+        yd[n] = MathUtil.ParseF64(ys);
+        n += 1;
+    }
+
+    if p < 0 { return Fatal("negative power") }
+    if p > MAXDEG { return Fatal("power too large") }
+    if n < p + 1 { return Fatal("not enough points") }
+
+    a: Vec(float64);
+    VecResize(a, p + 1);
+    b: Vec(float64);
+    VecResize(b, p + 1);
+    sx: Vec(float64);
+    VecResize(sx, 2 * p + 1);
+    sxy: Vec(float64);
+    VecResize(sxy, p + 1);
+
+    xbar: float64 = 0.0;
+    ybar: float64 = 0.0;
+    for i: 0..n - 1 {
+        xbar += xd[i];
+        ybar += yd[i];
+    }
+    xbar /= cast(float64)n;
+    ybar /= cast(float64)n;
+
+    for i: 0..n - 1 {
+        x := xd[i] - xbar;
+        y := yd[i] - ybar;
+        for j: 0..p {
+            sxy[j] += y * MathUtil.PowInt(x, j);
+        }
+        for j: 0..2 * p {
+            sx[j] += MathUtil.PowInt(x, j);
+        }
+    }
+
+    dim := p + 1;
+    mat: Vec(float64);
+    VecResize(mat, dim * dim);
+    for i: 0..p {
+        for j: 0..p {
+            mat[i * dim + j] = sx[i + j];
+        }
+    }
+    d := Det(mat[:], dim, dim);
+    if IsN(d, 0) { return Fatal("points not independent") }
+
+    for j: 0..p {
+        for i: 0..p {
+            mat[i * dim + j] = sxy[i];
+        }
+        a[j] = Det(mat[:], dim, dim) / d;
+        for i: 0..p {
+            mat[i * dim + j] = sx[i + j];
+        }
+    }
+
+    out: Vec(u8);
+    if verbose {
+        unused BuilderAppend(out, "\npt\tactual x\tactual y\tpredicted y\n");
+    }
+    e: float64 = 0.0;
+    for i: 0..n - 1 {
+        x := xd[i] - xbar;
+        z: float64 = 0.0;
+        for j: 0..p {
+            z += a[j] * MathUtil.PowInt(x, j);
+        }
+        z += ybar;
+        e += (z - yd[i]) * (z - yd[i]);
+        if verbose {
+            BuilderPrint(*out, "%.\t", i + 1);
+            MathUtil.AppendF64(*out, xd[i]);
+            unused BuilderAppend(out, "\t");
+            MathUtil.AppendF64(*out, yd[i]);
+            unused BuilderAppend(out, "\t");
+            MathUtil.AppendF64(*out, z);
+            unused BuilderAppend(out, "\n");
+        }
+    }
+    if verbose {
+        unused BuilderAppend(out, "root mean squared error = ");
+        MathUtil.AppendF64(*out, MathUtil.Sqrt(e / cast(float64)n));
+        unused BuilderAppend(out, "\n");
+    }
+
+    b[0] += ybar;
+    for i: 0..p {
+        for j: 0..i {
+            b[j] += a[i] * Comb(i, j) * MathUtil.PowInt(-xbar, i - j);
+        }
+    }
+
+    pr := false;
+    unused BuilderAppend(out, "y = ");
+    i := p;
+    while i >= 0 {
+        if !IsN(b[i], 0) || (i == 0 && !pr) {
+            if b[i] < 0.0 {
+                unused BuilderAppend(out, "-");
+                b[i] = -b[i];
+            } else if pr {
+                unused BuilderAppend(out, "+");
+            }
+            pr = true;
+            if i == 0 {
+                MathUtil.AppendF64(*out, b[i]);
+            } else {
+                if !IsN(b[i], 1) {
+                    MathUtil.AppendF64(*out, b[i]);
+                    unused BuilderAppend(out, "*");
+                }
+                unused BuilderAppend(out, "x");
+                if i > 1 {
+                    BuilderPrint(*out, "^%", i);
+                }
+            }
+        }
+        i -= 1;
+    }
+    unused BuilderAppend(out, "\n");
+    MathUtil.WriteOut(TextView(out[:]));
+    return 0;
+}

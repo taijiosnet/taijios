@@ -1,0 +1,85 @@
+// Cracker Barrel peg puzzle solver (replaces appl/math/crackerbarrel.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+ORDER :: 6
+
+State :: struct {
+    board: [36]s32;
+    pegs: s32;
+    minpegs: s32;
+}
+
+dx: [6]s32 = .[1, 0, -1, -1, 0, 1];
+dy: [6]s32 = .[0, 1, 1, 0, -1, -1];
+
+Puzzle :: (st: *State) -> bool {
+    if st.pegs < st.minpegs { st.minpegs = st.pegs }
+    if st.pegs == 1 { return true }
+    for r: 0..ORDER - 1 {
+        for c: 0..ORDER - r - 1 {
+            fromx := r * ORDER + c;
+            if st.board[fromx] != 0 {
+                for m: 0..5 {
+                    tor := cast(s32)r + 2 * dy[m];
+                    toc := cast(s32)c + 2 * dx[m];
+                    if tor + toc < ORDER && tor >= 0 && toc >= 0 {
+                        jumpr := cast(s32)r + dy[m];
+                        jumpc := cast(s32)c + dx[m];
+                        jumpx := jumpr * ORDER + jumpc;
+                        if st.board[jumpx] != 0 {
+                            tox := tor * ORDER + toc;
+                            if st.board[tox] == 0 {
+                                st.board[fromx] = 0;
+                                st.board[jumpx] = 0;
+                                st.board[tox] = 1;
+                                st.pegs -= 1;
+                                if Puzzle(st) { return true }
+                                st.board[fromx] = 1;
+                                st.board[jumpx] = 1;
+                                st.board[tox] = 0;
+                                st.pegs += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+Solve :: (st: *State) -> bool {
+    st.pegs = (ORDER + 1) * ORDER / 2 - 1;
+    st.minpegs = st.pegs;
+    for i: 0..35 { st.board[i] = 0 }
+    for r: 0..ORDER - 1 {
+        for c: 0..ORDER - r - 1 {
+            st.board[r * ORDER + c] = 1;
+        }
+    }
+    st.board[0] = 0;
+    return Puzzle(st);
+}
+
+main :: () -> s32 {
+    trials: s64 = 1;
+    if Args.OperandCount() >= 1 {
+        trials = MathUtil.ParseInt(Args.Operand(0));
+    }
+    st: State;
+    solved := false;
+    start := MathUtil.Millisec();
+    for _: 0..trials - 1 {
+        solved = Solve(*st);
+    }
+    end := MathUtil.Millisec();
+    out: Vec(u8);
+    BuilderPrint(*out, "% ms\n", end - start);
+    if !solved { unused BuilderAppend(out, "No solution\n") }
+    BuilderPrint(*out, "Minimum pegs: %\n", st.minpegs);
+    MathUtil.WriteOut(TextView(out[:]));
+    return 0;
+}

@@ -1,0 +1,119 @@
+// Print prime numbers in a range (replaces appl/math/primes.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+BIGX: float64 = 9.007199254740992e15;
+BITS :: 8
+TABLEN :: 1000
+
+pt: [50]s64 = .[
+    2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+    31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+    73, 79, 83, 89, 97, 101, 103, 107, 109, 113,
+    127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
+    179, 181, 191, 193, 197, 199, 211, 223, 227, 229
+];
+
+wheel48: [48]float64 = .[
+    10.0, 2.0, 4.0, 2.0, 4.0, 6.0, 2.0, 6.0,
+    4.0, 2.0, 4.0, 6.0, 6.0, 2.0, 6.0, 4.0,
+    2.0, 6.0, 4.0, 6.0, 8.0, 4.0, 2.0, 4.0,
+    2.0, 4.0, 8.0, 6.0, 4.0, 6.0, 2.0, 4.0,
+    6.0, 2.0, 6.0, 6.0, 4.0, 2.0, 4.0, 6.0,
+    2.0, 6.0, 4.0, 2.0, 4.0, 2.0, 10.0, 2.0
+];
+
+bittab: [8]u8 = .[1, 2, 4, 8, 16, 32, 64, 128];
+table: [1000]u8;
+
+Mark :: (nn: float64, k: s64) {
+    it1 := cast(s64)(nn / cast(float64)k);
+    j := cast(s64)(cast(float64)k * cast(float64)it1 - nn);
+    if j < 0 { j += k }
+    while j < TABLEN * BITS {
+        table[j >> 3] = table[j >> 3] | bittab[j & 7];
+        j += k;
+    }
+}
+
+Ouch :: () -> s32 {
+    MathUtil.WriteErr("primes: limits exceeded\n");
+    unused Args.SetFailure("ouch");
+    return 1;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    if argc <= 0 {
+        MathUtil.WriteErr("usage: primes starting [ending]\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    nn := MathUtil.ParseF64(Args.Operand(0));
+    limit := BIGX;
+    if argc > 1 {
+        limit = MathUtil.ParseF64(Args.Operand(1));
+        if limit < nn { return 0 }
+        if limit > BIGX { return Ouch() }
+    }
+    if nn < 0.0 || nn > BIGX { return Ouch() }
+    if nn == 0.0 { nn = 1.0 }
+    out: Vec(u8);
+    if nn < 230.0 {
+        for i: 0..49 {
+            r := cast(float64)pt[i];
+            if r < nn { continue }
+            if r > limit {
+                if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+                return 0;
+            }
+            BuilderPrint(*out, "%\n", pt[i]);
+            if limit >= BIGX {
+                MathUtil.WriteOut(TextView(out[:]));
+                return 0;
+            }
+        }
+        nn = 230.0;
+    }
+    t := cast(s64)(nn / 2.0);
+    nn = 2.0 * cast(float64)t + 1.0;
+    while true {
+        for i: 0..TABLEN - 1 { table[i] = 0 }
+        v := MathUtil.Sqrt(nn + cast(float64)(TABLEN * BITS));
+        Mark(nn, 3);
+        Mark(nn, 5);
+        Mark(nn, 7);
+        wi: s64 = 0;
+        k: float64 = 11.0;
+        while k <= v {
+            Mark(nn, cast(s64)k);
+            wi += 1;
+            if wi >= 48 { wi = 0 }
+            k += wheel48[wi];
+        }
+        i: s64 = 0;
+        while i < TABLEN * BITS {
+            if (table[i >> 3] & bittab[i & 7]) == 0 {
+                temp := nn + cast(float64)i;
+                if temp > limit {
+                    if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+                    return 0;
+                }
+                BuilderPrint(*out, "%\n", cast(s64)temp);
+                if out.count >= 16384 {
+                    MathUtil.WriteOut(TextView(out[:]));
+                    VecClear(out);
+                }
+                if limit >= BIGX {
+                    if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+                    return 0;
+                }
+            }
+            i += 2;
+        }
+        nn += cast(float64)(TABLEN * BITS);
+    }
+    return 0;
+}

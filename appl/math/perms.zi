@@ -1,0 +1,81 @@
+// Generate permutations of N elements (replaces appl/math/perms.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+out: Vec(u8);
+
+PutSeq :: (el: []s64, origin: s64) {
+    for k: 0..el.count - 1 {
+        BuilderPrint(*out, " %", el[k] + origin);
+    }
+    unused BuilderAppend(out, "\n");
+    if out.count >= 16384 {
+        MathUtil.WriteOut(TextView(out[:]));
+        VecClear(out);
+    }
+}
+
+NextPerm :: (el: []s64) -> bool {
+    n := el.count;
+    j := n - 2;
+    hit := false;
+    while j >= 0 {
+        if el[j] < el[j + 1] {
+            hit = true;
+            break;
+        }
+        j -= 1;
+    }
+    if !hit { return false }
+    k := n - 1;
+    while k > j {
+        if el[k] > el[j] {
+            t := el[k];
+            el[k] = el[j];
+            el[j] = t;
+            break;
+        }
+        k -= 1;
+    }
+    k = j + 1;
+    half := (n + j + 1) / 2;
+    while k < half {
+        kk := n - k + j;
+        t := el[k];
+        el[k] = el[kk];
+        el[kk] = t;
+        k += 1;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    idx: s32 = 0;
+    origin: s64 = 1;
+    if idx < argc {
+        a := Args.Operand(idx);
+        if a.count > 0 && a[0] == 45 {
+            origin = MathUtil.ParseInt(a[1:]);
+            idx += 1;
+        }
+    }
+    if argc - idx != 1 {
+        MathUtil.WriteErr("Usage: perms #elements\n");
+        return 0;
+    }
+    n := MathUtil.ParseInt(Args.Operand(idx));
+    if n > 0 {
+        el: Vec(s64);
+        VecResize(el, n);
+        for k: 0..n - 1 { el[k] = k }
+        while true {
+            PutSeq(el[:], origin);
+            if !NextPerm(el[:]) { break }
+        }
+        if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+    }
+    return 0;
+}

@@ -1,0 +1,216 @@
+// Shared math helpers for dis/math ZX commands.
+Files :: #import "taijios_files";
+Io :: #import "taijios_io";
+#import "std/format"
+#import "std/vec"
+#import "std/number_text"
+
+WriteOut :: (s: string) {
+    if s.count > 0 { unused Io.Write(1, s) }
+}
+
+WriteErr :: (s: string) {
+    if s.count > 0 { unused Io.Write(2, s) }
+}
+
+ReadAllHandle :: (fd: s32, out: *Vec(u8)) {
+    buf: [4096]u8;
+    while true {
+        n := Io.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(out.*, TextView(buf[:n]));
+    }
+}
+
+ReadAllFile :: (path: string, out: *Vec(u8)) -> bool {
+    fd := Io.Open(path, 0);
+    if fd < 0 { return false }
+    ReadAllHandle(fd, out);
+    unused Io.Close(fd);
+    return true;
+}
+
+Millisec :: () -> s64 {
+    buf: [32]u8;
+    size := Files.ReadBytesAt("/dev/time", 0, buf[:]);
+    if size <= 0 { return 0 }
+    micros, count := IntegerPrefix(TextView(buf[:size]));
+    if count <= 0 { return 0 }
+    return micros / 1000;
+}
+
+AbsF64 :: (x: float64) -> float64 {
+    if x < 0.0 { return -x }
+    return x;
+}
+
+Sqrt :: (x: float64) -> float64 {
+    if x <= 0.0 { return 0.0 }
+    g := x;
+    if g < 1.0 { g = 1.0 }
+    for _: 0..63 {
+        ng := 0.5 * (g + x / g);
+        if AbsF64(ng - g) <= 1.0e-15 * ng { return ng }
+        g = ng;
+    }
+    return g;
+}
+
+Log :: (x: float64) -> float64 {
+    if x <= 0.0 { return 0.0 }
+    ln2: float64 = 0.693147180559945309417232121458176568;
+    m := x;
+    k: s64 = 0;
+    while m >= 2.0 {
+        m *= 0.5;
+        k += 1;
+    }
+    while m < 0.5 {
+        m *= 2.0;
+        k -= 1;
+    }
+    y := (m - 1.0) / (m + 1.0);
+    y2 := y * y;
+    term := y;
+    sum: float64 = 0.0;
+    for n: 0..30 {
+        sum += term / cast(float64)(2 * n + 1);
+        term *= y2;
+        if AbsF64(term) < 1.0e-17 { break }
+    }
+    return 2.0 * sum + cast(float64)k * ln2;
+}
+
+PowInt :: (x: float64, p: s64) -> float64 {
+    if p == 0 { return 1.0 }
+    neg := false;
+    e := p;
+    if e < 0 {
+        neg = true;
+        e = -e;
+    }
+    res: float64 = 1.0;
+    base := x;
+    while e > 0 {
+        if (e & 1) != 0 { res *= base }
+        base *= base;
+        e = e >> 1;
+    }
+    if neg { return 1.0 / res }
+    return res;
+}
+
+IsSpaceByte :: (b: u8) -> bool {
+    return b == 32 || b == 9 || b == 10 || b == 13;
+}
+
+ParseInt :: (s: string) -> s64 {
+    i: s64 = 0;
+    while i < s.count && IsSpaceByte(cast(u8)s[i]) { i += 1 }
+    if i >= s.count { return 0 }
+    neg := false;
+    if s[i] == 45 {
+        neg = true;
+        i += 1;
+    } else if s[i] == 43 {
+        i += 1;
+    }
+    val: s64 = 0;
+    while i < s.count {
+        c := cast(u8)s[i];
+        if c < 48 || c > 57 { break }
+        val = val * 10 + cast(s64)(c - 48);
+        i += 1;
+    }
+    if neg { return -val }
+    return val;
+}
+
+ParseF64 :: (s: string) -> float64 {
+    i: s64 = 0;
+    while i < s.count && IsSpaceByte(cast(u8)s[i]) { i += 1 }
+    if i >= s.count { return 0.0 }
+    neg := false;
+    if s[i] == 45 {
+        neg = true;
+        i += 1;
+    } else if s[i] == 43 {
+        i += 1;
+    }
+    val: float64 = 0.0;
+    while i < s.count {
+        c := cast(u8)s[i];
+        if c < 48 || c > 57 { break }
+        val = val * 10.0 + cast(float64)(c - 48);
+        i += 1;
+    }
+    if i < s.count && s[i] == 46 {
+        i += 1;
+        scale: float64 = 0.1;
+        while i < s.count {
+            c := cast(u8)s[i];
+            if c < 48 || c > 57 { break }
+            val += cast(float64)(c - 48) * scale;
+            scale *= 0.1;
+            i += 1;
+        }
+    }
+    if i < s.count && (s[i] == 101 || s[i] == 69) {
+        i += 1;
+        eneg := false;
+        if i < s.count && s[i] == 45 {
+            eneg = true;
+            i += 1;
+        } else if i < s.count && s[i] == 43 {
+            i += 1;
+        }
+        exp: s64 = 0;
+        while i < s.count {
+            c := cast(u8)s[i];
+            if c < 48 || c > 57 { break }
+            exp = exp * 10 + cast(s64)(c - 48);
+            i += 1;
+        }
+        if eneg { exp = -exp }
+        val *= PowInt(10.0, exp);
+    }
+    if neg { return -val }
+    return val;
+}
+
+AppendF64 :: (out: *Vec(u8), v: float64) {
+    neg := false;
+    x := v;
+    if x < 0.0 {
+        neg = true;
+        x = -x;
+    }
+    scaled := cast(s64)(x * 1000000.0 + 0.5);
+    whole := scaled / 1000000;
+    frac := scaled % 1000000;
+    if neg && (whole != 0 || frac != 0) {
+        unused BuilderAppend(out.*, "-");
+    }
+    BuilderPrint(out, "%", whole);
+    unused BuilderAppend(out.*, ".");
+    div: s64 = 100000;
+    for _: 0..5 {
+        d := (frac / div) % 10;
+        VecPush(out.*, cast(u8)(48 + d));
+        div /= 10;
+    }
+}
+
+AppendZeroPad :: (out: *Vec(u8), v: s64, width: s64) {
+    div: s64 = 1;
+    for _: 1..width - 1 {
+        div *= 10;
+    }
+    rem := v;
+    for _: 0..width - 1 {
+        d := (rem / div) % 10;
+        if d < 0 { d = -d }
+        VecPush(out.*, cast(u8)(48 + d));
+        div /= 10;
+    }
+}

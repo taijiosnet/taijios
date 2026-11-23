@@ -1,13 +1,7 @@
 <../../mkconfig
 
 TARG=\
-	ack.dis\
-	crackerbarrel.dis\
-	factor.dis\
 	ffts.dis\
-	fibonacci.dis\
-	fit.dis\
-	genprimes.dis\
 	geodesy.dis\
 	graph0.dis\
 	gr.dis\
@@ -16,13 +10,9 @@ TARG=\
 	linbench.dis\
 	mersenne.dis\
 	parts.dis\
-	perms.dis\
-	pi.dis\
 	polyfill.dis\
 	polyhedra.dis\
 	powers.dis\
-	primes.dis\
-	sieve.dis\
 
 MODULES=
 
