@@ -1,0 +1,124 @@
+// The cases of the 9P test: each frame in ninep_frames.zi unpacked as a
+// request and as a reply, written as text and packed again, as the Limbo
+// probe printed it from the Ninep module, for comparison with
+// ninep.limbo.txt. The module's own stray diagnostics are left out there.
+using Ninep :: #import "ninep"
+using Frames :: #import "ninep_frames"
+
+Hex :: (out: *Vec(u8), bytes: string) {
+    digits := "0123456789abcdef"
+    for bytes {
+        VecPush(<<out, digits[it >> 4])
+        VecPush(<<out, digits[it & 15])
+    }
+}
+
+Unhex :: (text: string) -> Vec(u8) {
+    bytes: Vec(u8)
+    value: u8 = 0
+    for text {
+        digit := ifx it >= #char "a" then it - #char "a" + 10 else it - #char "0"
+        value = value * 16 + digit
+        if it_index % 2 == 1 { VecPush(bytes, value); value = 0 }
+    }
+    return bytes
+}
+
+// One line for a frame unpacked in one direction: the bytes used, the
+// message as text and, when there is one, its bytes packed again.
+Unpacked :: (out: *Vec(u8), label: string, index: s64, frame: string, request: bool) {
+    message: Ninep.Message
+    used := Ninep.Unpack(frame, request, *message)
+    BuilderPrint(out, "% % % ", label, index, used)
+    Ninep.Text(*message, out)
+    if used > 0 {
+        packed: Vec(u8)
+        unused Ninep.Pack(*message, *packed)
+        BuilderAppend(<<out, " ")
+        Hex(out, TextView(packed[:]))
+    }
+}
+
+Lines :: (out: *Vec(u8)) {
+    for Frames.FRAMES {
+        bytes := Unhex(it)
+        frame := TextView(bytes[:])
+        BuilderPrint(out, "frame % %\n", it_index, it)
+        Unpacked(out, "T", it_index, frame, true)
+        BuilderAppend(<<out, "\n")
+        Unpacked(out, "R", it_index, frame, false)
+        BuilderPrint(out, " istmsg=%\n", Ninep.IsRequest(frame))
+    }
+    versions := string.["9P2000", "9P2000.u", "9P", "9P1", "9P2001", "9P3000.x", "8P2000", "", "9", "9Pabc", "9P2000x", "9P1999"]
+    for versions {
+        size, version := Ninep.Compatible(4096 + it_index * 1000, it, 8216, "")
+        other_size, other_version := Ninep.Compatible(4096 + it_index * 1000, it, 100, "9P2000.L")
+        BuilderPrint(out, "compatible % % % % %\n", it_index, size, version, other_size, other_version)
+    }
+    dir: Ninep.Dir
+    dir.name = "café"
+    dir.gid = "g"
+    dir.qid.path = 0xfedcba9876543210
+    dir.qid.version = 0x7fffffff
+    dir.qid.qtype = 0x48
+    dir.mode = 0x800001FD
+    dir.atime = -1
+    dir.length = -1
+    dir.dtype = 0xffff
+    dir.dev = -2
+    packed: Vec(u8)
+    Ninep.PackDir(*packed, *dir)
+    BuilderPrint(out, "packdir % % ", Ninep.DirSize(*dir), packed.count)
+    Hex(out, TextView(packed[:]))
+    BuilderAppend(<<out, "\n")
+    lengths := s64.[0, 7, 14, 21, 28, 35, 42, 49, 55]
+    for lengths {
+        read: Ninep.Dir
+        used := Ninep.UnpackDir(TextView(packed[:it]), *read)
+        BuilderPrint(out, "unpackdir % %", it, used)
+        if used > 0 {
+            BuilderAppend(<<out, " ")
+            Ninep.DirText(out, *read)
+        }
+        BuilderAppend(<<out, "\n")
+    }
+    Extra(out)
+}
+
+// What the Limbo probe could not show; a line is added only on failure.
+Extra :: (out: *Vec(u8)) {
+    // A stat of 256 bytes or more in a Twstat, which the Limbo module refused.
+    long_name: Vec(u8)
+    for 1..300 { VecPush(long_name, #char "n") }
+    wstat: Ninep.Message
+    wstat.kind = Ninep.Twstat
+    wstat.tag = 9
+    wstat.fid = 4
+    wstat.stat.name = TextView(long_name[:])
+    frame: Vec(u8)
+    unused Ninep.Pack(*wstat, *frame)
+    back: Ninep.Message
+    used := Ninep.Unpack(TextView(frame[:]), true, *back)
+    if used != frame.count || back.stat.name != TextView(long_name[:]) { BuilderAppend(<<out, "FAIL: long Twstat\n") }
+
+    // A reply before a size is agreed, and one too long for it.
+    reply: Ninep.Message
+    reply.kind = Ninep.Rread
+    reply.tag = 3
+    reply.data = TextView(long_name[:])
+    for limit: s64.[0, 100, 8216] {
+        sent: Vec(u8)
+        Ninep.PackReply(*reply, limit, *sent)
+        got: Ninep.Message
+        unused Ninep.Unpack(TextView(sent[:]), false, *got)
+        want := ifx limit == 0 then "Tversion not seen" else (ifx limit == 100 then "9P reply didn't fit" else "")
+        ok := ifx limit == 8216 then got.kind == Ninep.Rread && got.data.count == 300 else got.kind == Ninep.Rerror && got.ename == want && got.tag == 3
+        if !ok { BuilderPrint(out, "FAIL: PackReply %\n", limit) }
+    }
+    size, error := Ninep.MessageSize(TextView(frame[:4]), 0)
+    small, too_small := Ninep.MessageSize("\x04\x00\x00\x00", 0)
+    big, too_big := Ninep.MessageSize(TextView(frame[:4]), 100)
+    if size != frame.count || error != "" || too_small != "invalid 9P message size" || too_big != "9P message longer than agreed" {
+        BuilderAppend(<<out, "FAIL: MessageSize\n")
+    }
+}
