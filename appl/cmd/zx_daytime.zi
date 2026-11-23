@@ -1,0 +1,190 @@
+// Civil time from seconds since the epoch, as appl/lib/daytime.b did it. The
+// guest timezone file names the standard and daylight zones, their offsets
+// from GMT in seconds, and the second ranges in which daylight time holds.
+#import "std/number_text"
+#import "std/vec"
+Files :: #import "taijios_files";
+
+Tm :: struct {
+    sec: s64;
+    min: s64;
+    hour: s64;
+    mday: s64;
+    mon: s64; // 0 to 11
+    year: s64; // since 1900
+    wday: s64; // Sunday is 0
+    yday: s64;
+    zone: string;
+}
+
+Zone :: struct {
+    standard: string;
+    standard_offset: s64;
+    daylight: string;
+    daylight_offset: s64;
+    pairs: Vec(s64); // start and end seconds of each daylight period
+}
+
+Weekdays :: "SunMonTueWedThuFriSat";
+Months :: "JanFebMarAprMayJunJulAugSepOctNovDec";
+
+Space :: (byte: u8) -> bool { return byte == 32 || byte == 9 || byte == 10 || byte == 13 }
+
+Word :: (text: string, at: *s64) -> string {
+    while at.* < text.count && Space(cast(u8)text[at.*]) { at.* += 1 }
+    start := at.*
+    while at.* < text.count && !Space(cast(u8)text[at.*]) { at.* += 1 }
+    return text[start:at.*]
+}
+
+Owned :: (text: string) -> string { return TextDetach(TextCopy(text)) }
+
+// int s as Limbo converted it: an optional minus and decimal digits,
+// stopping at the 32-bit limits; anything else is 0.
+LimboInt :: (text: string) -> s64 {
+    at: s64
+    negative := text.count > 0 && text[0] == cast(u8)45
+    if negative { at = 1 }
+    value: s64
+    while at < text.count && text[at] >= cast(u8)48 && text[at] <= cast(u8)57 {
+        if value < 2147483648 { value = value * 10 + cast(s64)(text[at] - cast(u8)48) }
+        at += 1
+    }
+    if negative {
+        if value > 2147483648 { return -2147483648 }
+        return 0 - value
+    }
+    if value > 2147483647 { return 2147483647 }
+    return value
+}
+
+ReadText :: (path: string, value: *Text) -> bool { return Files.ReadFile(path, value, 1048576) >= 0 }
+
+GmtZone :: () -> Zone { return .{standard = "GMT", standard_offset = 0, daylight = "", daylight_offset = 0} }
+
+// /env/timezone, else /locale/timezone; a leading / or # names the file to
+// read instead. A missing or empty file, or one with fewer than four words,
+// leaves GMT.
+ReadZone :: () -> Zone {
+    first: Text
+    second: Text
+    value := *first
+    if !ReadText("/env/timezone", value) { if !ReadText("/locale/timezone", value) { return GmtZone() } }
+    text := TextView(value.*)
+    if text.count == 0 { return GmtZone() }
+    if text[0] == cast(u8)47 || text[0] == cast(u8)35 {
+        path := Owned(text)
+        if path[path.count - 1] == cast(u8)10 { path = path[0:path.count - 1] }
+        value = *second
+        if !ReadText(path, value) { return GmtZone() }
+        text = TextView(value.*)
+        if text.count == 0 { return GmtZone() }
+    }
+    words: Vec(string)
+    at: s64
+    while at < text.count {
+        word := Word(text, *at)
+        if word.count == 0 { break }
+        if !VecPush(words, word) { return GmtZone() }
+    }
+    if words.count < 4 { return GmtZone() }
+    zone := GmtZone()
+    zone.standard = Owned(words[0])
+    zone.standard_offset = LimboInt(words[1])
+    zone.daylight = Owned(words[2])
+    zone.daylight_offset = LimboInt(words[3])
+    pairs: Vec(s64)
+    for i: 4..words.count-1 { if !VecPush(pairs, LimboInt(words[i])) { break } }
+    zone.pairs = pairs
+    return zone
+}
+
+Leap :: (year: s64) -> bool { return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) }
+
+YearDays :: (year: s64) -> s64 { return ifx Leap(year) then 366 else 365 }
+
+MonthDays :: (year: s64, month: s64) -> s64 {
+    lengths: [12]s64 = .[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if month == 1 && Leap(year) { return 29 }
+    return lengths[month]
+}
+
+// Break seconds since the epoch into a Gregorian date in GMT.
+Gmt :: (seconds: s64) -> Tm {
+    tm: Tm
+    part := seconds % 86400
+    day := seconds / 86400
+    if part < 0 { part += 86400; day -= 1 }
+    tm.sec = part % 60
+    minutes := part / 60
+    tm.min = minutes % 60
+    tm.hour = minutes / 60
+    // 1 January 1970 was a Thursday.
+    tm.wday = (day + 7340036) % 7
+    year: s64 = 70
+    if day >= 0 {
+        while day >= YearDays(year + 1900) { day -= YearDays(year + 1900); year += 1 }
+    } else {
+        while day < 0 { year -= 1; day += YearDays(year + 1900) }
+    }
+    tm.year = year
+    tm.yday = day
+    month: s64
+    while day >= MonthDays(year + 1900, month) { day -= MonthDays(year + 1900, month); month += 1 }
+    tm.mday = day + 1
+    tm.mon = month
+    tm.zone = "GMT"
+    return tm
+}
+
+Local :: (zone: *Zone, seconds: s64) -> Tm {
+    shifted := seconds + zone.standard_offset
+    daylight := false
+    at: s64
+    while at + 1 < zone.pairs.count {
+        if shifted >= zone.pairs[at] && shifted < zone.pairs[at + 1] {
+            shifted = seconds + zone.daylight_offset
+            daylight = true
+            break
+        }
+        at += 2
+    }
+    tm := Gmt(shifted)
+    if daylight { tm.zone = zone.daylight } else { tm.zone = zone.standard }
+    return tm
+}
+
+Two :: (line: *Vec(u8), value: s64) {
+    if value < 10 { unused BuilderAppend(line.*, "0") }
+    BuilderPrint(line, "%", value)
+}
+
+// daytime->text: "Thu Jan 01 00:00:00 GMT 1970".
+Text :: (tm: Tm) -> string {
+    line: Vec(u8)
+    unused BuilderAppend(line, Weekdays[3*tm.wday:3*tm.wday+3])
+    unused BuilderAppend(line, " ")
+    unused BuilderAppend(line, Months[3*tm.mon:3*tm.mon+3])
+    unused BuilderAppend(line, " ")
+    Two(*line, tm.mday)
+    unused BuilderAppend(line, " ")
+    Two(*line, tm.hour)
+    unused BuilderAppend(line, ":")
+    Two(*line, tm.min)
+    unused BuilderAppend(line, ":")
+    Two(*line, tm.sec)
+    unused BuilderAppend(line, " ")
+    unused BuilderAppend(line, tm.zone)
+    BuilderPrint(*line, " %", 1900 + tm.year)
+    return BuilderFinish(line)
+}
+
+// daytime->now: /dev/time holds microseconds since the epoch.
+Now :: () -> s64 {
+    time: [64]u8
+    count := Files.ReadBytesAt("/dev/time", 0, time[:])
+    if count <= 0 { return 0 }
+    micros, used := IntegerPrefix(TextView(time[:count]))
+    if used <= 0 { return 0 }
+    return micros / 1000000
+}

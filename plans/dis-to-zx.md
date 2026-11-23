@@ -248,7 +248,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/cprof.dis | appl/cmd/cprof.b |  | - |  |
 | dis/cpu.dis | appl/cmd/cpu.b |  | - |  |
 | dis/crypt.dis | appl/cmd/crypt.b | module/crypt.m | - |  |
-| dis/date.dis | appl/cmd/date.b |  | - |  |
 | dis/dd.dis | appl/cmd/dd.b |  | - |  |
 | dis/dial.dis | appl/cmd/dial.b | module/dial.m | - |  |
 | dis/diff.dis | appl/cmd/diff.b |  | - |  |

@@ -1,0 +1,45 @@
+// date: print the date and time, following appl/cmd/date.b.
+using Args :: #import "taijios_args";
+using Arg :: #import "zx_arg";
+using Cli :: #import "zx_cli";
+using Daytime :: #import "zx_daytime";
+
+Usage :: "usage: date [-un] [seconds]\n";
+
+// The seconds argument must be all digits; anything else is a usage error.
+Numeric :: (text: string) -> bool {
+    for i: 0..text.count-1 { if text[i] < cast(u8)48 || text[i] > cast(u8)57 { return false } }
+    return true
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan
+    seconds_flag := false
+    gmt_flag := false
+    while true {
+        option := Arg.Option(*scan)
+        if option == 0 { break }
+        if option == #char "n" { seconds_flag = true }
+        else if option == #char "u" { gmt_flag = true }
+        else { return Cli.Usage(Usage) }
+    }
+    count := Args.OperandCount() - scan.next
+    if count > 1 || (count == 1 && !Numeric(Args.Operand(scan.next))) { return Cli.Usage(Usage) }
+    seconds := Daytime.Now()
+    if count == 1 { seconds = Daytime.LimboInt(Args.Operand(scan.next)) }
+    line: Vec(u8)
+    if seconds_flag {
+        BuilderPrint(*line, "%\n", seconds)
+    } else {
+        if gmt_flag {
+            unused BuilderAppend(line, Daytime.Text(Daytime.Gmt(seconds)))
+        } else {
+            zone := Daytime.ReadZone()
+            unused BuilderAppend(line, Daytime.Text(Daytime.Local(*zone, seconds)))
+        }
+        unused BuilderAppend(line, "\n")
+    }
+    unused Cli.WriteAll(1, BuilderFinish(line))
+    return 0
+}

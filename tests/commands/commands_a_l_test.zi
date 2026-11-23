@@ -30,9 +30,40 @@ WORDS :: "one two  three\nfour\tfive\n";
 SQUEEZE :: "abczz\naabb\n";
 
 // The emulator's own variables name this host, so env's cases remove them first.
-cases: [2]Case = Case.[
+cases: [30]Case = Case.[
     .{tool = "env", before = "rm /env/emuargs /env/emuroot /env/emuhost /env/emuwdir\na=one\nb='two words'\n", out = "b='two words'\na=one\n"},
     .{tool = "env", args = "x", status = "usage", err = "Usage: env\n"},
+    .{tool = "date", args = "-u 0", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "0", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "-u -n 1234567890", out = "1234567890\n"},
+    .{tool = "date", args = "-nu 1234567890", out = "1234567890\n"},
+    .{tool = "date", args = "-uu 1234567890", out = "Fri Feb 13 23:31:30 GMT 2009\n"},
+    .{tool = "date", args = "-- 0", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "''", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "-n 010", out = "10\n"},
+    .{tool = "date", args = "-u 1970", out = "Thu Jan 01 00:32:50 GMT 1970\n"},
+    .{tool = "date", args = "-u 2147483647", out = "Tue Jan 19 03:14:07 GMT 2038\n"},
+    // Limbo's int conversion stops at the largest 32-bit value.
+    .{tool = "date", args = "-u 99999999999", out = "Tue Jan 19 03:14:07 GMT 2038\n"},
+    .{tool = "date", args = "0 1", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    .{tool = "date", args = "abc", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    .{tool = "date", args = "-x", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    .{tool = "date", args = "-", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    .{tool = "date", args = "-n 0x10", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    .{tool = "date", args = "-100", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    .{tool = "date", args = "-n -0", status = "usage", err = "usage: date [-un] [seconds]\n"},
+    // The shell stores a spaced timezone value quoted, so its first word keeps the quote.
+    .{tool = "date", args = "0", before = "timezone='EST -18000 EDT -14400'\n", out = "Wed Dec 31 19:00:00 'EST 1969\n"},
+    .{tool = "date", args = "0", before = "timezone='EST -18000 EDT -14400 -1000000000 1000000000'\n", out = "Wed Dec 31 20:00:00 EDT 1969\n"},
+    .{tool = "date", args = "0", before = "timezone='X'\n", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "0", before = "timezone='/locale/Argentina'\n", out = "Wed Dec 31 21:00:00 ART 1969\n"},
+    .{tool = "date", args = "0", before = "timezone='#/locale/Argentina'\n", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "0", before = "timezone='/nonexistent'\n", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
+    .{tool = "date", args = "50", before = "timezone='A 0 B 3600 0 100'\n", out = "Thu Jan 01 01:00:50 B 1970\n"},
+    .{tool = "date", args = "100", before = "timezone='A 0 B 3600 0 100'\n", out = "Thu Jan 01 00:01:40 'A 1970\n"},
+    // Without an argument date reads /dev/time; only the shape is fixed.
+    .{args = "date -n | sed 's/^[0-9][0-9]*$/number/'", out = "number\n"},
+    .{args = "date | sed 's/^[A-Z][a-z][a-z] [A-Z][a-z][a-z] [0-9][0-9] [0-9:]* [A-Z]+ 20[0-9][0-9]$/date/'", before = "rm /env/timezone\n", out = "date\n"},
 ];
 
 failures: s32;
