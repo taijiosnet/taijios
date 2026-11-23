@@ -222,7 +222,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 119 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 118 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -318,7 +318,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_string.zi); loaded only by sh.dis |
 | dis/sh/test.dis | appl/cmd/sh/test.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
 | dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - | open: sh.zx has no Tk; the module needs a ZX Tk window API (lib/sh/win uses it) |
-| dis/sort.dis | appl/cmd/sort.b | module/sort.m | - |  |
 | dis/src.dis | appl/cmd/src.b |  | - |  |
 | dis/stack.dis | appl/cmd/stack.b |  | - |  |
 | dis/stackv.dis | appl/cmd/stackv.b |  | - |  |

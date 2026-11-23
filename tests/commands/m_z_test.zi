@@ -28,8 +28,9 @@ WORK :: "build/tests/commands-m-z";
 ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
+UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [201]Case = Case.[
+cases: [210]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -271,6 +272,16 @@ fakenet/2/status
     .{tool = "p", args = "nosuch", err = "p: nosuch: can't open nosuch: 'nosuch' file does not exist\n"},
     // A missing file is reported and the rest still prints.
     .{tool = "p", args = "nosuch short", out = "short\n", err = "p: nosuch: can't open nosuch: 'nosuch' file does not exist\n"},
+    // sort: byte order, then numeric order where a non-number reads as zero.
+    .{tool = "sort", args = "unsorted", out = "-5\n10\n100\n9\nCherry\napple\napple\nbanana\n"},
+    .{tool = "sort", args = "-r unsorted", out = "banana\napple\napple\nCherry\n9\n100\n10\n-5\n"},
+    .{tool = "sort", args = "-n unsorted", out = "-5\nbanana\napple\nCherry\napple\n9\n10\n100\n"},
+    .{tool = "sort", args = "-nr unsorted", out = "100\n10\n9\napple\nCherry\napple\nbanana\n-5\n"},
+    .{tool = "sort", input = "unsorted", out = "-5\n10\n100\n9\nCherry\napple\napple\nbanana\n"},
+    .{tool = "sort", args = "empty"},
+    .{tool = "sort", args = "nosuch", status = "open file", err = "sort: cannot open nosuch: 'nosuch' file does not exist\n"},
+    .{tool = "sort", args = "unsorted unsorted", status = "usage", err = "usage: sort [-n] [file]\n"},
+    .{tool = "sort", args = "-x unsorted", status = "usage", err = "usage: sort [-n] [file]\n"},
 ];
 
 failures: s32;
@@ -361,6 +372,7 @@ Prepare :: (binary: string) -> bool {
         Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
         Write("lines.txt", Lines()) &&
+        Write("unsorted", UNSORTED) &&
         Write("fakeprog/1/status", "proc1 one") && Write("fakeprog/2/status", "proc2 two") &&
         Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long)) &&
         Write("fakenet/1/status", "listen 0 0\n") && Write("fakenet/1/local", "tcp!1.2.3.4!80\n") &&

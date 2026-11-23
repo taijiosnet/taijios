@@ -1,0 +1,153 @@
+// Sort lines of a file or the standard input, replacing the Limbo sort.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Arg :: #import "zx_arg";
+using Cli :: #import "zx_cli";
+using Daytime :: #import "zx_daytime";
+
+Usage :: "usage: sort [-n] [file]\n";
+
+// One line at a time from a block buffer, the way bufio gets did.
+Reader :: struct {
+    handle: s32;
+    buffer: [4096]u8;
+    start: s64;
+    end: s64;
+    done: bool;
+}
+
+// The next line with its newline, or false at the end of the input.
+Line :: (reader: *Reader) -> (text: string, ok: bool) {
+    line: Vec(u8);
+    while true {
+        if reader.start >= reader.end {
+            if reader.done { break }
+            count := Io.ReadBytes(reader.handle, reader.buffer[:]);
+            if count <= 0 {
+                reader.done = true;
+                break;
+            }
+            reader.start = 0;
+            reader.end = count;
+        }
+        byte := reader.buffer[reader.start];
+        reader.start += 1;
+        unused VecPush(line, byte);
+        if byte == cast(u8)10 { break }
+    }
+    if line.count == 0 { return "", false }
+    return TextDetach(BuilderFinish(line)), true;
+}
+
+// Collect every line of the input.
+Lines :: (handle: s32) -> Vec(string) {
+    reader: Reader;
+    reader.handle = handle;
+    lines: Vec(string);
+    while true {
+        line, ok := Line(*reader);
+        if !ok { break }
+        unused VecPush(lines, line);
+    }
+    return lines;
+}
+
+// An owned copy, so a stored view does not outlive its backing text.
+Copy :: (text: string) -> string { return TextDetach(TextCopy(text)); }
+
+// Byte order, as Limbo's string comparison gave it.
+NotAfter :: (a: string, b: string) -> bool {
+    end := ifx a.count < b.count then a.count else b.count;
+    for i: 0..end-1 {
+        if a[i] != b[i] { return a[i] < b[i] }
+    }
+    return a.count <= b.count;
+}
+
+// The Limbo mergesort over one span of the array; a and spare are parallel.
+Merge :: (a: *Vec(string), spare: *Vec(string), low: s64, high: s64, numeric: bool) {
+    if high - low <= 1 { return }
+    middle := (high - low - 1) / 2 + 1 + low;
+    Merge(a, spare, low, middle, numeric);
+    Merge(a, spare, middle, high, numeric);
+    for i: low..high-1 { spare.*[i] = Copy(a.*[i]) }
+    left := low;
+    right := middle;
+    at := low;
+    while left < middle && right < high {
+        before: bool;
+        if numeric {
+            before = Daytime.LimboInt(spare.*[left]) <= Daytime.LimboInt(spare.*[right])
+        } else {
+            before = NotAfter(spare.*[left], spare.*[right])
+        }
+        if before {
+            a.*[at] = Copy(spare.*[left]);
+            left += 1;
+        } else {
+            a.*[at] = Copy(spare.*[right]);
+            right += 1;
+        }
+        at += 1;
+    }
+    while left < middle {
+        a.*[at] = Copy(spare.*[left]);
+        left += 1;
+        at += 1;
+    }
+    while right < high {
+        a.*[at] = Copy(spare.*[right]);
+        right += 1;
+        at += 1;
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan;
+    numeric := false;
+    reverse := false;
+    count := Args.OperandCount();
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break; }
+        if option == #char "n" {
+            numeric = true;
+        } else if option == #char "r" {
+            reverse = true;
+        } else {
+            return Cli.Usage(Usage);
+        }
+    }
+    if count - scan.next > 1 { return Cli.Usage(Usage) }
+    handle: s32 = 0;
+    if scan.next < count {
+        name := Args.Operand(scan.next);
+        handle = Io.OpenFile(name, 0);
+        if handle < 0 {
+            unused Cli.WriteAll(2, "sort: cannot open ");
+            unused Cli.WriteAll(2, name);
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, Io.LastError());
+            unused Cli.WriteAll(2, "\n");
+            unused Args.SetFailure("open file");
+            return 1;
+        }
+    }
+    lines: Vec(string) = Lines(handle);
+    if handle != 0 { unused Io.CloseFile(handle) }
+    spare: Vec(string);
+    for 0..lines.count-1 { unused VecPush(spare, "") }
+    if lines.count > 0 { Merge(*lines, *spare, 0, lines.count, numeric) }
+    if reverse {
+        at := lines.count - 1;
+        while at >= 0 {
+            unused Cli.WriteAll(1, lines[at]);
+            at -= 1;
+        }
+    } else {
+        for lines { unused Cli.WriteAll(1, it) }
+    }
+    return 0;
+}
