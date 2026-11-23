@@ -1,0 +1,27 @@
+// The library suites compared with Limbo: suite N has a name, a file
+// NAME.limbo.txt of the lines the Limbo module printed, and a cases
+// module that prints the same lines from the Ziran library.
+using Csv :: #import "csv_cases"
+using Uris :: #import "uris_cases"
+using Pointers :: #import "xpointers_cases"
+using Golden :: #import "golden"
+
+NAMES: [3]string = .["csv", "uris", "xpointers"];
+
+Lines :: (suite: s64, out: *Vec(u8)) {
+    if suite == 0 { Csv.Lines(out) }
+    if suite == 1 { Uris.Lines(out) }
+    if suite == 2 { Pointers.Lines(out) }
+}
+
+// Appends "DIR/NAME.limbo.txt", the file a suite is compared with.
+GoldenPath :: (suite: s64, directory: string, out: *Vec(u8)) {
+    BuilderPrint(out, "%/%.limbo.txt", directory, NAMES[suite])
+}
+
+// Whether a suite prints the text want; report gets what differs.
+Passes :: (suite: s64, want: string, report: *Vec(u8)) -> bool {
+    got: Vec(u8)
+    Lines(suite, *got)
+    return Golden.Same(NAMES[suite], TextView(got[:]), want, report)
+}

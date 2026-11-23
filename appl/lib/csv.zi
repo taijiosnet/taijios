@@ -1,0 +1,80 @@
+// Comma-separated values, read and written as the Limbo CSV module did.
+// A record ends at a newline, a carriage return with or without a newline
+// after it, or the end of the text. A field in double quotes can hold
+// commas, newlines and doubled quotes; text after its closing quote is
+// added to it.
+#import "std/vec";
+
+Cursor :: struct {
+    text: string;
+    at: s64;
+}
+
+// The next byte, -1 at the end; either form of line end is a newline.
+Next :: (cursor: *Cursor) -> s64 {
+    if cursor.at >= cursor.text.count { return -1 }
+    c := cast(s64)cursor.text[cursor.at];
+    cursor.at += 1;
+    if c != #char "\r" { return c }
+    if cursor.at < cursor.text.count && cursor.text[cursor.at] == #char "\n" { cursor.at += 1 }
+    return #char "\n";
+}
+
+// Reads one field into field and returns what ended it: a comma, a
+// newline or -1.
+ReadField :: (cursor: *Cursor, field: *Text) -> s64 {
+    c := Next(cursor);
+    if c == 34 {
+        c = Next(cursor);
+        while c >= 0 {
+            if c == 34 {
+                c = Next(cursor);
+                if c != 34 { break }
+            }
+            VecPush(field.bytes, cast(u8)c);
+            c = Next(cursor);
+        }
+    }
+    while c >= 0 && c != #char "," && c != #char "\n" {
+        VecPush(field.bytes, cast(u8)c);
+        c = Next(cursor);
+    }
+    return c;
+}
+
+// Reads the record that starts at byte offset at; its fields replace
+// those in fields. Returns where the next record starts, and false when
+// the text has no more records. An empty line is a record of one empty
+// field.
+ReadRecord :: (text: string, at: s64, fields: *Vec(Text)) -> (next: s64, found: bool) {
+    VecClear(<<fields);
+    cursor: Cursor;
+    cursor.text = text;
+    cursor.at = at;
+    while true {
+        field: Text;
+        end := ReadField(*cursor, *field);
+        if fields.count == 0 && field.bytes.count == 0 && end < 0 { break }
+        VecPush(<<fields, field);
+        if end != #char "," { break }
+    }
+    return cursor.at, fields.count > 0;
+}
+
+// Appends a field, in double quotes with its quotes doubled when it holds
+// one, and in double quotes when it holds a comma or a newline.
+Quote :: (out: *Vec(u8), field: string) {
+    quotes := false;
+    separators := false;
+    for field {
+        if it == 34 { quotes = true }
+        if it == #char "," || it == #char "\n" { separators = true }
+    }
+    if !quotes && !separators { BuilderAppend(<<out, field); return }
+    VecPush(<<out, 34);
+    for field {
+        if it == 34 { VecPush(<<out, 34) }
+        VecPush(<<out, it);
+    }
+    VecPush(<<out, 34);
+}

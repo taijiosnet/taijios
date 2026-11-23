@@ -1,0 +1,26 @@
+// Tests for the libraries in appl/lib that replace Limbo modules: csv.zi,
+// uris.zi, xpointers.zi, xpath.zi, xml_names.zi and the limbo_text.zi
+// helpers they share. Each NAME.limbo.txt holds what the Limbo module
+// printed for the cases in NAME_cases.zi; the Ziran library must print
+// the same lines.
+//
+//     ziran run --target=c --root tests/limbo --module-path appl/lib tests/limbo/lib_test.zi
+//
+// lib_guest.zi runs the same comparison as a ZX program in the emulator.
+#import "std/file"
+using Suites :: #import "suites"
+
+main :: () -> s32 {
+    report: Vec(u8)
+    failed: s32 = 0
+    for Suites.NAMES {
+        path: Vec(u8)
+        Suites.GoldenPath(it_index, "tests/limbo", *path)
+        want, ok := ReadEntireFile(TextView(path[:]))
+        if !ok { BuilderPrint(*report, "FAIL: cannot read %\n", TextView(path[:])) }
+        if !ok || !Suites.Passes(it_index, want, *report) { failed += 1 }
+    }
+    if failed != 0 { print("%", TextView(report[:])); return 1 }
+    print("lib: % libraries match their Limbo modules\n", Suites.NAMES.count)
+    return 0
+}

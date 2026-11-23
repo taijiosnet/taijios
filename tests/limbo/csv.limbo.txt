@@ -1,0 +1,92 @@
+text 0 end
+text 1 record 0: <a> <b> <c>
+text 1 end
+text 2 record 0: <a> <b> <c>
+text 2 end
+text 3 record 0: <>
+text 3 end
+text 4 record 0: <>
+text 4 record 1: <>
+text 4 end
+text 5 record 0: <a> <>
+text 5 end
+text 6 record 0: <> <>
+text 6 end
+text 7 record 0: <> <>
+text 7 end
+text 8 record 0: <a>
+text 8 record 1: <b>
+text 8 end
+text 9 record 0: <a>
+text 9 record 1: <b>
+text 9 end
+text 10 record 0: <a>
+text 10 end
+text 11 record 0: <>
+text 11 end
+text 12 record 0: <>
+text 12 end
+text 13 record 0: <a,b> <c>
+text 13 end
+text 14 record 0: <a"b> <c>
+text 14 end
+text 15 record 0: <a\nb> <c>
+text 15 record 1: <d>
+text 15 end
+text 16 record 0: <ax> <b>
+text 16 end
+text 17 record 0: <x"a"> <b>
+text 17 end
+text 18 record 0: <unterminated,b\nc>
+text 18 end
+text 19 record 0: <>
+text 19 end
+text 20 record 0: <">
+text 20 end
+text 21 record 0: <a> <b>
+text 21 record 1: <c>
+text 21 end
+text 22 record 0: <a b > < c >
+text 22 end
+text 23 record 0: <café> <é>
+text 23 end
+text 24 record 0: <a\nb>
+text 24 end
+text 25 record 0: <a> <> <b>
+text 25 record 1: <> <> <>
+text 25 end
+text 26 record 0: <a">
+text 26 end
+text 27 record 0: <a > <b>
+text 27 end
+text 28 record 0: < "a"> <b>
+text 28 end
+text 29 record 0: <1> <2>
+text 29 record 1: <3> <4>
+text 29 record 2: <>
+text 29 record 3: <5>
+text 29 end
+text 30 record 0: <> <>
+text 30 end
+text 31 record 0: <a">
+text 31 end
+text 32 record 0: <a>
+text 32 end
+text 33 record 0: <,>
+text 33 end
+quote 0 <>
+quote 1 <a>
+quote 2 <a b>
+quote 3 <"a,b">
+quote 4 <"a\nb">
+quote 5 <"a""b">
+quote 6 <"""">
+quote 7 <"""""">
+quote 8 <"a""b""c">
+quote 9 <"""a""">
+quote 10 <",">
+quote 11 <café>
+quote 12 <"x""">
+quote 13 <"""x">
+quote 14 <a\rb>
+quote 15 <"a"",\nb">

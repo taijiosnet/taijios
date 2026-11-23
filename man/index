@@ -2617,7 +2617,6 @@ appl	/man/2/cfg
 appl	/man/2/complete
 appl	/man/2/convcs
 appl	/man/2/crc
-appl	/man/2/csv
 appl	/man/2/daytime
 appl	/man/2/dbm
 appl	/man/2/debug
@@ -6174,7 +6173,6 @@ buffers	/man/6/colour
 bufio	/man/1/yacc
 bufio	/man/2/bufio
 bufio	/man/2/bufio-chanfill
-bufio	/man/2/csv
 bufio	/man/2/format
 bufio	/man/2/imagefile
 bufio	/man/2/json
@@ -6192,7 +6190,6 @@ bufio.m	/man/1/yacc
 bufio.m	/man/2/attrdb
 bufio.m	/man/2/bufio
 bufio.m	/man/2/bufio-chanfill
-bufio.m	/man/2/csv
 bufio.m	/man/2/format
 bufio.m	/man/2/palmfile
 bufio.m	/man/2/rfc822
@@ -7148,7 +7145,6 @@ carets	/man/1/mash
 carets	/man/1/sh
 carriage	/man/1/deb
 carriage	/man/1/mash
-carriage	/man/2/csv
 carriage	/man/6/json
 carriage	/man/6/keyboard
 carriage	/man/6/sexprs
@@ -7778,7 +7774,6 @@ character	/man/2/bufio
 character	/man/2/cfg
 character	/man/2/complete
 character	/man/2/convcs
-character	/man/2/csv
 character	/man/2/debug
 character	/man/2/draw-0intro
 character	/man/2/draw-font
@@ -9209,7 +9204,6 @@ comma	/man/1/calc
 comma	/man/1/charon
 comma	/man/1/m4
 comma	/man/1/sh-csv
-comma	/man/2/csv
 comma	/man/2/rfc822
 comma	/man/6/users
 command's	/man/1/mash
@@ -9225,7 +9219,6 @@ commas	/man/1/m4
 commas	/man/10/acid
 commas	/man/10/plan9.ini
 commas	/man/10/print
-commas	/man/2/csv
 commas	/man/2/sys-print
 commas	/man/6/json
 commas	/man/9/grid
@@ -10749,7 +10742,6 @@ contains	/man/10/styxserver
 contains	/man/2/alphabet-intro
 contains	/man/2/asn1
 contains	/man/2/attrdb
-contains	/man/2/csv
 contains	/man/2/dbm
 contains	/man/2/debug
 contains	/man/2/dhcpclient
@@ -10986,7 +10978,6 @@ continues	/man/9/0intro
 continues	/man/9/text
 continuing	/man/1/acme
 continuing	/man/1/tiny
-continuing	/man/2/csv
 continuous	/man/6/colour
 continuously	/man/2/sys-millisec
 continuously	/man/9/options
@@ -12430,10 +12421,7 @@ css.m	/man/2/w3c-css
 css21	/man/2/w3c-css
 csv	/man/1/sh
 csv	/man/1/sh-csv
-csv	/man/2/csv
 csv.b	/man/1/sh-csv
-csv.b	/man/2/csv
-csv.m	/man/2/csv
 ct65545	/man/3/vga
 ct65545hwgc	/man/3/vga
 ctext	/man/2/dial
@@ -12904,7 +12892,6 @@ data	/man/2/bufio
 data	/man/2/bufio-chanfill
 data	/man/2/convcs
 data	/man/2/crc
-data	/man/2/csv
 data	/man/2/dbm
 data	/man/2/debug
 data	/man/2/devpointer
@@ -17259,7 +17246,6 @@ double	/man/10/c2l
 double	/man/10/print
 double	/man/10/sleep
 double	/man/2/cfg
-double	/man/2/csv
 double	/man/2/math-export
 double	/man/2/math-fp
 double	/man/6/attrdb
@@ -17269,7 +17255,6 @@ double	/man/8/prep
 double	/man/9/bind
 double	/man/9/entry
 double	/man/9/text
-doubled	/man/2/csv
 doubled	/man/2/string
 doubled	/man/9/bind
 doublequote	/man/1/sh
@@ -18201,7 +18186,6 @@ email	/man/1/mux
 emanating	/man/1/sh-file2chan
 embedded	/man/1/ebook
 embedded	/man/2/asn1
-embedded	/man/2/csv
 embedded	/man/2/factotum
 embedded	/man/2/ip
 embedded	/man/2/math-0intro
@@ -19356,7 +19340,6 @@ error	/man/2/bufio
 error	/man/2/cfg
 error	/man/2/complete
 error	/man/2/convcs
-error	/man/2/csv
 error	/man/2/dbm
 error	/man/2/debug
 error	/man/2/dhcpclient
@@ -21461,7 +21444,6 @@ fd	/man/10/plan9.ini
 fd	/man/10/print
 fd	/man/10/styxserver
 fd	/man/2/bufio
-fd	/man/2/csv
 fd	/man/2/dhcpclient
 fd	/man/2/dial
 fd	/man/2/diskblocks
@@ -21654,7 +21636,6 @@ fields	/man/10/parsecmd
 fields	/man/10/styx
 fields	/man/10/styxserver
 fields	/man/2/crc
-fields	/man/2/csv
 fields	/man/2/daytime
 fields	/man/2/dhcpclient
 fields	/man/2/draw-screen
@@ -21859,7 +21840,6 @@ file	/man/2/command
 file	/man/2/complete
 file	/man/2/convcs
 file	/man/2/crc
-file	/man/2/csv
 file	/man/2/daytime
 file	/man/2/dbm
 file	/man/2/debug
@@ -22306,7 +22286,6 @@ files	/man/2/attrdb
 files	/man/2/bufio
 files	/man/2/complete
 files	/man/2/convcs
-files	/man/2/csv
 files	/man/2/daytime
 files	/man/2/dbm
 files	/man/2/debug
@@ -22961,7 +22940,6 @@ fn	/man/2/command
 fn	/man/2/complete
 fn	/man/2/convcs
 fn	/man/2/crc
-fn	/man/2/csv
 fn	/man/2/daytime
 fn	/man/2/dbm
 fn	/man/2/debug
@@ -23353,7 +23331,6 @@ format	/man/2/attrdb
 format	/man/2/bufio
 format	/man/2/cfg
 format	/man/2/convcs
-format	/man/2/csv
 format	/man/2/daytime
 format	/man/2/devpointer
 format	/man/2/dis
@@ -24271,7 +24248,6 @@ getip	/man/2/dhcpclient
 getips	/man/2/dhcpclient
 getkeys	/man/2/cfg
 getline	/man/1/read
-getline	/man/2/csv
 getlines	/man/1/sh-csv
 getlines	/man/1/sh-sexprs
 getlines	/man/1/sh-std
@@ -26576,7 +26552,6 @@ include	/man/2/command
 include	/man/2/complete
 include	/man/2/convcs
 include	/man/2/crc
-include	/man/2/csv
 include	/man/2/daytime
 include	/man/2/dbm
 include	/man/2/debug
@@ -26777,7 +26752,6 @@ included	/man/10/kproc
 included	/man/10/mk
 included	/man/10/plan9.ini
 included	/man/2/cfg
-included	/man/2/csv
 included	/man/2/encoding
 included	/man/2/keyring-sha1
 included	/man/2/prefab-compound
@@ -27486,7 +27460,6 @@ init	/man/2/command
 init	/man/2/complete
 init	/man/2/convcs
 init	/man/2/crc
-init	/man/2/csv
 init	/man/2/dbm
 init	/man/2/debug
 init	/man/2/devpointer
@@ -28103,7 +28076,6 @@ instance	/man/2/asn1
 instance	/man/2/bufio
 instance	/man/2/bufio-chanfill
 instance	/man/2/command
-instance	/man/2/csv
 instance	/man/2/dhcpclient
 instance	/man/2/dial
 instance	/man/2/dialog
@@ -29413,7 +29385,6 @@ iobfd	/man/3/arch
 iobuf	/man/1/yacc
 iobuf	/man/2/bufio
 iobuf	/man/2/bufio-chanfill
-iobuf	/man/2/csv
 iobuf	/man/2/format
 iobuf	/man/2/imagefile
 iobuf	/man/2/json
@@ -31163,7 +31134,6 @@ lib	/man/2/cfg
 lib	/man/2/complete
 lib	/man/2/convcs
 lib	/man/2/crc
-lib	/man/2/csv
 lib	/man/2/daytime
 lib	/man/2/dbm
 lib	/man/2/debug
@@ -31787,7 +31757,6 @@ list	/man/2/attrdb
 list	/man/2/cfg
 list	/man/2/command
 list	/man/2/convcs
-list	/man/2/csv
 list	/man/2/daytime
 list	/man/2/debug
 list	/man/2/dhcpclient
@@ -32149,7 +32118,6 @@ load	/man/2/command
 load	/man/2/complete
 load	/man/2/convcs
 load	/man/2/crc
-load	/man/2/csv
 load	/man/2/daytime
 load	/man/2/dbm
 load	/man/2/debug
@@ -32642,7 +32610,6 @@ logwindow	/man/1/logwindow
 logwindow	/man/4/logfile
 logwindow.b	/man/1/logwindow
 log₂	/man/2/bloomfilter
-lone	/man/2/csv
 longer	/man/1/acme
 longer	/man/1/miniterm
 longer	/man/1/prof
@@ -35027,7 +34994,6 @@ module	/man/2/command
 module	/man/2/complete
 module	/man/2/convcs
 module	/man/2/crc
-module	/man/2/csv
 module	/man/2/dbm
 module	/man/2/debug
 module	/man/2/dhcpclient
@@ -36514,7 +36480,6 @@ newline	/man/10/panic
 newline	/man/2/arg
 newline	/man/2/asn1
 newline	/man/2/bufio
-newline	/man/2/csv
 newline	/man/2/daytime
 newline	/man/2/dialog
 newline	/man/2/keyring-certtostr
@@ -36654,7 +36619,6 @@ nil	/man/2/cfg
 nil	/man/2/command
 nil	/man/2/complete
 nil	/man/2/convcs
-nil	/man/2/csv
 nil	/man/2/daytime
 nil	/man/2/dbm
 nil	/man/2/debug
@@ -37141,7 +37105,6 @@ note	/man/2/bufio
 note	/man/2/cfg
 note	/man/2/command
 note	/man/2/convcs
-note	/man/2/csv
 note	/man/2/daytime
 note	/man/2/geodesy
 note	/man/2/palmfile
@@ -38251,7 +38214,6 @@ operation	/man/10/plan9.ini
 operation	/man/10/qio
 operation	/man/10/styxserver
 operation	/man/2/complete
-operation	/man/2/csv
 operation	/man/2/dbm
 operation	/man/2/dhcpclient
 operation	/man/2/dis
@@ -40433,7 +40395,6 @@ path	/man/2/command
 path	/man/2/complete
 path	/man/2/convcs
 path	/man/2/crc
-path	/man/2/csv
 path	/man/2/daytime
 path	/man/2/dbm
 path	/man/2/debug
@@ -43668,7 +43629,6 @@ provide	/man/10/sleep
 provide	/man/10/splhi
 provide	/man/2/0intro
 provide	/man/2/alphabet-intro
-provide	/man/2/csv
 provide	/man/2/dhcpclient
 provide	/man/2/draw-0intro
 provide	/man/2/draw-context
@@ -43848,7 +43808,6 @@ provides	/man/2/bufio
 provides	/man/2/command
 provides	/man/2/convcs
 provides	/man/2/crc
-provides	/man/2/csv
 provides	/man/2/debug
 provides	/man/2/devpointer
 provides	/man/2/dhcpclient
@@ -44404,7 +44363,6 @@ quote	/man/1/sh-regex
 quote	/man/1/tiny
 quote	/man/1/wm-sh
 quote	/man/2/attrdb
-quote	/man/2/csv
 quote	/man/2/rfc822
 quote	/man/2/string
 quote	/man/2/tk
@@ -44435,7 +44393,6 @@ quoted	/man/10/getfields
 quoted	/man/10/mk
 quoted	/man/10/parsecmd
 quoted	/man/2/cfg
-quoted	/man/2/csv
 quoted	/man/2/draw-context
 quoted	/man/2/factotum
 quoted	/man/2/rfc822
@@ -44467,7 +44424,6 @@ quotes	/man/10/c2l
 quotes	/man/10/getfields
 quotes	/man/10/mk
 quotes	/man/2/cfg
-quotes	/man/2/csv
 quotes	/man/2/rfc822
 quotes	/man/2/string
 quotes	/man/2/sys-print
@@ -44917,7 +44873,6 @@ read	/man/10/styxserver
 read	/man/2/attrdb
 read	/man/2/bufio
 read	/man/2/bufio-chanfill
-read	/man/2/csv
 read	/man/2/debug
 read	/man/2/devpointer
 read	/man/2/dial
@@ -45257,7 +45212,6 @@ reads	/man/1/wish
 reads	/man/10/odbc
 reads	/man/10/plan9.ini
 reads	/man/10/qio
-reads	/man/2/csv
 reads	/man/2/daytime
 reads	/man/2/devpointer
 reads	/man/2/dis
@@ -45903,7 +45857,6 @@ ref	/man/2/cfg
 ref	/man/2/command
 ref	/man/2/complete
 ref	/man/2/crc
-ref	/man/2/csv
 ref	/man/2/daytime
 ref	/man/2/dbm
 ref	/man/2/debug
@@ -46266,7 +46219,6 @@ reg	/man/3/gpio
 reg	/man/6/ubfa
 regard	/man/10/qio
 regarded	/man/1/m4
-regarded	/man/2/csv
 regarded	/man/2/itslib
 regarded	/man/2/sys-read
 regarded	/man/4/registry
@@ -47221,7 +47173,6 @@ represent	/man/10/master
 represent	/man/10/newchan
 represent	/man/10/rune
 represent	/man/2/asn1
-represent	/man/2/csv
 represent	/man/2/debug
 represent	/man/2/disks
 represent	/man/2/draw-display
@@ -47705,7 +47656,6 @@ required	/man/10/styx
 required	/man/10/styxserver
 required	/man/2/alphabet-intro
 required	/man/2/asn1
-required	/man/2/csv
 required	/man/2/dhcpclient
 required	/man/2/dial
 required	/man/2/disks
@@ -48398,7 +48348,6 @@ return	/man/2/cfg
 return	/man/2/command
 return	/man/2/complete
 return	/man/2/convcs
-return	/man/2/csv
 return	/man/2/dbm
 return	/man/2/debug
 return	/man/2/dhcpclient
@@ -48709,7 +48658,6 @@ returns	/man/2/cfg
 returns	/man/2/complete
 returns	/man/2/convcs
 returns	/man/2/crc
-returns	/man/2/csv
 returns	/man/2/daytime
 returns	/man/2/dbm
 returns	/man/2/debug
@@ -51700,7 +51648,6 @@ sh	/man/10/parsecmd
 sh	/man/2/0intro
 sh	/man/2/arg
 sh	/man/2/command
-sh	/man/2/csv
 sh	/man/2/factotum
 sh	/man/2/itslib
 sh	/man/2/sh
@@ -53192,7 +53139,6 @@ source	/man/2/cfg
 source	/man/2/complete
 source	/man/2/convcs
 source	/man/2/crc
-source	/man/2/csv
 source	/man/2/daytime
 source	/man/2/dbm
 source	/man/2/debug
@@ -53723,7 +53669,6 @@ specially	/man/1/sh-std
 specially	/man/1/tiny
 specially	/man/10/allocb
 specially	/man/10/mk
-specially	/man/2/csv
 specially	/man/2/dialog
 specially	/man/3/cons
 specially	/man/8/cs
@@ -54568,7 +54513,6 @@ starts	/man/10/conf
 starts	/man/10/dmainit
 starts	/man/10/kbdputc
 starts	/man/10/ntsrv
-starts	/man/2/csv
 starts	/man/2/debug
 starts	/man/2/draw-0intro
 starts	/man/2/draw-image
@@ -55307,7 +55251,6 @@ string	/man/2/cfg
 string	/man/2/command
 string	/man/2/complete
 string	/man/2/convcs
-string	/man/2/csv
 string	/man/2/daytime
 string	/man/2/dbm
 string	/man/2/debug
@@ -57532,7 +57475,6 @@ taking	/man/1/blur
 taking	/man/1/fs
 taking	/man/1/mash-make
 taking	/man/2/bufio
-taking	/man/2/csv
 taking	/man/2/draw-example
 taking	/man/2/sh
 taking	/man/2/styxservers
@@ -57819,8 +57761,6 @@ termination	/man/1/tiny
 termination	/man/10/acid
 termination	/man/10/kproc
 terminator	/man/1/tiny
-terminator	/man/2/csv
-terminators	/man/2/csv
 terminology	/man/2/draw-0intro
 terms	/man/1/charon
 terms	/man/1/math-misc
@@ -57934,7 +57874,6 @@ text	/man/2/alphabet-intro
 text	/man/2/asn1
 text	/man/2/bufio
 text	/man/2/convcs
-text	/man/2/csv
 text	/man/2/daytime
 text	/man/2/disks
 text	/man/2/draw-0intro
@@ -60625,7 +60564,6 @@ unquoted	/man/2/rfc822
 unquoted	/man/2/sexprs
 unquoted	/man/2/string
 unquoted	/man/6/sexprs
-unquotes	/man/2/csv
 unreachable	/man/3/ip
 unread	/man/1/wm-sh
 unread	/man/10/allocb
@@ -61686,7 +61624,6 @@ value	/man/2/cfg
 value	/man/2/complete
 value	/man/2/convcs
 value	/man/2/crc
-value	/man/2/csv
 value	/man/2/daytime
 value	/man/2/dbm
 value	/man/2/debug
@@ -61932,7 +61869,6 @@ values	/man/2/attrdb
 values	/man/2/bufio-chanfill
 values	/man/2/cfg
 values	/man/2/convcs
-values	/man/2/csv
 values	/man/2/daytime
 values	/man/2/dbm
 values	/man/2/dhcpclient
@@ -63641,7 +63577,6 @@ write	/man/10/qlock
 write	/man/10/styxserver
 write	/man/2/bufio
 write	/man/2/bufio-chanfill
-write	/man/2/csv
 write	/man/2/dbm
 write	/man/2/dial
 write	/man/2/diskblocks

@@ -1,0 +1,45 @@
+// The library test as a ZX program for the emulator: the same suites as
+// lib_test.zi, compared with the same Limbo lines read from the guest's
+// /tests/limbo.
+//
+//     zi2zx --root tests/limbo --module-path appl/lib --module-path appl/cmd --bind-host taijios_args \
+//         --bind-host taijios_io --entry lib_guest:main -o build/tests/limbo/lib_guest.zx tests/limbo/lib_guest.zi
+//     emu -r . /dis/sh.dis -c 'zxrun /build/tests/limbo/lib_guest.zx'
+using Args :: #import "taijios_args"
+using Io :: #import "taijios_io"
+using Cli :: #import "zx_cli"
+using Suites :: #import "suites"
+
+ReadGuest :: (path: string, text: *Vec(u8)) -> bool {
+    fd := Io.OpenFile(path, 0)
+    if fd < 0 { return false }
+    chunk: [8192]u8
+    count := Io.ReadBytes(fd, chunk[:])
+    while count > 0 {
+        BuilderAppend(<<text, TextView(chunk[:count]))
+        count = Io.ReadBytes(fd, chunk[:])
+    }
+    unused Io.CloseFile(fd)
+    return true
+}
+
+main :: () -> s32 {
+    report: Vec(u8)
+    failed: s32 = 0
+    for Suites.NAMES {
+        path: Vec(u8)
+        Suites.GoldenPath(it_index, "/tests/limbo", *path)
+        want: Vec(u8)
+        ok := ReadGuest(TextView(path[:]), *want)
+        if !ok { BuilderPrint(*report, "FAIL: cannot read %\n", TextView(path[:])) }
+        if !ok || !Suites.Passes(it_index, TextView(want[:]), *report) { failed += 1 }
+    }
+    if failed != 0 {
+        unused Cli.WriteAll(2, TextView(report[:]))
+        unused Args.SetFailure("fail")
+        return 1
+    }
+    BuilderPrint(*report, "lib: % libraries match their Limbo modules\n", Suites.NAMES.count)
+    unused Cli.WriteAll(1, TextView(report[:]))
+    return 0
+}

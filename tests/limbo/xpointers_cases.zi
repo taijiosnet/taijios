@@ -5,7 +5,7 @@ using Pointers :: #import "xpointers"
 using Xpath :: #import "xpath"
 
 // Appends one line for each case, in the form the Limbo probe printed.
-PointerLines :: (out: *Vec(u8)) {
+Lines :: (out: *Vec(u8)) {
     frames := string.[
         "intro", "a:b", "", "xpointer(id('a'))", "xmlns(x=http://e.org) xpointer(//x:a)", "element(/1/2)element(a/3)",
         "x:y(a^(b^)c^^d)", "f(a(b)c)", "f(a", "f(a))", "f(^x)", "f(^", "f()g", "f() (x)", "9a", "a b", "f(a)  \t g(b)", "x:(a)",

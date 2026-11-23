@@ -44,7 +44,7 @@ Resolve :: (out: *Vec(u8), label: string, reference: string, base: string, with_
 }
 
 // Appends one line for each case, in the form the Limbo probe printed.
-UriLines :: (out: *Vec(u8)) {
+Lines :: (out: *Vec(u8)) {
     parses := string.[
         "http://user:pw@Host.com:8080/a/b?x=1#frag", "HTTP://h", "mailto:a@b", "//h/p", "/a/./b/../c",
         "a/b", "http://[::1]:80/x", "http://[::1]x/", "foo%20bar", "%00", "%41%4", "http://h/a%2Fb",

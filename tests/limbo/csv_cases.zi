@@ -1,0 +1,48 @@
+// The cases of the CSV test: each one printed as the Limbo probe printed
+// it, for comparison with csv.limbo.txt.
+using Csv :: #import "csv"
+
+// Appends text with its line ends written as \n and \r.
+Show :: (out: *Vec(u8), text: string) {
+    for text {
+        if it == #char "\n" { BuilderAppend(<<out, "\\n") }
+        else if it == #char "\r" { BuilderAppend(<<out, "\\r") }
+        else { VecPush(<<out, it) }
+    }
+}
+
+Lines :: (out: *Vec(u8)) {
+    texts := string.[
+        "", "a,b,c\n", "a,b,c", "\n", "\n\n", "a,\n", ",\n", ",", "a\r\nb\r\n", "a\rb", "a\r", "\r\n", "\r",
+        "\"a,b\",c\n", "\"a\"\"b\",c\n", "\"a\nb\",c\nd\n", "\"a\"x,b\n", "x\"a\",b\n", "\"unterminated,b\nc", "\"\"\n", "\"\"\"\"\n",
+        "\"a\",\"b\"\n\"c\"", "a b , c \n", "café,é\n", "\"a\r\nb\"\n", "a,,b\n,,\n", "\"a\"\"\"\n", "\"a\" ,b\n", " \"a\",b\n",
+        "1,2\n3,4\n\n5\n", "\"\",\"\"\n", "\"a\"\"", "a\n\"", "\",\"\n",
+    ]
+    for text: texts {
+        at: s64 = 0
+        record: s64 = 0
+        while true {
+            fields: Vec(Text)
+            next, found := Csv.ReadRecord(text, at, *fields)
+            if !found { break }
+            BuilderPrint(out, "text % record %:", it_index, record)
+            for i: 0..fields.count - 1 {
+                BuilderAppend(<<out, " <")
+                Show(out, TextView(fields[i]))
+                BuilderAppend(<<out, ">")
+            }
+            BuilderAppend(<<out, "\n")
+            at = next
+            record += 1
+        }
+        BuilderPrint(out, "text % end\n", it_index)
+    }
+    fields := string.["", "a", "a b", "a,b", "a\nb", "a\"b", "\"", "\"\"", "a\"b\"c", "\"a\"", ",", "café", "x\"", "\"x", "a\rb", "a\",\nb"]
+    for fields {
+        quoted: Vec(u8)
+        Csv.Quote(*quoted, it)
+        BuilderPrint(out, "quote % <", it_index)
+        Show(out, TextView(quoted[:]))
+        BuilderAppend(<<out, ">\n")
+    }
+}

@@ -950,7 +950,7 @@ appl
 			ssl3.b
 			sslsession.b
 			x509.b
-		csv.b
+		csv.zi
 		daytime.b
 		db.b
 		dbm.b
@@ -1573,7 +1573,6 @@ dis
 		crc.dis
 		crypt
 			+
-		csv.dis
 		daytime.dis
 		db.dis
 		dbm.dis
@@ -2208,7 +2207,6 @@ module
 	convcs.m
 	crc.m
 	css.m
-	csv.m
 	cvsimages.m
 	daytime.m
 	db.m
