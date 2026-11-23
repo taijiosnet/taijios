@@ -59,7 +59,7 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/m4.dis | appl/cmd/m4.b |  | - |  |
 | dis/man2html.dis | appl/cmd/man2html.b |  | - |  |
 | dis/man2txt.dis | appl/cmd/man2txt.b |  | - |  |
-| dis/mash.dis | appl/cmd/mash/mash.b |  | - | zx-twin /dis/mash.zx (appl/cmd/mash/mash.zi and its eight modules, `mk install-zx`): mash's own grammar through the yacc tables of mashparse.b, the builtins modules compiled in (env, eval, exit, load, prompt, quote, run, status, time, whatis, and make with depends, match and rules), the make builder, and threads as guest processes. tests/mash: 32 of 33 cases match /dis/mash.dis, 1 known gap (the line number the parser reports after a failed command). Still open here: dis/lib/mash/tk.dis needs a Ziran Tk that answers Tk->cmd on a toplevel, which nothing provides today (module/tk.m has no ZX consumer and the ZX Tk lives inside a Tcl interpreter, not behind a callable binding); dis/lib/mash/history.dis needs a served file fed while the parser runs, which ZX has no threads for; the <{} and >{} pipes are served but the words of the block still reach the generator's argument list, so a command taking one as a non-final operand misreads it (the parse's item pool needs per-nested-parse scoping). Limbo loaders of Mashlib/Mashparse stay while dis/mash.dis exists. |
+| dis/mash.dis | appl/cmd/mash/mash.b |  | - | zx-twin /dis/mash.zx (appl/cmd/mash/mash.zi and its eight modules, `mk install-zx`): mash's own grammar through the yacc tables of mashparse.b, the builtins modules compiled in (env, eval, exit, load, prompt, quote, run, status, time, whatis, and make with depends, match and rules), the make builder, and threads as guest processes. <{} and >{} generators: each value's items are a range of their own in the parse's pool (mash_parse.zi PoolWiden), so the generator's word takes its place among the operands and the block's own words stay in the block; the child mash.zx that runs a block (`-i`) registers the builtins and holds the pipe on its output (<{}) or input (>{}), served from /tmp/pipes. tests/mash: 34 of 35 cases match /dis/mash.dis (pipe names compared as $pipe), 1 known gap (the line number the parser reports after a failed command). Still open here: the `run` builtin is a stub (mash.dis prints a script's output, mash.zx prints nothing); a >{} consumer's own output is lost when the shell exits at once, since it is a child process where mash.dis had a thread that ran first; dis/lib/mash/tk.dis and dis/lib/mash/history.dis stay blocked (see Blockers below). Limbo loaders of Mashlib/Mashparse stay while dis/mash.dis exists. |
 | dis/mc.dis | appl/cmd/mc.b |  | - |  |
 | dis/mdb.dis | appl/cmd/mdb.b |  | - |  |
 | dis/metamorph.dis | appl/cmd/metamorph.b |  | - |  |
@@ -94,7 +94,7 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/sh/std.dis | appl/cmd/sh/std.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_std.zi); loaded only by sh.dis |
 | dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_string.zi); loaded only by sh.dis |
 | dis/sh/test.dis | appl/cmd/sh/test.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
-| dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - | open: sh.zx has no Tk; the module needs a ZX Tk window API (lib/sh/win uses it) |
+| dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - | blocked: module/tk.m is a Limbo interface with no ZX consumer, nothing lets a Ziran program call Tk->cmd on a toplevel (the ZX Tk lives inside the Tcl interpreter); no port and no second tk binding for sh.zx |
 | dis/src.dis | appl/cmd/src.b |  | - |  |
 | dis/stack.dis | appl/cmd/stack.b |  | - |  |
 | dis/stackv.dis | appl/cmd/stackv.b |  | - |  |
@@ -118,3 +118,9 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/xd.dis | appl/cmd/xd.b |  | - |  |
 | dis/yacc.dis | appl/cmd/yacc.b |  | - |  |
 
+
+## Blockers
+
+- `dis/sh/tk.dis` (row above): `module/tk.m` is a Limbo interface with no ZX consumer. Decision: no port; sh.zx gets no second tk binding.
+- `dis/lib/mash/tk.dis` (row in [02-libraries.md](02-libraries.md)): the same `module/tk.m` interface behind mash's tk builtin. Decision: no port.
+- `dis/lib/mash/history.dis` (row in [02-libraries.md](02-libraries.md)): the Limbo module serves a file that is fed while the parser runs; ZX has no threads for a served file beside the parse. Decision: no port.

@@ -78,9 +78,9 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/lib/login.dis | appl/lib/login.b |  | - |  |
 | dis/lib/man.dis | appl/lib/man.b | module/man.m | - |  |
 | dis/lib/mash/builtins.dis | appl/cmd/mash/builtins.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_builtins.zi); loaded only by mash.dis |
-| dis/lib/mash/history.dis | appl/cmd/mash/history.b |  | - |  |
+| dis/lib/mash/history.dis | appl/cmd/mash/history.b |  | - | blocked: the module serves a file fed while the parser runs, which ZX has no threads for; no port (shell lane, see the Blockers list in [03-shell-commands.md](03-shell-commands.md)) |
 | dis/lib/mash/make.dis | appl/cmd/mash/make.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_make.zi: the node builder, the dependency and rule tables, and depends/match/rules); loaded only by mash.dis |
-| dis/lib/mash/tk.dis | appl/cmd/mash/tk.b | module/tk.m | - |  |
+| dis/lib/mash/tk.dis | appl/cmd/mash/tk.b | module/tk.m | - | blocked: module/tk.m is a Limbo interface with no ZX consumer (mash's tk builtin calls Tk->cmd on a toplevel); no port (shell lane, see the Blockers list in [03-shell-commands.md](03-shell-commands.md)) |
 | dis/lib/mashlib.dis | appl/cmd/mash/mashlib.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_env.zi, mash_exec.zi, mash_value.zi); loaded only by mash.dis |
 | dis/lib/mashparse.dis | appl/cmd/mash/mashparse.b |  | - | ported into /dis/mash.zx (appl/cmd/mash/mash_parse.zi, mash_lex.zi: the same yacc tables and actions); loaded only by mash.dis |
 | dis/lib/memfs.dis | appl/lib/memfs.b | module/memfs.m | - |  |
