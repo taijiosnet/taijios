@@ -205,3 +205,35 @@ ParseFileSize :: (metadata: []u8) -> s64 {
     }
     return cast(s64)value;
 }
+
+// Decode Inferno m8 (CMAP8) or r8g8b8 .bit file into canvas_rgba (600x400x4).
+LoadBitToRGBA :: (data: []u8, rgba: []u8, width: s32, height: s32) -> bool {
+    if data.count < 60 { return false }
+    pixels := cast(s64)width * cast(s64)height;
+    if rgba.count < pixels * 4 { return false }
+    // Check channel string in first 12 bytes
+    is_rgb24 := TextView(data[:12]) == "     r8g8b8 ";
+    if is_rgb24 {
+        if data.count < 60 + pixels * 3 { return false }
+        for i: 0..pixels-1 {
+            soff := 60 + i * 3;
+            doff := i * 4;
+            rgba[doff] = data[soff];
+            rgba[doff + 1] = data[soff + 1];
+            rgba[doff + 2] = data[soff + 2];
+            rgba[doff + 3] = 255;
+        }
+        return true;
+    }
+    // Default CMAP8 (m8)
+    if data.count < 60 + pixels { return false }
+    for i: 0..pixels-1 {
+        c := CmapToRGBA(cast(s32)data[60 + i]);
+        doff := i * 4;
+        rgba[doff] = cast(u8)((c >> 24) & 0xFF);
+        rgba[doff + 1] = cast(u8)((c >> 16) & 0xFF);
+        rgba[doff + 2] = cast(u8)((c >> 8) & 0xFF);
+        rgba[doff + 3] = 255;
+    }
+    return true;
+}

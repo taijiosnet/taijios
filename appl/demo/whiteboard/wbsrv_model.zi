@@ -1,0 +1,500 @@
+// Pure whiteboard server state, CMAP8 rasterizer, and 9P2000 protocol
+// serving wb.bit and strokes, ported from appl/demo/whiteboard/wbsrv.b.
+#import "std/vec"
+#import "std/number_text"
+
+WBW :: 600;
+WBH :: 400;
+PIXELS_LEN :: WBW * WBH;
+
+QDIR :: 0;
+QBIT :: 1;
+QSTROKES :: 2;
+
+DMDIR :: 0x80000000;
+QTDIR :: 0x80;
+QTFILE :: 0x00;
+
+TVERSION :: 100;
+RVERSION :: 101;
+TATTACH :: 104;
+RATTACH :: 105;
+RERROR :: 107;
+TFLUSH :: 108;
+RFLUSH :: 109;
+TWALK :: 110;
+RWALK :: 111;
+TOPEN :: 112;
+ROPEN :: 113;
+TREAD :: 116;
+RREAD :: 117;
+TWRITE :: 118;
+RWRITE :: 119;
+TCLUNK :: 120;
+RCLUNK :: 121;
+TSTAT :: 124;
+RSTAT :: 125;
+
+MAX_FIDS :: 32;
+MAX_MSGS :: 128;
+
+FidEntry :: struct {
+    in_use: bool;
+    fid: u32;
+    qpath: u64;
+    is_open: bool;
+    bit_snap: Vec(u8);
+    has_snap: bool;
+    next_msg: s64;
+    has_pending: bool;
+    pending_tag: u16;
+    pending_count: u32;
+}
+
+Server :: struct {
+    msize: u32;
+    pixels: [PIXELS_LEN]u8; // CMAP8 (0 = White, 255 = Black)
+    fids: [MAX_FIDS]FidEntry;
+    msgs: [MAX_MSGS]Text;
+    msg_head: s64;
+    attached: bool;
+}
+
+InitServer :: (s: *Server) {
+    s.msize = 8192;
+    s.msg_head = 0;
+    s.attached = false;
+    for i: 0..PIXELS_LEN-1 { s.pixels[i] = 0 } // White in CMAP8
+    for i: 0..MAX_FIDS-1 { s.fids[i].in_use = false }
+}
+
+AppendField11 :: (txt: string, out: *Vec(u8)) {
+    pad := 11 - txt.count;
+    while pad > 0 { unused VecPush(<<out, 32); pad -= 1 }
+    unused BuilderAppend(<<out, txt);
+    unused VecPush(<<out, 32);
+}
+
+AppendInt11 :: (v: s64, out: *Vec(u8)) {
+    buf: [24]u8;
+    AppendField11(FormatInteger(v, buf[:]), out);
+}
+
+FormatBitHeader :: (out: *Vec(u8)) {
+    AppendField11("m8", out);
+    AppendInt11(0, out);
+    AppendInt11(0, out);
+    AppendInt11(WBW, out);
+    AppendInt11(WBH, out);
+}
+
+SnapshotBit :: (s: *Server, out: *Vec(u8)) {
+    unused VecResize(<<out, 0);
+    FormatBitHeader(out);
+    unused BuilderAppend(<<out, TextView(s.pixels[:]));
+}
+
+LoadBitPixels :: (s: *Server, data: []u8) -> bool {
+    if data.count < 60 + PIXELS_LEN { return false }
+    for i: 0..PIXELS_LEN-1 { s.pixels[i] = data[60 + i] }
+    return true;
+}
+
+RgbaToCmap8 :: (rgba: u32) -> u8 {
+    if rgba == 0xFFFFFFFF { return 0 }
+    if rgba == 0x000000FF { return 255 }
+    r := cast(s32)((rgba >> 24) & 0xFF);
+    g := cast(s32)((rgba >> 16) & 0xFF);
+    b := cast(s32)((rgba >> 8) & 0xFF);
+    ri := 3 - (r / 85);
+    gi := 3 - (g / 85);
+    bi := 3 - (b / 85);
+    if ri < 0 { ri = 0 } else if ri > 3 { ri = 3 }
+    if gi < 0 { gi = 0 } else if gi > 3 { gi = 3 }
+    if bi < 0 { bi = 0 } else if bi > 3 { bi = 3 }
+    return cast(u8)((ri << 6) | (gi << 4) | (bi << 2));
+}
+
+PlotDisc :: (s: *Server, cx: s32, cy: s32, radius: s32, cmap: u8) {
+    r := ifx radius < 0 then 0 else radius;
+    rr := r * r;
+    for dy: -r..r {
+        py := cy + dy;
+        if py < 0 || py >= WBH { continue }
+        for dx: -r..r {
+            if dx * dx + dy * dy > rr { continue }
+            px := cx + dx;
+            if px < 0 || px >= WBW { continue }
+            s.pixels[cast(s64)py * WBW + cast(s64)px] = cmap;
+        }
+    }
+}
+
+DrawLine :: (s: *Server, x0_in: s32, y0_in: s32, x1: s32, y1: s32, radius: s32, cmap: u8) {
+    x0 := x0_in;
+    y0 := y0_in;
+    dx := ifx x1 >= x0 then x1 - x0 else x0 - x1;
+    dy := ifx y1 >= y0 then y1 - y0 else y0 - y1;
+    sx: s32 = ifx x0 < x1 then 1 else -1;
+    sy: s32 = ifx y0 < y1 then 1 else -1;
+    err := dx - dy;
+    while true {
+        PlotDisc(s, x0, y0, radius, cmap);
+        if x0 == x1 && y0 == y1 { break }
+        e2 := err * 2;
+        if e2 > -dy { err -= dy; x0 += sx }
+        if e2 < dx { err += dx; y0 += sy }
+    }
+}
+
+ParseIntTok :: (data: string, pos: *s64) -> (val: s64, ok: bool) {
+    i := <<pos;
+    while i < data.count && (data[i] == 32 || data[i] == 9 || data[i] == 10 || data[i] == 13) { i += 1 }
+    if i >= data.count { <<pos = i; return 0, false }
+    neg := false;
+    if data[i] == 45 { neg = true; i += 1 }
+    else if data[i] == 43 { i += 1 }
+    if i >= data.count || data[i] < 48 || data[i] > 57 { <<pos = i; return 0, false }
+    v: s64 = 0;
+    while i < data.count && data[i] >= 48 && data[i] <= 57 {
+        v = v * 10 + cast(s64)(data[i] - 48);
+        i += 1;
+    }
+    <<pos = i;
+    return ifx neg then -v else v, true;
+}
+
+// Parse & draw stroke data: "colour width x0 y0 x1 y1 ...".
+// Returns "" on success, "bad data" on malformed input.
+DrawStrokes :: (s: *Server, data: string) -> string {
+    vals: [260]s64;
+    n: s64 = 0;
+    pos: s64 = 0;
+    while n < 260 {
+        v, ok := ParseIntTok(data, *pos);
+        if !ok { break }
+        vals[n] = v;
+        n += 1;
+    }
+    if n < 6 || (n & 1) != 0 { return "bad data" }
+    cmap := RgbaToCmap8(cast(u32)cast(s32)vals[0]);
+    width := cast(s32)vals[1];
+    x0 := cast(s32)vals[2];
+    y0 := cast(s32)vals[3];
+    idx: s64 = 4;
+    while idx + 1 < n {
+        x1 := cast(s32)vals[idx];
+        y1 := cast(s32)vals[idx + 1];
+        DrawLine(s, x0, y0, x1, y1, width, cmap);
+        x0 = x1;
+        y0 = y1;
+        idx += 2;
+    }
+    return "";
+}
+
+ReadU16 :: (b: []u8, off: s64) -> u16 { return cast(u16)b[off] | (cast(u16)b[off + 1] << 8) }
+ReadU32 :: (b: []u8, off: s64) -> u32 {
+    return cast(u32)b[off] | (cast(u32)b[off + 1] << 8) |
+           (cast(u32)b[off + 2] << 16) | (cast(u32)b[off + 3] << 24);
+}
+ReadU64 :: (b: []u8, off: s64) -> u64 { return cast(u64)ReadU32(b, off) | (cast(u64)ReadU32(b, off + 4) << 32) }
+PushU8 :: (out: *Vec(u8), v: u8) { unused VecPush(<<out, v) }
+PushU16 :: (out: *Vec(u8), v: u16) { PushU8(out, cast(u8)(v & 0xFF)); PushU8(out, cast(u8)((v >> 8) & 0xFF)) }
+PushU32 :: (out: *Vec(u8), v: u32) {
+    PushU8(out, cast(u8)(v & 0xFF));
+    PushU8(out, cast(u8)((v >> 8) & 0xFF));
+    PushU8(out, cast(u8)((v >> 16) & 0xFF));
+    PushU8(out, cast(u8)((v >> 24) & 0xFF));
+}
+PushU64 :: (out: *Vec(u8), v: u64) {
+    PushU32(out, cast(u32)(v & 0xFFFFFFFF));
+    PushU32(out, cast(u32)((v >> 32) & 0xFFFFFFFF));
+}
+PushStr :: (out: *Vec(u8), txt: string) { PushU16(out, cast(u16)txt.count); unused BuilderAppend(<<out, txt) }
+PushQid :: (out: *Vec(u8), qpath: u64) {
+    PushU8(out, ifx qpath == QDIR then QTDIR else QTFILE);
+    PushU32(out, 0);
+    PushU64(out, qpath);
+}
+
+PackDir :: (out: *Vec(u8), qpath: u64) {
+    name := ".";
+    perm: u32 = cast(u32)DMDIR | 365;
+    if qpath == QBIT { name = "wb.bit"; perm = 292 }
+    else if qpath == QSTROKES { name = "strokes"; perm = 438 }
+    body_len: u16 = cast(u16)(39 + (2 + name.count) + (2 + 7) + (2 + 7) + 2);
+    PushU16(out, body_len);
+    PushU16(out, 0);
+    PushU32(out, 0);
+    PushQid(out, qpath);
+    PushU32(out, perm);
+    PushU32(out, 0);
+    PushU32(out, 0);
+    PushU64(out, 0);
+    PushStr(out, name);
+    PushStr(out, "inferno");
+    PushStr(out, "inferno");
+    PushStr(out, "");
+}
+
+FinishReply :: (kind: u8, tag: u16, payload: []u8, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    PushU32(*out.bytes, cast(u32)(7 + payload.count));
+    PushU8(*out.bytes, kind);
+    PushU16(*out.bytes, tag);
+    unused BuilderAppend(out.bytes, TextView(payload));
+}
+
+EmitError :: (tag: u16, msg: string, replies: *Vec(Text)) {
+    body: Vec(u8);
+    PushStr(*body, msg);
+    pkt: Text;
+    FinishReply(RERROR, tag, VecSlice(body, 0, body.count), *pkt);
+    unused VecPush(<<replies, pkt);
+}
+
+EmitRread :: (tag: u16, data: string, replies: *Vec(Text)) {
+    body: Vec(u8);
+    PushU32(*body, cast(u32)data.count);
+    unused BuilderAppend(body, data);
+    pkt: Text;
+    FinishReply(RREAD, tag, VecSlice(body, 0, body.count), *pkt);
+    unused VecPush(<<replies, pkt);
+}
+
+FindFid :: (s: *Server, fid: u32) -> s64 {
+    for i: 0..MAX_FIDS-1 { if s.fids[i].in_use && s.fids[i].fid == fid { return i } }
+    return -1;
+}
+
+AllocFid :: (s: *Server, fid: u32, qpath: u64) -> s64 {
+    for i: 0..MAX_FIDS-1 {
+        if !s.fids[i].in_use {
+            s.fids[i].in_use = true;
+            s.fids[i].fid = fid;
+            s.fids[i].qpath = qpath;
+            s.fids[i].is_open = false;
+            s.fids[i].has_snap = false;
+            s.fids[i].has_pending = false;
+            s.fids[i].next_msg = s.msg_head;
+            unused VecResize(s.fids[i].bit_snap, 0);
+            return i;
+        }
+    }
+    return -1;
+}
+
+HandlePacket :: (s: *Server, pkt: []u8, replies: *Vec(Text)) {
+    if pkt.count < 7 { return }
+    kind := pkt[4];
+    tag := ReadU16(pkt, 5);
+
+    if kind == TVERSION {
+        req_msize := ifx pkt.count >= 11 then ReadU32(pkt, 7) else 8192;
+        if req_msize < s.msize && req_msize >= 256 { s.msize = req_msize }
+        body: Vec(u8);
+        PushU32(*body, s.msize);
+        PushStr(*body, "9P2000");
+        out: Text;
+        FinishReply(RVERSION, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    if kind == TATTACH {
+        if pkt.count < 11 { EmitError(tag, "short Tattach", replies); return }
+        fid := ReadU32(pkt, 7);
+        if FindFid(s, fid) >= 0 || AllocFid(s, fid, QDIR) < 0 { EmitError(tag, "bad fid", replies); return }
+        s.attached = true;
+        body: Vec(u8);
+        PushQid(*body, QDIR);
+        out: Text;
+        FinishReply(RATTACH, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    if kind == TFLUSH {
+        if pkt.count >= 9 {
+            oldtag := ReadU16(pkt, 7);
+            for i: 0..MAX_FIDS-1 {
+                if s.fids[i].in_use && s.fids[i].has_pending && s.fids[i].pending_tag == oldtag {
+                    s.fids[i].has_pending = false;
+                    break;
+                }
+            }
+        }
+        empty: [0]u8;
+        out: Text;
+        FinishReply(RFLUSH, tag, empty[:], *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    if kind == TWALK {
+        if pkt.count < 17 { EmitError(tag, "short Twalk", replies); return }
+        fid := ReadU32(pkt, 7);
+        newfid := ReadU32(pkt, 11);
+        nwname := cast(s64)ReadU16(pkt, 15);
+        idx := FindFid(s, fid);
+        if idx < 0 { EmitError(tag, "bad fid", replies); return }
+        cur := s.fids[idx].qpath;
+        off: s64 = 17;
+        qids: [8]u64;
+        nq: s64 = 0;
+        for w: 0..nwname-1 {
+            if off + 2 > pkt.count { EmitError(tag, "short Twalk", replies); return }
+            slen := cast(s64)ReadU16(pkt, off);
+            off += 2;
+            if off + slen > pkt.count { EmitError(tag, "short Twalk", replies); return }
+            name := TextView(pkt[off:off + slen]);
+            off += slen;
+            if cur != QDIR { break }
+            if name == "wb.bit" { cur = QBIT }
+            else if name == "strokes" { cur = QSTROKES }
+            else if name == "." || name == ".." { cur = QDIR }
+            else { break }
+            if nq < 8 { qids[nq] = cur; nq += 1 }
+        }
+        if nwname > 0 && nq == 0 { EmitError(tag, "file does not exist", replies); return }
+        if nq == nwname {
+            if newfid == fid { s.fids[idx].qpath = cur }
+            else if AllocFid(s, newfid, cur) < 0 { EmitError(tag, "too many fids", replies); return }
+        }
+        body: Vec(u8);
+        PushU16(*body, cast(u16)nq);
+        for k: 0..nq-1 { PushQid(*body, qids[k]) }
+        out: Text;
+        FinishReply(RWALK, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    if kind == TOPEN {
+        if pkt.count < 12 { EmitError(tag, "short Topen", replies); return }
+        idx := FindFid(s, ReadU32(pkt, 7));
+        if idx < 0 { EmitError(tag, "bad fid", replies); return }
+        s.fids[idx].is_open = true;
+        s.fids[idx].next_msg = s.msg_head;
+        body: Vec(u8);
+        PushQid(*body, s.fids[idx].qpath);
+        PushU32(*body, s.msize - 24);
+        out: Text;
+        FinishReply(ROPEN, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    if kind == TREAD {
+        if pkt.count < 23 { EmitError(tag, "short Tread", replies); return }
+        idx := FindFid(s, ReadU32(pkt, 7));
+        offset := cast(s64)ReadU64(pkt, 11);
+        count := cast(s64)ReadU32(pkt, 19);
+        if idx < 0 || !s.fids[idx].is_open { EmitError(tag, "bad fid", replies); return }
+        qp := s.fids[idx].qpath;
+        if qp == QDIR {
+            dir_bytes: Vec(u8);
+            PackDir(*dir_bytes, QBIT);
+            PackDir(*dir_bytes, QSTROKES);
+            if offset >= dir_bytes.count { EmitRread(tag, "", replies) }
+            else {
+                end := offset + count;
+                if end > dir_bytes.count { end = dir_bytes.count }
+                EmitRread(tag, TextView(VecSlice(dir_bytes, offset, end)), replies);
+            }
+            return;
+        }
+        if qp == QBIT {
+            f := *s.fids[idx];
+            if !f.has_snap {
+                SnapshotBit(s, *f.bit_snap);
+                f.has_snap = true;
+            }
+            snap_len := f.bit_snap.count;
+            if offset >= snap_len { EmitRread(tag, "", replies) }
+            else {
+                end := offset + count;
+                if end > snap_len { end = snap_len }
+                EmitRread(tag, TextView(VecSlice(f.bit_snap, offset, end)), replies);
+            }
+            return;
+        }
+        if qp == QSTROKES {
+            if s.fids[idx].next_msg < s.msg_head {
+                slot := s.fids[idx].next_msg % MAX_MSGS;
+                s.fids[idx].next_msg += 1;
+                msg := TextView(s.msgs[slot]);
+                slice := ifx msg.count > count then msg[:count] else msg;
+                EmitRread(tag, slice, replies);
+            } else {
+                s.fids[idx].has_pending = true;
+                s.fids[idx].pending_tag = tag;
+                s.fids[idx].pending_count = cast(u32)count;
+            }
+            return;
+        }
+        EmitError(tag, "bad path", replies);
+        return;
+    }
+    if kind == TWRITE {
+        if pkt.count < 23 { EmitError(tag, "short Twrite", replies); return }
+        idx := FindFid(s, ReadU32(pkt, 7));
+        count := cast(s64)ReadU32(pkt, 19);
+        if idx < 0 || !s.fids[idx].is_open { EmitError(tag, "bad fid", replies); return }
+        if s.fids[idx].qpath != QSTROKES { EmitError(tag, "permission denied", replies); return }
+        if 23 + count > pkt.count { EmitError(tag, "short Twrite", replies); return }
+        data := TextView(pkt[23:23 + count]);
+        err := DrawStrokes(s, data);
+        if err.count > 0 { EmitError(tag, err, replies); return }
+
+        // Reply Rwrite first, then broadcast to pending readers
+        body: Vec(u8);
+        PushU32(*body, cast(u32)count);
+        out: Text;
+        FinishReply(RWRITE, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+
+        slot := s.msg_head % MAX_MSGS;
+        unused VecResize(s.msgs[slot].bytes, 0);
+        unused BuilderAppend(s.msgs[slot].bytes, data);
+        this_idx := s.msg_head;
+        s.msg_head += 1;
+        for i: 0..MAX_FIDS-1 {
+            if s.fids[i].in_use && s.fids[i].is_open && s.fids[i].qpath == QSTROKES && s.fids[i].has_pending {
+                limit := cast(s64)s.fids[i].pending_count;
+                slice := ifx data.count > limit then data[:limit] else data;
+                EmitRread(s.fids[i].pending_tag, slice, replies);
+                s.fids[i].has_pending = false;
+                s.fids[i].next_msg = this_idx + 1;
+            }
+        }
+        return;
+    }
+    if kind == TCLUNK {
+        if pkt.count >= 11 {
+            idx := FindFid(s, ReadU32(pkt, 7));
+            if idx >= 0 {
+                s.fids[idx].in_use = false;
+                s.fids[idx].is_open = false;
+                s.fids[idx].has_pending = false;
+                unused VecResize(s.fids[idx].bit_snap, 0);
+            }
+        }
+        empty: [0]u8;
+        out: Text;
+        FinishReply(RCLUNK, tag, empty[:], *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    if kind == TSTAT {
+        if pkt.count < 11 { EmitError(tag, "short Tstat", replies); return }
+        idx := FindFid(s, ReadU32(pkt, 7));
+        if idx < 0 { EmitError(tag, "bad fid", replies); return }
+        st: Vec(u8);
+        PackDir(*st, s.fids[idx].qpath);
+        body: Vec(u8);
+        PushU16(*body, cast(u16)st.count);
+        unused BuilderAppend(body, TextView(VecSlice(st, 0, st.count)));
+        out: Text;
+        FinishReply(RSTAT, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+    EmitError(tag, "unsupported 9P message", replies);
+}

@@ -1,0 +1,94 @@
+// Table-driven unit tests for appl/demo/whiteboard/wbsrv_model.zi.
+#import "std/vec"
+using Model :: #import "wbsrv_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+MakePacket :: (kind: u8, tag: u16, payload: []u8, out: *Vec(u8)) {
+    unused VecResize(<<out, 0);
+    Model.PushU32(out, cast(u32)(7 + payload.count));
+    Model.PushU8(out, kind);
+    Model.PushU16(out, tag);
+    unused BuilderAppend(<<out, TextView(payload));
+}
+
+main :: () -> s32 {
+    srv: Model.Server;
+    Model.InitServer(*srv);
+
+    // 1. Stroke drawing validation
+    Expect(Model.DrawStrokes(*srv, "255 1 10 20") == "bad data", "reject short stroke");
+    Expect(Model.DrawStrokes(*srv, "255 1 10 20 30") == "bad data", "reject odd token count");
+    Expect(Model.DrawStrokes(*srv, "255 1 10 20 30 20") == "", "accept valid stroke");
+    Expect(srv.pixels[20 * Model.WBW + 20] == 255, "stroke pixel painted on canvas");
+
+    // 2. SnapshotBit header + size
+    snap: Vec(u8);
+    Model.SnapshotBit(*srv, *snap);
+    Expect(snap.count == 60 + Model.PIXELS_LEN, "wb.bit snapshot size");
+    Expect(TextView(VecSlice(snap, 0, 60)) == "         m8           0           0         600         400 ", "wb.bit m8 header");
+
+    // 3. 9P2000 protocol: attach -> walk wb.bit (write denied) -> walk strokes (read parked, write broadcasts)
+    pkt: Vec(u8);
+    body: Vec(u8);
+    replies: Vec(Text);
+
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 0xFFFFFFFF);
+    Model.PushStr(*body, "inferno");
+    Model.PushStr(*body, "");
+    MakePacket(Model.TATTACH, 1, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RATTACH, "Rattach");
+
+    // Walk & open strokes on fid 2
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 2);
+    Model.PushU16(*body, 1);
+    Model.PushStr(*body, "strokes");
+    MakePacket(Model.TWALK, 2, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RWALK, "Rwalk strokes");
+
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU8(*body, 2);
+    MakePacket(Model.TOPEN, 3, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.ROPEN, "Ropen strokes");
+
+    // Park a read on strokes
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, 512);
+    MakePacket(Model.TREAD, 4, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 0, "strokes read parked");
+
+    // Write valid stroke -> replies Rwrite + wakes pending Rread
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    stroke_msg := "255 2 5 5 15 15";
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, cast(u32)stroke_msg.count);
+    unused BuilderAppend(body, stroke_msg);
+    MakePacket(Model.TWRITE, 5, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 2 && replies[0].bytes[4] == Model.RWRITE && replies[1].bytes[4] == Model.RREAD, "write + broadcast");
+
+    if failures == 0 { print("wbsrv_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

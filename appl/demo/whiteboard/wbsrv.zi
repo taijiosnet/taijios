@@ -1,0 +1,116 @@
+// Collaborative whiteboard 9P2000 server mounted at mntpt,
+// ported from appl/demo/whiteboard/wbsrv.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using Clock :: #import "taijios_clock"
+using IO :: #import "taijios_io"
+using Namespace :: #import "taijios_namespace"
+using Model :: #import "wbsrv_model"
+
+SAVE_INTERVAL_MS :: 300000;
+
+ReadExact :: (fd: s32, buf: []u8) -> bool {
+    got: s64 = 0;
+    while got < buf.count {
+        n := IO.Read(fd, buf[got:]);
+        if n <= 0 { return false }
+        got += cast(s64)n;
+    }
+    return true;
+}
+
+SaveSnapshot :: (s: *Model.Server, path: string) {
+    fd := IO.Open(path, 1);
+    if fd < 0 { return }
+    snap: Vec(u8);
+    Model.SnapshotBit(s, *snap);
+    at: s64 = 0;
+    raw := TextView(VecSlice(snap, 0, snap.count));
+    while at < raw.count {
+        chunk := raw.count - at;
+        if chunk > 8192 { chunk = 8192 }
+        n := IO.Write(fd, raw[at:at + chunk]);
+        if n <= 0 { break }
+        at += cast(s64)n;
+    }
+    unused IO.Close(fd);
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    if argc < 1 {
+        print("wbsrv: usage: wbsrv mntpt [savefile]\n");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    mntpt := Args.Operand(0);
+    savefile := ifx argc >= 2 then Args.Operand(1) else "";
+
+    srv: Model.Server;
+    Model.InitServer(*srv);
+
+    if savefile.count > 0 {
+        fd := IO.Open(savefile, 0);
+        if fd >= 0 {
+            data: Vec(u8);
+            buf: [8192]u8;
+            while true {
+                n := IO.Read(fd, buf[:]);
+                if n <= 0 { break }
+                unused BuilderAppend(data, TextView(buf[:n]));
+                if data.count > 512000 { break }
+            }
+            unused IO.Close(fd);
+            unused Model.LoadBitPixels(*srv, VecSlice(data, 0, data.count));
+        }
+    }
+
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 {
+        print("wbsrv: pipe failed: %\n", Namespace.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    ticket := Namespace.MountAsync(ends[1], -1, mntpt, Namespace.Before, "");
+    unused IO.Close(ends[1]);
+    if ticket <= 0 {
+        unused IO.Close(ends[0]);
+        print("wbsrv: mount failed: %\n", Namespace.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    pkt: Vec(u8);
+    replies: Vec(Text);
+    hdr: [4]u8;
+    mount_finished := false;
+    next_save := Clock.Millis() + SAVE_INTERVAL_MS;
+
+    while ReadExact(ends[0], hdr[:]) {
+        size := cast(s64)Model.ReadU32(hdr[:], 0);
+        if size < 7 || size > 65536 { break }
+        if !VecResizeBounded(pkt, size, 65536) { break }
+        pkt_slice := VecSlice(pkt, 0, size);
+        for i: 0..3 { pkt_slice[i] = hdr[i] }
+        if !ReadExact(ends[0], pkt_slice[4:size]) { break }
+
+        unused VecResize(replies, 0);
+        Model.HandlePacket(*srv, pkt_slice, *replies);
+        for i: 0..replies.count-1 {
+            out := TextView(replies[i]);
+            if IO.Write(ends[0], out) < out.count { break }
+        }
+        if !mount_finished && srv.attached {
+            unused Namespace.MountDone(ticket, true);
+            mount_finished = true;
+        }
+        if savefile.count > 0 && Clock.Millis() >= next_save {
+            SaveSnapshot(*srv, savefile);
+            next_save = Clock.Millis() + SAVE_INTERVAL_MS;
+        }
+    }
+
+    unused IO.Close(ends[0]);
+    return 0;
+}

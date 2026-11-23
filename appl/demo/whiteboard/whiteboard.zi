@@ -117,20 +117,38 @@ ApplyStrokeText :: (text: string) -> bool {
 
 PollRemoteStrokes :: () -> bool {
     if !state.connected || strokes_fd < 0 { return false }
-    meta: [12]u8;
-    if IO.Stat(TextView(strokes_path), meta[:]) != 0 { return false }
-    size := Model.ParseFileSize(meta[:]);
-    if size <= state.read_offset { return false }
-    if IO.Seek(strokes_fd, state.read_offset, SEEK_START) < 0 { return false }
     buf: [4096]u8;
     changed := false;
-    while state.read_offset < size {
-        n := IO.Read(strokes_fd, buf[:]);
-        if n <= 0 { break }
-        state.read_offset += cast(s64)n;
+    while true {
+        n := IO.PollRead(strokes_fd, buf[:]);
+        if n == -2 { break }
+        if n <= 0 {
+            unused IO.Close(strokes_fd);
+            strokes_fd = -1;
+            state.connected = false;
+            unused Surface.SetTitle("Whiteboard (Disconnected)");
+            break;
+        }
         if ApplyStrokeText(TextView(buf[:n])) { changed = true }
     }
     return changed;
+}
+
+LoadInitialBit :: (dir: string) {
+    bit_path: Text;
+    Model.ServicePath(dir, "wb.bit", *bit_path);
+    fd := IO.Open(TextView(bit_path), 0);
+    if fd < 0 { return }
+    data: Vec(u8);
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(data, TextView(buf[:n]));
+        if data.count > 1048576 { break }
+    }
+    unused IO.Close(fd);
+    unused Model.LoadBitToRGBA(VecSlice(data, 0, data.count), canvas_rgba[:], Model.CANVAS_W, Model.CANVAS_H);
 }
 
 SendStroke :: (colour: u32, width: s32, p0: Model.Point, p1: Model.Point) {
@@ -153,8 +171,9 @@ main :: () -> s32 {
     Model.InitState(*state);
     Model.ServicePath(servicedir, "strokes", *strokes_path);
 
-    // Clear canvas to white.
+    // Clear canvas to white, then load initial wb.bit from service if available.
     FillRect(canvas_rgba[:], Model.CANVAS_W, Model.CANVAS_H, 0, 0, Model.CANVAS_W, Model.CANVAS_H, Model.COLOR_WHITE);
+    LoadInitialBit(servicedir);
 
     // Connect to strokes service if available.
     fd := IO.Open(TextView(strokes_path), ORDWR);

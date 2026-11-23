@@ -1,8 +1,6 @@
 <../../../mkconfig
 
 TARG=\
-		wbsrv.dis\
-		whiteboard.dis\
 
 SHTARG=\
 		runwb.sh\
@@ -10,17 +8,29 @@ SHTARG=\
 MODULES=\
 
 SYSMODULES= \
-	draw.m\
-	sys.m\
-	tk.m\
-	tkclient.m\
 
 DISBIN=$ROOT/dis/demo/whiteboard
 
 <$ROOT/mkfiles/mkdis
 
+wbsrv.zx: wbsrv.zi wbsrv_model.zi ../../cmd/taijios_args.zi ../../cmd/taijios_clock.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_clock --bind-host taijios_io --bind-host taijios_namespace --entry wbsrv:main -o $target wbsrv.zi
+
+$DISBIN/wbsrv.zx: wbsrv.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 wbsrv.zx "$staged" && mv "$staged" "$target"
+
+whiteboard.zx: whiteboard.zi whiteboard_model.zi ../../cmd/tcltk/zx_surface.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_args --bind-host taijios_io --entry whiteboard:main -o $target whiteboard.zi
+
+$DISBIN/whiteboard.zx: whiteboard.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 whiteboard.zx "$staged" && mv "$staged" "$target"
+
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES
+install:V:	$SHFILES $DISBIN/wbsrv.zx $DISBIN/whiteboard.zx
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 
