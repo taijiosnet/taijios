@@ -424,6 +424,9 @@ RunGenerator :: (x: *Exec, item: s32) -> s32 {
     op := items[item].op;
     c := items[item].cmd;
     if c < 0 { return -1 }
+    // cmds builds "cmdt cmd", whose left half is empty; the block it names
+    // is the right half.
+    while c >= 0 && cmds[c].op == CSEQ && cmds[c].left < 0 { c = cmds[c].right }
     if op == IBACKQ { return QuoteGen(x, c, true) }
     if op == IQUOTE { return QuoteGen(x, c, false) }
     if op == IINPIPE { return PipeGen(x, c, false) }
@@ -531,14 +534,73 @@ CmdWords :: (c: s32) -> Vec(Text) {
     return out
 }
 
-// <{...} and >{...}: run the list beside the shell and return the path of a
-// named pipe the command can read or write.
+// <{...} and >{...}: run the list beside the shell with one end of a named
+// pipe on its standard input or output, and return the pipe's other end as
+// the path the command reads or writes.
+//
+// The pipe itself is served from /tmp/pipes, as the ZX shell's own named
+// pipes are. What is not right yet is the argument list the generator sits
+// in: the parse's item pool is shared with the block's own words, so a
+// command that takes the generator as an operand also sees those words.
+// The pipe path is appended last, so a command that reads its last operand
+// still works.
 PipeGen :: (x: *Exec, c: s32, write: bool) -> s32 {
-    unused x;
-    unused c;
-    unused write;
-    ReportItem(x, c, "pipe generators are not available in this guest");
-    return -1
+    dir, ok := NamedPipe(x);
+    if !ok { return -1 }
+    // "data" is the end the command uses; "data1" the one the child holds.
+    other: Vec(u8);
+    BuilderPrint(*other, "%/data1", TextView(dir));
+    h := Io.Open(TextView(other[:]), 1);
+    if h < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "mash: cannot open %: %\n", TextView(other[:]), Io.Error());
+        ExecError(x, TextView(msg[:]));
+        return -1
+    }
+    childfd: s32 = 1;
+    if !write { childfd = 0 }
+    s: Saved;
+    SaveFds(x, *s);
+    x.env.fds[childfd] = h;
+    words := CmdWords(c);
+    batch: Batch;
+    unused StartChild(x, *batch, *words, x.env.fds[0], x.env.fds[1], x.env.fds[2]);
+    RestoreFds(x, *s);
+    unused Io.Close(h);
+    path: Vec(u8);
+    BuilderPrint(*path, "%/data", TextView(dir));
+    return ItemW(TextView(path[:]))
+}
+
+pipeseq: s32;
+
+// A directory under /tmp/pipes holding a fresh pipe's data and data1, as the
+// ZX shell's NamedPipe makes one: an empty directory the pipe device is
+// bound onto.
+NamedPipe :: (x: *Exec) -> (dir: Text, ok: bool) {
+    top := Io.Create("/tmp/pipes", 0, cast(s32)0x800001ff);
+    if top >= 0 { unused Io.Close(top) }
+    d: Vec(u8);
+    while true {
+        pipeseq += 1;
+        VecClear(d);
+        BuilderPrint(*d, "/tmp/pipes/mash.%", pipeseq);
+        h := Io.CreateNew(TextView(d[:]), 0, cast(s32)0x800001ff);
+        if h >= 0 { unused Io.Close(h); break }
+        if pipeseq > 100000 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "mash: cannot make %: %\n", TextView(d[:]), Io.Error());
+            ExecError(x, TextView(msg[:]));
+            return TextCopy(""), false
+        }
+    }
+    if Ns.Bind("#|", TextView(d[:]), 0) != 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "mash: cannot bind pipe onto %: %\n", TextView(d[:]), Ns.Error());
+        ExecError(x, TextView(msg[:]));
+        return TextCopy(""), false
+    }
+    return TextCopy(TextView(d[:])), true
 }
 
 // Redirections, as mkredirs and redirect: open each operand and hand the
