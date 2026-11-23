@@ -10,9 +10,10 @@
 // matched: it hung, or printed debugging, and the case holds the result
 // the original meant.
 //
-// /filter runs shell commands and waits for /dis/sh.zx; /auth's protocol
-// waits for a ZX Inferno Auth client; only its key file is checked here.
-// /fs/match -r waits for a regular expression library.
+// /fs/exec, /fs/pipe, /fs/query and /fs/run run their command through
+// /dis/sh.zx, as the Dis modules ran one in a shell of their own. /auth's
+// protocol waits for a ZX Inferno Auth client; only its key file is
+// checked here. /fs/match -r waits for a regular expression library.
 //
 // From the TaijiOS root, after "(cd appl/alphabet && mk install-zx)":
 //     ziran run --target=c --root tests/alphabet tests/alphabet/alphabet_test.zi -- [EMU]
@@ -251,15 +252,41 @@ block10: [16]Case = Case.[
     .{name = "fs:proto-star", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/proto -r tree {/echo '*'}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\n", err = ""},
 ];
 
-block11: [5]Case = Case.[
+block11: [16]Case = Case.[
     .{name = "fs:proto-filter", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/filter {/fs/proto -r tree {/echo +}} {/fs/match '*.txt'}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\n", err = ""},
     .{name = "fs:mergewrite", script = "typeset /fs\n- {/fs/write {/fs/walk tree} copy5}\n- {/fs/mergewrite -v {/fs/walk tree2} copy5 {/fs/compose AoverB}}\n- {/print {/fs/print {/fs/entries {/fs/walk copy5}}} 1}\n- {/print {/read copy5/a.txt} 1}\n", input = "", status = "", out = "copy5\ncopy5/a.txt\ncopy5/b.b\ncopy5/sub\ncopy5/sub/c.txt\ncopy5/sub/z.txt\ncopy5/x.b\nother\n", err = "alphabet: 2. mergewrite: create copy5 20000000700\nalphabet: 2. mergewrite: removing copy5/a.txt\nalphabet: 2. mergewrite: create copy5/a.txt 600\nalphabet: 2. mergewrite: removing copy5/sub\nalphabet: 2. mergewrite: create copy5/sub 20000000700\nalphabet: 2. mergewrite: create copy5/sub/c.txt 600\nalphabet: 2. mergewrite: create copy5/sub/z.txt 600\nalphabet: 2. mergewrite: create copy5/x.b 600\n"},
     .{name = "fs:mergewrite-A", script = "typeset /fs\n- {/fs/write {/fs/walk tree} copy6}\n- {/fs/mergewrite {/fs/walk tree2} copy6 {/fs/compose B}}\n- {/print {/fs/print {/fs/entries {/fs/walk copy6}}} 1}\n", input = "", status = "", out = "copy6\ncopy6/a.txt\ncopy6/b.b\ncopy6/sub\ncopy6/sub/c.txt\ncopy6/sub/d.b\ncopy6/sub/deep\ncopy6/sub/deep/e.txt\n", err = ""},
     .{name = "fs:mergewrite-n", script = "typeset /fs\n- {/fs/mergewrite -n -v {/fs/walk tree2} copy7 {/fs/newer}}\n- {/print {/fs/print {/fs/entries {/fs/walk copy7}}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 2. mergewrite: create copy7 20000000700\nalphabet: 2. mergewrite: create copy7/a.txt 600\nalphabet: 2. mergewrite: create copy7/sub 20000000700\nalphabet: 2. mergewrite: create copy7/sub/c.txt 600\nalphabet: 2. mergewrite: create copy7/sub/z.txt 600\nalphabet: 2. mergewrite: create copy7/x.b 600\nfs: walk: cannot stat copy7: 'copy7' file does not exist\nalphabet: 0. eval: error: command failed\n"},
     .{name = "fs:mergewrite-new", script = "typeset /fs\n- {/fs/mergewrite {/fs/walk tree2} copy8 {/fs/newer}}\n- {/print {/fs/print {/fs/entries {/fs/walk copy8}}} 1}\n", input = "", status = "", out = "copy8\ncopy8/a.txt\ncopy8/sub\ncopy8/sub/c.txt\ncopy8/sub/z.txt\ncopy8/x.b\n", err = ""},
+    .{name = "fs:fs-info", script = "typeset /fs\ninfo\n", input = "", status = "", out = "typeset /\n/auth [-v] [-k /string] [-C /string] /wfd -> /wfd\n/cat [/fd...] -> /fd\n/create /fd /string -> /status\n/dial /string -> /wfd\n/echo [-n] /string -> /fd\n/env /string -> /string\n/export /string -> /wfd\n/fd /string -> /wfd\n/filter /fd /cmd [/string...] -> /fd\n/mount [-abc] [-x /string] /wfd /string -> /status\n/par [/status...] -> /status\n/parse /string -> /cmd\n/pretty /cmd -> /string\n/print /fd /string -> /status\n/read /string -> /fd\n/readall /fd -> /string\n/rewrite [-d /string] /cmd /cmd -> /cmd\n/seq [-ao] [/status...] -> /status\n/unparse /cmd -> /string\n/w2fd /wfd -> /fd\n/wait /status -> /string\n\ntypeset /fs\n/fs/and /fs/gate /fs/gate [/fs/gate...] -> /fs/gate\n/fs/bundle /fs/fs -> /fd\n/fs/chstat [-c] [-p /fs/gate] [-m /string] [-u /string] [-g /string] [-t /string] [-a /string] /fs/fs -> /fs/fs\n/fs/compose [-d] /string -> /fs/selector\n/fs/depth /string -> /fs/gate\n/fs/entries /fs/fs -> /fs/entries\n/fs/exec [-pP] [-n /string] [-t /cmd] /fs/entries /cmd -> /status\n/fs/filter [-d] /fs/fs /fs/gate -> /fs/fs\n/fs/ls [-um] /fs/entries -> /fd\n/fs/match [-ar] /string -> /fs/gate\n/fs/merge [-1] [-c /fs/selector] /fs/fs /fs/fs [/fs/fs...] -> /fs/fs\n/fs/mergewrite [-vn] /fs/fs /string /fs/selector -> /status\n/fs/mode /string -> /fs/gate\n/fs/newer [-d] -> /fs/selector\n/fs/not /fs/gate -> /fs/gate\n/fs/or /fs/gate /fs/gate [/fs/gate...] -> /fs/gate\n/fs/path [-x] /string [/string...] -> /fs/gate\n/fs/pipe [-1pP] /fs/fs /cmd -> /status\n/fs/print /fs/entries -> /fd\n/fs/proto [-r /string] /fd -> /fs/fs\n/fs/query [-pP] /cmd -> /fs/gate\n/fs/run /cmd -> /string\n/fs/select /fs/entries /fs/gate -> /fs/entries\n/fs/setroot [-c] /fs/fs /string -> /fs/fs\n/fs/size /fs/entries -> /fd\n/fs/unbundle /fd -> /fs/fs\n/fs/walk [-b /string] /string -> /fs/fs\n/fs/write [-v] /fs/fs /string -> /status\n", err = ""},
+    .{name = "fs:exec", script = "typeset /fs\n- {/fs/exec {/fs/entries {/fs/walk tree/sub}} \"{echo file $file}}\n\n", input = "", status = "", out = "file tree/sub\nfile tree/sub/c.txt\nfile tree/sub/d.b\nfile tree/sub/deep\nfile tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:exec-n2", script = "typeset /fs\n- {/fs/exec -n 2 {/fs/entries {/fs/walk tree/sub}} \"{echo $file}}\n\n", input = "", status = "", out = "tree/sub tree/sub/c.txt\ntree/sub/d.b tree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:exec-p", script = "typeset /fs\n- {/fs/exec -p {/fs/entries {/fs/walk tree/sub}} \"{echo $file $mode $mtime $length}}\n\n", input = "", status = "", out = "tree/sub d-rwx------ 1577979240 0\ntree/sub/c.txt --rw------- 1577979240 4\ntree/sub/d.b --rw------- 1577979240 4\ntree/sub/deep d-rwx------ 1577979240 0\ntree/sub/deep/e.txt --rw------- 1577979240 2\n", err = ""},
+    .{name = "fs:exec-P", script = "typeset /fs\n- {/fs/exec -P {/fs/entries {/fs/walk tree/sub}} \"{echo $name $dtype}}\n\n", input = "", status = "", out = "tree/sub U\nc.txt U\nd.b U\ndeep U\ne.txt U\n", err = ""},
+    .{name = "fs:exec-t", script = "typeset /fs\n- {/fs/exec -t \"{echo done $#file} {/fs/entries {/fs/walk tree/sub}} \"{echo $file}}\n\n", input = "", status = "", out = "tree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\ndone 0\n", err = ""},
+    .{name = "fs:exec-fail", script = "typeset /fs\n- {/fs/exec {/fs/entries {/fs/walk tree/sub}} \"{test -d $file}}\n\n", input = "", status = "", out = "", err = ""},
+    .{name = "fs:exec-n0", script = "typeset /fs\n- {/fs/exec -n 0 {/fs/entries {/fs/walk tree/sub}} \"{echo $file}}\n\n", input = "", status = "no value", out = "", err = "fs: exec: invalid argument to -n\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:exec-pn", script = "typeset /fs\n- {/fs/exec -p -n 2 {/fs/entries {/fs/walk tree/sub}} \"{echo $file}}\n\n", input = "", status = "no value", out = "", err = "fs: exec: cannot specify -p with -n 2\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:exec-block", script = "typeset /fs\n- {/fs/exec {/fs/entries {/fs/walk tree/sub}} {echo $file}}\n\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: $file not defined or cannot be reused\n"},
+    .{name = "fs:query", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/query \"{test -d $file}}}} 1}\n\n", input = "", status = "", out = "tree\ntree/sub\ntree/sub/deep\n", err = ""},
 ];
 
-CASES :: 181;
+block12: [12]Case = Case.[
+    .{name = "fs:query-p", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/query -p \"{test $length -gt 3}}}} 1}\n\n", input = "", status = "", out = "tree/a.txt\ntree/b.b\ntree/sub/c.txt\ntree/sub/d.b\n", err = ""},
+    .{name = "fs:query-P", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree/sub}} {/fs/query -P \"{echo $name $dtype}}}} 1}\n", input = "", status = "", out = "tree/sub U\ntree/sub\nc.txt U\ntree/sub/c.txt\nd.b U\ntree/sub/d.b\ndeep U\ntree/sub/deep\ne.txt U\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:pipe", script = "typeset /fs\n- {/fs/pipe {/fs/walk tree/sub} \"{cat}}\n\n", input = "", status = "", out = "sea\ndee\ne\n", err = ""},
+    .{name = "fs:pipe-p", script = "typeset /fs\n- {/fs/pipe -p {/fs/walk tree/sub} \"{echo $file $length}}\n\n", input = "", status = "", out = "tree/sub/c.txt 4\ntree/sub/d.b 4\ntree/sub/deep/e.txt 2\n", err = ""},
+    .{name = "fs:pipe-1", script = "typeset /fs\n- {/fs/pipe -1 {/fs/walk tree/sub} \"{cat}}\n\n", input = "", status = "", out = "sea\ndee\ne\n", err = ""},
+    .{name = "fs:pipe-1p", script = "typeset /fs\n- {/fs/pipe -1 -p {/fs/walk tree/sub} \"{cat}}\n\n", input = "", status = "no value", out = "", err = "fs: exec: cannot specify -p with -1\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:run", script = "typeset /fs\n- {/print {/echo {/fs/run \"{s=hello}}} 1}\n\n", input = "", status = "", out = "hello\n", err = ""},
+    .{name = "fs:run-side", script = "typeset /fs\n- {/print {/echo {/fs/run \"{s=hello; echo side}}} 1}\n\n", input = "", status = "", out = "side\nhello\n", err = ""},
+    .{name = "fs:run-two", script = "typeset /fs\n- {/print {/echo {/fs/run \"{s=(a b)}}} 1}\n\n", input = "", status = "no value", out = "", err = "fs: run: $s has 2 members; exactly one is required\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:run-none", script = "typeset /fs\n- {/print {/echo {/fs/run \"{x=1}}} 1}\n\n", input = "", status = "no value", out = "", err = "fs: run: $s has 0 members; exactly one is required\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:run-raise", script = "typeset /fs\n- {/print {/echo {/fs/run \"{raise oops}}} 1}\n\n", input = "", status = "no value", out = "", err = "sh: raise: './raise' file does not exist\nfs: run: $s has 0 members; exactly one is required\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:run-cmd", script = "typeset /fs\n- {/print {/echo {/fs/run \"{s={a b}}}} 1}\n\n", input = "", status = "", out = "{a b}\n", err = ""},
+];
+
+CASES :: 204;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -285,7 +312,9 @@ CaseAt :: (i: s64) -> Case {
 
     if i < 176 { return block10[i - 160] }
 
-    if i < 181 { return block11[i - 176] }
+    if i < 192 { return block11[i - 176] }
+
+    if i < 204 { return block12[i - 192] }
 
     return block0[0];
 }

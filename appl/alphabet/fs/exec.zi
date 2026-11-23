@@ -1,0 +1,90 @@
+// /fs/exec [-n string] [-t cmd] [-pP] entries cmd -> status: run a shell
+// command for each entry, or each -n of them, with $file the paths; -p sets
+// the entry's mode, uid, mtime and length, -P its whole stat; -t runs a
+// command after the last.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Sh :: #import "shcmd";
+Run1 :: #import "fs/shellrun";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "exec", "rtc-ns-tc-p-P", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("exec");
+        p.run = RunExec;
+        prod = Va.AddProducer(p);
+    }
+    n: s64 = 1;
+    pflag: s64 = 0;
+    tcmd: s32 = -1;
+    for i: 0..Al.OptCount(call) - 1 {
+        opt := Al.OptLetter(call, i);
+        if opt == #char "n" {
+            n = Al.LimboInt(Va.ValueText(Al.OptArg(call, i, 0)));
+            if n <= 0 {
+                unused Io.WriteBytes(2, "fs: exec: invalid argument to -n\n");
+                return -1;
+            }
+        } else if opt == #char "t" {
+            tcmd = Va.CmdOf(Al.OptArg(call, i, 0));
+        } else if opt == #char "p" {
+            pflag = 1;
+        } else if opt == #char "P" {
+            pflag = 2;
+        }
+    }
+    if pflag != 0 && n > 1 {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: exec: cannot specify -p with -n %\n", n);
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return -1;
+    }
+    v := Va.NewValue(#char "r", prod);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetCmd(v, Va.CmdOf(call.args[1]));
+    Va.SetN0(v, n);
+    Va.SetN1(v, pflag);
+    Va.SetN2(v, tcmd);
+    Va.SetErrc(v, Va.ReportStart(call.report, "exec"));
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+// Each run is a shell of its own; a failure in one does not stop the next.
+Shell :: (prelude: string, cmd: s32) {
+    line := Al.Join(prelude, Sh.CmdString(cmd));
+    launch := Run1.Start(line, -1);
+    if launch.id != 0 { unused Run1.Wait(launch.id) }
+}
+
+RunExec :: (v: s32) -> string {
+    src := Va.Kid(v, 0);
+    n := Va.N0(v);
+    pflag := Va.N1(v);
+    files: Vec(string);
+    while true {
+        e := EntriesNext(src, true);
+        if !e.ok { break }
+        VecPush(files, e.path);
+        if files.count >= n {
+            prelude: Vec(u8);
+            Run1.Assign(*prelude, "file", files[:]);
+            if pflag != 0 { Run1.StatEnv(*prelude, e.dir, pflag) }
+            Shell(BuilderFinish(prelude), Va.CmdOf(v));
+            VecClear(files);
+        }
+    }
+    if files.count > 0 {
+        prelude: Vec(u8);
+        Run1.Assign(*prelude, "file", files[:]);
+        Shell(BuilderFinish(prelude), Va.CmdOf(v));
+    }
+    if Va.N2(v) >= 0 { Shell("file=();", cast(s32)Va.N2(v)) }
+    return "";
+}

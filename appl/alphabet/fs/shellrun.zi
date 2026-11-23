@@ -1,0 +1,128 @@
+// Running a shell command for an fs module, as the Dis modules ran one in
+// a shell context of their own: here in /dis/sh.zx, with the variables
+// they set ($file, and with -p or -P the entry's stat) assigned before it.
+#import "std/vec";
+using Io :: #import "taijios_io";
+Sh :: #import "shcmd";
+Process :: #import "taijios_process";
+using Fs :: #import "fs/fsvalue";
+
+SHELL :: "/dis/sh.zx";
+
+// name=(values...); in shell syntax, appended to out.
+Assign :: (out: *Vec(u8), name: string, values: []string) {
+    BuilderAppend(<<out, name);
+    BuilderAppend(<<out, "=(");
+    for values {
+        if it_index > 0 { VecPush(<<out, #char " ") }
+        BuilderAppend(<<out, Sh.Quote(it, false));
+    }
+    BuilderAppend(<<out, ");");
+}
+
+Assign1 :: (out: *Vec(u8), name: string, value: string) {
+    one := string.[value];
+    Assign(out, name, one[:]);
+}
+
+// setstatenv: mode, uid, mtime and length; with pflag 2 also name, gid,
+// muid, qid, atime, dtype and dev.
+StatEnv :: (out: *Vec(u8), d: FsDir, pflag: s64) {
+    Assign1(out, "mode", Modes(d.mode));
+    Assign1(out, "uid", d.uid);
+    Assign1(out, "mtime", Number(cast(s64)d.mtime));
+    Assign1(out, "length", Number(d.length));
+    if pflag > 1 {
+        Assign1(out, "name", d.name);
+        Assign1(out, "gid", d.gid);
+        Assign1(out, "muid", d.muid);
+        hex: Vec(u8);
+        BuilderAppend(hex, "16r");
+        Hex(*hex, d.qpath);
+        qid := string.[BuilderFinish(hex), Number(cast(s64)d.qvers)];
+        Assign(out, "qid", qid[:]);
+        Assign1(out, "atime", Number(cast(s64)d.atime));
+        c: Vec(u8);
+        AppendRune(*c, d.dtype);
+        Assign1(out, "dtype", BuilderFinish(c));
+        Assign1(out, "dev", Number(cast(s64)d.dev));
+    }
+}
+
+// Starts the shell on a command line; input is the handle for its
+// standard input, or -1 for this program's. The launch id, or 0.
+Start :: (line: string, input: s32) -> Process.Launch {
+    operands := string.["-c", line];
+    return Process.StartWith(SHELL, operands[:], input, -1, -1);
+}
+
+// Waits for a launched shell: its status, "" for success.
+Wait :: (id: s32) -> string {
+    outcome := Process.Wait(id);
+    if outcome.status == 0 || (outcome.status == 1 && outcome.value == 0) { return "" }
+    if outcome.error.count > 0 { return TextDetach(TextCopy(outcome.error)) }
+    out: Vec(u8);
+    BuilderPrint(*out, "%", outcome.value);
+    return BuilderFinish(out);
+}
+
+Modes :: (mode: u32) -> string {
+    tab := string.["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
+    out: Vec(u8);
+    if (mode & DMDIR) != 0 {
+        VecPush(out, #char "d");
+    } else if (mode & DMAPPEND) != 0 {
+        VecPush(out, #char "a");
+    } else if (mode & DMAUTH) != 0 {
+        VecPush(out, #char "A");
+    } else {
+        VecPush(out, #char "-");
+    }
+    VecPush(out, ifx (mode & DMEXCL) != 0 then #char "l" else #char "-");
+    BuilderAppend(out, tab[(mode >> 6) & 7]);
+    BuilderAppend(out, tab[(mode >> 3) & 7]);
+    BuilderAppend(out, tab[mode & 7]);
+    return BuilderFinish(out);
+}
+
+Number :: (n: s64) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "%", n);
+    return BuilderFinish(out);
+}
+
+Hex :: (out: *Vec(u8), n: u64) {
+    digits: [16]u8;
+    k := 0;
+    x := n;
+    while true {
+        d := x & 15;
+        digits[k] = cast(u8)(ifx d < 10 then #char "0" + d else #char "a" + d - 10);
+        k += 1;
+        x >>= 4;
+        if x == 0 { break }
+    }
+    while k > 0 {
+        k -= 1;
+        VecPush(<<out, digits[k]);
+    }
+}
+
+AppendRune :: (out: *Vec(u8), r_in: s32) {
+    r := ifx r_in < 0 || r_in > 0x10FFFF then 0xFFFD else r_in;
+    if r < 0x80 {
+        VecPush(<<out, cast(u8)r);
+    } else if r < 0x800 {
+        VecPush(<<out, cast(u8)(0xC0 | (r >> 6)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    } else if r < 0x10000 {
+        VecPush(<<out, cast(u8)(0xE0 | (r >> 12)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 6) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    } else {
+        VecPush(<<out, cast(u8)(0xF0 | (r >> 18)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 12) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 6) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    }
+}

@@ -1,0 +1,37 @@
+// /fs/query [-pP] cmd -> gate: entries for which a shell command succeeds,
+// run with $file the entry's path; -p sets its mode, uid, mtime and
+// length, -P its whole stat.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Sh :: #import "shcmd";
+Run1 :: #import "fs/shellrun";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "query", "pc-p-P", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("query", Gate) }
+    pflag: s64 = 0;
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "p" { pflag = 1 }
+        if Al.OptLetter(call, i) == #char "P" { pflag = 2 }
+    }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetCmd(v, Va.CmdOf(call.args[0]));
+    Va.SetN0(v, pflag);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Gate :: (v: s32, e: *EntryItem) -> bool {
+    prelude: Vec(u8);
+    Run1.Assign1(*prelude, "file", e.path);
+    if Va.N0(v) != 0 { Run1.StatEnv(*prelude, e.dir, Va.N0(v)) }
+    BuilderAppend(prelude, Sh.CmdString(Va.CmdOf(v)));
+    launch := Run1.Start(BuilderFinish(prelude), -1);
+    if launch.id == 0 { return false }
+    return Run1.Wait(launch.id).count == 0;
+}

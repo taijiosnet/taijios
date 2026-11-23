@@ -1,0 +1,64 @@
+// /fs/run cmd -> string: run a shell command and give the one value it
+// leaves in $s.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Sh :: #import "shcmd";
+Quote :: #import "taijios_quote";
+Files :: #import "taijios_files";
+Run1 :: #import "fs/shellrun";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "run", "sc", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    c := Va.CmdOf(call.args[0]);
+    // $s comes back through a file: the command's own output is its own
+    count += 1;
+    path: Vec(u8);
+    BuilderPrint(*path, "/tmp/alphabet.run.%.%", Stamp(), count);
+    place := BuilderFinish(path);
+    line: Vec(u8);
+    BuilderAppend(line, "s=();");
+    BuilderAppend(line, Sh.CmdString(c));
+    BuilderPrint(*line, ";{echo $#s; echo ${quote $s}} > %", Sh.Quote(place, false));
+    launch := Run1.Start(BuilderFinish(line), -1);
+    status := ifx launch.id == 0 then launch.error else Run1.Wait(launch.id);
+    text: Text;
+    got := Files.ReadFile(place, *text, 1 << 20) == 0;
+    unused Io.Remove(place);
+    if !got {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: run: exception % raised in %\n", Ty.Q(status), Sh.CmdString(c));
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return -1;
+    }
+    body := TextView(text);
+    nl := 0;
+    while nl < body.count && body[nl] != #char "\n" { nl += 1 }
+    members := Al.LimboInt(body[0:nl]);
+    if members != 1 {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: run: $s has % members; exactly one is required\n", members);
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return -1;
+    }
+    rest := ifx nl < body.count then body[nl + 1:] else "";
+    if rest.count > 0 && rest[rest.count - 1] == #char "\n" { rest = rest[0:rest.count - 1] }
+    words: Vec(Text);
+    Quote.Unquoted(rest, *words);
+    value := ifx words.count > 0 then TextDetach(TextCopy(TextView(words[0]))) else "";
+    return Va.MkString(value);
+}
+
+#scope_file
+
+count: s64;
+
+Stamp :: () -> s64 {
+    time: [32]u8;
+    n := Files.ReadBytesAt("/dev/time", 0, time[:]);
+    v: s64 = 0;
+    if n > 0 { for time[:n] { if it >= #char "0" && it <= #char "9" { v = v * 10 + cast(s64)(it - #char "0") } } }
+    return v;
+}

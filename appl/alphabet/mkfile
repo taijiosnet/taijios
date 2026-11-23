@@ -121,6 +121,11 @@ ZXSOURCES=\
 	fs/merge.zi\
 	fs/mergewrite.zi\
 	fs/proto.zi\
+	fs/shellrun.zi\
+	fs/exec.zi\
+	fs/query.zi\
+	fs/pipe.zi\
+	fs/run.zi\
 
 alphabet.zx: $ZXSOURCES mkfile
 	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../lib --module-path main=main --module-path abc=abc --module-path fs=fs --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_files --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
