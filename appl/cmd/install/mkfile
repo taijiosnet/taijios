@@ -6,7 +6,6 @@ TARG=\
 	wdiff.dis\
 	inst.dis\
 	wrap.dis\
-	archfs.dis\
 	install.dis\
 	arch.dis\
 	proto.dis\
@@ -34,13 +33,16 @@ DISBIN=$ROOT/dis/install
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=mkproto ckproto proto2list mergelog updatelog applylog
-ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../taijios_clock.zi ../taijios_keyring.zi ../../lib/taijios_quote.zi
+ZXCOMMANDS=mkproto ckproto proto2list mergelog updatelog applylog archfs
+ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi arch_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../taijios_clock.zi ../taijios_keyring.zi ../taijios_namespace.zi ../../lib/taijios_quote.zi ../../lib/ninep.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
 updatelog.zx: updatelog.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_keyring --entry updatelog:main -o $target updatelog.zi
+
+archfs.zx: archfs.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_namespace --entry archfs:main -o $target archfs.zi
 
 &.zx: &.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi

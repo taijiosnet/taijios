@@ -1,0 +1,494 @@
+// Styx/9P2000 read-only archive file server (replaces appl/cmd/install/archfs.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Clock :: #import "taijios_clock";
+Namespace :: #import "taijios_namespace";
+using Ninep :: #import "ninep";
+Util :: #import "install_util";
+Arch :: #import "arch_lib";
+#import "std/format"
+#import "std/vec"
+
+Einuse :: "fid already in use";
+Ebadfid :: "bad fid";
+Eopen :: "fid already opened";
+Enotfound :: "file does not exist";
+Enotdir :: "not a directory";
+Eperm :: "permission denied";
+
+UID :: "inferno";
+GID :: "inferno";
+
+QTDIR :: 0x80;
+QTFILE :: 0x00;
+
+Node :: struct {
+    name: Text;
+    uid: Text;
+    gid: Text;
+    qid_path: u64;
+    qtype: s64;
+    mode: u32;
+    mtime: s32;
+    length: s64;
+    offset: s64;
+    parent: s64;
+    first_child: s64;
+    next_sibling: s64;
+}
+
+Fid :: struct {
+    fid: s64;
+    open: bool;
+    node: s64;
+}
+
+Server :: struct {
+    nodes: Vec(Node);
+    fids: Vec(Fid);
+    msize: s64;
+    ar: Arch.Archive;
+    next_qid: u64;
+    attached: bool;
+    skip: bool;
+}
+
+Basename :: (p: string) -> string {
+    i := p.count;
+    while i > 0 {
+        i -= 1;
+        if p[i] == 47 { return p[i + 1:] }
+    }
+    return p;
+}
+
+FilePrefix :: (prefix: string, s: string) -> bool {
+    n := prefix.count;
+    m := s.count;
+    if n > m { return false }
+    if s[:n] != prefix { return false }
+    if m > n && s[n] != 47 { return false }
+    return true;
+}
+
+Selected :: (s: string, prefixes: *Vec(Text)) -> bool {
+    for i: 0..prefixes.count - 1 {
+        if FilePrefix(TextView(prefixes.*[i]), s) { return true }
+    }
+    return false;
+}
+
+NewNode :: (srv: *Server, name: string, uid: string, gid: string, mode: u32, mtime: s32) -> s64 {
+    n: Node;
+    n.name = Util.CopyText(name);
+    n.uid = Util.CopyText(uid);
+    n.gid = Util.CopyText(gid);
+    n.qid_path = srv.next_qid;
+    srv.next_qid += 1;
+    n.qtype = ifx (mode & Stat.Directory) != 0 then QTDIR else QTFILE;
+    n.mode = mode;
+    n.mtime = mtime;
+    n.length = 0;
+    n.offset = 0;
+    n.parent = -1;
+    n.first_child = -1;
+    n.next_sibling = -1;
+    idx := srv.nodes.count;
+    VecPush(srv.nodes, n);
+    return idx;
+}
+
+LookupChild :: (srv: *Server, dir_idx: s64, name: string) -> s64 {
+    if name == "." { return dir_idx }
+    if name == ".." { return srv.nodes[dir_idx].parent }
+    cur := srv.nodes[dir_idx].first_child;
+    while cur >= 0 {
+        if TextView(srv.nodes[cur].name) == name { return cur }
+        cur = srv.nodes[cur].next_sibling;
+    }
+    return -1;
+}
+
+AppendChild :: (srv: *Server, parent_idx: s64, child_idx: s64) {
+    srv.nodes[child_idx].parent = parent_idx;
+    if srv.nodes[parent_idx].first_child < 0 {
+        srv.nodes[parent_idx].first_child = child_idx;
+        return;
+    }
+    cur := srv.nodes[parent_idx].first_child;
+    while srv.nodes[cur].next_sibling >= 0 {
+        cur = srv.nodes[cur].next_sibling;
+    }
+    srv.nodes[cur].next_sibling = child_idx;
+}
+
+SplitPath :: (p_in: string) -> (elem: string, rest: string) {
+    p := p_in;
+    while p.count > 0 && p[0] == 47 { p = p[1:] }
+    i: s64 = 0;
+    while i < p.count && p[i] != 47 { i += 1 }
+    if i == p.count { return p, "" }
+    return p[:i], p[i:];
+}
+
+MkdirNode :: (srv: *Server, path: string, mode: u32, mtime: s32, uid: string, gid: string, existsok: bool) -> s64 {
+    if path == "/" { return 0 }
+    d := NewNode(srv, Basename(path), uid, gid, mode, mtime);
+    cur_path := path;
+    prev: s64 = 0;
+    now_s := cast(s32)(Clock.UnixMillis() / 1000);
+    while cur_path.count > 0 {
+        elem, rest := SplitPath(cur_path);
+        if elem.count == 0 { break }
+        p := LookupChild(srv, prev, elem);
+        if rest.count == 0 {
+            if p >= 0 {
+                if !existsok && (srv.nodes[p].mode & Stat.Directory) == 0 {
+                    eb: Vec(u8);
+                    BuilderPrint(*eb, "addfile: % already there", path);
+                    Util.WriteErr(TextView(eb[:]));
+                }
+                return p;
+            }
+            AppendChild(srv, prev, d);
+            return d;
+        }
+        if p < 0 {
+            dir_node := NewNode(srv, elem, UID, GID, 0x1FD | Stat.Directory, now_s);
+            AppendChild(srv, prev, dir_node);
+            p = dir_node;
+        }
+        prev = p;
+        cur_path = rest;
+    }
+    return d;
+}
+
+Mkdirs :: (srv: *Server, name: string) {
+    now_s := cast(s32)(Clock.UnixMillis() / 1000);
+    basedir: Vec(u8);
+    i: s64 = 0;
+    while i < name.count {
+        while i < name.count && name[i] == 47 { i += 1 }
+        if i >= name.count { break }
+        start := i;
+        while i < name.count && name[i] != 47 { i += 1 }
+        if i >= name.count { break } // last component is the file itself
+        unused BuilderAppend(basedir, "/");
+        unused BuilderAppend(basedir, name[start:i]);
+        unused MkdirNode(srv, TextView(basedir[:]), 0x1FD | Stat.Directory, now_s, UID, GID, true);
+    }
+}
+
+ReadArch :: (srv: *Server, path: string, prefixes: *Vec(Text)) -> bool {
+    if !Arch.OpenArch(path, *srv.ar) {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fatal: cannot open %(%)\n\n", path, IO.Error());
+        Util.WriteErr(TextView(eb[:]));
+        return false;
+    }
+    while Arch.GetHdr(*srv.ar) {
+        aname := TextView(srv.ar.hdr.name);
+        if prefixes.count > 0 {
+            if !Selected(aname, prefixes) {
+                if srv.skip { return true }
+                if !Arch.Drain(*srv.ar, srv.ar.hdr.length) { break }
+                continue;
+            }
+            Mkdirs(srv, aname);
+        }
+        idx := MkdirNode(srv, aname, srv.ar.hdr.mode, srv.ar.hdr.mtime,
+                         TextView(srv.ar.hdr.uid), TextView(srv.ar.hdr.gid), false);
+        if (srv.ar.hdr.mode & Stat.Directory) == 0 {
+            srv.nodes[idx].length = srv.ar.hdr.length;
+            srv.nodes[idx].offset = srv.ar.pos;
+        }
+        if !Arch.Drain(*srv.ar, srv.ar.hdr.length) { break }
+    }
+    if srv.ar.err.bytes.count > 0 {
+        return false;
+    }
+    return true;
+}
+
+NodeToDir :: (srv: *Server, idx: s64, out: *Ninep.Dir) {
+    n := *srv.nodes[idx];
+    out.name = TextView(n.name);
+    out.uid = TextView(n.uid);
+    out.gid = TextView(n.gid);
+    out.muid = "";
+    out.qid.path = n.qid_path;
+    out.qid.version = 0;
+    out.qid.qtype = n.qtype;
+    out.mode = cast(s64)n.mode;
+    out.atime = cast(s64)n.mtime;
+    out.mtime = cast(s64)n.mtime;
+    out.length = n.length;
+    out.dtype = 88; // 'X'
+    out.dev = 0;
+}
+
+FindFid :: (srv: *Server, fid: s64) -> s64 {
+    for i: 0..srv.fids.count - 1 {
+        if srv.fids[i].fid == fid { return i }
+    }
+    return -1;
+}
+
+NewFid :: (srv: *Server, fid: s64) -> s64 {
+    if FindFid(srv, fid) >= 0 { return -1 }
+    f: Fid;
+    f.fid = fid;
+    f.open = false;
+    f.node = -1;
+    VecPush(srv.fids, f);
+    return srv.fids.count - 1;
+}
+
+FreeFid :: (srv: *Server, idx: s64) {
+    last := srv.fids.count - 1;
+    if idx != last {
+        srv.fids[idx].fid = srv.fids[last].fid;
+        srv.fids[idx].open = srv.fids[last].open;
+        srv.fids[idx].node = srv.fids[last].node;
+    }
+    VecResize(srv.fids, last);
+}
+
+SetErr :: (reply: *Ninep.Message, msg: string) {
+    reply.kind = Ninep.Rerror;
+    reply.ename = msg;
+}
+
+Handle :: (srv: *Server, m: *Ninep.Message, reply: *Ninep.Message, data: *Vec(u8)) {
+    reply.tag = m.tag;
+    if m.kind == Ninep.Tversion {
+        ms, ver := Ninep.Compatible(m.msize, m.version, Ninep.DEFMSIZE, Ninep.VERSION);
+        srv.msize = ms;
+        reply.kind = Ninep.Rversion;
+        reply.msize = ms;
+        reply.version = ver;
+    } else if m.kind == Ninep.Tauth {
+        SetErr(reply, "no authentication required");
+    } else if m.kind == Ninep.Tflush {
+        reply.kind = Ninep.Rflush;
+    } else if m.kind == Ninep.Tattach {
+        f := NewFid(srv, m.fid);
+        if f < 0 { SetErr(reply, Einuse); return }
+        srv.fids[f].node = 0;
+        srv.attached = true;
+        reply.kind = Ninep.Rattach;
+        reply.qid.path = srv.nodes[0].qid_path;
+        reply.qid.version = 0;
+        reply.qid.qtype = srv.nodes[0].qtype;
+    } else if m.kind == Ninep.Twalk {
+        f := FindFid(srv, m.fid);
+        if f < 0 { SetErr(reply, Ebadfid); return }
+        if srv.fids[f].open { SetErr(reply, Eopen); return }
+        dir := srv.fids[f].node;
+        nn := m.names.count;
+        VecClear(reply.qids);
+        for k: 0..nn - 1 {
+            if (srv.nodes[dir].mode & Stat.Directory) == 0 {
+                if k == 0 { SetErr(reply, Enotdir); return }
+                break;
+            }
+            next := LookupChild(srv, dir, m.names[k]);
+            if next < 0 {
+                if k == 0 { SetErr(reply, Enotfound); return }
+                break;
+            }
+            dir = next;
+            q: Qid;
+            q.path = srv.nodes[dir].qid_path;
+            q.version = 0;
+            q.qtype = srv.nodes[dir].qtype;
+            VecPush(reply.qids, q);
+        }
+        if reply.qids.count == nn {
+            target_f := f;
+            if m.newfid != m.fid {
+                target_f = NewFid(srv, m.newfid);
+                if target_f < 0 { SetErr(reply, Einuse); return }
+            }
+            srv.fids[target_f].node = dir;
+        }
+        reply.kind = Ninep.Rwalk;
+    } else if m.kind == Ninep.Topen {
+        f := FindFid(srv, m.fid);
+        if f < 0 { SetErr(reply, Ebadfid); return }
+        // Reject OWRITE(1), ORDWR(2), OTRUNC(16), ORCLOSE(64)
+        if (m.mode & (1 | 2 | 16 | 64)) != 0 {
+            SetErr(reply, Eperm);
+            return;
+        }
+        srv.fids[f].open = true;
+        nd := *srv.nodes[srv.fids[f].node];
+        reply.kind = Ninep.Ropen;
+        reply.qid.path = nd.qid_path;
+        reply.qid.version = 0;
+        reply.qid.qtype = nd.qtype;
+        reply.iounit = Ninep.DEFIOUNIT;
+    } else if m.kind == Ninep.Tread {
+        f := FindFid(srv, m.fid);
+        if f < 0 { SetErr(reply, Ebadfid); return }
+        nd_idx := srv.fids[f].node;
+        nd := *srv.nodes[nd_idx];
+        VecClear(data.*);
+        if (nd.mode & Stat.Directory) != 0 {
+            k: s64 = 0;
+            cur := nd.first_child;
+            while cur >= 0 {
+                d: Ninep.Dir;
+                NodeToDir(srv, cur, *d);
+                l := Ninep.DirSize(*d);
+                if k < m.offset {
+                    k += l;
+                    cur = srv.nodes[cur].next_sibling;
+                    continue;
+                }
+                if data.count + l > m.count { break }
+                Ninep.PackDir(data, *d);
+                cur = srv.nodes[cur].next_sibling;
+            }
+        } else {
+            leng := nd.length;
+            cnt := m.count;
+            if m.offset >= 0 && m.offset < leng {
+                if m.offset + cnt > leng { cnt = leng - m.offset }
+                if cnt > 0 {
+                    unused Arch.ReadAt(*srv.ar, nd.offset + m.offset, data, cnt);
+                }
+            }
+        }
+        reply.kind = Ninep.Rread;
+    } else if m.kind == Ninep.Tclunk {
+        f := FindFid(srv, m.fid);
+        if f < 0 { SetErr(reply, Ebadfid); return }
+        FreeFid(srv, f);
+        reply.kind = Ninep.Rclunk;
+    } else if m.kind == Ninep.Tstat {
+        f := FindFid(srv, m.fid);
+        if f < 0 { SetErr(reply, Ebadfid); return }
+        NodeToDir(srv, srv.fids[f].node, *reply.stat);
+        reply.kind = Ninep.Rstat;
+    } else {
+        SetErr(reply, Eperm);
+    }
+}
+
+ReadFullFd :: (fd: s32, buf: []u8) -> bool {
+    at: s64 = 0;
+    while at < buf.count {
+        n := IO.Read(fd, buf[at:]);
+        if n <= 0 { return false }
+        at += cast(s64)n;
+    }
+    return true;
+}
+
+SendReply :: (fd: s32, srv: *Server, reply: *Ninep.Message) -> bool {
+    out: Vec(u8);
+    unused Ninep.Pack(reply, *out);
+    at: s64 = 0;
+    while at < out.count {
+        n := IO.Write(fd, TextView(out[at:]));
+        if n <= 0 { return false }
+        at += cast(s64)n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    mtpt: Vec(u8);
+    unused BuilderAppend(mtpt, "/mnt");
+    srv: Server;
+    srv.msize = Ninep.DEFMSIZE;
+    srv.next_qid = 0;
+    srv.attached = false;
+    srv.skip = false;
+
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 109 { // -m
+            v, ok := Arg.Value(*scan);
+            if !ok {
+                Util.WriteErr("fatal: mount point missing\n");
+                return 1;
+            }
+            VecClear(mtpt);
+            unused BuilderAppend(mtpt, v);
+        } else if c == 115 { // -s
+            srv.skip = true;
+        }
+    }
+    argc := Args.OperandCount();
+    if scan.next >= argc {
+        Util.WriteErr("fatal: missing archive file\n");
+        return 1;
+    }
+    archfile := Args.Operand(scan.next);
+    prefixes: Vec(Text);
+    for i: scan.next + 1..argc - 1 {
+        VecPush(prefixes, Util.CopyText(Args.Operand(cast(s32)i)));
+    }
+
+    now_s := cast(s32)(Clock.UnixMillis() / 1000);
+    root_idx := NewNode(*srv, Basename(TextView(mtpt[:])), UID, GID, 0x1ED | Stat.Directory, now_s);
+    srv.nodes[root_idx].parent = root_idx;
+
+    if !ReadArch(*srv, archfile, *prefixes) {
+        return 1;
+    }
+
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 {
+        Util.WriteErr("fatal: can't create pipe\n");
+        return 1;
+    }
+    ticket := Namespace.MountAsync(ends[1], -1, TextView(mtpt[:]), Namespace.Replace, "");
+    unused IO.Close(ends[1]);
+    if ticket <= 0 {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fatal: cannot mount archive on %: %\n", TextView(mtpt[:]), Namespace.Error());
+        Util.WriteErr(TextView(eb[:]));
+        unused IO.Close(ends[0]);
+        return 1;
+    }
+
+    mount_checked := false;
+    frame: Vec(u8);
+    while true {
+        header: [4]u8;
+        if !ReadFullFd(ends[0], header[:]) { break }
+        size, err := Ninep.MessageSize(TextView(header[:]), srv.msize);
+        if err.count > 0 { break }
+        VecClear(frame);
+        unused BuilderAppend(frame, TextView(header[:]));
+        VecResize(frame, size);
+        if !ReadFullFd(ends[0], frame[4:]) { break }
+        m: Ninep.Message;
+        if Ninep.Unpack(TextView(frame[:]), true, *m) <= 0 { break }
+        reply: Ninep.Message;
+        data: Vec(u8);
+        Handle(*srv, *m, *reply, *data);
+        if reply.kind == Ninep.Rread { reply.data = TextView(data[:]) }
+        if !SendReply(ends[0], *srv, *reply) { break }
+        if srv.attached && !mount_checked {
+            mount_checked = true;
+            if Namespace.MountDone(ticket, true) != 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "fatal: cannot mount archive on %: %\n", TextView(mtpt[:]), Namespace.Error());
+                Util.WriteErr(TextView(eb[:]));
+                break;
+            }
+        }
+    }
+    unused IO.Close(ends[0]);
+    Arch.CloseArch(*srv.ar);
+    return 0;
+}

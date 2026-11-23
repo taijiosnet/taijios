@@ -1,0 +1,116 @@
+// Guest parity test for install batch 3: archfs (plain and gzipped archives).
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/install tests/install/install_batch3_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/inst3";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".dis";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) ||
+        !CreateDirectory("build/dis-legacy-math/inst3/m1") ||
+        !CreateDirectory("build/dis-legacy-math/inst3/m2") ||
+        !CreateDirectory("build/dis-legacy-math/inst3/m3") ||
+        !CreateDirectory("build/dis-legacy-math/inst3/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Build a valid Inferno archive file (plain)
+    arch: Vec(u8);
+    BuilderPrint(*arch, "/wrap 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo/1700000000 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/wrap/demo/1700000000/desc 664 inferno inferno 1700000000 13\n");
+    BuilderPrint(*arch, "demo package\n");
+    BuilderPrint(*arch, "/hello.txt 664 inferno inferno 1700000000 12\n");
+    BuilderPrint(*arch, "hello world\n");
+    BuilderPrint(*arch, "/sub 20000000775 inferno inferno 1700000000 0\n");
+    BuilderPrint(*arch, "/sub/item.txt 664 inferno inferno 1700000000 10\n");
+    BuilderPrint(*arch, "nested 42\n");
+    BuilderPrint(*arch, "end of archive\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst3/test.arch", BuilderFinish(arch));
+
+    // Also create gzipped copy using host gzip
+    gz_cmd: [3]string = .["sh", "-c", "gzip -c build/dis-legacy-math/inst3/test.arch > build/dis-legacy-math/inst3/test.arch.gz"];
+    gz_run: ProcessRun;
+    Expect(RunProcess(.{arguments = gz_cmd[:], capture_output = true}, *gz_run), "gzip archive");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    // 1. Mount full plain archive
+    BuilderPrint(*script, "/dis/install/archfs% -m /%/m1 test.arch &\n", suffix, WORK);
+    BuilderPrint(*script, "sleep 1\n");
+    BuilderPrint(*script, "cat m1/hello.txt > result/hello.txt\n");
+    BuilderPrint(*script, "cat m1/sub/item.txt > result/item.txt\n");
+    BuilderPrint(*script, "cat m1/wrap/demo/1700000000/desc > result/desc.txt\n");
+    BuilderPrint(*script, "unmount /%/m1\n", WORK);
+
+    // 2. Mount with -s and /wrap prefix filter
+    BuilderPrint(*script, "/dis/install/archfs% -s -m /%/m2 test.arch /wrap &\n", suffix, WORK);
+    BuilderPrint(*script, "sleep 1\n");
+    BuilderPrint(*script, "cat m2/wrap/demo/1700000000/desc > result/desc2.txt\n");
+    BuilderPrint(*script, "cat m2/hello.txt > result/m2_hello >[2] /dev/null\n");
+    BuilderPrint(*script, "unmount /%/m2\n", WORK);
+
+    // 3. Mount gzipped archive
+    BuilderPrint(*script, "/dis/install/archfs% -m /%/m3 test.arch.gz &\n", suffix, WORK);
+    BuilderPrint(*script, "sleep 1\n");
+    BuilderPrint(*script, "cat m3/hello.txt > result/gz_hello.txt\n");
+    BuilderPrint(*script, "cat m3/sub/item.txt > result/gz_item.txt\n");
+    BuilderPrint(*script, "unmount /%/m3\n", WORK);
+
+    unused WriteEntireFile("build/dis-legacy-math/inst3/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("hello.txt") == "hello world\n", "plain hello.txt");
+    Expect(Result("item.txt") == "nested 42\n", "plain sub/item.txt");
+    Expect(Result("desc.txt") == "demo package\n", "plain wrap desc");
+    Expect(Result("desc2.txt") == "demo package\n", "filtered -s wrap desc");
+    Expect(Result("m2_hello") == "", "filtered -s excluded hello.txt");
+    Expect(Result("gz_hello.txt") == "hello world\n", "gzip hello.txt");
+    Expect(Result("gz_item.txt") == "nested 42\n", "gzip sub/item.txt");
+
+    if failures != 0 {
+        print("install_batch3_test: % failures\n", failures);
+        return 1;
+    }
+    print("install_batch3_test: all checks passed\n");
+    return 0;
+}
