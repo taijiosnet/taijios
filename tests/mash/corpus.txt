@@ -1,0 +1,141 @@
+# mash parity corpus: each case runs through /dis/mash.dis and /dis/mash.zx
+# and both outputs must match. The cases use mash's own builtins only, so the
+# Limbo mash can record them in this tree, where the Limbo commands are gone.
+
+=== assign and expand a list
+script:
+x = a b c;
+quote $x;
+
+=== local assignment
+script:
+y := p q r;
+quote $y;
+
+=== assignments do not leak between kinds
+script:
+a := one;
+b = two;
+quote $a;
+quote $b;
+
+=== caret concatenation over a list
+script:
+x = a b c;
+quote $x ^ z;
+
+=== caret concatenation with a singleton on the left
+script:
+x = a b c;
+quote (h ^ $x);
+
+=== quoted dollar squashes a list
+script:
+x = a b c;
+quote $"x;
+
+=== quoted words keep their spaces
+script:
+quote 'a b' c;
+
+=== empty variable expands to nothing
+script:
+e :=;
+quote before $e after;
+
+=== function definition and call
+script:
+fn f { quote in-f $* };
+f 1 2 3;
+
+=== function with no arguments
+script:
+fn g { quote g-called };
+g;
+
+=== if with a true condition
+script:
+if (len (a b c) == 3) { quote three };
+
+=== if with a false condition
+script:
+if (len (a b c) == 4) { quote four };
+
+=== if else
+script:
+if (len (a) == 2) { quote two } else { quote other };
+
+=== while runs its body while the condition holds
+script:
+n = 2;
+while (len $n == 2) { quote tick; n = 1 };
+
+=== for over a list
+script:
+for (i in (a b c)) { quote item $i };
+
+=== case matches a list
+script:
+x = a b c;
+case $x { (a b c) => quote matched };
+
+=== case falls through to the second arm
+script:
+x = z;
+case $x { (a b c) => quote first; (z) => quote second };
+
+=== comparison operators
+script:
+quote (1 == 1);
+quote (1 != 1);
+quote (1 == 2);
+
+=== regular expression match
+script:
+quote (hello ~ 'h.*');
+
+=== head tail and length
+gap: the line number after a failed command: the parser resumes one line later than mash's
+script:
+x = a b c;
+quote hd $x;
+quote tl $x;
+quote len $x;
+
+=== cons builds a list
+script:
+quote (a :: b :: c);
+
+=== nested blocks
+script:
+{ { quote inner } };
+
+=== environment listing names a variable
+script:
+somevar = value;
+env;
+
+=== quote prints words as input
+script:
+quote a 'b c' d;
+
+=== comments and blank lines are ignored
+script:
+# a comment line
+
+quote after;
+
+=== status of a builtin
+script:
+quote before;
+quote after;
+
+=== whatis reports a variable
+script:
+wq = one two;
+whatis wq;
+
+=== whatis reports a function
+script:
+fn hello { quote hi };
+whatis hello;

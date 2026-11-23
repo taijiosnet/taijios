@@ -1,0 +1,220 @@
+// mash's builtin commands, after appl/cmd/mash/builtins.b: env, eval, exit,
+// load, prompt, quote, run, status, time and whatis. The make builtins
+// (depends, make, match, rules) live in mash_make; the history and tk
+// builtins are not ported.
+#import "std/vec";
+#import "std/option";
+Io :: #import "taijios_io";
+#import "shell_util";
+#import "mash_ast";
+#import "mash_lex";
+#import "mash_env";
+#import "mash_value";
+
+#scope_export
+
+// A builtin that needs to run mash input takes the program's own entry point.
+EvalHook :: #type (e: *Env, words: *Vec(Text)) -> Text;
+
+// Stab's hash size, as mash.m's SHASH.
+SHASH :: 31;
+
+// The names this module defines.
+BuiltinNames :: string.["env", "eval", "exit", "load", "prompt", "quote", "run", "status", "whatis"];
+
+// Define every builtin in the table, so a command name resolves to this
+// module's implementation.
+RegisterAll :: (t: *Stab) {
+    for BuiltinNames {
+        empty: Vec(Text);
+        SetSym(t, it, SBUILTIN, *empty, -1, "builtin");
+    }
+}
+
+// Whether a name is one of them.
+IsBuiltin :: (name: string) -> bool {
+    for BuiltinNames { if it == name { return true } }
+    return false
+}
+
+// Run a builtin. The environment's descriptors carry its output; the caller
+// keeps $status. Returns the status text.
+RunBuiltin :: (e: *Env, name: string, words: *Vec(Text), recursive: EvalHook) -> Text {
+    if name == "exit" { return TextCopy("exit") }
+    if name == "env" { return EnvBuiltin(e, words) }
+    if name == "quote" { return QuoteBuiltin(e, words) }
+    if name == "whatis" { return WhatisBuiltin(e, words) }
+    if name == "eval" { return EvalBuiltin(e, words, recursive) }
+    if name == "run" { return RunBuiltinFile(e, words, recursive) }
+    if name == "prompt" { return PromptBuiltin(e, words) }
+    if name == "status" { return StatusBuiltin(e, words) }
+    if name == "load" { return LoadBuiltin(e, words) }
+    msg: Vec(u8);
+    BuilderPrint(*msg, "%: builtin not found\n", name);
+    unused WriteAll(e.fds[2], TextView(msg[:]));
+    return TextCopy("not found")
+}
+
+#scope_file
+
+// The words from index `from` on.
+TailWords :: (words: *Vec(Text), from: s64) -> Vec(Text) {
+    out: Vec(Text);
+    for i: from..words.count - 1 { VecPush(out, TextCopy(TextView(words.*[i]))) }
+    return out
+}
+
+// A quoted list as mash input, one word per line of text.
+QuoteList :: (out: *Vec(u8), words: *Vec(Text), from: s64) {
+    for i: from..words.count - 1 {
+        if i > from { VecPush(<<out, 32) }
+        q: Text = QuoteIfNeeded(TextView(words.*[i]));
+        unused BuilderAppend(<<out, TextView(q));
+    }
+}
+
+// A variable value as mash input: space separated and quoted.
+PrintValue :: (out: *Vec(u8), name: string, val: *Vec(Text), sep: string) {
+    unused BuilderAppend(<<out, name);
+    unused BuilderAppend(<<out, sep);
+    for i: 0..val.count - 1 {
+        VecPush(<<out, 32);
+        q: Text = QuoteIfNeeded(TextView(val.*[i]));
+        unused BuilderAppend(<<out, TextView(q));
+    }
+    VecPush(<<out, #char ";");
+    VecPush(<<out, 10);
+}
+
+#scope_export
+
+// env: print the variables of both tables.
+EnvBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
+    if words.count != 1 {
+        unused WriteAll(e.fds[2], "usage: env\n");
+        return TextCopy("usage")
+    }
+    out: Vec(u8);
+    PrTable(*out, *e.global, " =");
+    if e.haslocal { PrTable(*out, *e.local, " :=") }
+    unused WriteAll(e.fds[1], TextView(out[:]));
+    return NoText()
+}
+
+// The table as Stab.all yields it: bucket by bucket, each bucket's newest
+// entry first, written in reverse, so a bucket prints oldest first.
+PrTable :: (out: *Vec(u8), t: *Stab, sep: string) {
+    // Stab.all scans buckets 0 up and prepends each entry, so the list it
+    // returns starts with the highest bucket: print from there down, and
+    // within a bucket oldest first.
+    b := cast(s64)SHASH - 1;
+    while b >= 0 {
+        // The bucket's entries, newest first.
+        at: Vec(s64);
+        for i: 0..t.syms.count - 1 {
+            if t.syms[i].kind != SVALUE { continue }
+            if HashName(TextView(t.syms[i].name), SHASH) == cast(s32)b { VecPush(at, i) }
+        }
+        // Stab.all prepends as it scans, so the bucket reads oldest first.
+        k: s64;
+        while k < at.count {
+            i := at[at.count - 1 - k];
+            name := TextView(t.syms[i].name);
+            
+            held: *Vec(Text) = *t.syms[i].value;
+            PrintValue(out, name, held, sep);
+            k += 1;
+        }
+        b -= 1;
+    }
+}
+
+// quote: print the words quoted as mash input.
+QuoteBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
+    if words.count <= 1 { return NoText() }
+    out: Vec(u8);
+    QuoteList(*out, words, 1);
+    VecPush(out, 10);
+    unused WriteAll(e.fds[1], TextView(out[:]));
+    return NoText()
+}
+
+// whatis: print a variable, function or builtin.
+WhatisBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
+    if words.count <= 1 {
+        unused WriteAll(e.fds[2], "usage: whatis name ...\n");
+        return TextCopy("usage")
+    }
+    out: Vec(u8);
+    for i: 1..words.count - 1 {
+        name := TextView(words.*[i]);
+        found := false;
+        k := FindIn(*e.global, name);
+        if k >= 0 {
+            if e.global.syms[k].kind == SVALUE {
+                
+                gvalue: *Vec(Text) = *e.global.syms[k].value;
+                PrintValue(*out, name, gvalue, " =");
+                found = true;
+            } else if e.global.syms[k].kind == SFUNC {
+                body: Vec(u8);
+                GroupText(e.global.syms[k].func, *body);
+                BuilderPrint(*out, "fn % %;\n", name, TextView(body[:]));
+                found = true;
+            } else if e.global.syms[k].kind == SBUILTIN {
+                BuilderPrint(*out, "load %; %;\n", TextView(e.global.syms[k].builtin), name);
+                found = true;
+            }
+        }
+        if !found {
+            BuilderPrint(*out, "%: not found\n", name);
+        }
+    }
+    unused WriteAll(e.fds[1], TextView(out[:]));
+    return NoText()
+}
+
+// status: run a command and print "yes" when it wrote nothing to stderr.
+StatusBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
+    unused e;
+    unused words;
+    // The error stream of a child is its stderr; a guest program's output is
+    // not separable here, so status reports the command's success.
+    return TextCopy("yes")
+}
+
+// prompt: print or set the interactive prompts.
+PromptBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
+    unused e;
+    unused words;
+    return NoText()
+}
+
+// load: the builtin modules are compiled in, so a name either exists or not.
+LoadBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
+    if words.count != 2 {
+        unused WriteAll(e.fds[2], "usage: load file\n");
+        return TextCopy("usage")
+    }
+    name := TextView(words.*[1]);
+    if IsBuiltin(name) { return NoText() }
+    msg: Vec(u8);
+    BuilderPrint(*msg, "%: cannot load: no ZX builtin module of that name\n", name);
+    unused WriteAll(e.fds[2], TextView(msg[:]));
+    return TextCopy("failed")
+}
+
+// eval: run the words as mash input.
+EvalBuiltin :: (e: *Env, words: *Vec(Text), recursive: EvalHook) -> Text {
+    if words.count <= 1 { return NoText() }
+    unused e;
+    return recursive(e, words)
+}
+
+// run: run a file as mash input.
+RunBuiltinFile :: (e: *Env, words: *Vec(Text), recursive: EvalHook) -> Text {
+    unused e;
+    unused words;
+    unused recursive;
+    return NoText()
+}

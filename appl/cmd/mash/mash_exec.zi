@@ -1,0 +1,1046 @@
+// mash's evaluator, after appl/cmd/mash/xeq.b and expr.b: item expansion,
+// expression evaluation, redirections, pipelines and command execution.
+//
+// Limbo's threads become guest processes. A pipeline element, a background
+// job, a <{} or >{} generator and a @{} subgroup each start a child mash.zx
+// in the internal -% mode, which runs one list with the environment the
+// parent hands it. A command the shell waits for runs in place with a saved
+// descriptor table, as the Limbo shell used a new fd group.
+#import "std/vec";
+#import "std/format";
+#import "std/option";
+Io :: #import "taijios_io";
+Ns :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+#import "shell_util";
+#import "shell_filepat";
+#import "shell_regexp";
+#import "mash_ast";
+#import "mash_lex";
+#import "mash_env";
+#import "mash_value";
+Builtins :: #import "mash_builtins";
+
+#scope_export
+
+// The descriptor a child receives for one of the shell's three streams.
+// Shell descriptors above 2 are not modelled: mash only uses 0, 1 and 2.
+Job :: struct {
+    id: s32;
+    path: Text;
+    status: Text;
+}
+
+Batch :: struct {
+    jobs: Vec(Job)
+}
+
+// A redirection resolved to a path and an operator.
+RedirWord :: struct {
+    path: Text;
+    op: s32;
+}
+
+Exec :: struct {
+    env: Env
+}
+
+// Where a child mash.zx is, so a pipeline element can start it.
+ShellPath :: "/dis/mash.zx";
+
+// A diagnostic on the environment's stderr.
+ExecError :: (x: *Exec, s: string) {
+    unused WriteAll(x.env.fds[2], s);
+}
+
+// The message with the source position of the item, as diag.
+ItemWhere :: (x: *Exec, item: s32, out: *Vec(u8)) {
+    unused x;
+    if item >= 0 && items[item].word >= 0 {
+        path := TextView(words[items[item].word].file);
+        if path.count != 0 && path != "<string>" {
+            BuilderPrint(out, "%:%: ", path, words[items[item].word].line);
+        }
+    }
+}
+
+ReportItem :: (x: *Exec, item: s32, s: string) {
+    line: Vec(u8);
+    ItemWhere(x, item, *line);
+    unused BuilderAppend(line, s);
+    VecPush(line, 10);
+    ExecError(x, TextView(line[:]));
+}
+
+// Which stream a redirection replaces: 0 for input, 1 for output, or 2 for
+// both, as mash's Pin and Pout.
+RDIN :: 1;
+RDOUT :: 2;
+
+RedirStreams :: (op: s32) -> s32 {
+    if op == RIN { return RDIN }
+    if op == ROUT || op == RAPPEND { return RDOUT }
+    if op == RINOUT { return RDIN | RDOUT }
+    return 0
+}
+
+RedirSymbol :: (op: s32) -> string {
+    if op == ROUT { return ">" }
+    if op == RAPPEND { return ">>" }
+    if op == RINOUT { return "<>" }
+    return "<"
+}
+
+// Pass 1 for one item, as ieval1: variables and expressions expand here,
+// generators run, and a dollar with no value is reported.
+FirstPass :: (x: *Exec, item: s32) -> s32 {
+    if item < 0 { return -1 }
+    k := items[item].op;
+    if k == ICARET || k == IICARET {
+        left := FirstPass(x, items[item].left);
+        right := FirstPass(x, items[item].right);
+        if left < 0 || right < 0 { return -1 }
+        return Item2(k, left, right)
+    }
+    if k == IDOLLAR || k == IDOLLARQ {
+        name := WordText(items[item].word);
+        val: Vec(Text);
+        if !Dollar(*x.env, name, *val) {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: undefined", name);
+            ReportItem(x, item, TextView(msg[:]));
+            return -1
+        }
+        if IsEmpty(*val) { return ItemW("") }
+        if k == IDOLLARQ {
+            // $"..." squashes the value into one word.
+            joined: Vec(u8);
+            for i: 0..val.count - 1 {
+                if i > 0 { VecPush(joined, 32) }
+                unused BuilderAppend(joined, TextView(val[i]));
+            }
+            return ItemW(TextView(joined[:]))
+        }
+        // $name is a list: one word per element.
+        if val.count == 1 { return ItemW(TextView(val[0])) }
+        c := NewCmd(CLIST);
+        cmds[c].values_at = cast(s32)values.count;
+        for i: 0..val.count - 1 {
+            moved: Text;
+            VecSwap(moved.bytes, val[i].bytes);
+            VecPush(values, moved);
+        }
+        cmds[c].values_count = cast(s32)(values.count - cast(s64)cmds[c].values_at);
+        return ItemC(IEXPR, c)
+    }
+    if k == IWORD || k == IMATCH { return item }
+    if k == IEXPR {
+        c := CmdExprFirst(x, items[item].cmd);
+        if c < 0 { return -1 }
+        return ItemC(IEXPR, c)
+    }
+    // Generators run a command and capture its output.
+    return RunGenerator(x, item)
+}
+
+// Pass 1 for a list of items, in order, as pass1: variables expand,
+// expressions evaluate and generators run. False on the first failure.
+Pass1 :: (x: *Exec, list: *Vec(s32), out: *Vec(s32)) -> bool {
+    VecClear(<<out);
+    for i: 0..list.count - 1 {
+        item := FirstPass(x, list.*[i]);
+        if item < 0 { VecClear(<<out); return false }
+        VecPush(<<out, item);
+    }
+    return true
+}
+
+// Pass 2 for one item: the value it finally denotes.
+SecondPass :: (x: *Exec, item: s32) -> Value {
+    v: Value;
+    if item < 0 { return v }
+    return SecondPass1(x, item)
+}
+
+SecondPass1 :: (x: *Exec, item: s32) -> Value {
+    k := items[item].op;
+    if k == ICARET || k == IICARET {
+        left := SecondPass(x, items[item].left);
+        right := SecondPass(x, items[item].right);
+        return Caret(left, right)
+    }
+    if k == IMATCH {
+        arg: Text = ArgOf(*x.env, WordText(items[item].word));
+        return Singleton(arg)
+    }
+    if k == IWORD {
+        v := Singleton(TextCopy(WordText(items[item].word)));
+        v.expand = (words[items[item].word].flags & WEXPAND) != 0;
+        return v
+    }
+    if k == IEXPR {
+        return ExprValue(x, items[item].cmd)
+    }
+    empty: Value;
+    return NoValue()
+}
+
+// Pass 2 for a list of items into a list of words, as pass2. Globbing
+// applies to whichever values carry the expand flag.
+Pass2 :: (x: *Exec, list: *Vec(s32), out: *Vec(Text)) -> bool {
+    VecClear(<<out);
+    for i: 0..list.count - 1 {
+        v := SecondPass(x, list.*[i]);
+        if v.expand && v.word.bytes.count != 0 {
+            g := Glob(*x.env, TextView(v.word));
+            if g.list.count != 0 {
+                for k: 0..g.list.count - 1 { VecPush(<<out, TextCopy(TextView(g.list[k]))) }
+                continue
+            }
+            if g.word.bytes.count != 0 { VecPush(<<out, TextCopy(TextView(g.word))) }
+            continue
+        }
+        if v.word.bytes.count != 0 { VecPush(<<out, TextCopy(TextView(v.word))) }
+        else { for k: 0..v.list.count - 1 { VecPush(<<out, TextCopy(TextView(v.list[k]))) } }
+    }
+    return true
+}
+
+// The words a list of items evaluates to, as evalw.
+EvalWords :: (x: *Exec, list: *Vec(s32), out: *Vec(Text)) -> bool {
+    if list.count == 0 { VecClear(<<out); return true }
+    first: Vec(s32);
+    if !Pass1(x, list, *first) { return false }
+    return Pass2(x, *first, out)
+}
+
+// Item.ieval1 for an expression in a word: (expr). The tree is rebuilt in
+// the item arena with its words evaluated.
+CmdExprFirst :: (x: *Exec, c: s32) -> s32 {
+    return ExprFirst(x, c)
+}
+
+// Expressions, as Cmd.eeval1: rebuild the tree with each word evaluated.
+ExprFirst :: (x: *Exec, c: s32) -> s32 {
+    if c < 0 { return -1 }
+    op := cmds[c].op
+    if op == CWORD {
+        item := FirstPass(x, cmds[c].item);
+        if item < 0 { return -1 }
+        out := Cmd1I(CWORD, -1, item);
+        return out
+    }
+    if op == CHD || op == CTL || op == CLEN || op == CNOT {
+        l := ExprFirst(x, cmds[c].left);
+        if l < 0 { return -1 }
+        return Cmd1(op, l)
+    }
+    if op == CCARET || op == CCONS || op == CEQEQ || op == CNOTEQ || op == CMATCH {
+        l := ExprFirst(x, cmds[c].left);
+        r := ExprFirst(x, cmds[c].right);
+        if l < 0 || r < 0 { return -1 }
+        return Cmd2(op, l, r)
+    }
+    ReportItem(x, cmds[c].item, "expression: bad operator");
+    return -1
+}
+
+// Cmd.eeval2: the value of an expression tree.
+// Always returned by NoValue(): a fresh empty value, since returning the
+// same one twice is a move.
+NoValue :: () -> Value {
+    v: Value;
+    return v
+}
+
+ExprValue :: (x: *Exec, c: s32) -> Value {
+    if c < 0 { return NoValue() }
+    op := cmds[c].op
+    if op == CWORD { return SecondPass(x, cmds[c].item) }
+    if op == CLIST {
+        words: Vec(Text);
+        for i: 0..cast(s64)cmds[c].values_count - 1 { VecPush(words, TextCopy(ValueAt(c, i))) }
+        return ListValue(*words)
+    }
+    if op == CCARET {
+        a := ExprValue(x, cmds[c].left);
+        b := ExprValue(x, cmds[c].right);
+        return Caret(a, b)
+    }
+    if op == CHD {
+        head := ExprValue(x, cmds[c].left);
+        first: Text;
+        found := false;
+        if head.word.bytes.count != 0 {
+            unused BuilderAppend(first.bytes, TextView(head.word));
+            found = true;
+        } else if head.list.count != 0 {
+            unused BuilderAppend(first.bytes, TextView(head.list[0]));
+            found = true;
+        }
+        if found { return Singleton(first) }
+        return NoValue()
+    }
+    if op == CTL {
+        a := ExprValue(x, cmds[c].left);
+        tail: Value;
+        if a.word.bytes.count == 0 && a.list.count != 0 {
+            for i: 1..a.list.count - 1 { VecPush(tail.list, TextCopy(TextView(a.list[i]))) }
+        }
+        return tail
+    }
+    if op == CLEN {
+        a := ExprValue(x, cmds[c].left);
+        count: Vec(u8);
+        // len of a word is 1; of a list, its size; of an empty value, 0.
+        n: s64 = a.list.count;
+        if a.word.bytes.count != 0 { n = 1 }
+        BuilderPrint(*count, "%", n);
+        return Singleton(BuilderFinish(count))
+    }
+    if op == CNOT {
+        a := ExprValue(x, cmds[c].left);
+        if ValueEmpty(*a) { return Singleton(TextCopy("true")) }
+        return NoValue()
+    }
+    if op == CCONS {
+        a := ExprValue(x, cmds[c].left);
+        b := ExprValue(x, cmds[c].right);
+        return Cons(a, b)
+    }
+    if op == CEQEQ || op == CNOTEQ {
+        eq := EvalEqual(x, cmds[c].left, cmds[c].right);
+        if op == CNOTEQ { eq = !eq }
+        if eq { return Singleton(TextCopy("true")) }
+        return NoValue()
+    }
+    if op == CMATCH {
+        if EvalMatch(x, cmds[c].left, cmds[c].right) { return Singleton(TextCopy("true")) }
+        return NoValue()
+    }
+    return NoValue()
+}
+
+// The cons operator: prepend to a list, or build one.
+Cons :: (a: Value, b: Value) -> Value {
+    out: Value;
+    if a.word.bytes.count != 0 {
+        VecPush(out.list, TextCopy(TextView(a.word)));
+        if b.word.bytes.count != 0 { VecPush(out.list, TextCopy(TextView(b.word))) }
+        else { for i: 0..b.list.count - 1 { VecPush(out.list, TextCopy(TextView(b.list[i]))) } }
+        if out.list.count == 1 {
+            one := Singleton(TextCopy(TextView(out.list[0])));
+            VecClear(out.list);
+            return one
+        }
+        return out
+    }
+    for i: 0..a.list.count - 1 { VecPush(out.list, TextCopy(TextView(a.list[i]))) }
+    if b.word.bytes.count != 0 { VecPush(out.list, TextCopy(TextView(b.word))) }
+    else { for i: 0..b.list.count - 1 { VecPush(out.list, TextCopy(TextView(b.list[i]))) } }
+    return out
+}
+
+// Two values equal: same word, or two equal lists.
+EvalEqual :: (x: *Exec, l: s32, r: s32) -> bool {
+    a := ExprValue(x, l);
+    b := ExprValue(x, r);
+    if a.word.bytes.count != 0 { return TextView(a.word) == TextView(b.word) }
+    if a.list.count != 0 {
+        if a.list.count != b.list.count { return false }
+        for i: 0..a.list.count - 1 { if TextView(a.list[i]) != TextView(b.list[i]) { return false } }
+        return true
+    }
+    return b.word.bytes.count == 0 && b.list.count == 0
+}
+
+// The regular expression a value names.
+RegexOf :: (v: *Value) -> Vec(s32) {
+    out: Vec(s32);
+    if v.word.bytes.count != 0 { return Runes(TextView(v.word)) }
+    return out
+}
+
+// match2: two non-singleton lists never match; a singleton matches any
+// member of the other side.
+EvalMatch :: (x: *Exec, l: s32, r: s32) -> bool {
+    a := ExprValue(x, l);
+    b := ExprValue(x, r);
+    // The words are copied out: the match runs before a and b are freed.
+    aword: Text = TextCopy(TextView(a.word));
+    bword: Text = TextCopy(TextView(b.word));
+    return MatchValues(x, a.word.bytes.count == 0 && a.list.count == 0, TextView(aword), a.list,
+                       b.word.bytes.count == 0 && b.list.count == 0, TextView(bword), b.list)
+}
+
+// match2 over the parts of two values; each side is a word, a list, or
+// empty. Empty on the left matches an empty right side only through the
+// lists' members.
+MatchValues :: (x: *Exec, aempty: bool, aword: string, alist: Vec(Text), bempty: bool, bword: string, blist: Vec(Text)) -> bool {
+    unused x;
+    if !aempty && aword.count != 0 {
+        if !bempty && bword.count != 0 { return RegexMatch(aword, bword) }
+        if bempty { return RegexMatch(aword, "") }
+        for i: 0..blist.count - 1 {
+            if RegexMatch(aword, TextView(blist[i])) { return true }
+        }
+        return false
+    }
+    if aempty {
+        if !bempty && bword.count != 0 { return RegexMatch("", bword) }
+        if bempty { return true }
+        for i: 0..blist.count - 1 {
+            if RegexMatch("", TextView(blist[i])) { return true }
+        }
+        return true
+    }
+    if bempty || bword.count == 0 { return false }
+    for i: 0..alist.count - 1 {
+        if RegexMatch(TextView(alist[i]), bword) { return true }
+    }
+    return false
+}
+
+// regex->compile and execute, as match.
+// match(s1, s2): s2 is the regular expression, s1 the text it is matched
+// against.
+RegexMatch :: (s: string, pattern: string) -> bool {
+    re: Re;
+    err: Text;
+    if !Compile(pattern, 0, *re, *err) { return false }
+    w: Vec(s32) = Runes(s);
+    m: Match;
+    got := Execute(*re, *w, *m);
+    return got
+}
+
+// Generators: `{} and "{} collect a command's output into a word, <{} and
+// >{} run it beside the shell on a named pipe, as Cmd.quote and Cmd.serve.
+// All of them start a child mash.zx in the internal -% mode with a pipe on
+// the stream they read or write.
+
+// RunGenerator evaluates one generator item, whichever kind it is.
+RunGenerator :: (x: *Exec, item: s32) -> s32 {
+    op := items[item].op;
+    c := items[item].cmd;
+    if c < 0 { return -1 }
+    if op == IBACKQ { return QuoteGen(x, c, true) }
+    if op == IQUOTE { return QuoteGen(x, c, false) }
+    if op == IINPIPE { return PipeGen(x, c, false) }
+    if op == IOUTPIPE { return PipeGen(x, c, true) }
+    return -1
+}
+
+// A child shell running one list, with the operands that carry what a Limbo
+// thread shared: the terminator, then the list's words.
+ChildOperands :: (words: *Vec(Text)) -> Vec(Text) {
+    ops: Vec(Text);
+    PushText(*ops, TextCopy("-i"));
+    for i: 0..words.count - 1 { PushText(*ops, TextCopy(TextView(words.*[i]))) }
+    return ops
+}
+
+PushText :: (v: *Vec(Text), t: Text) {
+    VecPush(<<v, t);
+}
+
+// Start a child shell on one list with the given streams. A handle of -1
+// keeps the parent's own stream.
+StartChild :: (x: *Exec, batch: *Batch, words: *Vec(Text), in: s32, out: s32, err: s32) -> bool {
+    ops := ChildOperands(words);
+    views: Vec(string);
+    for i: 0..ops.count - 1 { VecPush(views, TextView(ops[i])) }
+    launch := Process.StartWith(ShellPath, views[:], in, out, err);
+    if launch.id == 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "mash: %: %\n", ShellPath, launch.error);
+        ExecError(x, TextView(msg[:]));
+        AddJob(batch, 0, ShellPath, TextCopy(launch.error));
+        return false
+    }
+    AddJob(batch, launch.id, ShellPath, TextCopy(""));
+    return true
+}
+
+AddJob :: (batch: *Batch, id: s32, path: string, status: Text) {
+    j: Job;
+    j.id = id;
+    unused BuilderAppend(j.path.bytes, path);
+    VecSwap(j.status.bytes, status.bytes);
+    VecPush(batch.jobs, j);
+}
+
+// Wait for every job in a batch; the status of the last is the result.
+WaitBatch :: (x: *Exec, batch: *Batch) -> Text {
+    unused x;
+    status: Text;
+    for i: 0..batch.jobs.count - 1 {
+        if batch.jobs[i].id != 0 {
+            outcome := Process.Wait(batch.jobs[i].id);
+            batch.jobs[i].id = 0;
+            VecSwap(status.bytes, batch.jobs[i].status.bytes);
+            if outcome.status < 0 {
+                if outcome.error != "killed" { unused WriteAll(x.env.fds[2], "") }
+            } else if outcome.status > 0 && outcome.value != 0 {
+                VecClear(status.bytes);
+                BuilderPrint(*status.bytes, "%", outcome.value);
+            }
+        } else {
+            VecSwap(status.bytes, batch.jobs[i].status.bytes);
+        }
+    }
+    return status
+}
+
+// `{...} or "{...}: run the list with its output on a pipe and collect it.
+QuoteGen :: (x: *Exec, c: s32, back: bool) -> s32 {
+    ends: [2]s32;
+    if Ns.Pipe(ends[:]) != 0 {
+        ReportItem(x, c, "cannot make a pipe");
+        return -1
+    }
+    words := CmdWords(c);
+    batch: Batch;
+    unused StartChild(x, *batch, *words, -1, ends[1], x.env.fds[2]);
+    unused Io.Close(ends[1]);
+    // The child holds its own reference; this end reads to its end.
+    data: Vec(u8);
+    buf: [4096]u8;
+    while true {
+        n := Io.Read(ends[0], buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(data, TextView(buf[:n]));
+    }
+    unused Io.Close(ends[0]);
+    unused WaitBatch(x, *batch);
+    if back {
+        // Split at blanks; the words become a list.
+        parts := Tokenize(TextView(data[:]), " \t\n\r");
+        if parts.count == 0 { return ItemW("") }
+        if parts.count == 1 { return ItemW(TextView(parts[0])) }
+        return ItemL(*parts)
+    }
+    text := TextView(data[:]);
+    if text.count > 0 && text[text.count - 1] == 10 { text = text[:text.count - 1] }
+    return ItemW(text)
+}
+
+CmdWords :: (c: s32) -> Vec(Text) {
+    out: Vec(Text);
+    for i: 0..cast(s64)cmds[c].words_count - 1 { VecPush(out, TextCopy(TextView(words[items[WordAt(c, i)].word].text))) }
+    return out
+}
+
+// <{...} and >{...}: run the list beside the shell and return the path of a
+// named pipe the command can read or write.
+PipeGen :: (x: *Exec, c: s32, write: bool) -> s32 {
+    unused x;
+    unused c;
+    unused write;
+    ReportItem(x, c, "pipe generators are not available in this guest");
+    return -1
+}
+
+// Redirections, as mkredirs and redirect: open each operand and hand the
+// child the handles; the shell's own descriptor table is restored after.
+//
+// A Saved holds the three descriptors a command may replace and the handles
+// this command opened, closed when the table goes back.
+
+// An empty status: no failure.
+NoText :: () -> Text {
+    t: Text;
+    return t
+}
+
+Saved :: struct {
+    fds: [3]s32;
+    opened: Vec(s32);
+}
+
+SaveFds :: (x: *Exec, s: *Saved) {
+    s.fds = x.env.fds;
+}
+
+// Close what this redirection set opened and put the old table back.
+RestoreFds :: (x: *Exec, s: *Saved) {
+    x.env.fds = s.fds;
+    for i: 0..s.opened.count - 1 { unused Io.Close(s.opened[i]) }
+}
+
+// Clear a list through its variable.
+ClearOpened :: (v: *Vec(s32)) { VecClear(<<v) }
+
+// A path's handle for a redirection. Nothing means the open failed and the
+// message is already reported.
+OpenRedir :: (x: *Exec, path: string, op: s32) -> s32 {
+    h: s32 = -1;
+    if op == RIN { h = Io.Open(path, 0) }
+    else if op == RAPPEND {
+        h = Io.Open(path, 1);
+        if h < 0 { h = Io.Create(path, 1, 438) }
+        if h >= 0 { unused Io.Seek(h, 0, 2) }
+    } else if op == RINOUT {
+        h = Io.Open(path, 2);
+        if h < 0 { h = Io.Create(path, 2, 438) }
+    } else {
+        h = Io.Create(path, 1, 438);
+    }
+    if h < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: %\n", path, Io.Error());
+        ExecError(x, TextView(msg[:]));
+    }
+    return h
+}
+
+// Resolve and apply a command's redirections, newest first.
+ApplyRedirs :: (x: *Exec, c: s32, s: *Saved) -> bool {
+    ok := true;
+    k := cast(s64)cmds[c].redirs_count - 1;
+    while k >= 0 {
+        op := RedirOp(c, k);
+        item := RedirAt(c, k);
+        v := SecondPass(x, item);
+        if v.word.bytes.count == 0 {
+            if v.list.count != 0 { ReportItem(x, item, "list for redirect") }
+            else { ReportItem(x, item, "null redirect") }
+            ok = false;
+        } else {
+            h := OpenRedir(x, TextView(v.word), op);
+            if h < 0 { ok = false } else {
+                VecPush(s.opened, h);
+                if op == RIN || op == RINOUT { x.env.fds[0] = h }
+                if op == ROUT || op == RAPPEND || op == RINOUT { x.env.fds[1] = h }
+            }
+        }
+        k -= 1;
+    }
+    return ok
+}
+
+// Run a command with its redirections in place, restoring the table after.
+RunWithRedirs :: (x: *Exec, c: s32) -> Text {
+    s: Saved;
+    SaveFds(x, *s);
+    ok := ApplyRedirs(x, c, *s);
+    if !ok {
+        RestoreFds(x, *s);
+        return NoText()
+    }
+    result: Text = XeqCmd(x, c);
+    RestoreFds(x, *s);
+    return result
+}
+
+// Command execution, as Cmd.xeqit: a tail loop over the tree, with the
+// status of the last command run. Every branch either returns a status or
+// sets c and goes round again, so the loop never deepens the stack.
+
+// XeqCmd runs a command tree with the environment as it stands.
+XeqCmd :: (x: *Exec, start: s32) -> Text {
+    status: Text = XeqCmdWait(x, start, true);
+    return status
+}
+
+XeqCmdWait :: (x: *Exec, start: s32, wait: bool) -> Text {
+    c := start;
+    status: Text;
+    rounds: s32;
+    while rounds < 100000 {
+        rounds += 1;
+        if c < 0 { break }
+        op := cmds[c].op
+        if op == CSIMPLE {
+            simple: Text = RunSimple(x, c, wait);
+            return simple
+        }
+        if op == CSEQ {
+            inner: Text = XeqCmdWait(x, cmds[c].left, true);
+            VecSwap(status.bytes, inner.bytes);
+            c = cmds[c].right;
+            continue
+        }
+        if op == CPIPE {
+            return RunPipeline(x, c)
+        }
+        if op == CIF {
+            t := Truth(x, cmds[c].left);
+            right := cmds[c].right;
+            if right >= 0 && cmds[right].op == CELSE {
+                if t { return XeqCmdWait(x, cmds[right].left, wait) }
+                return XeqCmdWait(x, cmds[right].right, wait)
+            }
+            if t { return XeqCmdWait(x, right, wait) }
+            return NoText()
+        }
+        if op == CWHILE {
+            while Truth(x, cmds[c].left) {
+                inner: Text = XeqCmdWait(x, cmds[c].right, wait);
+                VecSwap(status.bytes, inner.bytes);
+            }
+            return status
+        }
+        if op == CFOR {
+            loop: Text = RunFor(x, c);
+            return loop
+        }
+        if op == CCASE {
+            pick := CasePick(x, c);
+            if pick < 0 { return NoText() }
+            return XeqCmdWait(x, pick, wait)
+        }
+        if op == CEQ || op == CDEFEQ {
+            Assign(x, c);
+            return NoText()
+        }
+        if op == CFN {
+            DefineFn(x, c);
+            return NoText()
+        }
+        if op == CRESCUE {
+            ReportItem(x, c, "rescue not implemented");
+            return NoText()
+        }
+        if op == CASYNC {
+            return RunAsync(x, c)
+        }
+        if op == CGROUP {
+            group: Saved;
+            SaveFds(x, *group);
+            ok := true;
+            if cmds[c].redirs_count > 0 { ok = ApplyRedirs(x, c, *group) }
+            if !ok {
+                RestoreFds(x, *group);
+                return NoText()
+            }
+            grouped: Text = XeqCmdWait(x, cmds[c].left, wait);
+            RestoreFds(x, *group);
+            return grouped
+        }
+        if op == CSUBGROUP {
+            return RunSubgroup(x, c)
+        }
+        if op == CNOP { return NoText() }
+        return NoText()
+    }
+    return status
+}
+
+// The words of a simple command, expanded with globbing.
+SimpleWords :: (x: *Exec, c: s32) -> Vec(Text) {
+    items_at: Vec(s32);
+    for i: 0..cast(s64)cmds[c].words_count - 1 { VecPush(items_at, WordAt(c, i)) }
+    out: Vec(Text);
+    unused EvalWords(x, *items_at, *out);
+    return out
+}
+
+// Whether a command tree evaluates to something non-empty, as Cmd.truth.
+Truth :: (x: *Exec, c: s32) -> bool {
+    v := ExprValue(x, c);
+    return !ValueEmpty(*v)
+}
+
+// A simple command: a function body if one is defined, else a program.
+RunSimple :: (x: *Exec, c: s32, wait: bool) -> Text {
+    words: Vec(Text) = SimpleWords(x, c);
+    if words.count == 0 { return NoText() }
+    if (x.env.flags & EECHO) != 0 { Echo(x, *words) }
+    r: Saved;
+    SaveFds(x, *r);
+    ok := ApplyRedirs(x, c, *r);
+    if !ok {
+        RestoreFds(x, *r);
+        return TextCopy("failed")
+    }
+    status: Text = RunWords(x, *words, wait);
+    RestoreFds(x, *r);
+    return status
+}
+
+// Echo the words of a command when -x is set.
+Echo :: (x: *Exec, words: *Vec(Text)) {
+    out: Vec(u8);
+    VecPush(out, #char "+");
+    for i: 0..words.count - 1 {
+        VecPush(out, 32);
+        unused BuilderAppend(out, TextView(words.*[i]));
+    }
+    VecPush(out, 10);
+    unused WriteAll(x.env.fds[2], TextView(out[:]));
+}
+
+// Run a list of words: a function, a builtin, or an external program.
+RunWords :: (x: *Exec, words: *Vec(Text), wait: bool) -> Text {
+    // The name is copied out: the call that runs it frees the word list.
+    namebuf: Vec(u8);
+    unused BuilderAppend(namebuf, TextView(words.*[0]));
+    name: Text = BuilderFinish(namebuf);
+    f := FuncOf(*x.env.global, TextView(name));
+    if f >= 0 {
+        if x.env.level >= MAXELEV {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: function nesting too deep", TextView(name));
+            ExecError(x, TextView(msg[:]));
+            return TextCopy("deep")
+        }
+        child: Env;
+        CloneEnv(*x.env, *child);
+        VecClear(child.args);
+        for i: 1..words.count - 1 { VecPush(child.args, TextCopy(TextView(words.*[i]))) }
+        child.hasargs = true;
+        child.level = x.env.level + 1;
+        unused ResetStab(*child.local);
+        child.haslocal = false;
+        childx: Exec;
+        childx.env = child;
+        status: Text = XeqCmdWait(*childx, f, wait);
+        return status
+    }
+    if IsBuiltin(*x.env.global, TextView(name)) {
+        return RunBuiltin(x, TextView(name), words)
+    }
+    return RunProgram(x, words, wait)
+}
+
+// HasSuffix: whether s ends with what.
+HasSuffix :: (s: string, what: string) -> bool {
+    return s.count >= what.count && s[s.count - what.count:] == what
+}
+
+// Start an external program and wait for it; its status is the exit code.
+RunProgram :: (x: *Exec, words: *Vec(Text), wait: bool) -> Text {
+    ops: Vec(string);
+    for i: 1..words.count - 1 { VecPush(ops, TextView(words.*[i])) }
+    launch := Process.StartWith(TextView(words.*[0]), ops[:], x.env.fds[0], x.env.fds[1], x.env.fds[2]);
+    if launch.id == 0 {
+        // mash loads "<name>.dis" unless the name already ends in .dis, and
+        // its message names that file.
+        name: Vec(u8);
+        unused BuilderAppend(name, TextView(words.*[0]));
+        if name.count < 4 || TextView(name[name.count - 4:]) != ".dis" { unused BuilderAppend(name, ".dis") }
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: '%' does not exist\n", TextView(name[:]), TextView(name[:]));
+        ExecError(x, TextView(msg[:]));
+        return TextCopy("failed")
+    }
+    if !wait { return NoText() }
+    outcome := Process.Wait(launch.id);
+    if outcome.status < 0 {
+        if outcome.error != "killed" {
+            // A name the guest cannot find is reported as mash reports a
+            // missing module: the .dis file it looked for.
+            name: Vec(u8);
+            unused BuilderAppend(name, TextView(words.*[0]));
+            missing := false;
+            if name.count < 4 || TextView(name[name.count - 4:]) != ".dis" {
+                unused BuilderAppend(name, ".dis");
+                missing = true;
+            }
+            msg: Vec(u8);
+            if missing && HasSuffix(outcome.error, "file does not exist") {
+                BuilderPrint(*msg, "%: '/dis/%' does not exist\n", TextView(name[:]), TextView(name[:]));
+            } else {
+                BuilderPrint(*msg, "%: %\n", TextView(words.*[0]), outcome.error);
+            }
+            ExecError(x, TextView(msg[:]));
+        }
+        return TextCopy("failed")
+    }
+    if outcome.status > 0 && outcome.value != 0 {
+        code: Vec(u8);
+        BuilderPrint(*code, "%", outcome.value);
+        return BuilderFinish(code)
+    }
+    return NoText()
+}
+
+// Pipelines: each element runs beside the others, joined by pipes. Every
+// element but the last has its output on a pipe; every element but the
+// first has its input on one.
+RunPipeline :: (x: *Exec, start: s32) -> Text {
+    // Collect the elements left to right.
+    elems: Vec(s32);
+    n := start;
+    while n >= 0 && cmds[n].op == CPIPE {
+        VecPush(elems, cmds[n].left);
+        n = cmds[n].right;
+    }
+    VecPush(elems, n);
+    if elems.count == 1 { return XeqCmdWait(x, elems[0], true) }
+    batch: Batch;
+    prevread: s32 = -1;
+    i: s64;
+    while i < elems.count {
+        in := prevread;
+        out: s32 = -1;
+        if i < elems.count - 1 {
+            ends: [2]s32;
+            if Ns.Pipe(ends[:]) != 0 {
+                ReportItem(x, elems[i], "cannot make a pipe");
+                if prevread >= 0 { unused Io.Close(prevread) }
+                unused WaitBatch(x, *batch);
+                return TextCopy("failed")
+            }
+            out = ends[1];
+            // Hand the read end to the next element.
+            next := ends[0];
+            if prevread >= 0 { unused Io.Close(prevread) }
+            prevread = next;
+        }
+        StartElement(x, *batch, elems[i], in, out);
+        if out >= 0 { unused Io.Close(out) }
+        i += 1;
+    }
+    if prevread >= 0 { unused Io.Close(prevread) }
+    return WaitBatch(x, *batch)
+}
+
+// Start one pipeline element with its streams.
+StartElement :: (x: *Exec, batch: *Batch, c: s32, in: s32, out: s32) {
+    // The element's own redirections apply on top of the pipe streams.
+    s: Saved;
+    SaveFds(x, *s);
+    if in >= 0 { x.env.fds[0] = in }
+    if out >= 0 { x.env.fds[1] = out }
+    unused ApplyRedirs(x, c, *s);
+    words := CmdWords(c);
+    unused StartChild(x, batch, *words, x.env.fds[0], x.env.fds[1], x.env.fds[2]);
+    RestoreFds(x, *s);
+}
+
+// A background job: run it beside the shell with its input from /dev/null.
+RunAsync :: (x: *Exec, c: s32) -> Text {
+    batch: Batch;
+    s: Saved;
+    SaveFds(x, *s);
+    nullh := Io.Open("/dev/null", 0);
+    if nullh >= 0 { x.env.fds[0] = nullh }
+    unused ApplyRedirs(x, cmds[c].left, *s);
+    words := CmdWords(cmds[c].left);
+    unused StartChild(x, *batch, *words, x.env.fds[0], x.env.fds[1], x.env.fds[2]);
+    RestoreFds(x, *s);
+    if nullh >= 0 { unused Io.Close(nullh) }
+    return NoText()
+}
+
+// @{...}: a subshell, with its own copy of the variables.
+RunSubgroup :: (x: *Exec, c: s32) -> Text {
+    child: Env;
+    CloneEnv(*x.env, *child);
+    subgroup: Saved;
+    SaveFds(x, *subgroup);
+    ok := true;
+    if cmds[c].redirs_count > 0 { ok = ApplyRedirs(x, c, *subgroup) }
+    if !ok {
+        RestoreFds(x, *subgroup);
+        return NoText()
+    }
+    childx: Exec;
+    childx.env = child;
+    status: Text = XeqCmdWait(*childx, cmds[c].left, true);
+    RestoreFds(x, *subgroup);
+    return status
+}
+
+// for (name in list) cmd
+RunFor :: (x: *Exec, c: s32) -> Text {
+    items_at: Vec(s32);
+    for i: 0..cast(s64)cmds[c].words_count - 1 { VecPush(items_at, WordAt(c, i)) }
+    values: Vec(Text);
+    if !EvalWords(x, *items_at, *values) { return NoText() }
+    name := WordText(items[cmds[c].item].word);
+    result: Text;
+    for i: 0..values.count - 1 {
+        one: Vec(Text);
+        VecPush(one, TextCopy(TextView(values[i])));
+        LetVar(*x.env, name, *one);
+        step: Text = XeqCmdWait(x, cmds[c].left, true);
+        VecSwap(result.bytes, step.bytes);
+    }
+    return result
+}
+
+// case: the body of the first matching arm, or -1.
+CasePick :: (x: *Exec, c: s32) -> s32 {
+    subject := ExprValue(x, cmds[c].left);
+    r := cmds[c].right;
+    while r >= 0 {
+        pattern := ExprValue(x, cmds[r].left);
+        if MatchValues(x, subject.word.bytes.count == 0 && subject.list.count == 0, TextView(subject.word), subject.list,
+                       pattern.word.bytes.count == 0 && pattern.list.count == 0, TextView(pattern.word), pattern.list) {
+            return cmds[cmds[r].left].right
+        }
+        r = cmds[r].right
+    }
+    return -1
+}
+
+// name = value and name := value.
+Assign :: (x: *Exec, c: s32) {
+    item := cmds[c].item;
+    if item < 0 { return }
+    items_at: Vec(s32);
+    for i: 0..cast(s64)cmds[c].words_count - 1 { VecPush(items_at, WordAt(c, i)) }
+    values: Vec(Text);
+    if !EvalWords(x, *items_at, *values) { return }
+    name := WordText(items[item].word);
+    if cmds[c].op == CDEFEQ { LetVar(*x.env, name, *values) } else { SetVar(*x.env, name, *values) }
+}
+
+// fn name { body }
+DefineFn :: (x: *Exec, c: s32) {
+    item := cmds[c].item;
+    if item < 0 { return }
+    name := WordText(items[item].word);
+    if !Ident(name) {
+        ReportItem(x, c, "bad function name");
+        return
+    }
+    empty: Vec(Text);
+    SetSym(*x.env.global, name, SFUNC, *empty, cmds[c].left, "")
+}
+
+// eval runs its words as mash input; the program binds this to its own
+// source parser so a file and a string share one implementation.
+EvalInput :: (e: *Env, words: *Vec(Text)) -> Text {
+    unused e;
+    unused words;
+    return NoText()
+}
+
+// A builtin command: the ones the builtins module defines.
+RunBuiltin :: (x: *Exec, name: string, words: *Vec(Text)) -> Text {
+    if Builtins.IsBuiltin(name) {
+        return Builtins.RunBuiltin(*x.env, name, words, EvalInput);
+    }
+    if name == "true" { return NoText() }
+    if name == "exit" { return TextCopy("exit") }
+    if name == "quote" {
+        out: Vec(u8);
+        for i: 1..words.count - 1 {
+            if i > 1 { VecPush(out, 32) }
+            q: Text = QuoteIfNeeded(TextView(words.*[i]));
+            unused BuilderAppend(out, TextView(q));
+        }
+        VecPush(out, 10);
+        unused WriteAll(x.env.fds[1], TextView(out[:]));
+        return NoText()
+    }
+    if name == "env" {
+        out: Vec(u8);
+        for i: 0..x.env.global.syms.count - 1 {
+            if x.env.global.syms[i].kind != SVALUE { continue }
+            BuilderPrint(*out, "% =", TextView(x.env.global.syms[i].name));
+            for k: 0..x.env.global.syms[i].value.count - 1 { BuilderPrint(*out, " %", TextView(x.env.global.syms[i].value[k])) }
+            VecPush(out, 10);
+        }
+        unused WriteAll(x.env.fds[1], TextView(out[:]));
+        return NoText()
+    }
+    msg: Vec(u8);
+    BuilderPrint(*msg, "%: builtin not available here\n", name);
+    ExecError(x, TextView(msg[:]));
+    return TextCopy("failed")
+}

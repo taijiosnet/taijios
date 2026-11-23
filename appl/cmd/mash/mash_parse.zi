@@ -1,0 +1,645 @@
+// mash's parser: the LALR tables yacc generated for appl/cmd/mash/mash.y,
+// and that grammar's actions written out. Parsing stays table driven, so the
+// grammar, its precedences and its error recovery are the originals.
+//
+// Semantic values are command, item and flag indices; item lists are ranges
+// in one pool, since a value cannot own a Vec while it sits on the stack.
+#import "std/vec";
+#import "mash_ast";
+#import "mash_lex";
+#import "mash_env";
+
+#scope_export
+
+YYERRCODE :: 2;
+YYMAXDEPTH :: 150;
+YYLAST :: 249;
+YYFLAG :: -1000;
+
+
+
+
+
+
+
+
+
+yyact: Vec(s32);
+yypact: Vec(s32);
+yypgo: Vec(s32);
+yyr1: Vec(s32);
+yyr2: Vec(s32);
+yychk: Vec(s32);
+yydef: Vec(s32);
+yyexca: Vec(s32);
+
+// The tables are filled once, at startup: a file-scope array of this size
+// is over the compiler's initializer limit.
+TablesReady: bool;
+
+InitTables :: () {
+    if TablesReady { return }
+    TablesReady = true;
+    for value: s32.[    7,  20,   4,  49,  41,  47, 110,  65, 103,  95,   17,  24,  32, 112,  33, 146, 142,  38,  39,  28,   59,  60, 140, 129,  40,  64,  22,  46,  63,  35,   36,  34,  37, 128, 127,  38,  67,  69,  70,  71,   27,  26,  25,  76,  22,  75, 126, 111,  77,  74,   45,  80,  81,  38,  44,  78,  88,  89,  90,  91,   92,  68,  22,  98,  99,  93,  94,  32, 124,  33,   97, 106,  62, 107,  38,  39, 104, 108, 109, 104,   68,  40, 105,  22,  66, 105,  56, 143,  55, 116,  117, 118, 119, 120,  73,  32,  32,  33,  33,  38,   39, 122, 132,  36, 131,  37,  40, 123,  22,  72,  125,  56,  43,  55, 135, 136,  58,  57, 133,  62,  134, 139,  38,   6,  62,  16,  13,  14,  15, 141,   66,  22,  96,  67,  69,  62,  32,  79,  33,  84,   83,  21,  24,  61, 147, 148, 144,  24, 149,  11,   22,   3,  12,  16,  13,  14,  15,  18,   2,  19,    1,   5,  85,  87,  86,  84,  83,   8, 101,  21,   54,  51,  52,  53,  48,  39,   9,  11,  22,  82,   12,  40,  42,  50, 137,  18,  56,  19,  55,  54,   51,  52,  53,  48,  39, 115, 138,  38,  39, 130,   40,  10,  50,  29,  40,  56,  22,  55, 102,  56,   31,  55,  85,  87,  86,  84,  83, 121,  23,  30,   85,  87,  86,  84,  83, 114,   0, 145,  85,  87,   86,  84,  83, 113,   0,   0,  85,  87,  86,  84,   83, 100,   0,   0,  85,  87,  86,  84,  83 ] { VecPush(yyact, value) }
+    for value: s32.[ -1000,-1000, 121,-1000,-1000,-1000,-1000,   1,-1000,-1000,   -3,-1000,  84,  25,  21,  -2, 173,  92,  15,  15,  120,-1000, 173,-1000, 149,-1000,-1000,-1000,-1000,-1000, -1000,-1000, 109,-1000, 102,  33,  15,  15,-1000,  81,   66,  19, 149,-1000, 117, 173, 173, 151,-1000,-1000,  173, 173, 173, 173, 173,  56,  52,-1000,-1000, 104,  104,  15,  15, 233,-1000,  54,-1000, 109,-1000, 109,  109, 109,-1000,-1000,-1000,-1000,   1,  17, -24,-1000,  225, 217,-1000, 173, 173, 173, 173, 173, 209,-1000, -1000,-1000,-1000, 177, 177,-1000,-1000,-1000,  57,-1000, -1000,-1000,-1000,-1000,  40,-1000,  16,   4,   3,  -7,   70,-1000,-1000, 149, 149, 154,-1000, 125, 125, 125,  125,-1000,  -8,-1000,-1000, -14,-1000,-1000,-1000,-1000, -1000,  15,  15,  70,  79, 137, 132,-1000,-1000, 201, -1000, -15,-1000, 149, 149, 149,-1000, 132, 132,-1000 ] { VecPush(yypact, value) }
+    for value: s32.[    0, 218, 203,   3, 208,   1, 199,  10, 201,   7,  196, 195,   0,   2,   4, 182, 176,   6,   5,   8,  168,   9, 167, 160, 158, 151 ] { VecPush(yypgo, value) }
+    for value: s32.[    0,  23,  24,  24,  25,  25,  25,  15,  15,  13,   14,  14,  12,  12,  12,  22,  22,  16,  16,  16,   16,  16,  16,  16,  16,  16,  16,  16,  16,  19,   19,  20,  20,  21,  21,  11,  11,  10,   8,   8,    2,   2,   4,   4,   3,   3,   3,   3,   5,   5,    5,   7,   9,   9,  17,  17,   6,   6,   6,   6,    1,   1,   1,  18,  18,  18,  18,  18,  18,  18,   18,  18,  18,  18,  18 ] { VecPush(yyr1, value) }
+    for value: s32.[    0,   1,   0,   2,   1,   1,   1,   0,   2,   2,    1,   2,   1,   1,   3,   1,   4,   4,   5,   7,    5,   7,   5,   5,   3,   3,   3,   3,   4,   4,    3,   0,   1,   0,   3,   0,   2,   3,   1,   2,    1,   1,   1,   1,   4,   4,   4,   4,   1,   3,    3,   1,   0,   2,   0,   2,   2,   2,   2,   2,    1,   1,   1,   1,   1,   3,   3,   2,   2,   2,    2,   3,   3,   3,   3 ] { VecPush(yyr2, value) }
+    for value: s32.[ -1000, -23, -24, -25, -13,  40,   2, -12, -22, -16,   -8,  28,  31,   5,   6,   7,   4,  -7,  36,  38,   -5,  20,  29,  -1,  10,  41,  40,  39,  22,  -2,   -4,  -6,  -5,  -3,  34,  32,  33,  35,  20,  21,   27, -14, -15,  28,  29,  29,  29, -18,  20,  -3,   29,  17,  18,  19,  16,  34,  32,  25,  24,  -5,   -5,  23,  15, -18, -12,  -9,  28,  -5,  28,  -5,   -5,  -5,  28,  28,  30, -13, -12, -14,  -7,  20,  -18, -18,  28,  15,  14,  11,  13,  12, -18, -18,  -18, -18, -18,  -9,  -9, -21,  28, -21,  -5,  -5,    8, -20,  -4, -19,  22,  28, -14, -14, -14, -14,  -17,  30,  37,   8,   8, -11, -18, -18, -18, -18,  -18,   8, -14, -19,  28, -14,  30,  30,  30,  30,   -6,  34,  32, -17,  -9, -12, -12,  30, -10, -18,   30, -14,  30,   8,   9,  26,  30, -12, -12, -13 ] { VecPush(yychk, value) }
+    for value: s32.[    2,  -2,  -2,   3,   4,   5,   6,   0,  12,  13,   15,   7,   0,   0,   0,   0,   0,   0,   0,   0,   38,  -2,   0,   9,   0,  60,  61,  62,  52,  39,   40,  41,  42,  43,   0,   0,   0,   0,  48,   0,    0,   0,  10,   7,   0,   0,   0,   0,  63,  64,    0,   0,   0,   0,   0,   0,   0,  52,  52,  33,   33,   0,   0,   0,  14,  31,   7,  56,   7,  57,   58,  59,   7,   7,  54,   8,  11,   0,   0,  51,    0,   0,  35,   0,   0,   0,   0,   0,   0,  67,   68,  69,  70,  24,  25,  26,   7,  27,   0,  49,   50,  16,  53,  32,   0,   7,   0,   0,   0,   0,   17,  54,  52,   0,   0,   0,  66,  71,  72,  73,   74,  65,   0,  28,   7,   0,  46,  47,  44,  45,   55,   0,   0,  18,   0,  20,  22,  23,  36,   0,   34,   0,  30,   0,   0,   0,  29,  19,  21,  37 ] { VecPush(yydef, value) }
+    for value: s32.[ -1, 1,  1, -1,  -2, 0, -1, 2,  1, 1,  -2, 0, -1, 21,  24, 51,  25, 51,  -2, 48 ] { VecPush(yyexca, value) }
+}
+
+// A semantic value: a command index, an item index, an item list, or a flag.
+SVal :: struct {
+    cmd: s32;
+    item: s32;
+    items_at: s32;
+    items_count: s32;
+    flag: s32;
+}
+
+EmptyVal :: () -> SVal {
+    v: SVal;
+    v.cmd = -1;
+    v.item = -1;
+    v.items_at = 0;
+    v.items_count = 0;
+    return v
+}
+
+// Item lists handed up the tree as a range in one pool.
+pool: Vec(s32);
+
+PoolStart :: () -> s32 { return cast(s32)pool.count }
+
+PoolAdd :: (i: s32) { VecPush(pool, i) }
+
+PoolSet :: (v: *SVal, at: s32) {
+    v.items_at = at;
+    v.items_count = cast(s32)(pool.count - cast(s64)at);
+}
+
+// The list a value names, into out.
+PoolList :: (v: SVal, out: *Vec(s32)) {
+    VecClear(<<out);
+    for i: 0..cast(s64)v.items_count - 1 { VecPush(<<out, pool[cast(s64)v.items_at + i]) }
+}
+
+PoolReversed :: (v: SVal, out: *Vec(s32)) {
+    VecClear(<<out);
+    k := cast(s64)v.items_count - 1;
+    while k >= 0 { VecPush(<<out, pool[cast(s64)v.items_at + k]); k -= 1 }
+}
+
+// What the grammar's actions need from the evaluator.
+XeqHook :: #type (cmd: s32) -> bool;
+MkSimpleHook :: #type (items: *Vec(s32)) -> s32;
+MkCmdHook :: #type (cmd: s32, flag: s32) -> s32;
+
+Actions :: struct {
+    // Append a command to the statements a parse is collecting.
+    xeq: XeqHook;
+    // mksimple: a simple command from an item list.
+    mksimple: MkSimpleHook;
+    // mkcmd: wrap for a terminator flag.
+    mkcmd: MkCmdHook;
+}
+
+// Everything the parser needs: its lexer, the actions, and the source text
+// for diagnostics.
+Parser :: struct {
+    lexer: Lexer;
+    act: Actions;
+    // The token read ahead, when ahead is true.
+    ahead: bool;
+    tok: s32;
+    tokval: SVal;
+    // The position of the token being read, for diagnostics.
+    errs: s32;
+}
+
+ReportSyntax :: (p: *Parser, s: string) {
+    p.errs += 1;
+    out: Vec(u8);
+    path := TextView(p.lexer.path);
+    if path.count != 0 && path != "<string>" {
+        BuilderPrint(*out, "%:%: %\n", path, p.lexer.line, s);
+    } else {
+        BuilderPrint(*out, "%\n", s);
+    }
+    if diagnose != null { unused diagnose(TextView(out[:])) }
+}
+
+// Set by the program: where a syntax diagnostic goes.
+Diagnostic :: #type (s: string) -> bool;
+diagnose: Diagnostic;
+
+BindDiagnostic :: (d: Diagnostic) { diagnose = d }
+
+// The next token from the lexer, with its semantic value.
+NextToken :: (p: *Parser) -> s32 {
+    t := Lex(*p.lexer);
+    v: SVal;
+    v.cmd = -1;
+    v.item = -1;
+    if t == LWORD { v.item = p.lexer.valword }
+    p.tokval = v;
+    return t
+}
+
+// yylex1: the token as a grammar terminal number, from Lex's token.
+Terminal :: (p: *Parser, t: s32) -> s32 {
+    if t <= 0 { return 1 }
+    if t >= YYPRIVATE && t < YYPRIVATE + 42 { return t - YYPRIVATE + 2 }
+    return 2
+}
+
+// The next grammar terminal, read from the lexer when none is pending.
+ReadTerminal :: (p: *Parser) -> s32 {
+    t := NextToken(p);
+    if t == LERROR { return 2 }
+    return Terminal(p, t)
+}
+
+YYPRIVATE :: 57344;
+
+Stack :: struct { state: s32; val: SVal }
+
+// Parse the whole source through the tables, running an action per
+// reduction, as yyeparse. Returns 0 when the input parsed, 1 on error.
+//
+// The engine's "break yystack" becomes the done flag: after it is set, no
+// state is pushed or reduced again.
+Parse :: (p: *Parser) -> s32 {
+    InitTables();
+    stack: [YYMAXDEPTH]Stack;
+    state: s32 = 0;
+    // -1 means no token has been read yet.
+    yychar: s32 = -1;
+    errflag: s32;
+    yyp: s32 = -1;
+    yyval: SVal;
+    result: s32 = 0;
+    done := false;
+    yyn: s32 = 0;
+    // The outer pass pushes a state; a shift pushes its own state and stays
+    // in the inner pass, as yacc's parser does.
+    while !done {
+        yyp += 1;
+        if yyp >= YYMAXDEPTH {
+            ReportSyntax(p, "yacc stack overflow");
+            result = 1;
+            break;
+        }
+        stack[yyp].state = state;
+        stack[yyp].val = yyval;
+        reduce := true;
+        while true {
+            yyn = yypact[state];
+            if yyn > YYFLAG {
+                if yychar < 0 { yychar = ReadTerminal(p) }
+                candidate := yyn + yychar;
+                if candidate >= 0 && candidate < YYLAST {
+                    shifted := yyact[candidate];
+                    if yychk[shifted] == yychar {
+                        yychar = -1;
+                        yyp += 1;
+                        if yyp >= YYMAXDEPTH {
+                            ReportSyntax(p, "yacc stack overflow");
+                            result = 1;
+                            done = true;
+                            break;
+                        }
+                        state = shifted;
+                        stack[yyp].state = state;
+                        stack[yyp].val = p.tokval;
+                        if errflag > 0 { errflag -= 1 }
+                        continue;
+                    }
+                }
+            }
+            // The default action of this state.
+            yyn = yydef[state];
+            if yyn == -2 {
+                if yychar < 0 { yychar = ReadTerminal(p) }
+                xi: s64;
+                while true {
+                    if yyexca[xi] == -1 && yyexca[xi + 1] == state { break }
+                    xi += 2;
+                }
+                xi += 2;
+                while true {
+                    yyn = yyexca[xi];
+                    if yyn < 0 || yyn == yychar { break }
+                    xi += 2;
+                }
+                yyn = yyexca[xi + 1];
+                if yyn < 0 {
+                    // The accept action.
+                    done = true;
+                    break;
+                }
+            }
+            if yyn != 0 { break }
+            // Error: report it, then try to recover.
+            if errflag == 0 {
+                ReportSyntax(p, "syntax error");
+                Suck(*p.lexer);
+            }
+            if errflag != 3 {
+                errflag = 3;
+                recovered := false;
+                while yyp >= 0 {
+                    e := yypact[stack[yyp].state] + YYERRCODE;
+                    if e >= 0 && e < YYLAST {
+                        candidate2 := yyact[e];
+                        if yychk[candidate2] == YYERRCODE {
+                            state = candidate2;
+                            yychar = -1;
+                            recovered = true;
+                            break;
+                        }
+                    }
+                    yyp -= 1;
+                }
+                if !recovered {
+                    result = 1;
+                    done = true;
+                }
+                reduce = false;
+                break;
+            }
+            if yychar == 1 {
+                result = 1;
+                done = true;
+                reduce = false;
+                break;
+            }
+            yychar = -1;
+        }
+        if done || !reduce { continue }
+        // Reduce by the action's production.
+        yypt := yyp;
+        yyp -= yyr2[yyn];
+        // The goto table finds the next state.
+        lhs := yyr1[yyn];
+        yyg := yypgo[lhs];
+        yyj := yyg + stack[yyp].state + 1;
+        if yyj >= YYLAST || yychk[yyact[yyj]] != -lhs { state = yyact[yyg] } else { state = yyact[yyj] }
+        if !Reduce(p, yyn, stack[:], yypt, yyp, *yyval) {
+            result = 1;
+            break
+        }
+        // The push for the reduced state happens at the top of this loop,
+        // as yacc's does: goto, then round again.
+    }
+    return result
+}
+
+// The grammar's actions, one per production, in mash.y's order. Actions with
+// no code leave the default value, as yacc's $$ = $1 default does.
+Reduce :: (p: *Parser, prod: s32, stack: []Stack, yypt: s32, yyp: s32, out: *SVal) -> bool {
+    yyval: SVal = EmptyVal();
+    // $n is stack[yypt - (n-1)], so $1 is always stack[yypt]. The length of
+    // the rule is what puts yyp where it is.
+    got := false;
+    first: s32 = yypt;
+    if prod == 1 {
+        // script: tcmds
+        yyval = stack[first].val;
+        got = true;
+    } else if prod == 2 {
+        // tcmds: empty
+        yyval = EmptyVal();
+        got = true;
+    } else if prod == 3 {
+        // tcmds: tcmds xeq
+        yyval = stack[first].val;
+        got = true;
+    } else if prod == 4 {
+        // xeq: cmda { $1.xeq(e) }
+        c := stack[yypt].val.cmd;
+        if c >= 0 { unused p.act.xeq(c) }
+        yyval = EmptyVal();
+        got = true;
+    } else if prod == 5 {
+        // xeq: Leof
+        yyval = EmptyVal();
+        got = true;
+    } else if prod == 6 {
+        // xeq: error
+        yyval = EmptyVal();
+        got = true;
+    } else if prod == 7 {
+        // cmdt: empty
+        yyval.cmd = -1;
+        got = true;
+    } else if prod == 8 {
+        // cmdt: cmdt cmda
+        yyval.cmd = Cmd2(CSEQ, stack[first].val.cmd, stack[yypt].val.cmd);
+        got = true;
+    } else if prod == 9 {
+        // cmda: cmd term
+        yyval.cmd = p.act.mkcmd(stack[yypt - 1].val.cmd, stack[yypt].val.flag);
+        got = true;
+    } else if prod == 10 {
+        yyval = stack[first].val;
+        got = true;
+    } else if prod == 11 {
+        // cmds: cmdt cmd
+        yyval.cmd = Cmd2(CSEQ, stack[yypt - 1].val.cmd, p.act.mkcmd(stack[yypt].val.cmd, 0));
+        got = true;
+    } else if prod == 12 {
+        yyval = stack[first].val;
+        got = true;
+    } else if prod == 13 {
+        yyval = stack[first].val;
+        got = true;
+    } else if prod == 14 {
+        // cmd: cmd Lpipe cmd
+        yyval.cmd = Cmd2(CPIPE, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+        got = true;
+    } else if prod == 15 {
+        // simple: asimple
+        PoolList(stack[first].val, *slist);
+        yyval.cmd = p.act.mksimple(*slist);
+        got = true;
+    } else if prod == 16 {
+        // simple: asimple Lcolon list cobrace
+        unused p;
+        got = true;
+    }
+    if !got {
+        // Productions 17 to 74 are written below, in the same order.
+        return Reduce2(p, prod, stack, yypt, yyp, out)
+    }
+    <<out = yyval;
+    return true
+}
+
+// Scratch for an item list on its way into a command.
+slist: Vec(s32);
+
+Reduce2 :: (p: *Parser, prod: s32, stack: []Stack, yypt: s32, yyp: s32, out: *SVal) -> bool {
+    yyval: SVal = EmptyVal();
+    first: s32 = yyp + 1;
+    if first < 0 { first = 0 }
+    if prod == 16 {
+        // simple: asimple Lcolon list cobrace
+        dep := stack[yypt].val.cmd;
+        if dep >= 0 {
+            PoolList(stack[yypt - 1].val, *slist);
+            CmdSetWords(dep, *slist);
+            PoolList(stack[yypt - 3].val, *slist);
+            yyval.cmd = Cmd1W(CDEPEND, dep, *slist);
+        } else {
+            yyval.cmd = dep;
+        }
+    } else if prod == 17 {
+        // complex: Loncurly cmds Loffcurly epilog
+        yyval.cmd = Cmde(stack[yypt].val.cmd, CGROUP, stack[yypt - 2].val.cmd, -1);
+    } else if prod == 18 {
+        // complex: Lat Loncurly cmds Loffcurly epilog
+        yyval.cmd = Cmde(stack[yypt].val.cmd, CSUBGROUP, stack[yypt - 2].val.cmd, -1);
+    } else if prod == 19 {
+        // complex: Lfor Lonparen sword Lin list Loffparen cmd
+        c := Cmd1I(CFOR, stack[yypt].val.cmd, stack[yypt - 4].val.item);
+        words: Vec(s32);
+        PoolReversed(stack[yypt - 2].val, *words);
+        if c >= 0 { CmdSetWords(c, *words) }
+        yyval.cmd = c;
+    } else if prod == 20 {
+        // complex: Lif Lonparen expr Loffparen cmd
+        yyval.cmd = Cmd2(CIF, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 21 {
+        // complex: Lif ... cmd Lelse cmd
+        yyval.cmd = Cmd2(CIF, stack[yypt - 4].val.cmd, Cmd2(CELSE, stack[yypt - 2].val.cmd, stack[yypt].val.cmd));
+    } else if prod == 22 {
+        // complex: Lwhile Lonparen expr Loffparen cmd
+        yyval.cmd = Cmd2(CWHILE, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 23 {
+        // complex: Lcase expr Loncurly cases Loffcurly
+        yyval.cmd = Cmd2(CCASE, stack[yypt - 3].val.cmd, RotCases(stack[yypt - 1].val.cmd));
+    } else if prod == 24 {
+        // complex: sword Leq list
+        PoolList(stack[yypt].val, *slist);
+        yyval.cmd = CmdIW(CEQ, stack[yypt - 2].val.item, *slist);
+    } else if prod == 25 {
+        // complex: sword Ldefeq list
+        PoolList(stack[yypt].val, *slist);
+        yyval.cmd = CmdIW(CDEFEQ, stack[yypt - 2].val.item, *slist);
+    } else if prod == 26 {
+        // complex: Lfn word obrace
+        yyval.cmd = Cmd1I(CFN, stack[yypt].val.cmd, stack[yypt - 1].val.item);
+    } else if prod == 27 {
+        // complex: Lrescue word obrace
+        yyval.cmd = Cmd1I(CRESCUE, stack[yypt].val.cmd, stack[yypt - 1].val.item);
+    } else if prod == 28 {
+        // complex: word Lcolonmatch word cbrace
+        body := stack[yypt].val.cmd;
+        if body >= 0 { cmds[body].item = stack[yypt - 1].val.item }
+        yyval.cmd = Cmd1I(CRULE, body, stack[yypt - 3].val.item);
+    } else if prod == 29 {
+        // cbrace: Lcolon Loncurly cmds Loffcurly
+        yyval.cmd = Cmd1(CLISTGROUP, stack[yypt - 1].val.cmd);
+    } else if prod == 30 {
+        // cbrace: Loncurly cmds Loffcurly
+        yyval.cmd = Cmd1(CGROUP, stack[yypt - 1].val.cmd);
+    } else if prod == 31 {
+        // cobrace: empty
+        yyval.cmd = Cmd1(CNOP, -1);
+    } else if prod == 32 {
+        yyval = stack[first].val;
+    } else if prod == 33 {
+        // obrace: empty
+        yyval.cmd = -1;
+    } else if prod == 34 {
+        // obrace: Loncurly cmds Loffcurly
+        yyval.cmd = stack[yypt - 1].val.cmd;
+    } else if prod == 35 {
+        // cases: empty
+        yyval.cmd = -1;
+        yyval.items_at = PoolStart();
+    } else if prod == 36 {
+        // cases: cases case
+        yyval.cmd = Cmd2(CCASES, stack[yypt - 1].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 37 {
+        // case: expr Lmatched cmda
+        yyval.cmd = Cmd2(CMATCHED, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 38 {
+        // asimple: word
+        at := PoolStart();
+        PoolAdd(stack[yypt].val.item);
+        yyval = EmptyVal();
+        yyval.items_at = at;
+        yyval.items_count = cast(s32)(pool.count - cast(s64)at);
+        yyval.cmd = -1;
+    } else if prod == 39 {
+        // asimple: asimple item
+        at := stack[yypt - 1].val.items_at;
+        PoolAdd(stack[yypt].val.item);
+        yyval = EmptyVal();
+        yyval.items_at = at;
+        yyval.items_count = cast(s32)(pool.count - cast(s64)at);
+    } else if prod == 40 {
+        yyval = stack[first].val;
+    } else if prod == 41 {
+        yyval = stack[first].val;
+    } else if prod == 42 {
+        yyval = stack[first].val;
+    } else if prod == 43 {
+        yyval = stack[first].val;
+    } else if prod == 44 {
+        // wgen: Lbackq Loncurly cmds Loffcurly
+        yyval.item = ItemC(IBACKQ, stack[yypt - 1].val.cmd);
+    } else if prod == 45 {
+        // wgen: Lquote Loncurly cmds Loffcurly
+        yyval.item = ItemC(IQUOTE, stack[yypt - 1].val.cmd);
+    } else if prod == 46 {
+        // wgen: Lless Loncurly cmds Loffcurly
+        yyval.item = ItemC(IINPIPE, stack[yypt - 1].val.cmd);
+    } else if prod == 47 {
+        // wgen: Lgreat Loncurly cmds Loffcurly
+        yyval.item = ItemC(IOUTPIPE, stack[yypt - 1].val.cmd);
+    } else if prod == 48 {
+        yyval = stack[first].val;
+    } else if prod == 49 {
+        // word: word Lcaret word
+        yyval.item = Item2(ICARET, stack[yypt - 2].val.item, stack[yypt].val.item);
+    } else if prod == 50 {
+        // word: Lonparen expr Loffparen
+        yyval.item = ItemC(IEXPR, stack[yypt - 1].val.cmd);
+    } else if prod == 51 {
+        // sword: Lword
+        yyval.item = Sword(stack[yypt].val.item, p);
+    } else if prod == 52 {
+        // list: empty. Its range starts where the pool ends, so the first
+        // witem appended to it does not pick up earlier statements' items.
+        yyval = EmptyVal();
+        yyval.items_at = PoolStart();
+        yyval.items_count = 0;
+        yyval.cmd = -1;
+    } else if prod == 53 {
+        // list: list witem
+        at := stack[yypt - 1].val.items_at;
+        PoolAdd(stack[yypt].val.item);
+        yyval = EmptyVal();
+        yyval.items_at = at;
+        yyval.items_count = cast(s32)(pool.count - cast(s64)at);
+        yyval.cmd = -1;
+    } else if prod == 54 {
+        // epilog: empty
+        yyval.cmd = NewCmd(CNOP);
+        cmds[yyval.cmd].error = false;
+    } else if prod == 55 {
+        // epilog: epilog redir
+        c := stack[yypt - 1].val.cmd;
+        yyval.cmd = c;
+        if c >= 0 { unused CmdIO(c, stack[yypt].val.item, p) }
+    } else if prod == 56 {
+        // redir: Lless word
+        yyval.item = ItemR(RIN, stack[yypt].val.item);
+    } else if prod == 57 {
+        // redir: Lgreat word
+        yyval.item = ItemR(ROUT, stack[yypt].val.item);
+    } else if prod == 58 {
+        // redir: Lgreatgreat word
+        yyval.item = ItemR(RAPPEND, stack[yypt].val.item);
+    } else if prod == 59 {
+        // redir: Llessgreat word
+        yyval.item = ItemR(RINOUT, stack[yypt].val.item);
+    } else if prod == 60 {
+        // term: Lsemi
+        yyval.flag = 0;
+    } else if prod == 61 {
+        // term: Leof
+        yyval.flag = 0;
+    } else if prod == 62 {
+        // term: Land
+        yyval.flag = 1;
+    } else if prod == 63 {
+        // expr: Lword
+        yyval.cmd = Cmd1I(CWORD, -1, stack[yypt].val.item);
+    } else if prod == 64 {
+        // expr: wgen
+        yyval.cmd = Cmd1I(CWORD, -1, stack[yypt].val.item);
+    } else if prod == 65 {
+        // expr: Lonparen expr Loffparen
+        yyval.cmd = stack[yypt - 1].val.cmd;
+    } else if prod == 66 {
+        // expr: expr Lcaret expr
+        yyval.cmd = Cmd2(CCARET, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 67 {
+        // expr: Lhd expr
+        yyval.cmd = Cmd1(CHD, stack[yypt].val.cmd);
+    } else if prod == 68 {
+        // expr: Ltl expr
+        yyval.cmd = Cmd1(CTL, stack[yypt].val.cmd);
+    } else if prod == 69 {
+        // expr: Llen expr
+        yyval.cmd = Cmd1(CLEN, stack[yypt].val.cmd);
+    } else if prod == 70 {
+        // expr: Lnot expr
+        yyval.cmd = Cmd1(CNOT, stack[yypt].val.cmd);
+    } else if prod == 71 {
+        // expr: expr Lcons expr
+        yyval.cmd = Cmd2(CCONS, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 72 {
+        // expr: expr Leqeq expr
+        yyval.cmd = Cmd2(CEQEQ, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 73 {
+        // expr: expr Lnoteq expr
+        yyval.cmd = Cmd2(CNOTEQ, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    } else if prod == 74 {
+        // expr: expr Lmatch expr
+        yyval.cmd = Cmd2(CMATCH, stack[yypt - 2].val.cmd, stack[yypt].val.cmd);
+    }
+    unused p;
+    <<out = yyval;
+    return true
+}
+
+// mash's parse-time checks, from misc.b: repeat redirections, make a simple
+// command, and reject a malformed function or variable name.
+
+// A redirection on a command, as Cmd.cmdio: repeating one of the same
+// direction is an error and marks the command bad.
+CmdIO :: (c: s32, item: s32, p: *Parser) -> bool {
+    if c < 0 || item < 0 { return false }
+    r := items[item].redir;
+    if r < 0 { return false }
+    k := 0;
+    while k < cmds[c].redirs_count {
+        if RedirOp(c, k) == r {
+            ReportSyntax(p, "repeat redirection");
+            cmds[c].error = true;
+            return false;
+        }
+        k += 1;
+    }
+    // Redirections are collected newest first: the last one applies first.
+    redirs[cmds[c].redirs_at].op = r;
+    return true
+}
+
+// sword: a word that must be a plain identifier.
+Sword :: (item: s32, p: *Parser) -> s32 {
+    if item >= 0 && items[item].op == IWORD && Ident(WordText(items[item].word)) { return item }
+    ReportSyntax(p, "malformed identifier");
+    return -1
+}
+
+// Rotate a case list, as Cmd.rotcases: the parse builds cases newest first.
+RotCases :: (c: s32) -> s32 {
+    l := c;
+    out: s32 = -1;
+    while l >= 0 {
+        t := cmds[l].right;
+        cmds[l].right = out;
+        out = l;
+        l = cmds[l].left;
+        if out >= 0 { cmds[out].left = t }
+    }
+    return out
+}

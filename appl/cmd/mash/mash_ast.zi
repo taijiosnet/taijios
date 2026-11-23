@@ -1,0 +1,477 @@
+// mash's parse tree, after appl/cmd/mash/mash.m and misc.b: items and
+// commands in one arena each, so a node is named by its index and -1 stands
+// for nil. A command's words, redirections and values are ranges in pools
+// shared by the whole parse.
+#import "std/vec";
+#import "shell_util";
+
+#scope_export
+
+// Redirection types, as Rin and the rest.
+RIN :: 0;
+ROUT :: 1;
+RAPPEND :: 2;
+RINOUT :: 3;
+RCOUNT :: 4;
+
+// Item operators.
+ICARET :: 0;
+IICARET :: 1;
+IDOLLAR :: 2;
+IDOLLARQ :: 3;
+IMATCH :: 4;
+IWORD :: 5;
+IEXPR :: 6;
+IBACKQ :: 7;
+IQUOTE :: 8;
+IINPIPE :: 9;
+IOUTPIPE :: 10;
+IREDIR :: 11;
+
+// Command operators, in the grammar's order so a dump stays readable.
+CSIMPLE :: 0;
+CSEQ :: 1;
+CFOR :: 2;
+CIF :: 3;
+CELSE :: 4;
+CWHILE :: 5;
+CCASE :: 6;
+CCASES :: 7;
+CMATCHED :: 8;
+CDEFEQ :: 9;
+CEQ :: 10;
+CFN :: 11;
+CRESCUE :: 12;
+CASYNC :: 13;
+CGROUP :: 14;
+CLISTGROUP :: 15;
+CSUBGROUP :: 16;
+CNOP :: 17;
+CWORD :: 18;
+CLIST :: 19;
+CCARET :: 20;
+CHD :: 21;
+CLEN :: 22;
+CNOT :: 23;
+CTL :: 24;
+CCONS :: 25;
+CEQEQ :: 26;
+CNOTEQ :: 27;
+CMATCH :: 28;
+CPIPE :: 29;
+CDEPEND :: 30;
+CRULE :: 31;
+CPRIVATE :: 32;
+
+// Word flags.
+WQUOTED :: 1;
+WEXPAND :: 2;
+
+Word :: struct {
+    text: Text;
+    flags: s32;
+    line: s32;
+    file: Text;
+}
+
+Item :: struct {
+    op: s32;
+    word: s32;   // index into words, or -1
+    left: s32;   // index into items, or -1
+    right: s32;
+    cmd: s32;    // index into cmds, or -1
+    redir: s32;  // redirection type, or -1
+    redirword: s32;
+}
+
+Redir :: struct {
+    op: s32;
+    word: s32;  // an item
+}
+
+Cmd :: struct {
+    op: s32;
+    words_at: s32;
+    words_count: s32;
+    left: s32;
+    right: s32;
+    item: s32;
+    redirs_at: s32;
+    redirs_count: s32;
+    values_at: s32;
+    values_count: s32;
+    error: bool;
+}
+
+words: Vec(Word);
+items: Vec(Item);
+cmds: Vec(Cmd);
+redirs: Vec(Redir);
+itemlist: Vec(s32);
+values: Vec(Text);
+
+Reset :: () {
+    VecClear(words);
+    VecClear(items);
+    VecClear(cmds);
+    VecClear(redirs);
+    VecClear(itemlist);
+    VecClear(values);
+}
+
+NewWord :: (text: string, flags: s32, line: s32, file: string) -> s32 {
+    w: Word;
+    unused BuilderAppend(w.text.bytes, text);
+    w.flags = flags;
+    w.line = line;
+    unused BuilderAppend(w.file.bytes, file);
+    VecPush(words, w);
+    return cast(s32)(words.count - 1);
+}
+
+WordText :: (w: s32) -> string { return TextView(words[w].text) }
+
+// A bare item; every field but the operator starts empty.
+NewItem :: (op: s32) -> s32 {
+    item: Item;
+    item.op = op;
+    item.word = -1;
+    item.left = -1;
+    item.right = -1;
+    item.cmd = -1;
+    item.redir = -1;
+    item.redirword = -1;
+    VecPush(items, item);
+    return cast(s32)(items.count - 1);
+}
+
+NewCmd :: (op: s32) -> s32 {
+    cmd: Cmd;
+    cmd.op = op;
+    VecPush(cmds, cmd);
+    return cast(s32)(cmds.count - 1);
+}
+
+Item1 :: (op: s32, l: s32) -> s32 {
+    i := NewItem(op);
+    items[i].left = l;
+    return i;
+}
+
+Item2 :: (op: s32, l: s32, r: s32) -> s32 {
+    i := NewItem(op);
+    items[i].left = l;
+    items[i].right = r;
+    return i;
+}
+
+ItemC :: (op: s32, c: s32) -> s32 {
+    i := NewItem(op);
+    items[i].cmd = c;
+    return i;
+}
+
+ItemR :: (op: s32, w: s32) -> s32 {
+    i := NewItem(IREDIR);
+    items[i].redir = op;
+    items[i].redirword = w;
+    return i;
+}
+
+// A quoted word, as Item.itemw: no globbing, no keyword.
+ItemW :: (s: string) -> s32 {
+    i := NewItem(IWORD);
+    items[i].word = NewWord(s, WQUOTED, 0, "");
+    return i;
+}
+
+ItemL :: (l: *Vec(Text)) -> s32 {
+    if l.count == 1 { return ItemW(TextView(l.*[0])) }
+    c := NewCmd(CLIST);
+    cmds[c].values_at = cast(s32)values.count;
+    for i: 0..l.count - 1 {
+        moved: Text;
+        VecSwap(moved.bytes, l.*[i].bytes);
+        VecPush(values, moved);
+    }
+    cmds[c].values_count = cast(s32)(values.count - cast(s64)cmds[c].values_at);
+    return ItemC(IEXPR, c);
+}
+
+Cmd1 :: (op: s32, l: s32) -> s32 {
+    c := NewCmd(op);
+    cmds[c].left = l;
+    return c;
+}
+
+Cmd2 :: (op: s32, l: s32, r: s32) -> s32 {
+    c := NewCmd(op);
+    cmds[c].left = l;
+    cmds[c].right = r;
+    return c;
+}
+
+Cmd1I :: (op: s32, l: s32, i: s32) -> s32 {
+    c := NewCmd(op);
+    cmds[c].left = l;
+    cmds[c].item = i;
+    return c;
+}
+
+// The command `c` becomes `op` with children l and r, as Cmd.cmde.
+Cmde :: (c: s32, op: s32, l: s32, r: s32) -> s32 {
+    cmds[c].op = op;
+    cmds[c].left = l;
+    cmds[c].right = r;
+    return c;
+}
+
+// Set a command's words from a list of item indices, in the order given.
+// Copy a list of item indices into the command.
+CmdSetWords :: (c: s32, l: *Vec(s32)) {
+    at := cast(s32)itemlist.count;
+    for i: 0..l.count - 1 { VecPush(itemlist, l.*[i]) }
+    cmds[c].words_at = at;
+    cmds[c].words_count = cast(s32)(itemlist.count - cast(s64)at);
+}
+
+// Reading a command's words and redirections by index.
+WordAt :: (c: s32, i: s64) -> s32 { return itemlist[cmds[c].words_at + i] }
+RedirAt :: (c: s32, i: s64) -> s32 { return redirs[cmds[c].redirs_at + i].word }
+RedirOp :: (c: s32, i: s64) -> s32 { return redirs[cmds[c].redirs_at + i].op }
+ValueAt :: (c: s32, i: s64) -> string { return TextView(values[cmds[c].values_at + i]) }
+
+// A command carrying a word list, as Cmd.cmd1w.
+Cmd1W :: (op: s32, l: s32, w: *Vec(s32)) -> s32 {
+    c := NewCmd(op);
+    cmds[c].left = l;
+    CmdSetWords(c, w);
+    return c
+}
+
+// As Cmd.cmdiw: an item and a list, the list reversed into the command.
+CmdIW :: (op: s32, i: s32, w: *Vec(s32)) -> s32 {
+    c := NewCmd(op);
+    cmds[c].item = i;
+    CmdSetWords(c, w);
+    return c
+}
+
+// The printed form of a tree, as Cmd.text and its helpers in dump.b. Used by
+// -d and by the whatis and depends builtins.
+
+WordTextOut :: (w: s32, d: string, out: *Vec(u8)) {
+    if w < 0 { return }
+    text := TextView(words[w].text);
+    if d.count != 0 { unused BuilderAppend(<<out, d) }
+    if (words[w].flags & WQUOTED) != 0 {
+        unused BuilderAppend(<<out, "'");
+        for text {
+            if it == 39 || it == 92 { VecPush(<<out, 92) }
+            VecPush(<<out, it);
+        }
+        unused BuilderAppend(<<out, "'");
+    } else {
+        unused BuilderAppend(<<out, text);
+    }
+}
+
+ItemTextOut :: (i: s32, out: *Vec(u8)) {
+    if i < 0 { return }
+    op := items[i].op;
+    if op == ICARET {
+        ItemTextOut(items[i].left, out);
+        unused BuilderAppend(<<out, " ^ ");
+        ItemTextOut(items[i].right, out);
+    } else if op == IICARET {
+        ItemTextOut(items[i].left, out);
+        ItemTextOut(items[i].right, out);
+    } else if op == IDOLLARQ {
+        WordTextOut(items[i].word, "$\"", out);
+    } else if op == IDOLLAR || op == IMATCH {
+        WordTextOut(items[i].word, "$", out);
+    } else if op == IWORD {
+        WordTextOut(items[i].word, "", out);
+    } else if op == IEXPR {
+        VecPush(<<out, #char "(");
+        CmdTextOut(items[i].cmd, out);
+        VecPush(<<out, #char ")");
+    } else if op == IBACKQ {
+        VecPush(<<out, #char "`");
+        GroupText(items[i].cmd, out);
+    } else if op == IQUOTE {
+        VecPush(<<out, #char "\"");
+        GroupText(items[i].cmd, out);
+    } else if op == IINPIPE {
+        VecPush(<<out, #char "<");
+        GroupText(items[i].cmd, out);
+    } else if op == IOUTPIPE {
+        VecPush(<<out, #char ">");
+        GroupText(items[i].cmd, out);
+    }
+}
+
+// group(): the body printed, and a statement that is not already a
+// sequence gets its terminator.
+GroupText :: (c: s32, out: *Vec(u8)) {
+    unused BuilderAppend(<<out, "{ ");
+    if c < 0 {
+        unused BuilderAppend(<<out, " }");
+        return
+    }
+    CmdTextOut(c, out);
+    if cmds[c].op != CSEQ { VecPush(<<out, #char ";") }
+    unused BuilderAppend(<<out, " }");
+}
+
+// The words of a command, space separated.
+WordsText :: (c: s32, out: *Vec(u8)) {
+    for i: 0..cast(s64)cmds[c].words_count - 1 {
+        if i > 0 { VecPush(<<out, 32) }
+        ItemTextOut(WordAt(c, i), out);
+    }
+}
+
+// A command's redirections appended to the text built so far.
+RedirsText :: (c: s32, out: *Vec(u8)) {
+    for i: 0..cast(s64)cmds[c].redirs_count - 1 {
+        VecPush(<<out, 32);
+        op := RedirOp(c, i);
+        if op == ROUT { unused BuilderAppend(<<out, "> ") }
+        else if op == RAPPEND { unused BuilderAppend(<<out, ">> ") }
+        else if op == RINOUT { unused BuilderAppend(<<out, "<> ") }
+        else { unused BuilderAppend(<<out, "< ") }
+        ItemTextOut(RedirAt(c, i), out);
+    }
+}
+
+CmdTextOut :: (c: s32, out: *Vec(u8)) {
+    if c < 0 { return }
+    op := cmds[c].op;
+    if op == CSIMPLE {
+        WordsText(c, out);
+        RedirsText(c, out);
+    } else if op == CSEQ {
+        // sequence() writes every statement followed by its terminator. An
+        // empty first half prints nothing; the right half always ends with
+        // its own ";", which is what makes "fn f { a }" print "{ a; }".
+        if cmds[c].left >= 0 {
+            CmdTextOut(cmds[c].left, out);
+            VecPush(<<out, #char ";");
+            if cmds[c].right >= 0 { VecPush(<<out, 32) }
+        }
+        if cmds[c].right >= 0 {
+            CmdTextOut(cmds[c].right, out);
+            VecPush(<<out, #char ";");
+        }
+    } else if op == CFOR {
+        unused BuilderAppend(<<out, "for (");
+        ItemTextOut(cmds[c].item, out);
+        unused BuilderAppend(<<out, " in ");
+        WordsText(c, out);
+        unused BuilderAppend(<<out, ") ");
+        CmdTextOut(cmds[c].left, out);
+    } else if op == CIF {
+        unused BuilderAppend(<<out, "if (");
+        CmdTextOut(cmds[c].left, out);
+        unused BuilderAppend(<<out, ") ");
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CELSE {
+        CmdTextOut(cmds[c].left, out);
+        unused BuilderAppend(<<out, " else ");
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CWHILE {
+        unused BuilderAppend(<<out, "while (");
+        CmdTextOut(cmds[c].left, out);
+        unused BuilderAppend(<<out, ") ");
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CCASE {
+        unused BuilderAppend(<<out, "case ");
+        CmdTextOut(cmds[c].left, out);
+        unused BuilderAppend(<<out, " { ");
+        CmdTextOut(cmds[c].right, out);
+        VecPush(<<out, #char "}");
+    } else if op == CCASES {
+        CmdTextOut(cmds[c].left, out);
+        VecPush(<<out, #char ";");
+        VecPush(<<out, 32);
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CMATCHED {
+        CmdTextOut(cmds[c].left, out);
+        unused BuilderAppend(<<out, " => ");
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CDEFEQ || op == CEQ {
+        ItemTextOut(cmds[c].item, out);
+        if op == CDEFEQ { unused BuilderAppend(<<out, " := ") } else { unused BuilderAppend(<<out, " = ") }
+        WordsText(c, out);
+    } else if op == CFN {
+        unused BuilderAppend(<<out, "fn ");
+        ItemTextOut(cmds[c].item, out);
+        VecPush(<<out, 32);
+        GroupText(cmds[c].left, out);
+    } else if op == CRESCUE {
+        unused BuilderAppend(<<out, "rescue ");
+        ItemTextOut(cmds[c].item, out);
+        VecPush(<<out, 32);
+        GroupText(cmds[c].left, out);
+    } else if op == CASYNC {
+        CmdTextOut(cmds[c].left, out);
+        VecPush(<<out, #char "&");
+    } else if op == CGROUP {
+        GroupText(cmds[c].left, out);
+        RedirsText(c, out);
+    } else if op == CSUBGROUP {
+        VecPush(<<out, #char "@");
+        GroupText(cmds[c].left, out);
+        RedirsText(c, out);
+    } else if op == CLISTGROUP {
+        VecPush(<<out, #char ":");
+        GroupText(cmds[c].left, out);
+    } else if op == CWORD {
+        ItemTextOut(cmds[c].item, out);
+    } else if op == CCARET {
+        CmdTextOut(cmds[c].left, out);
+        unused BuilderAppend(<<out, " ^ ");
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CHD || op == CTL || op == CLEN {
+        if op == CHD { unused BuilderAppend(<<out, "hd ") }
+        else if op == CTL { unused BuilderAppend(<<out, "tl ") }
+        else { unused BuilderAppend(<<out, "len ") }
+        CmdTextOut(cmds[c].left, out);
+    } else if op == CNOT {
+        VecPush(<<out, #char "!");
+        CmdTextOut(cmds[c].left, out);
+    } else if op == CCONS || op == CEQEQ || op == CNOTEQ || op == CMATCH || op == CPIPE {
+        CmdTextOut(cmds[c].left, out);
+        if op == CCONS { unused BuilderAppend(<<out, " :: ") }
+        else if op == CEQEQ { unused BuilderAppend(<<out, " == ") }
+        else if op == CNOTEQ { unused BuilderAppend(<<out, " != ") }
+        else if op == CMATCH { unused BuilderAppend(<<out, " ~ ") }
+        else { unused BuilderAppend(<<out, " | ") }
+        CmdTextOut(cmds[c].right, out);
+    } else if op == CDEPEND {
+        WordsText(c, out);
+        unused BuilderAppend(<<out, " : ");
+        WordsText(cmds[c].left, out);
+        VecPush(<<out, 32);
+        CmdTextOut(cmds[c].left, out);
+    } else if op == CRULE {
+        ItemTextOut(cmds[c].item, out);
+        unused BuilderAppend(<<out, " :~ ");
+        ItemTextOut(cmds[cmds[c].left].item, out);
+        VecPush(<<out, 32);
+        CmdTextOut(cmds[c].left, out);
+    } else if op == CLIST {
+        for i: 0..cast(s64)cmds[c].values_count - 1 {
+            if i > 0 { VecPush(<<out, 32) }
+            unused BuilderAppend(<<out, ValueAt(c, i));
+        }
+    }
+}
+
+// The whole tree as text.
+CmdText :: (c: s32) -> Text {
+    out: Vec(u8);
+    CmdTextOut(c, *out);
+    return BuilderFinish(out);
+}

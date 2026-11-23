@@ -76,3 +76,20 @@ mashlib.dis:	$LIBSRC
 
 %.s:		%.b
 	limbo $LIMBOFLAGS -w -G -S $stem.b
+
+# The ZX mash: mash.zi and its modules, with the builtins compiled in.
+ZXCMD=..
+ZXSH=../sh
+MASHZX=mash.zi mash_ast.zi mash_lex.zi mash_parse.zi mash_env.zi mash_value.zi mash_exec.zi mash_builtins.zi
+HOSTS=--bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process
+
+mash.zx:	$MASHZX $ZXSH/shell_util.zi $ZXSH/shell_filepat.zi $ZXSH/shell_regexp.zi $ZXCMD/taijios_args.zi $ZXCMD/taijios_io.zi $ZXCMD/taijios_namespace.zi $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $(ZXCMD) --module-path $(ZXSH) $(HOSTS) --entry mash:main -o $target mash.zi
+	chmod 755 $target
+
+install-zx:V:	$ROOT/dis/mash.zx
+
+$ROOT/dis/mash.zx:	mash.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 mash.zx "$staged" && mv "$staged" "$target"

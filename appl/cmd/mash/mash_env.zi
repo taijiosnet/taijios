@@ -1,0 +1,233 @@
+// mash's symbol table and environment, after appl/cmd/mash/symb.b and
+// mash.m: variables, functions and builtins by name, in a global table and
+// an optional local one. Every procedure takes an Env by pointer, so the
+// Vecs it owns are never moved.
+#import "std/vec";
+Io :: #import "taijios_io";
+#import "shell_util";
+#import "mash_ast";
+#import "mash_lex";
+
+#scope_export
+
+// Environment flags, as mash.m.
+ETOP :: 1;
+EINTER :: 2;
+EECHO :: 4;
+ERAISE :: 8;
+EDUMPING :: 16;
+ENOXEQ :: 32;
+
+// Symbol kinds.
+SVALUE :: 0;
+SFUNC :: 1;
+SBUILTIN :: 2;
+
+MAXELEV :: 256;
+
+// The one-element value a variable set to nothing holds, kept apart from an
+// undefined variable.
+EMPTYWORD :: "\x01empty";
+
+Symbol :: struct {
+    name: Text;
+    value: Vec(Text);
+    func: s32;
+    builtin: Text;
+    kind: s32;
+}
+
+Stab :: struct { syms: Vec(Symbol) }
+
+Env :: struct {
+    global: Stab;
+    local: Stab;
+    haslocal: bool;
+    flags: s32;
+    // Descriptors 0, 1 and 2 as taijios_io handles; -1 is closed.
+    fds: [3]s32;
+    args: Vec(Text);
+    hasargs: bool;
+    level: s32;
+}
+
+ResetStab :: (t: *Stab) { VecClear(t.syms) }
+
+ResetEnv :: (e: *Env) {
+    ResetStab(*e.global);
+    ResetStab(*e.local);
+    VecClear(e.args);
+    e.haslocal = false;
+    e.hasargs = false;
+    e.flags = 0;
+    e.level = 0;
+    e.fds[0] = 0;
+    e.fds[1] = 1;
+    e.fds[2] = 2;
+}
+
+CopySymbol :: (dst: *Vec(Symbol), src: *Vec(Symbol), i: s64) {
+    s: Symbol;
+    unused BuilderAppend(s.name.bytes, TextView(src.*[i].name));
+    for k: 0..src.*[i].value.count - 1 { VecPush(s.value, TextCopy(TextView(src.*[i].value[k]))) }
+    s.func = src.*[i].func;
+    unused BuilderAppend(s.builtin.bytes, TextView(src.*[i].builtin));
+    s.kind = src.*[i].kind;
+    VecPush(<<dst, s);
+}
+
+// env.copy(): the tables copied, its own descriptor slots and $*.
+CopyEnv :: (src: *Env, out: *Env) {
+    ResetStab(*out.global);
+    ResetStab(*out.local);
+    VecClear(out.args);
+    out.flags = src.flags;
+    out.fds = src.fds;
+    out.level = src.level;
+    out.haslocal = false;
+    out.hasargs = false;
+    for i: 0..src.global.syms.count - 1 { CopySymbol(*out.global.syms, *src.global.syms, i) }
+    if src.haslocal {
+        for i: 0..src.local.syms.count - 1 { CopySymbol(*out.local.syms, *src.local.syms, i) }
+        out.haslocal = true;
+    }
+    for i: 0..src.args.count - 1 { VecPush(out.args, TextCopy(TextView(src.args[i]))) }
+    out.hasargs = src.hasargs;
+}
+
+// env.clone(): a copy that is no longer top level or interactive.
+CloneEnv :: (src: *Env, out: *Env) {
+    CopyEnv(src, out);
+    out.flags = src.flags & ~(ETOP | EINTER);
+}
+
+FindIn :: (t: *Stab, name: string) -> s64 {
+    k := t.syms.count - 1;
+    while k >= 0 {
+        if TextView(t.syms[k].name) == name { return k }
+        k -= 1;
+    }
+    return -1
+}
+
+SetSym :: (t: *Stab, name: string, kind: s32, v: *Vec(Text), func: s32, builtin: string) {
+    k := FindIn(t, name);
+    if k < 0 {
+        s: Symbol;
+        unused BuilderAppend(s.name.bytes, name);
+        s.func = -1;
+        s.kind = -1;
+        VecPush(t.syms, s);
+        k = t.syms.count - 1;
+    }
+    if kind == SVALUE {
+        VecClear(t.syms[k].value);
+        for i: 0..v.count - 1 { VecPush(t.syms[k].value, TextCopy(TextView(v.*[i]))) }
+    } else if kind == SFUNC {
+        t.syms[k].func = func;
+    } else {
+        VecClear(t.syms[k].builtin.bytes);
+        unused BuilderAppend(t.syms[k].builtin.bytes, builtin);
+    }
+    t.syms[k].kind = kind;
+}
+
+// A name's value into out. True when the name has one; out then holds the
+// single EMPTYWORD when the variable was set to nothing.
+GetValue :: (t: *Stab, name: string, out: *Vec(Text)) -> bool {
+    VecClear(<<out);
+    k := FindIn(t, name);
+    if k < 0 || t.syms[k].kind != SVALUE { return false }
+    for i: 0..t.syms[k].value.count - 1 { VecPush(<<out, TextCopy(TextView(t.syms[k].value[i]))) }
+    return true
+}
+
+// Whether a fetched value is the one-element empty marker.
+IsEmpty :: (v: *Vec(Text)) -> bool {
+    return v.count == 1 && TextView(v.*[0]) == EMPTYWORD
+}
+
+FuncOf :: (t: *Stab, name: string) -> s32 {
+    k := FindIn(t, name);
+    if k < 0 || t.syms[k].kind != SFUNC { return -1 }
+    return t.syms[k].func
+}
+
+// Whether a name is a builtin in this table.
+IsBuiltin :: (t: *Stab, name: string) -> bool {
+    k := FindIn(t, name);
+    return k >= 0 && t.syms[k].kind == SBUILTIN
+}
+
+BuiltinOf :: (t: *Stab, name: string) -> Text {
+    k := FindIn(t, name);
+    if k < 0 || t.syms[k].kind != SBUILTIN { return TextCopy("") }
+    return TextCopy(TextView(t.syms[k].builtin))
+}
+
+// env.dollar: the local table first, then the global one. True when the
+// name is defined, with its value in out.
+Dollar :: (e: *Env, name: string, out: *Vec(Text)) -> bool {
+    if e.haslocal {
+        if GetValue(*e.local, name, out) { return true }
+    }
+    if GetValue(*e.global, name, out) { return true }
+    VecClear(<<out);
+    return false
+}
+
+// env.set: a local of that name if there is one, else the global table.
+SetVar :: (e: *Env, name: string, v: *Vec(Text)) {
+    if e.haslocal && FindIn(*e.local, name) >= 0 { SetSym(*e.local, name, SVALUE, v, -1, "") }
+    else { SetSym(*e.global, name, SVALUE, v, -1, "") }
+}
+
+// env.let: the local table, made on first use.
+LetVar :: (e: *Env, name: string, v: *Vec(Text)) {
+    e.haslocal = true;
+    SetSym(*e.local, name, SVALUE, v, -1, "")
+}
+
+// $n: the argument, or the literal "$n" when there is none.
+ArgOf :: (e: *Env, s: string) -> Text {
+    n := LimboInt(s);
+    if !e.hasargs || n < 0 || n >= e.args.count {
+        out: Vec(u8);
+        BuilderPrint(*out, "$%", s);
+        return BuilderFinish(out)
+    }
+    return TextCopy(TextView(e.args[n]))
+}
+
+// The value of $*.
+Star :: (e: *Env) -> Vec(Text) {
+    out: Vec(Text);
+    for i: 0..e.args.count - 1 { VecPush(out, TextCopy(TextView(e.args[i]))) }
+    return out
+}
+
+// An empty status, meaning success.
+NoText :: () -> Text {
+    t: Text;
+    return t
+}
+
+// Write all of s to a handle.
+WriteAll :: (h: s32, s: string) -> bool {
+    if h < 0 { return false }
+    offset: s64;
+    while offset < s.count {
+        n := Io.Write(h, s[offset:]);
+        if n <= 0 { return false }
+        offset += n;
+    }
+    return true;
+}
+
+// env.report: "path:line: text", as where() builds it.
+ReportErr :: (e: *Env, path: string, line: s32, s: string) {
+    out: Vec(u8);
+    if path.count != 0 && path != "<string>" { BuilderPrint(*out, "%:%: %\n", path, line, s) }
+    else { BuilderPrint(*out, "%\n", s) }
+    unused WriteAll(e.fds[2], TextView(out[:]));
+}

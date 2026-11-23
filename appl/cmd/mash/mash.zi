@@ -1,0 +1,240 @@
+// mash: the TaijiOS make/shell as a ZX program, after appl/cmd/mash/mash.b.
+//     mash [-denx] [-c command] [src [args...]]
+//
+// The parse is mash's own grammar, through the tables yacc generated for
+// appl/cmd/mash/mash.y. The builtins module's commands are in mash_builtins.
+//
+// An internal mode lets one mash run a list for another, which is how a
+// pipeline element, a background job and a generator run: -i, then the
+// words of the list. Everything the child needs is in those words.
+#import "std/vec";
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Ns :: #import "taijios_namespace";
+#import "shell_util";
+#import "mash_ast";
+#import "mash_lex";
+#import "mash_env";
+#import "mash_value";
+#import "mash_parse";
+#import "mash_exec";
+Builtins :: #import "mash_builtins";
+
+// What a parse needs: one Exec and one Parser for the whole run.
+context: Exec;
+parser: Parser;
+// Interactive mode reads a line at a time from descriptor 0.
+interactive: bool;
+interactivefd: s32;
+// The prompt and continuation strings, as mash's globals.
+prompt: Text;
+contin: Text;
+// The status of the last command parsed, which the -c form reports.
+laststatus: Text;
+
+#scope_file
+
+// Report a diagnostic on the environment's stderr.
+Diagnose :: (s: string) -> bool {
+    unused WriteAll(context.env.fds[2], s);
+    return true
+}
+
+// The parser's actions: a statement runs as it is parsed, as the grammar's
+// xeq action did.
+XeqStatement :: (c: s32) -> bool {
+    if (context.env.flags & EDUMPING) != 0 { Dump(c) }
+    if (context.env.flags & ENOXEQ) != 0 { return true }
+    status: Text = XeqCmd(*context, c);
+    VecSwap(laststatus.bytes, status.bytes);
+    return true
+}
+
+// mkcmd: a terminator flag wraps the command in a sequence for "&".
+MkCmd :: (c: s32, flag: s32) -> s32 {
+    if c < 0 { return c }
+    if flag != 0 {
+        empty: Vec(s32);
+        out := Cmd1(CASYNC, c);
+        return out
+    }
+    return c
+}
+
+// mksimple: a simple command from an item list, taking redirections out.
+MkSimple :: (list: *Vec(s32)) -> s32 {
+    words_at: Vec(s32);
+    redir_at: Vec(s32);
+    for i: 0..list.count - 1 {
+        item := list.*[i];
+        if items[item].op == IREDIR { VecPush(redir_at, item); continue }
+        VecPush(words_at, item);
+    }
+    c := NewCmd(CSIMPLE);
+    CmdSetWords(c, *words_at);
+    // Redirections keep their order; the executor applies them last first.
+    cmds[c].redirs_at = cast(s32)redirs.count;
+    for i: 0..redir_at.count - 1 {
+        r := redir_at[i];
+        VecPush(redirs, Redir.{op = items[r].redir, word = items[r].redirword});
+    }
+    cmds[c].redirs_count = cast(s32)(redirs.count - cast(s64)cmds[c].redirs_at);
+    return c
+}
+
+// Parse and run one source through the tables. The grammar runs each
+// statement as it reduces it (its xeq action), so parsing and execution are
+// one pass, exactly as mash does it.
+RunSource :: (lex: *Lexer) -> bool {
+    CopyLexer(lex, *parser.lexer);
+    parser.ahead = false;
+    parser.errs = 0;
+    result := Parse(*parser);
+    return result == 0
+}
+
+// Dump a command tree, as -d does: its text form and a terminator.
+Dump :: (c: s32) {
+    text: Text = CmdText(c);
+    out: Vec(u8);
+    BuilderPrint(*out, "%", TextView(text));
+    if text.bytes.count > 0 && text.bytes[text.bytes.count - 1] != #char "&" { VecPush(out, #char ";") }
+    VecPush(out, 10);
+    unused WriteAll(context.env.fds[1], TextView(out[:]));
+}
+
+main :: () -> s32 {
+    unused BindDiagnostic(Diagnose);
+    ResetEnv(*context.env);
+    // -i starts the internal mode that runs one list for another mash.
+    count := Args.OperandCount();
+    if count > 0 && Args.Operand(0) == "-i" {
+        if count < 2 { return Usage() }
+        words: Vec(Text);
+        for k: 1..count - 1 { PushText(*words, TextCopy(TextView(Args.Operand(k)))) }
+        status: Text = RunWords(*context, *words, true);
+        return Finish(TextView(status))
+    }
+    interactive := false;
+    ctxtflags: s32 = 0;
+    carg: Text;
+    hascarg := false;
+    i: s32 = 0;
+    while i < count {
+        a := Args.Operand(i);
+        if a.count == 0 || a[0] != #char "-" { break }
+        j: s64 = 1;
+        while j < a.count {
+            c := a[j];
+            if c == #char "d" { ctxtflags |= EDUMPING }
+            else if c == #char "e" { ctxtflags |= ERAISE }
+            else if c == #char "n" { ctxtflags |= ENOXEQ }
+            else if c == #char "x" { ctxtflags |= EECHO }
+            else if c == #char "c" {
+                if j < a.count - 1 {
+                    unused BuilderAppend(carg.bytes, a[j + 1:]);
+                } else if i + 1 >= count || Args.Operand(i + 1) == "" {
+                    return Usage();
+                } else {
+                    i += 1;
+                    unused BuilderAppend(carg.bytes, Args.Operand(i));
+                }
+                hascarg = true;
+                break;
+            } else {
+                return Usage();
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    // The grammar runs each statement as it reduces it, so the shell is
+    // always at top level: a ":" dependency is legal, as in mash.
+    context.env.flags = ETOP | ctxtflags;
+    // Its own copy of the environment, so sibling shells do not share it.
+    unused Ns.ForkEnv();
+    // The builtins are compiled in; registering them makes the names
+    // resolve to this module.
+    Builtins.RegisterAll(*context.env.global);
+    empty: Vec(Text);
+    unused empty;
+    // The parse actions need the evaluator's entry points.
+    parser.act.xeq = XeqStatement;
+    parser.act.mksimple = MkSimple;
+    parser.act.mkcmd = MkCmd;
+    if hascarg {
+        lex: Lexer;
+        InitString(*lex, TextView(carg));
+        if !RunSource(*lex) { return Finish("parse error") }
+        return Finish(TextView(laststatus))
+    }
+    if i < count {
+        path := Args.Operand(i);
+        context.env.args = TailArgs(count, i + 1);
+        context.env.hasargs = context.env.args.count > 0;
+        lex: Lexer;
+        h := Io.Open(path, 0);
+        if h < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: %\n", path, Io.Error());
+            unused WriteAll(2, TextView(msg[:]));
+            unused Args.SetFailure("failed");
+            return 1;
+        }
+        InitFile(*lex, h, path);
+        // mash defines these after it opens the script, so env lists a
+        // variable the script sets before them.
+        blank: Vec(Text);
+        SetSym(*context.env.global, "args", SVALUE, *blank, -1, "");
+        SetSym(*context.env.global, "mashinit", SVALUE, *blank, -1, "");
+        ok := RunSource(*lex);
+        unused Io.Close(h);
+        if !ok { return Finish(TextView(laststatus)) }
+        return Finish(TextView(laststatus))
+    }
+    // Standard input, interactive when it is the console.
+    lex: Lexer;
+    InitFile(*lex, 0, "<stdin>");
+    unused RunSource(*lex);
+    unused interactive;
+    return Finish(TextView(laststatus))
+}
+
+// The operands from an index on, as a script's $*.
+TailArgs :: (count: s32, from: s32) -> Vec(Text) {
+    out: Vec(Text);
+    for i: from..count - 1 { PushText(*out, TextCopy(TextView(Args.Operand(i)))) }
+    return out
+}
+
+#scope_file
+
+// Read a whole guest file, for -c and a script operand.
+ReadSource :: (path: string, out: *Text) -> bool {
+    h := Io.Open(path, 0);
+    if h < 0 { return false }
+    chunk: [8192]u8;
+    while true {
+        n := Io.Read(h, chunk[:]);
+        if n < 0 { unused Io.Close(h); return false }
+        if n == 0 { break }
+        unused BuilderAppend(out.bytes, TextView(chunk[:n]));
+    }
+    unused Io.Close(h);
+    return true
+}
+
+// Usage, as mash's usage().
+Usage :: () -> s32 {
+    unused WriteAll(2, "usage: mash [-denx] [-c command] [src [args]]\n");
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+// The exit status. mash exits 0 after a script whose last command failed:
+// the failure is reported but never becomes the process status, as Limbo's
+// mash does. Only a usage error is a nonzero exit.
+Finish :: (status: string) -> s32 {
+    unused status;
+    return 0
+}

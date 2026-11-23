@@ -1,0 +1,114 @@
+# What /dis/mash.dis printed for each case of corpus.txt, recorded by
+# mash_test --record: escaped status, standard output and standard error.
+=== assign and expand a list
+status: \n
+out: a b c\n
+err: 
+=== local assignment
+status: \n
+out: p q r\n
+err: 
+=== assignments do not leak between kinds
+status: \n
+out: one\ntwo\n
+err: 
+=== caret concatenation over a list
+status: \n
+out: az bz cz\n
+err: 
+=== caret concatenation with a singleton on the left
+status: \n
+out: ha hb hc\n
+err: 
+=== quoted dollar squashes a list
+status: \n
+out: 'a b c'\n
+err: 
+=== quoted words keep their spaces
+status: \n
+out: 'a b' c\n
+err: 
+=== empty variable expands to nothing
+status: \n
+out: before after\n
+err: 
+=== function definition and call
+status: \n
+out: in-f '$*'\n
+err: 
+=== function with no arguments
+status: \n
+out: g-called\n
+err: 
+=== if with a true condition
+status: \n
+out: 
+err: $W/case.10:1: syntax error\n
+=== if with a false condition
+status: \n
+out: 
+err: $W/case.11:1: syntax error\n
+=== if else
+status: \n
+out: other\n
+err: 
+=== while runs its body while the condition holds
+status: \n
+out: 
+err: 
+=== for over a list
+status: \n
+out: 
+err: $W/case.14:1: syntax error\n
+=== case matches a list
+status: \n
+out: 
+err: $W/case.15:2: syntax error\n
+=== case falls through to the second arm
+status: \n
+out: 
+err: $W/case.16:2: syntax error\n
+=== comparison operators
+status: \n
+out: true\n
+err: 
+=== regular expression match
+status: \n
+out: true\n
+err: 
+=== head tail and length
+status: \n
+out: 
+err: $W/case.19:2: syntax error\na.dis: '/dis/a.dis' does not exist\n$W/case.19:3: syntax error\n
+=== cons builds a list
+status: \n
+out: a b c\n
+err: 
+=== nested blocks
+status: \n
+out: inner\n
+err: 
+=== environment listing names a variable
+status: \n
+out: somevar = value;\nargs =;\nmashinit =;\n
+err: 
+=== quote prints words as input
+status: \n
+out: a 'b c' d\n
+err: 
+=== comments and blank lines are ignored
+status: \n
+out: after\n
+err: 
+=== status of a builtin
+status: \n
+out: before\nafter\n
+err: 
+=== whatis reports a variable
+status: \n
+out: wq = one two;\n
+err: 
+=== whatis reports a function
+status: \n
+out: fn hello { quote hi; };\n
+err: 

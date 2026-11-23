@@ -1,0 +1,386 @@
+// mash's lexer, after appl/cmd/mash/lex.b: a byte reader over a string or a
+// guest file, the character classes and the tokens of mashparse.m.
+#import "std/vec";
+Io :: #import "taijios_io";
+#import "shell_util";
+#import "mash_ast";
+
+#scope_export
+
+// Tokens of appl/cmd/mash/mashparse.m, numbered as that module declares them.
+LCASE :: 57346;
+LFOR :: 57347;
+LIF :: 57348;
+LWHILE :: 57349;
+LOFFPAREN :: 57350;
+LELSE :: 57351;
+LPIPE :: 57352;
+LEQEQ :: 57353;
+LMATCH :: 57354;
+LNOTEQ :: 57355;
+LCONS :: 57356;
+LCARET :: 57357;
+LNOT :: 57358;
+LHD :: 57359;
+LTL :: 57360;
+LLEN :: 57361;
+LWORD :: 57362;
+LBACKQ :: 57363;
+LCOLON :: 57364;
+LCOLONMATCH :: 57365;
+LDEFEQ :: 57366;
+LEQ :: 57367;
+LMATCHED :: 57368;
+LQUOTE :: 57369;
+LONCURLY :: 57370;
+LONPAREN :: 57371;
+LOFFCURLY :: 57372;
+LAT :: 57373;
+LGREAT :: 57374;
+LGREATGREAT :: 57375;
+LLESS :: 57376;
+LLESSGREAT :: 57377;
+LFN :: 57378;
+LIN :: 57379;
+LRESCUE :: 57380;
+LAND :: 57381;
+LEOF :: 57382;
+LSEMI :: 57383;
+LERROR :: 57384;
+
+// Character classes.
+ALPHA :: 1;
+NUMERIC :: 2;
+ONE :: 4;
+WS :: 8;
+META :: 16;
+
+// A source: a string, or a guest file read through buf. pushed holds the one
+// character put back, as Bufio ungetc.
+Lexer :: struct {
+    eof: bool;
+    isfile: bool;
+    fd: s32;
+    s: Text;
+    strpos: s64;
+    buf: [8192]u8;
+    bufpos: s64;
+    buflen: s64;
+    line: s32;
+    path: Text;
+    pushed: bool;
+    pushc: s32;
+    // Whether the end-of-file token has already been handed to the parser;
+    // the call after it reports -1, which is yacc's accept code, as mash's
+    // lexer does when it closes its file and returns nil.
+    ended: bool;
+    // The item index of the last LWORD Lex returned.
+    valword: s32;
+}
+
+InitString :: (l: *Lexer, s: string) {
+    VecClear(l.s.bytes);
+    unused BuilderAppend(l.s.bytes, s);
+    VecClear(l.path.bytes);
+    unused BuilderAppend(l.path.bytes, "<string>");
+    l.isfile = false;
+    l.strpos = 0;
+    l.line = 1;
+    l.eof = false;
+    l.ended = false;
+}
+
+InitFile :: (l: *Lexer, fd: s32, path: string) {
+    l.isfile = true;
+    l.fd = fd;
+    VecClear(l.path.bytes);
+    unused BuilderAppend(l.path.bytes, path);
+    l.bufpos = 0;
+    l.buflen = 0;
+    l.line = 1;
+    l.eof = false;
+    l.ended = false;
+    l.strpos = 0;
+}
+
+// Move src into dst, taking its text with it.
+CopyLexer :: (src: *Lexer, dst: *Lexer) {
+    dst.eof = src.eof;
+    dst.isfile = src.isfile;
+    dst.fd = src.fd;
+    VecSwap(dst.s.bytes, src.s.bytes);
+    dst.strpos = src.strpos;
+    dst.buf = src.buf;
+    dst.bufpos = src.bufpos;
+    dst.buflen = src.buflen;
+    dst.line = src.line;
+    VecSwap(dst.path.bytes, src.path.bytes);
+    dst.pushed = src.pushed;
+    dst.pushc = src.pushc;
+    dst.valword = src.valword;
+}
+
+// Getc is the only reader: it honours the one character put back, as
+// Bufio's ungetc does, so a lookahead never vanishes or repeats.
+Getc :: (l: *Lexer) -> s32 {
+    if l.pushed { l.pushed = false; return l.pushc }
+    if l.eof { return -1 }
+    if l.isfile {
+        if l.bufpos >= l.buflen {
+            l.bufpos = 0;
+            l.buflen = Io.Read(l.fd, l.buf[:]);
+            if l.buflen <= 0 { l.buflen = 0; l.eof = true; return -1 }
+        }
+        c := cast(s32)l.buf[l.bufpos];
+        l.bufpos += 1;
+        if c == 10 { l.line += 1 }
+        return c;
+    }
+    if l.strpos >= l.s.bytes.count { l.eof = true; return -1 }
+    c := cast(s32)l.s.bytes[l.strpos];
+    l.strpos += 1;
+    if c == 10 { l.line += 1 }
+    return c;
+}
+
+// Put one character back, as Bufio's ungetc: only one is ever held.
+Back :: (l: *Lexer, c: s32) {
+    if c < 0 { return }
+    l.pushed = true;
+    l.pushc = c;
+}
+
+ClassOf :: (c: s32) -> s32 {
+    if c == 32 || c == 9 || c == 10 || c == 13 || c == 11 { return WS }
+    if c == #char ":" || c == #char "#" || c == #char ";" || c == #char "&" || c == #char "|" ||
+        c == #char "^" || c == #char "$" || c == #char "=" || c == #char "@" || c == #char "~" ||
+        c == #char "`" || c == #char "{" || c == #char "}" || c == #char "(" || c == #char ")" ||
+        c == #char "<" || c == #char ">" { return ONE }
+    if (c >= #char "a" && c <= #char "z") || (c >= #char "A" && c <= #char "Z") || c == #char "_" { return ALPHA }
+    if c >= #char "0" && c <= #char "9" { return NUMERIC }
+    if c == #char "*" || c == #char "[" || c == #char "]" || c == #char "?" { return META }
+    return 0;
+}
+
+IsAlpha :: (c: s32) -> bool { return (ClassOf(c) & ALPHA) != 0 }
+IsAlnum :: (c: s32) -> bool { return (ClassOf(c) & (ALPHA | NUMERIC)) != 0 }
+IsTerm :: (c: s32) -> bool { return c < 0 || (ClassOf(c) & (ONE | WS)) != 0 }
+IsSpace :: (c: s32) -> bool { return (ClassOf(c) & WS) != 0 }
+IsQuoteByte :: (c: s32) -> bool { return c >= 0 && (ClassOf(c) & (ONE | WS | META)) != 0 }
+
+Ident :: (s: string) -> bool {
+    if s.count == 0 || !IsAlpha(cast(s32)s[0]) { return false }
+    for i: 1..s.count - 1 { if !IsAlnum(cast(s32)s[i]) { return false } }
+    return true;
+}
+
+// A keyword token, or -1.
+Keyword :: (s: string) -> s32 {
+    if s == "case" { return LCASE }
+    if s == "else" { return LELSE }
+    if s == "fn" { return LFN }
+    if s == "for" { return LFOR }
+    if s == "hd" { return LHD }
+    if s == "if" { return LIF }
+    if s == "in" { return LIN }
+    if s == "len" { return LLEN }
+    if s == "rescue" { return LRESCUE }
+    if s == "tl" { return LTL }
+    if s == "while" { return LWHILE }
+    return -1;
+}
+
+Enquote :: (s: string) -> Text {
+    out: Vec(u8);
+    VecPush(out, 39);
+    for s {
+        if it == 39 || it == 92 { VecPush(out, 92) }
+        VecPush(out, it);
+    }
+    VecPush(out, 39);
+    return BuilderFinish(out);
+}
+
+QuoteIfNeeded :: (s: string) -> Text {
+    for s { if IsQuoteByte(cast(s32)it) { return Enquote(s) } }
+    return TextCopy(s);
+}
+
+// Skip to the end of the line after a syntax error.
+Suck :: (l: *Lexer) {
+    while true {
+        c := Getc(l);
+        if c < 0 || c == 10 { return }
+    }
+}
+
+// $word, $n, $"..." and a lone $; the character after it is returned.
+GetDollar :: (l: *Lexer, line: s32) -> (item: s32, c: s32) {
+    op: s32 = IDOLLAR;
+    text: Vec(u8);
+    ch := Getc(l);
+    if ch >= #char "0" && ch <= #char "9" {
+        op = IMATCH;
+        while ch >= #char "0" && ch <= #char "9" {
+            VecPush(text, cast(u8)ch);
+            ch = Getc(l);
+        }
+    } else {
+        if ch == #char "\"" {
+            op = IDOLLARQ;
+            ch = Getc(l);
+        }
+        if IsAlpha(ch) {
+            while IsAlnum(ch) {
+                VecPush(text, cast(u8)ch);
+                ch = Getc(l);
+            }
+        } else if op == IDOLLAR {
+            unused BuilderAppend(text, "$");
+            op = IWORD;
+        } else {
+            unused BuilderAppend(text, "$\"");
+            op = IWORD;
+        }
+    }
+    i := NewItem(op);
+    items[i].word = NewWord(TextView(text[:]), 0, line, TextView(l.path));
+    return i, ch
+}
+
+// A word with quoting; the character after it is returned. Returns -1 for a
+// newline inside a quoted word, as getword does.
+GetWord :: (l: *Lexer, c0: s32, line: s32) -> (item: s32, c: s32) {
+    text: Vec(u8);
+    flags: s32 = 0;
+    ch := c0;
+    if ch == 39 {
+        flags = WQUOTED;
+        while true {
+            ch = Getc(l);
+            if ch < 0 { break }
+            if ch == 39 {
+                ch = Getc(l);
+                break;
+            }
+            if ch == 92 {
+                ch = Getc(l);
+                if ch != 39 && ch != 92 {
+                    if ch == 10 { continue }
+                    if ch >= 0 { Back(l, ch) }
+                    ch = 92;
+                }
+            } else if ch == 10 {
+                return -1, 0
+            }
+            VecPush(text, cast(u8)ch);
+        }
+    } else {
+        while true {
+            if ch == #char "*" || ch == #char "[" || ch == #char "?" { flags |= WEXPAND }
+            VecPush(text, cast(u8)ch);
+            ch = Getc(l);
+            if IsTerm(ch) || ch == 39 { break }
+        }
+    }
+    i := NewItem(IWORD);
+    items[i].word = NewWord(TextView(text[:]), flags, line, TextView(l.path));
+    return i, ch
+}
+
+// The next token; a word's item index is left in l.valword.
+Lex :: (l: *Lexer) -> s32 {
+    if l.ended { return -1 }
+    while true {
+        c := Getc(l)
+        while IsSpace(c) { c = Getc(l) }
+        if c < 0 { l.ended = true; return LEOF }
+        if c == #char ":" {
+            d := Getc(l);
+            if d == #char ":" { return LCONS }
+            if d == #char "=" { return LDEFEQ }
+            if d == #char "~" { return LCOLONMATCH }
+            Back(l, d);
+            return LCOLON
+        }
+        if c == #char "#" {
+            while true {
+                c = Getc(l)
+                if c < 0 { l.ended = true; return LEOF }
+                if c == 10 { break }
+            }
+            continue
+        }
+        if c == #char ";" { return LSEMI }
+        if c == #char "&" { return LAND }
+        if c == #char "|" { return LPIPE }
+        if c == #char "^" { return LCARET }
+        if c == #char "@" { return LAT }
+        if c == #char "!" {
+            d := Getc(l);
+            if d == #char "=" { return LNOTEQ }
+            Back(l, d);
+            return LNOT
+        }
+        if c == #char "~" { return LMATCH }
+        if c == #char "=" {
+            d := Getc(l);
+            if d == #char ">" { return LMATCHED }
+            if d == #char "=" { return LEQEQ }
+            Back(l, d);
+            return LEQ
+        }
+        if c == #char "`" { return LBACKQ }
+        if c == #char "\"" { return LQUOTE }
+        if c == #char "{" { return LONCURLY }
+        if c == #char "}" { return LOFFCURLY }
+        if c == #char "(" { return LONPAREN }
+        if c == #char ")" { return LOFFPAREN }
+        if c == #char "<" {
+            d := Getc(l);
+            if d == #char ">" { return LLESSGREAT }
+            Back(l, d);
+            return LLESS
+        }
+        if c == #char ">" {
+            d := Getc(l);
+            if d == #char ">" { return LGREATGREAT }
+            Back(l, d);
+            return LGREAT
+        }
+        if c == #char "\\" {
+            d := Getc(l);
+            if d == 10 { continue }
+            Back(l, d);
+        }
+        // Carets for free: adjacent words join into one item.
+        line := l.line;
+        chain: s32 = -1;
+        item: s32 = -1;
+        term: s32 = -1;
+        while true {
+            if c == #char "$" {
+                item, term = GetDollar(l, line)
+            } else {
+                item, term = GetWord(l, c, line)
+            }
+            if item < 0 { return LERROR }
+            if IsTerm(term) && term != #char "$" { break }
+            if chain < 0 { chain = item } else { chain = Item2(IICARET, chain, item) }
+            c = term;
+        }
+        Back(l, term);
+        if chain >= 0 {
+            l.valword = Item2(IICARET, chain, item);
+            return LWORD
+        }
+        // A lone word may be a keyword; a joined one never is.
+        if items[item].op == IWORD && (words[items[item].word].flags & WQUOTED) == 0 {
+            k := Keyword(WordText(items[item].word))
+            if k >= 0 { return k }
+        }
+        l.valword = item;
+        return LWORD
+    }
+    return LEOF
+}

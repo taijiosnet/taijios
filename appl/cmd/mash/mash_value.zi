@@ -1,0 +1,143 @@
+// mash's word and expression evaluation, after appl/cmd/mash/xeq.b's item
+// evaluation and expr.b: $variables, lists, carets, globbing and the
+// expression operators.
+#import "std/vec";
+#import "std/option";
+Io :: #import "taijios_io";
+#import "shell_util";
+#import "shell_filepat";
+#import "shell_regexp";
+#import "mash_ast";
+#import "mash_lex";
+#import "mash_env";
+
+#scope_export
+
+// What an item evaluates to: a singleton word, a list, and the glob flag.
+Value :: struct {
+    word: Text;
+    list: Vec(Text);
+    expand: bool;
+}
+
+NoValue :: () -> Value {
+    v: Value;
+    return v
+}
+
+// A value holding one word, taking ownership of the text's bytes.
+Singleton :: (s: Text) -> Value {
+    v: Value;
+    VecSwap(v.word.bytes, s.bytes);
+    return v
+}
+
+// A wildcard word expands through filepat, as glob does.
+Glob :: (e: *Env, s: string) -> Value {
+    out: Value;
+    files := Expand(s);
+    if files.count != 0 {
+        for i: 0..files.count - 1 { VecPush(out.list, TextCopy(TextView(files[i]))) }
+        return out
+    }
+    return Singleton(TextCopy(s));
+}
+
+// The catenation of two values, as caret: a singleton distributes over a
+// list, two lists pair up padded with nothing.
+Caret :: (a: Value, b: Value) -> Value {
+    out: Value;
+    if a.word.bytes.count != 0 {
+        if b.word.bytes.count != 0 {
+            joined: Vec(u8);
+            unused BuilderAppend(joined, TextView(a.word));
+            unused BuilderAppend(joined, TextView(b.word));
+            return Singleton(BuilderFinish(joined));
+        }
+        if b.list.count == 0 {
+            return Singleton(TextCopy(TextView(a.word)));
+        }
+        for i: 0..b.list.count - 1 {
+            joined: Vec(u8);
+            unused BuilderAppend(joined, TextView(a.word));
+            unused BuilderAppend(joined, TextView(b.list[i]));
+            VecPush(out.list, BuilderFinish(joined));
+        }
+        return out
+    }
+    if b.word.bytes.count != 0 {
+        if a.list.count == 0 {
+            return Singleton(TextCopy(TextView(b.word)));
+        }
+        for i: 0..a.list.count - 1 {
+            joined: Vec(u8);
+            unused BuilderAppend(joined, TextView(a.list[i]));
+            unused BuilderAppend(joined, TextView(b.word));
+            VecPush(out.list, BuilderFinish(joined));
+        }
+        return out
+    }
+    if a.list.count != 0 {
+        if b.list.count == 0 {
+            for i: 0..a.list.count - 1 { VecPush(out.list, TextCopy(TextView(a.list[i]))) }
+            return out
+        }
+        n := a.list.count;
+        if b.list.count > n { n = b.list.count }
+        for i: 0..n - 1 {
+            joined: Vec(u8);
+            if i < a.list.count { unused BuilderAppend(joined, TextView(a.list[i])) }
+            if i < b.list.count { unused BuilderAppend(joined, TextView(b.list[i])) }
+            VecPush(out.list, BuilderFinish(joined));
+        }
+        return out
+    }
+    if b.list.count != 0 {
+        for i: 0..b.list.count - 1 { VecPush(out.list, TextCopy(TextView(b.list[i]))) }
+    }
+    return out
+}
+
+// A list of strings as a value: one word stays a word.
+ListValue :: (l: *Vec(Text)) -> Value {
+    out: Value;
+    if l.count == 1 {
+        return Singleton(TextCopy(TextView(l.*[0])));
+    }
+    for i: 0..l.count - 1 { VecPush(out.list, TextCopy(TextView(l.*[i]))) }
+    return out
+}
+
+#scope_file
+
+// The bytes of a value joined by a space, as concat.
+ConcatValue :: (v: *Value, out: *Vec(u8)) {
+    if v.word.bytes.count != 0 { unused BuilderAppend(<<out, TextView(v.word)); return }
+    for i: 0..v.list.count - 1 {
+        if i > 0 { VecPush(<<out, 32) }
+        unused BuilderAppend(<<out, TextView(v.list[i]));
+    }
+}
+
+#scope_export
+
+// Whether a value is empty, as s == nil && l == nil.
+ValueEmpty :: (v: *Value) -> bool { return v.word.bytes.count == 0 && v.list.count == 0 }
+
+// Pass 1 for one item: variables expand and expressions evaluate. The
+// command half of that lives in mash_eval, so the evaluator binds its own
+// entry points here before any item is evaluated.
+ItemHook :: #type (i: s32, e: *Env, out: *s32) -> bool;
+
+firstpass: ItemHook;
+
+BindFirstPass :: (hook: ItemHook) { firstpass = hook }
+
+CallFirstPass :: (i: s32, e: *Env) -> (node: s32, ok: bool) {
+    got: s32 = -1;
+    good := false;
+    if firstpass != null {
+        if firstpass(i, e, *got) { good = true } else { got = -1 }
+    }
+    return got, good
+}
