@@ -1,0 +1,92 @@
+// Time a command, replacing the Limbo time.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Proc :: #import "taijios_process";
+using Clock :: #import "taijios_clock";
+using Cli :: #import "zx_cli";
+
+Usage :: "usage: time cmd ...\n";
+
+// The line being built, so the helpers can shorten it.
+Line :: struct {
+    bytes: Vec(u8);
+}
+
+// One decimal digit as a byte.
+Digit :: (value: s64) -> u8 { return cast(u8)(48 + value % 10) }
+
+// Append a whole number in decimal.
+Whole :: (line: *Line, value: s64) {
+    places: Vec(u8)
+    remaining := value
+    if remaining == 0 { unused VecPush(places, 48) }
+    while remaining > 0 {
+        unused VecPush(places, Digit(remaining))
+        remaining = remaining / 10
+    }
+    at := places.count - 1
+    while at >= 0 {
+        unused VecPush(line.bytes, places[at])
+        at -= 1
+    }
+}
+
+// Append the fraction of a duration in milliseconds as %.4g shows it: three
+// digits below one second, one above, and trailing zeros dropped.
+Fraction :: (line: *Line, whole: s64, fraction: s64) {
+    if fraction == 0 { return }
+    // The digits alone, then the point is added only when one survives.
+    piece: Vec(u8)
+    unused VecPush(piece, Digit(fraction / 100))
+    extra := 1
+    if whole == 0 {
+        unused VecPush(piece, Digit(fraction / 10))
+        unused VecPush(piece, Digit(fraction))
+        extra = 3
+    }
+    keep := extra
+    while keep > 0 && piece[keep-1] == 48 { keep -= 1 }
+    if keep == 0 { return }
+    unused VecPush(line.bytes, 46)
+    unused VecPush(line.bytes, piece[0])
+    if keep > 1 { unused VecPush(line.bytes, piece[1]) }
+    if keep > 2 { unused VecPush(line.bytes, piece[2]) }
+}
+
+// One duration in milliseconds as the Limbo "%.4gl" printed it.
+AppendSeconds :: (line: *Line, milliseconds: s64) {
+    Whole(line, milliseconds / 1000)
+    Fraction(line, milliseconds / 1000, milliseconds % 1000)
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 {
+        unused Cli.WriteAll(2, Usage);
+        return 0
+    }
+    started := Clock.Millis()
+    script: Vec(u8);
+    for i: 0..count-1 {
+        if i > 0 { unused BuilderAppend(script, " ") }
+        unused BuilderAppend(script, Args.Operand(i));
+    }
+    operands: Vec(string);
+    unused VecPush(operands, "-c");
+    unused VecPush(operands, TextDetach(BuilderFinish(script)));
+    unused Proc.Run("/dis/sh.zx", operands[:]);
+    elapsed := Clock.Millis() - started;
+    // The Limbo original printed the module load time, which is zero here,
+    // then the run time, then their sum.
+    line: Line
+    AppendSeconds(*line, 0);
+    unused BuilderAppend(line.bytes, "l ")
+    AppendSeconds(*line, elapsed);
+    unused BuilderAppend(line.bytes, "r ")
+    AppendSeconds(*line, elapsed);
+    unused BuilderAppend(line.bytes, "t\n")
+    unused Cli.WriteAll(2, BuilderFinish(line.bytes));
+    return 0
+}

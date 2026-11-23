@@ -30,7 +30,7 @@ WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [242]Case = Case.[
+cases: [245]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -323,6 +323,11 @@ fakenet/2/status
     .{tool = "xargs", status = "", err = "Usage: xargs command [command args] <[list of last command arg]\n"},
     // The shell reports the missing command with the path it searched.
     .{args = "xargs nosuchcmd arg < short", out = "", err = "sh: nosuchcmd: './nosuchcmd' file does not exist\n"},
+    // time: the command's output, then load, run and total seconds on stderr.
+    // The values are timings, so each number is rewritten to N first.
+    .{args = "{ time echo hi >[2] /dev/null }", out = "hi\n"},
+    .{tool = "time", err = "usage: time cmd ...\n"},
+    .{args = "{ time echo hi >[2] t.err; cat t.err | sed 's/[0-9][0-9.]*/N/g' }", out = "hi\nNl Nr Nt\n"},
 ];
 
 failures: s32;
