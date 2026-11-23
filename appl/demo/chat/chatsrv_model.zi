@@ -1,0 +1,460 @@
+// Pure 9P2000/Styx chat server state and wire protocol,
+// ported from appl/demo/chat/chatsrv.b.
+#import "std/vec"
+
+QDIR :: 0;
+QUSERS :: 1;
+QMSGS :: 2;
+
+DMDIR :: 0x80000000;
+QTDIR :: 0x80;
+QTFILE :: 0x00;
+
+TVERSION :: 100;
+RVERSION :: 101;
+TATTACH :: 104;
+RATTACH :: 105;
+RERROR :: 107;
+TFLUSH :: 108;
+RFLUSH :: 109;
+TWALK :: 110;
+RWALK :: 111;
+TOPEN :: 112;
+ROPEN :: 113;
+TREAD :: 116;
+RREAD :: 117;
+TWRITE :: 118;
+RWRITE :: 119;
+TCLUNK :: 120;
+RCLUNK :: 121;
+TSTAT :: 124;
+RSTAT :: 125;
+
+NKEPT :: 6;
+MAX_FIDS :: 64;
+MAX_MSGS :: 256;
+
+FidEntry :: struct {
+    in_use: bool;
+    fid: u32;
+    qpath: u64;
+    is_open: bool;
+    uname: Text;
+    next_msg: s64;
+    has_pending: bool;
+    pending_tag: u16;
+    pending_count: u32;
+}
+
+Server :: struct {
+    msize: u32;
+    fids: [MAX_FIDS]FidEntry;
+    msgs: [MAX_MSGS]Text;
+    msg_head: s64; // total messages ever posted
+    msg_kept_start: s64; // oldest kept message index
+}
+
+InitServer :: (s: *Server) {
+    s.msize = 8192;
+    s.msg_head = 0;
+    s.msg_kept_start = 0;
+    for i: 0..MAX_FIDS-1 { s.fids[i].in_use = false }
+}
+
+ReadU16 :: (b: []u8, off: s64) -> u16 {
+    return cast(u16)b[off] | (cast(u16)b[off + 1] << 8);
+}
+
+ReadU32 :: (b: []u8, off: s64) -> u32 {
+    return cast(u32)b[off] | (cast(u32)b[off + 1] << 8) |
+           (cast(u32)b[off + 2] << 16) | (cast(u32)b[off + 3] << 24);
+}
+
+ReadU64 :: (b: []u8, off: s64) -> u64 {
+    lo := cast(u64)ReadU32(b, off);
+    hi := cast(u64)ReadU32(b, off + 4);
+    return lo | (hi << 32);
+}
+
+PushU8 :: (out: *Vec(u8), v: u8) { unused VecPush(<<out, v) }
+
+PushU16 :: (out: *Vec(u8), v: u16) {
+    PushU8(out, cast(u8)(v & 0xFF));
+    PushU8(out, cast(u8)((v >> 8) & 0xFF));
+}
+
+PushU32 :: (out: *Vec(u8), v: u32) {
+    PushU8(out, cast(u8)(v & 0xFF));
+    PushU8(out, cast(u8)((v >> 8) & 0xFF));
+    PushU8(out, cast(u8)((v >> 16) & 0xFF));
+    PushU8(out, cast(u8)((v >> 24) & 0xFF));
+}
+
+PushU64 :: (out: *Vec(u8), v: u64) {
+    PushU32(out, cast(u32)(v & 0xFFFFFFFF));
+    PushU32(out, cast(u32)((v >> 32) & 0xFFFFFFFF));
+}
+
+PushStr :: (out: *Vec(u8), s: string) {
+    PushU16(out, cast(u16)s.count);
+    unused BuilderAppend(<<out, s);
+}
+
+PushQid :: (out: *Vec(u8), qpath: u64) {
+    qtype: u8 = ifx qpath == QDIR then QTDIR else QTFILE;
+    PushU8(out, qtype);
+    PushU32(out, 0); // vers
+    PushU64(out, qpath);
+}
+
+PackDir :: (out: *Vec(u8), qpath: u64) {
+    name := ".";
+    perm: u32 = cast(u32)DMDIR | 365;
+    if qpath == QUSERS { name = "users"; perm = 292 }
+    else if qpath == QMSGS { name = "msgs"; perm = 438 }
+    // Fixed body size: 2(type)+4(dev)+13(qid)+4(mode)+4(atime)+4(mtime)+8(length) = 39
+    // Plus 4 strings: name, "inferno", "inferno", ""
+    body_len: u16 = cast(u16)(39 + (2 + name.count) + (2 + 7) + (2 + 7) + 2);
+    PushU16(out, body_len);
+    PushU16(out, 0); // type
+    PushU32(out, 0); // dev
+    PushQid(out, qpath);
+    PushU32(out, perm);
+    PushU32(out, 0); // atime
+    PushU32(out, 0); // mtime
+    PushU64(out, 0); // length
+    PushStr(out, name);
+    PushStr(out, "inferno");
+    PushStr(out, "inferno");
+    PushStr(out, "");
+}
+
+FinishReply :: (kind: u8, tag: u16, payload: []u8, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    total: u32 = cast(u32)(4 + 1 + 2 + payload.count);
+    PushU32(*out.bytes, total);
+    PushU8(*out.bytes, kind);
+    PushU16(*out.bytes, tag);
+    unused BuilderAppend(out.bytes, TextView(payload));
+}
+
+EmitError :: (tag: u16, msg: string, replies: *Vec(Text)) {
+    body: Vec(u8);
+    PushStr(*body, msg);
+    pkt: Text;
+    FinishReply(RERROR, tag, VecSlice(body, 0, body.count), *pkt);
+    unused VecPush(<<replies, pkt);
+}
+
+EmitRread :: (tag: u16, data: string, replies: *Vec(Text)) {
+    body: Vec(u8);
+    PushU32(*body, cast(u32)data.count);
+    unused BuilderAppend(body, data);
+    pkt: Text;
+    FinishReply(RREAD, tag, VecSlice(body, 0, body.count), *pkt);
+    unused VecPush(<<replies, pkt);
+}
+
+FindFid :: (s: *Server, fid: u32) -> s64 {
+    for i: 0..MAX_FIDS-1 {
+        if s.fids[i].in_use && s.fids[i].fid == fid { return i }
+    }
+    return -1;
+}
+
+AllocFid :: (s: *Server, fid: u32, qpath: u64, uname: string) -> s64 {
+    for i: 0..MAX_FIDS-1 {
+        if !s.fids[i].in_use {
+            s.fids[i].in_use = true;
+            s.fids[i].fid = fid;
+            s.fids[i].qpath = qpath;
+            s.fids[i].is_open = false;
+            s.fids[i].has_pending = false;
+            s.fids[i].next_msg = s.msg_kept_start;
+            unused VecResize(s.fids[i].uname.bytes, 0);
+            unused BuilderAppend(s.fids[i].uname.bytes, uname);
+            return i;
+        }
+    }
+    return -1;
+}
+
+Broadcast :: (s: *Server, from: string, msg: string, replies: *Vec(Text)) {
+    slot := s.msg_head % MAX_MSGS;
+    unused VecResize(s.msgs[slot].bytes, 0);
+    if from.count > 0 {
+        unused BuilderAppend(s.msgs[slot].bytes, from);
+        unused BuilderAppend(s.msgs[slot].bytes, ": ");
+    }
+    unused BuilderAppend(s.msgs[slot].bytes, msg);
+    text := TextView(s.msgs[slot]);
+    this_idx := s.msg_head;
+    s.msg_head += 1;
+    if s.msg_head - s.msg_kept_start > NKEPT {
+        s.msg_kept_start = s.msg_head - NKEPT;
+    }
+
+    for i: 0..MAX_FIDS-1 {
+        if s.fids[i].in_use && s.fids[i].is_open && s.fids[i].qpath == QMSGS && s.fids[i].has_pending {
+            limit := cast(s64)s.fids[i].pending_count;
+            slice := ifx text.count > limit then text[:limit] else text;
+            EmitRread(s.fids[i].pending_tag, slice, replies);
+            s.fids[i].has_pending = false;
+            s.fids[i].next_msg = this_idx + 1;
+        }
+    }
+}
+
+UserList :: (s: *Server, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    for i: 0..MAX_FIDS-1 {
+        if s.fids[i].in_use && s.fids[i].is_open && s.fids[i].qpath == QMSGS {
+            unused BuilderAppend(out.bytes, TextView(s.fids[i].uname));
+            unused BuilderAppend(out.bytes, "\n");
+        }
+    }
+}
+
+HandlePacket :: (s: *Server, pkt: []u8, replies: *Vec(Text)) {
+    if pkt.count < 7 { return }
+    kind := pkt[4];
+    tag := ReadU16(pkt, 5);
+
+    if kind == TVERSION {
+        if pkt.count < 13 { EmitError(tag, "short Tversion", replies); return }
+        req_msize := ReadU32(pkt, 7);
+        if req_msize < s.msize && req_msize >= 256 { s.msize = req_msize }
+        body: Vec(u8);
+        PushU32(*body, s.msize);
+        PushStr(*body, "9P2000");
+        out: Text;
+        FinishReply(RVERSION, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TATTACH {
+        if pkt.count < 17 { EmitError(tag, "short Tattach", replies); return }
+        fid := ReadU32(pkt, 7);
+        ulen := cast(s64)ReadU16(pkt, 15);
+        uname := ifx 17 + ulen <= pkt.count then TextView(pkt[17:17 + ulen]) else "inferno";
+        if FindFid(s, fid) >= 0 { EmitError(tag, "fid in use", replies); return }
+        if AllocFid(s, fid, QDIR, uname) < 0 { EmitError(tag, "too many fids", replies); return }
+        body: Vec(u8);
+        PushQid(*body, QDIR);
+        out: Text;
+        FinishReply(RATTACH, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TFLUSH {
+        if pkt.count < 9 { EmitError(tag, "short Tflush", replies); return }
+        oldtag := ReadU16(pkt, 7);
+        for i: 0..MAX_FIDS-1 {
+            if s.fids[i].in_use && s.fids[i].has_pending && s.fids[i].pending_tag == oldtag {
+                s.fids[i].has_pending = false;
+                break;
+            }
+        }
+        empty: [0]u8;
+        out: Text;
+        FinishReply(RFLUSH, tag, empty[:], *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TWALK {
+        if pkt.count < 17 { EmitError(tag, "short Twalk", replies); return }
+        fid := ReadU32(pkt, 7);
+        newfid := ReadU32(pkt, 11);
+        nwname := cast(s64)ReadU16(pkt, 15);
+        idx := FindFid(s, fid);
+        if idx < 0 { EmitError(tag, "bad fid", replies); return }
+        if newfid != fid && FindFid(s, newfid) >= 0 { EmitError(tag, "fid in use", replies); return }
+        cur := s.fids[idx].qpath;
+        off: s64 = 17;
+        qids: [16]u64;
+        nq: s64 = 0;
+        for w: 0..nwname-1 {
+            if off + 2 > pkt.count { EmitError(tag, "short Twalk name", replies); return }
+            slen := cast(s64)ReadU16(pkt, off);
+            off += 2;
+            if off + slen > pkt.count { EmitError(tag, "short Twalk name", replies); return }
+            name := TextView(pkt[off:off + slen]);
+            off += slen;
+            if cur != QDIR { break }
+            if name == "users" { cur = QUSERS }
+            else if name == "msgs" { cur = QMSGS }
+            else if name == "." || name == ".." { cur = QDIR }
+            else { break }
+            if nq < 16 { qids[nq] = cur; nq += 1 }
+        }
+        if nwname > 0 && nq == 0 { EmitError(tag, "file does not exist", replies); return }
+        if nq == nwname {
+            if newfid == fid {
+                s.fids[idx].qpath = cur;
+            } else {
+                uname_copy: Text;
+                unused BuilderAppend(uname_copy.bytes, TextView(s.fids[idx].uname));
+                if AllocFid(s, newfid, cur, TextView(uname_copy)) < 0 {
+                    EmitError(tag, "too many fids", replies);
+                    return;
+                }
+            }
+        }
+        body: Vec(u8);
+        PushU16(*body, cast(u16)nq);
+        for k: 0..nq-1 { PushQid(*body, qids[k]) }
+        out: Text;
+        FinishReply(RWALK, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TOPEN {
+        if pkt.count < 12 { EmitError(tag, "short Topen", replies); return }
+        fid := ReadU32(pkt, 7);
+        idx := FindFid(s, fid);
+        if idx < 0 { EmitError(tag, "bad fid", replies); return }
+        s.fids[idx].is_open = true;
+        if s.fids[idx].qpath == QMSGS {
+            join_msg: Text;
+            unused BuilderAppend(join_msg.bytes, "+++ ");
+            unused BuilderAppend(join_msg.bytes, TextView(s.fids[idx].uname));
+            unused BuilderAppend(join_msg.bytes, " has arrived");
+            Broadcast(s, "", TextView(join_msg), replies);
+            s.fids[idx].next_msg = s.msg_kept_start;
+        }
+        body: Vec(u8);
+        PushQid(*body, s.fids[idx].qpath);
+        PushU32(*body, s.msize - 24);
+        out: Text;
+        FinishReply(ROPEN, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TREAD {
+        if pkt.count < 23 { EmitError(tag, "short Tread", replies); return }
+        fid := ReadU32(pkt, 7);
+        offset := cast(s64)ReadU64(pkt, 11);
+        count := cast(s64)ReadU32(pkt, 19);
+        idx := FindFid(s, fid);
+        if idx < 0 || !s.fids[idx].is_open { EmitError(tag, "bad fid", replies); return }
+        qp := s.fids[idx].qpath;
+        if qp == QDIR {
+            dir_bytes: Vec(u8);
+            PackDir(*dir_bytes, QUSERS);
+            PackDir(*dir_bytes, QMSGS);
+            if offset >= dir_bytes.count {
+                EmitRread(tag, "", replies);
+            } else {
+                end := offset + count;
+                if end > dir_bytes.count { end = dir_bytes.count }
+                EmitRread(tag, TextView(VecSlice(dir_bytes, offset, end)), replies);
+            }
+            return;
+        }
+        if qp == QUSERS {
+            users: Text;
+            UserList(s, *users);
+            str := TextView(users);
+            if offset >= str.count {
+                EmitRread(tag, "", replies);
+            } else {
+                end := offset + count;
+                if end > str.count { end = str.count }
+                EmitRread(tag, str[offset:end], replies);
+            }
+            return;
+        }
+        if qp == QMSGS {
+            if s.fids[idx].next_msg < s.msg_kept_start {
+                s.fids[idx].next_msg = s.msg_kept_start;
+            }
+            if s.fids[idx].next_msg < s.msg_head {
+                slot := s.fids[idx].next_msg % MAX_MSGS;
+                s.fids[idx].next_msg += 1;
+                msg := TextView(s.msgs[slot]);
+                slice := ifx msg.count > count then msg[:count] else msg;
+                EmitRread(tag, slice, replies);
+            } else {
+                if s.fids[idx].has_pending {
+                    EmitError(tag, "read already pending", replies);
+                } else {
+                    s.fids[idx].has_pending = true;
+                    s.fids[idx].pending_tag = tag;
+                    s.fids[idx].pending_count = cast(u32)count;
+                }
+            }
+            return;
+        }
+        EmitError(tag, "phase error -- bad path", replies);
+        return;
+    }
+
+    if kind == TWRITE {
+        if pkt.count < 23 { EmitError(tag, "short Twrite", replies); return }
+        fid := ReadU32(pkt, 7);
+        count := cast(s64)ReadU32(pkt, 19);
+        idx := FindFid(s, fid);
+        if idx < 0 || !s.fids[idx].is_open { EmitError(tag, "bad fid", replies); return }
+        if s.fids[idx].qpath != QMSGS { EmitError(tag, "permission denied", replies); return }
+        if 23 + count > pkt.count { EmitError(tag, "short Twrite data", replies); return }
+        data := TextView(pkt[23:23 + count]);
+        uname_copy: Text;
+        unused BuilderAppend(uname_copy.bytes, TextView(s.fids[idx].uname));
+        Broadcast(s, TextView(uname_copy), data, replies);
+        body: Vec(u8);
+        PushU32(*body, cast(u32)count);
+        out: Text;
+        FinishReply(RWRITE, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TCLUNK {
+        if pkt.count < 11 { EmitError(tag, "short Tclunk", replies); return }
+        fid := ReadU32(pkt, 7);
+        idx := FindFid(s, fid);
+        if idx >= 0 {
+            was_msgs := s.fids[idx].is_open && s.fids[idx].qpath == QMSGS;
+            uname_copy: Text;
+            unused BuilderAppend(uname_copy.bytes, TextView(s.fids[idx].uname));
+            s.fids[idx].in_use = false;
+            s.fids[idx].is_open = false;
+            s.fids[idx].has_pending = false;
+            if was_msgs {
+                left_msg: Text;
+                unused BuilderAppend(left_msg.bytes, "--- ");
+                unused BuilderAppend(left_msg.bytes, TextView(uname_copy));
+                unused BuilderAppend(left_msg.bytes, " has left");
+                Broadcast(s, "", TextView(left_msg), replies);
+            }
+        }
+        empty: [0]u8;
+        out: Text;
+        FinishReply(RCLUNK, tag, empty[:], *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    if kind == TSTAT {
+        if pkt.count < 11 { EmitError(tag, "short Tstat", replies); return }
+        fid := ReadU32(pkt, 7);
+        idx := FindFid(s, fid);
+        if idx < 0 { EmitError(tag, "bad fid", replies); return }
+        stat_entry: Vec(u8);
+        PackDir(*stat_entry, s.fids[idx].qpath);
+        body: Vec(u8);
+        PushU16(*body, cast(u16)stat_entry.count);
+        unused BuilderAppend(body, TextView(VecSlice(stat_entry, 0, stat_entry.count)));
+        out: Text;
+        FinishReply(RSTAT, tag, VecSlice(body, 0, body.count), *out);
+        unused VecPush(<<replies, out);
+        return;
+    }
+
+    EmitError(tag, "unsupported 9P message", replies);
+}

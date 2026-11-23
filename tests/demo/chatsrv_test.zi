@@ -1,0 +1,117 @@
+// Table-driven 9P2000/Styx protocol test for appl/demo/chat/chatsrv_model.zi.
+#import "std/vec"
+using Model :: #import "chatsrv_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+MakePacket :: (kind: u8, tag: u16, payload: []u8, out: *Vec(u8)) {
+    unused VecResize(<<out, 0);
+    Model.PushU32(out, cast(u32)(7 + payload.count));
+    Model.PushU8(out, kind);
+    Model.PushU16(out, tag);
+    unused BuilderAppend(<<out, TextView(payload));
+}
+
+main :: () -> s32 {
+    srv: Model.Server;
+    Model.InitServer(*srv);
+    pkt: Vec(u8);
+    body: Vec(u8);
+    replies: Vec(Text);
+
+    // 1. Tversion
+    Model.PushU32(*body, 8192);
+    Model.PushStr(*body, "9P2000");
+    MakePacket(Model.TVERSION, 0xFFFF, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RVERSION, "Rversion");
+
+    // 2. Tattach fid=1 uname=alice
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 0xFFFFFFFF);
+    Model.PushStr(*body, "alice");
+    Model.PushStr(*body, "");
+    MakePacket(Model.TATTACH, 1, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RATTACH, "Rattach");
+
+    // 3. Twalk fid=1 -> newfid=2 "msgs"
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 2);
+    Model.PushU16(*body, 1);
+    Model.PushStr(*body, "msgs");
+    MakePacket(Model.TWALK, 2, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RWALK, "Rwalk msgs");
+
+    // 4. Topen fid=2 (msgs) -> broadcasts arrival
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU8(*body, 2);
+    MakePacket(Model.TOPEN, 3, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.ROPEN, "Ropen msgs");
+
+    // 5. Tread fid=2 -> gets "+++ alice has arrived"
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, 1024);
+    MakePacket(Model.TREAD, 4, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RREAD, "Rread arrival");
+    Expect(TextView(replies[0])[11:] == "+++ alice has arrived", "arrival text");
+
+    // 6. Tread fid=2 again -> parked (0 replies)
+    unused VecResize(replies, 0);
+    MakePacket(Model.TREAD, 5, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 0, "pending read parked");
+
+    // 7. Twrite fid=2 "hello" -> wakes pending read + sends Rwrite
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, 5);
+    unused BuilderAppend(body, "hello");
+    MakePacket(Model.TWRITE, 6, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 2, "write wakes pending read and replies Rwrite");
+    if replies.count == 2 {
+        Expect(replies[0].bytes[4] == Model.RREAD &&
+               TextView(replies[0])[11:] == "alice: hello", "broadcast text");
+        Expect(replies[1].bytes[4] == Model.RWRITE, "Rwrite");
+    }
+
+    // 8. Check users file contains "alice\n"
+    users: Text;
+    Model.UserList(*srv, *users);
+    Expect(TextView(users) == "alice\n", "users list");
+
+    // 9. Tclunk fid=2 -> removes alice
+    unused VecResize(body, 0);
+    unused VecResize(replies, 0);
+    Model.PushU32(*body, 2);
+    MakePacket(Model.TCLUNK, 7, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), *replies);
+    Expect(replies.count == 1 && replies[0].bytes[4] == Model.RCLUNK, "Rclunk");
+    Model.UserList(*srv, *users);
+    Expect(TextView(users) == "", "users empty after clunk");
+
+    if failures == 0 { print("chatsrv_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

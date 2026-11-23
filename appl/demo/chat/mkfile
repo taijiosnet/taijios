@@ -1,7 +1,6 @@
 <../../../mkconfig
 
 TARG=\
-		chatsrv.dis\
 
 SHTARG=\
 		chatclient.sh\
@@ -9,10 +8,6 @@ SHTARG=\
 MODULES=\
 
 SYSMODULES= \
-	draw.m\
-	styx.m\
-	styxservers.m\
-	sys.m\
 
 DISBIN=$ROOT/dis/demo/chat
 
@@ -26,8 +21,16 @@ $DISBIN/chat.zx: chat.zx
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 chat.zx "$staged" && mv "$staged" "$target"
 
+chatsrv.zx: chatsrv.zi chatsrv_model.zi ../../cmd/taijios_io.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_io --entry chatsrv:main -o $target chatsrv.zi
+
+$DISBIN/chatsrv.zx: chatsrv.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 chatsrv.zx "$staged" && mv "$staged" "$target"
+
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES $DISBIN/chat.zx
+install:V:	$SHFILES $DISBIN/chat.zx $DISBIN/chatsrv.zx
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 

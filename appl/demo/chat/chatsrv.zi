@@ -1,0 +1,39 @@
+// Inferno demo 9P2000/Styx chat server, ported from appl/demo/chat/chatsrv.b.
+#import "std/vec"
+using IO :: #import "taijios_io"
+using Model :: #import "chatsrv_model"
+
+ReadExact :: (fd: s32, buf: []u8) -> bool {
+    got: s64 = 0;
+    while got < buf.count {
+        n := IO.Read(fd, buf[got:]);
+        if n <= 0 { return false }
+        got += cast(s64)n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    srv: Model.Server;
+    Model.InitServer(*srv);
+    pkt: Vec(u8);
+    replies: Vec(Text);
+    hdr: [4]u8;
+
+    while ReadExact(0, hdr[:]) {
+        size := cast(s64)Model.ReadU32(hdr[:], 0);
+        if size < 7 || size > 65536 { break }
+        if !VecResizeBounded(pkt, size, 65536) { break }
+        pkt_slice := VecSlice(pkt, 0, size);
+        for i: 0..3 { pkt_slice[i] = hdr[i] }
+        if !ReadExact(0, pkt_slice[4:size]) { break }
+
+        unused VecResize(replies, 0);
+        Model.HandlePacket(*srv, pkt_slice, *replies);
+        for i: 0..replies.count-1 {
+            out := TextView(replies[i]);
+            if IO.Write(0, out) < out.count { return 1 }
+        }
+    }
+    return 0;
+}
