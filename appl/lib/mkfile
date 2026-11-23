@@ -25,9 +25,7 @@ TARG=\
 	chanfill.dis\
 	crc.dis\
 	daytime.dis\
-	db.dis\
 	dbm.dis\
-	dbsrv.dis\
 	debug.dis\
 	deflate.dis\
 	dhcpclient.dis\
@@ -40,7 +38,6 @@ TARG=\
 	ether.dis\
 	factotum.dis\
 	filepat.dis\
-	format.dis\
 	fsfilter.dis\
 	fslib.dis\
 	fsproto.dis\
@@ -64,9 +61,6 @@ TARG=\
 	nametree.dis\
 	newns.dis\
 	oldauth.dis\
-	palm.dis\
-	palmdb.dis\
-	palmfile.dis\
 	parseman.dis\
 	plumbmsg.dis\
 	plumbing.dis\
@@ -97,13 +91,11 @@ TARG=\
 	string.dis\
 	strinttab.dis\
 	styx.dis\
-	styxflush.dis\
 	styxlib.dis\
 	styxpersist.dis\
 	styxservers.dis\
 	tables.dis\
 	tabs.dis\
-	tftp.dis\
 	timers.dis\
 	tcl_utils.dis\
 #	tcl_tk.dis\
@@ -123,7 +115,6 @@ TARG=\
 	url.dis\
 	vac.dis\
 	venti.dis\
-	virgil.dis\
 	wmclient.dis\
 	wmlib.dis\
 	wmsrv.dis\
@@ -196,7 +187,6 @@ ip.dis: $ROOT/module/ip.m
 ether.dis:	$ROOT/module/ether.m
 attrdb.dis attrhash.dis:	$ROOT/module/attrdb.m
 ipattr.dis:	$ROOT/module/attrdb.m $ROOT/module/ip.m $ROOT/module/ipattr.m
-tftp.dis:	$ROOT/module/tftp.m
 registries.dis:	$ROOT/module/registries.m
 keyset.dis:	$ROOT/module/keyset.m
 auth9.dis: $ROOT/module/auth9.m
@@ -208,7 +198,6 @@ dhcpclient.dis:	$ROOT/module/dhcp.m
 secstore.dis:	$ROOT/module/secstore.m
 vac.dis:	$ROOT/module/vac.m $ROOT/module/venti.m
 dial.dis:	$ROOT/module/dial.m
-styxflush.dis:	$ROOT/module/styxflush.m
 msgio.dis:	$ROOT/module/msgio.m
 
 

@@ -926,9 +926,7 @@ appl
 			x509.b
 		csv.zi
 		daytime.b
-		db.b
 		dbm.b
-		dbsrv.b
 		debug.b
 		deflate.b
 		dhcpclient.b
@@ -958,7 +956,6 @@ appl
 		ether.b
 		factotum.b
 		filepat.b
-		format.b
 		fsfilter.b
 		fslib.b
 		fsproto.b
@@ -988,9 +985,6 @@ appl
 		msgio.b
 		nametree.b
 		newns.b
-		palm.b
-		palmdb.b
-		palmfile.b
 		parseman.b
 		plumbing.b
 		plumbing.m
@@ -1048,7 +1042,6 @@ appl
 		string.b
 		strinttab.b
 		styx.b
-		styxflush.b
 		styxlib.b
 		styxservers.b
 		tables.b
@@ -1066,7 +1059,6 @@ appl
 		tcl_symhash.b
 		tcl_tk.b
 		tcl_utils.b
-		tftp.b
 		timers.b
 		titlebar.b
 		tkclient.b
@@ -1083,7 +1075,6 @@ appl
 		utils.m
 		vac.b
 		venti.b
-		virgil.b
 		w3c
 			css.b
 			mkfile
@@ -1535,9 +1526,7 @@ dis
 		crypt
 			+
 		daytime.dis
-		db.dis
 		dbm.dis
-		dbsrv.dis
 		debug.dis
 		deflate.dis
 		dhcpclient.dis
@@ -1554,7 +1543,6 @@ dis
 		ether.dis
 		factotum.dis
 		filepat.dis
-		format.dis
 		fsfilter.dis
 		fslib.dis
 		fsproto.dis
@@ -1584,9 +1572,6 @@ dis
 		msgio.dis
 		nametree.dis
 		newns.dis
-		palm.dis
-		palmdb.dis
-		palmfile.dis
 		parseman.dis
 		plumbing.dis
 		plumbmsg.dis
@@ -1625,7 +1610,6 @@ dis
 		styx.dis
 		styxconv
 			+
-		styxflush.dis
 		styxlib.dis
 		styxpersist.dis
 		styxservers.dis
@@ -1643,7 +1627,6 @@ dis
 		tcl_symhash.dis
 		tcl_tk.dis
 		tcl_utils.dis
-		tftp.dis
 		timers.dis
 		titlebar.dis
 		tkclient.dis
@@ -1656,7 +1639,6 @@ dis
 			usbmouse.dis
 		vac.dis
 		venti.dis
-		virgil.dis
 		w3c
 			+
 		winplace.zx
@@ -2151,7 +2133,6 @@ module
 	css.m
 	cvsimages.m
 	daytime.m
-	db.m
 	dbm.m
 	debug.m
 	dhcp.m
@@ -2170,7 +2151,6 @@ module
 	ffts.m
 	filepat.m
 	filter.m
-	format.m
 	freetype.m
 	fslib.m
 	fsproto.m
@@ -2213,8 +2193,6 @@ module
 	multistyx.m
 	muxclient.m
 	newns.m
-	palm.m
-	palmfile.m
 	pkcs.m
 	plumbmsg.m
 	pop3.m
@@ -2249,7 +2227,6 @@ module
 	strinttab.m
 	styx.m
 	styxconv.m
-	styxflush.m
 	styxlib.m
 	styxpersist.m
 	styxservers.m
@@ -2257,7 +2234,6 @@ module
 	tables.m
 	tabs.m
 	tcllib.m
-	tftp.m
 	timers.m
 	titlebar.m
 	tk.m

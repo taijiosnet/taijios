@@ -227,7 +227,6 @@ able	/man/1/mash-make
 able	/man/1/wm
 able	/man/10/plan9.ini
 able	/man/2/asn1
-able	/man/2/format
 able	/man/2/security-0intro
 able	/man/2/spree-objstore
 able	/man/3/ds
@@ -237,7 +236,6 @@ aborted	/man/2/spree
 aborted	/man/3/ds
 aborted	/man/5/0intro
 aborted	/man/5/version
-aborting	/man/2/styxflush
 aborts	/man/5/0intro
 aborts	/man/9/destroy
 about.b	/man/1/wm-misc
@@ -387,7 +385,6 @@ accepts	/man/1/wm
 accepts	/man/1/wm-sh
 accepts	/man/2/dbm
 accepts	/man/2/spki
-accepts	/man/2/virgil
 accepts	/man/3/boot
 accepts	/man/3/cmd
 accepts	/man/3/dbg
@@ -449,7 +446,6 @@ access	/man/2/factotum
 access	/man/2/hash
 access	/man/2/lock
 access	/man/2/math-linalg
-access	/man/2/palmfile
 access	/man/2/readdir
 access	/man/2/registries
 access	/man/2/security-0intro
@@ -599,7 +595,6 @@ account	/man/10/memory
 account	/man/10/qio
 account	/man/2/bufio
 account	/man/2/keyring-rc4
-account	/man/2/palmfile
 account	/man/2/secstore
 account	/man/2/styxservers
 account	/man/2/wmclient
@@ -778,7 +773,6 @@ active	/man/2/popup
 active	/man/2/registries
 active	/man/2/styxservers
 active	/man/2/sys-file2chan
-active	/man/2/tftp
 active	/man/2/translate
 active	/man/2/venti
 active	/man/3/ftl
@@ -857,8 +851,6 @@ actual	/man/2/asn1
 actual	/man/2/convcs
 actual	/man/2/dbm
 actual	/man/2/dial
-actual	/man/2/format
-actual	/man/2/palmfile
 actual	/man/2/spki-verifier
 actual	/man/2/spree-cardlib
 actual	/man/2/spree-gather
@@ -899,7 +891,6 @@ actually	/man/2/filter
 actually	/man/2/prefab-compound
 actually	/man/2/secstore
 actually	/man/2/spree-gather
-actually	/man/2/styxflush
 actually	/man/2/sys-dirread
 actually	/man/2/sys-read
 actually	/man/2/tk
@@ -1150,7 +1141,6 @@ address	/man/2/dial
 address	/man/2/dis
 address	/man/2/disks
 address	/man/2/ether
-address	/man/2/format
 address	/man/2/ip
 address	/man/2/registries
 address	/man/2/secstore
@@ -1158,7 +1148,6 @@ address	/man/2/security-login
 address	/man/2/srv
 address	/man/2/sys-0intro
 address	/man/2/sys-dial
-address	/man/2/virgil
 address	/man/3/arch
 address	/man/3/boot
 address	/man/3/dbg
@@ -1392,7 +1381,6 @@ adt	/man/2/draw-rect
 adt	/man/2/draw-screen
 adt	/man/2/factotum
 adt	/man/2/filter
-adt	/man/2/format
 adt	/man/2/geodesy
 adt	/man/2/hash
 adt	/man/2/imagefile
@@ -1402,7 +1390,6 @@ adt	/man/2/keyring-0intro
 adt	/man/2/keyring-crypt
 adt	/man/2/keyring-ipint
 adt	/man/2/lock
-adt	/man/2/palmfile
 adt	/man/2/plumbmsg
 adt	/man/2/prefab-compound
 adt	/man/2/prefab-element
@@ -1828,7 +1815,6 @@ allow	/man/2/draw-image
 allow	/man/2/keyring-0intro
 allow	/man/2/keyring-getmsg
 allow	/man/2/keyring-sha1
-allow	/man/2/palmfile
 allow	/man/2/plumbmsg
 allow	/man/2/prof
 allow	/man/2/sets
@@ -1964,7 +1950,6 @@ allows	/man/2/keyring-0intro
 allows	/man/2/keyring-crypt
 allows	/man/2/lock
 allows	/man/2/msgio
-allows	/man/2/palmfile
 allows	/man/2/plumbmsg
 allows	/man/2/prefab-element
 allows	/man/2/regex
@@ -2054,7 +2039,6 @@ alt	/man/1/sh-tk
 alt	/man/10/9load
 alt	/man/2/0intro
 alt	/man/2/popup
-alt	/man/2/styxflush
 alt	/man/2/timers
 alt	/man/2/tkclient
 alt	/man/3/prog
@@ -2289,7 +2273,6 @@ anstu	/man/1/du
 answer	/man/2/factotum
 answer	/man/2/styxservers
 answer	/man/2/translate
-answer	/man/2/virgil
 answer	/man/5/flush
 answer	/man/8/signer
 answering	/man/2/translate
@@ -2344,11 +2327,9 @@ apparent	/man/2/dbm
 apparently	/man/1/wm-misc
 apparently	/man/2/dbm
 apparently	/man/2/keyset
-apparently	/man/2/palmfile
 apparently	/man/8/create
 apparently	/man/8/getauthinfo
 apparently	/man/8/styxchat
-appdata	/man/2/palmfile
 appearance	/man/1/brutus
 appearance	/man/1/unicode
 appearance	/man/2/draw-font
@@ -2374,7 +2355,6 @@ append	/man/10/acid
 append	/man/10/iar
 append	/man/10/styxserver
 append	/man/2/attrdb
-append	/man/2/palmfile
 append	/man/2/prefab-element
 append	/man/2/string
 append	/man/2/styx
@@ -2423,8 +2403,6 @@ appends	/man/10/strcat
 appends	/man/2/string
 appends	/man/2/sys-print
 appends	/man/4/logfile
-appi	/man/2/palmfile
-appinfo	/man/2/palmfile
 appl	/man/1/9win
 appl	/man/1/acme
 appl	/man/1/alphabet-abc
@@ -2590,7 +2568,6 @@ appl	/man/2/ether
 appl	/man/2/factotum
 appl	/man/2/filepat
 appl	/man/2/filter-deflate
-appl	/man/2/format
 appl	/man/2/fsproto
 appl	/man/2/geodesy
 appl	/man/2/hash
@@ -2602,7 +2579,6 @@ appl	/man/2/lock
 appl	/man/2/mpeg
 appl	/man/2/msgio
 appl	/man/2/newns
-appl	/man/2/palmfile
 appl	/man/2/plumbmsg
 appl	/man/2/pop3
 appl	/man/2/popup
@@ -2630,16 +2606,13 @@ appl	/man/2/string
 appl	/man/2/stringinttab
 appl	/man/2/styx
 appl	/man/2/styxconv
-appl	/man/2/styxflush
 appl	/man/2/styxpersist
 appl	/man/2/styxservers
 appl	/man/2/styxservers-nametree
 appl	/man/2/tabs
-appl	/man/2/tftp
 appl	/man/2/tkclient
 appl	/man/2/translate
 appl	/man/2/venti
-appl	/man/2/virgil
 appl	/man/2/w3c-css
 appl	/man/2/wmclient
 appl	/man/2/wmlib
@@ -2741,7 +2714,6 @@ application	/man/2/draw-display
 application	/man/2/drawmux
 application	/man/2/factotum
 application	/man/2/ir
-application	/man/2/palmfile
 application	/man/2/plumbmsg
 application	/man/2/popup
 application	/man/2/prefab-element
@@ -2799,7 +2771,6 @@ applications	/man/2/ether
 applications	/man/2/imagefile
 applications	/man/2/ir
 applications	/man/2/keyring-certtostr
-applications	/man/2/palmfile
 applications	/man/2/plumbmsg
 applications	/man/2/prefab-0intro
 applications	/man/2/security-0intro
@@ -2987,7 +2958,6 @@ arbitrary	/man/2/bufio
 arbitrary	/man/2/dbm
 arbitrary	/man/2/draw-screen
 arbitrary	/man/2/filter
-arbitrary	/man/2/format
 arbitrary	/man/2/keyring-getmsg
 arbitrary	/man/2/keyring-getstring
 arbitrary	/man/2/keyring-ipint
@@ -3073,7 +3043,6 @@ archive	/man/10/0intro
 archive	/man/10/ar
 archive	/man/10/iar
 archive	/man/10/inm
-archive	/man/2/palmfile
 archive	/man/2/spree
 archive	/man/2/spree-allow
 archive	/man/2/spree-cardlib
@@ -3213,7 +3182,6 @@ args	/man/2/spki
 args	/man/2/string
 args	/man/2/styxservers-nametree
 args	/man/2/translate
-args	/man/2/virgil
 args	/man/2/w3c-css
 args	/man/3/cmd
 args	/man/4/iostats
@@ -3319,7 +3287,6 @@ array	/man/2/encoding
 array	/man/2/ether
 array	/man/2/factotum
 array	/man/2/filter
-array	/man/2/format
 array	/man/2/imagefile
 array	/man/2/ip
 array	/man/2/keyring-0intro
@@ -3333,7 +3300,6 @@ array	/man/2/keyring-sha1
 array	/man/2/math-export
 array	/man/2/math-linalg
 array	/man/2/msgio
-array	/man/2/palmfile
 array	/man/2/plumbmsg
 array	/man/2/popup
 array	/man/2/prof
@@ -3394,7 +3360,6 @@ arrays	/man/2/keyring-getstring
 arrays	/man/2/math-export
 arrays	/man/2/math-linalg
 arrays	/man/2/msgio
-arrays	/man/2/palmfile
 arrays	/man/2/secstore
 arrays	/man/2/styx
 arrays	/man/2/sys-0intro
@@ -3412,7 +3377,6 @@ arrived	/man/2/pop3
 arrived	/man/8/collabsrv
 arrives	/man/1/sh-file2chan
 arrives	/man/10/qio
-arrives	/man/2/styxflush
 arrives	/man/3/ip
 arrives	/man/3/pbus
 arrives	/man/3/plap
@@ -3529,7 +3493,6 @@ assertion	/man/2/0intro
 assign	/man/1/calc
 assign	/man/1/chmod
 assign	/man/2/dhcpclient
-assign	/man/2/palmfile
 assign	/man/3/ip
 assign	/man/3/plap
 assign	/man/3/pnp
@@ -3543,7 +3506,6 @@ assigned	/man/1/yacc
 assigned	/man/10/styxserver
 assigned	/man/2/dhcpclient
 assigned	/man/2/dial
-assigned	/man/2/palmfile
 assigned	/man/2/sys-0intro
 assigned	/man/2/sys-dial
 assigned	/man/2/sys-self
@@ -3555,7 +3517,6 @@ assigned	/man/3/pnp
 assigned	/man/9/canvas
 assigning	/man/2/bufio
 assigning	/man/2/draw-0intro
-assigning	/man/2/palmfile
 assigning	/man/2/sys-stat
 assignment	/man/1/calc
 assignment	/man/1/env
@@ -3575,7 +3536,6 @@ assigns	/man/1/sh
 assigns	/man/10/devattach
 assigns	/man/2/asn1
 assigns	/man/2/draw-screen
-assigns	/man/2/palmfile
 assigns	/man/3/dbg
 assigns	/man/8/prep
 assistance	/man/2/styxservers
@@ -3661,7 +3621,6 @@ assumed	/man/2/0intro
 assumed	/man/2/daytime
 assumed	/man/2/disks
 assumed	/man/2/filter-deflate
-assumed	/man/2/palmfile
 assumed	/man/2/sexprs
 assumed	/man/2/spree
 assumed	/man/2/spree-cardlib
@@ -3686,7 +3645,6 @@ assumes	/man/1/listen
 assumes	/man/10/qlock
 assumes	/man/10/styx
 assumes	/man/2/security-login
-assumes	/man/2/styxflush
 assumes	/man/2/venti
 assumes	/man/3/vid
 assumes	/man/4/export
@@ -3895,7 +3853,6 @@ attempts	/man/2/security-0intro
 attempts	/man/2/styx
 attempts	/man/2/sys-0intro
 attempts	/man/2/sys-bind
-attempts	/man/2/tftp
 attempts	/man/2/timers
 attempts	/man/3/cmd
 attempts	/man/3/cons
@@ -3916,7 +3873,6 @@ attr	/man/10/mk
 attr	/man/2/attrdb
 attr	/man/2/cfg
 attr	/man/2/factotum
-attr	/man/2/palmfile
 attr	/man/2/plumbmsg
 attr	/man/2/registries
 attr	/man/3/i82365
@@ -3988,7 +3944,6 @@ attributes	/man/2/convcs
 attributes	/man/2/dhcpclient
 attributes	/man/2/factotum
 attributes	/man/2/ip
-attributes	/man/2/palmfile
 attributes	/man/2/plumbmsg
 attributes	/man/2/registries
 attributes	/man/2/spree
@@ -4012,7 +3967,6 @@ attributes	/man/8/bootpd
 attributes	/man/8/dns
 attributes.new	/man/2/registries
 attrs	/man/2/cfg
-attrs	/man/2/palmfile
 attrs	/man/2/plumbmsg
 attrs	/man/2/registries
 attrs	/man/2/xml
@@ -4043,7 +3997,6 @@ augmented	/man/1/yacc
 augmented	/man/10/mk
 augments	/man/9/canvas
 augments	/man/9/text
-august	/man/2/palmfile
 auhdr	/man/1/auplay
 aui	/man/10/plan9.ini
 auip	/man/3/ip
@@ -4439,7 +4392,6 @@ b40f04	/man/1/stack
 b419a4	/man/1/stack
 b64text	/man/2/sexprs
 b64toip	/man/2/keyring-ipint
-backed	/man/2/palmfile
 backed	/man/9/canvas
 background	/man/1/cprof
 background	/man/1/os
@@ -4502,7 +4454,6 @@ backspace	/man/6/sexprs
 backspace	/man/9/entry
 backspace	/man/9/text
 backspacing	/man/1/acme
-backup	/man/2/palmfile
 backward	/man/1/acme
 backward	/man/1/diff
 backward	/man/6/image
@@ -4519,7 +4470,6 @@ bad	/man/1/sh-std
 bad	/man/1/sh-tk
 bad	/man/10/error
 bad	/man/10/styxserver
-bad	/man/2/format
 bad	/man/3/dbg
 bad	/man/3/logfs
 bad	/man/4/keyfs
@@ -4554,7 +4504,6 @@ bare	/man/1/ls
 bare	/man/10/2l
 bars	/man/1/wm-misc
 bars	/man/2/dividers
-bars	/man/2/palmfile
 bars	/man/9/menubutton
 bartlett's	/man/9/canvas
 base	/man/1/calc
@@ -4578,7 +4527,6 @@ base	/man/2/keyring-0intro
 base	/man/2/keyring-ipint
 base	/man/2/math-elem
 base	/man/2/math-fp
-base	/man/2/palmfile
 base	/man/2/prefab-style
 base	/man/2/print
 base	/man/2/sexprs
@@ -4624,7 +4572,6 @@ based	/man/10/plan9.ini
 based	/man/10/styxserver
 based	/man/2/dividers
 based	/man/2/draw-font
-based	/man/2/format
 based	/man/2/keyring-auth
 based	/man/2/lock
 based	/man/2/newns
@@ -4723,7 +4670,6 @@ bcmflnve123	/man/1/mprof
 bd	/man/9/options
 bdata	/man/10/2l
 bdmpr	/man/8/dhcp
-beamed	/man/2/palmfile
 bear	/man/2/disks
 bears	/man/2/asn1
 bebytestoip	/man/2/keyring-ipint
@@ -4913,7 +4859,6 @@ binary	/man/2/factotum
 binary	/man/2/math-0intro
 binary	/man/2/math-export
 binary	/man/2/math-fp
-binary	/man/2/palmfile
 binary	/man/2/sexprs
 binary	/man/2/spki
 binary	/man/2/stringinttab
@@ -5129,7 +5074,6 @@ bit	/man/2/keyring-0intro
 bit	/man/2/keyring-crypt
 bit	/man/2/math-export
 bit	/man/2/math-fp
-bit	/man/2/palmfile
 bit	/man/2/security-0intro
 bit	/man/2/sets
 bit	/man/2/sexprs
@@ -5225,7 +5169,6 @@ bits	/man/2/keyring-gensk
 bits	/man/2/keyring-ipint
 bits	/man/2/math-0intro
 bits	/man/2/math-fp
-bits	/man/2/palmfile
 bits	/man/2/sets
 bits	/man/2/sh
 bits	/man/2/sys-open
@@ -5446,7 +5389,6 @@ blocks	/man/2/keyring-sha1
 blocks	/man/2/prefab-element
 blocks	/man/2/sys-export
 blocks	/man/2/sys-file2chan
-blocks	/man/2/tftp
 blocks	/man/2/venti
 blocks	/man/3/cmd
 blocks	/man/3/cons
@@ -5501,12 +5443,10 @@ bold	/man/1/cook
 bold	/man/6/man
 book	/man/1/ebook
 book	/man/2/keyring-crypt
-book	/man/2/palmfile
 book	/man/2/security-0intro
 book	/man/2/tabs
 book	/man/3/ssl
 bookmark	/man/1/charon
-books	/man/2/palmfile
 bool	/man/2/asn1
 boolean	/man/1/sh-expr
 boolean	/man/2/asn1
@@ -5533,7 +5473,6 @@ boot	/man/10/9load
 boot	/man/10/plan9.ini
 boot	/man/10/seconds
 boot	/man/2/disks
-boot	/man/2/tftp
 boot	/man/3/boot
 boot	/man/3/cons
 boot	/man/3/dbg
@@ -5565,7 +5504,6 @@ bootfile	/man/10/9load
 bootfile	/man/10/plan9.ini
 booting	/man/10/9load
 booting	/man/10/plan9.ini
-booting	/man/2/tftp
 booting	/man/3/fpga
 booting	/man/6/ndb
 booting	/man/8/bootpd
@@ -5581,7 +5519,6 @@ bootp	/man/8/init
 bootp	/man/8/rip
 bootpd	/man/2/dhcpclient
 bootpd	/man/2/ether
-bootpd	/man/2/tftp
 bootpd	/man/6/ndb
 bootpd	/man/8/bootpd
 bootpd	/man/8/mangaload
@@ -5891,7 +5828,6 @@ britainpound	/man/1/units
 british	/man/1/units
 broad	/man/1/0intro
 broadcast	/man/2/ip
-broadcast	/man/2/virgil
 broadcast	/man/3/ether
 broadcast	/man/3/ip
 broadcast	/man/8/rip
@@ -5957,7 +5893,6 @@ bsssize	/man/10/ksize
 bst	/man/2/daytime
 bt	/man/10/plan9.ini
 bt485hwgc	/man/3/vga
-btime	/man/2/palmfile
 btos	/man/2/convcs
 btos.b	/man/2/convcs
 btos.dis	/man/2/convcs
@@ -6065,7 +6000,6 @@ buffers	/man/6/colour
 bufio	/man/1/yacc
 bufio	/man/2/bufio
 bufio	/man/2/bufio-chanfill
-bufio	/man/2/format
 bufio	/man/2/imagefile
 bufio	/man/2/pslib
 bufio	/man/2/sexprs
@@ -6079,8 +6013,6 @@ bufio.m	/man/1/yacc
 bufio.m	/man/2/attrdb
 bufio.m	/man/2/bufio
 bufio.m	/man/2/bufio-chanfill
-bufio.m	/man/2/format
-bufio.m	/man/2/palmfile
 bufio.m	/man/2/sexprs
 bufio.m	/man/2/spki
 bufio.m	/man/2/spki-verifier
@@ -6181,7 +6113,6 @@ bugs	/man/2/sys-file2chan
 bugs	/man/2/sys-fversion
 bugs	/man/2/sys-print
 bugs	/man/2/venti
-bugs	/man/2/virgil
 bugs	/man/2/xml
 bugs	/man/3/audio
 bugs	/man/3/cons
@@ -6492,7 +6423,6 @@ byte	/man/2/encoding
 byte	/man/2/ether
 byte	/man/2/factotum
 byte	/man/2/filter
-byte	/man/2/format
 byte	/man/2/imagefile
 byte	/man/2/ip
 byte	/man/2/keyring-0intro
@@ -6505,7 +6435,6 @@ byte	/man/2/keyring-rc4
 byte	/man/2/keyring-sha1
 byte	/man/2/math-export
 byte	/man/2/msgio
-byte	/man/2/palmfile
 byte	/man/2/plumbmsg
 byte	/man/2/prof
 byte	/man/2/secstore
@@ -6642,7 +6571,6 @@ bytes	/man/2/keyring-rc4
 bytes	/man/2/keyring-sha1
 bytes	/man/2/math-export
 bytes	/man/2/msgio
-bytes	/man/2/palmfile
 bytes	/man/2/plumbmsg
 bytes	/man/2/pop3
 bytes	/man/2/print
@@ -6823,7 +6751,6 @@ caller	/man/2/math-fp
 caller	/man/2/spree-allow
 caller	/man/2/styx
 caller	/man/2/styxconv
-caller	/man/2/styxflush
 caller	/man/2/styxpersist
 caller	/man/2/styxservers
 caller	/man/2/sys-dial
@@ -6944,7 +6871,6 @@ capability	/man/3/sd
 capable	/man/1/tiny
 capable	/man/10/9load
 capable	/man/10/plan9.ini
-capable	/man/2/format
 capable	/man/9/entry
 capacity	/man/3/tinyfs
 capbrightness	/man/3/tv
@@ -7086,7 +7012,6 @@ cat	/man/1/uuencode
 cat	/man/10/odbc
 cat	/man/10/plan9.ini
 cat	/man/2/dbm
-cat	/man/2/palmfile
 cat	/man/3/ds
 cat	/man/3/pnp
 cat	/man/3/sd
@@ -7103,12 +7028,10 @@ catches	/man/2/sh
 catching	/man/2/sh
 categories	/man/1/grid-query
 categories	/man/1/mux
-categories	/man/2/palmfile
 categories	/man/3/tls
 categories	/man/4/namespace
 category	/man/1/grid-query
 category	/man/10/conf
-category	/man/2/palmfile
 category	/man/3/tls
 catenate	/man/1/dd
 catenated	/man/1/acme
@@ -7217,8 +7140,6 @@ centigrade	/man/1/units
 centimeter	/man/9/text
 centimetres	/man/9/types
 central	/man/1/sh
-central	/man/2/styxflush
-centralloop	/man/2/styxflush
 centre	/man/3/touch
 centre	/man/8/touchcal
 centred	/man/2/dialog
@@ -7389,7 +7310,6 @@ chan	/man/2/plumbmsg
 chan	/man/2/popup
 chan	/man/2/prefab-compound
 chan	/man/2/styxconv
-chan	/man/2/styxflush
 chan	/man/2/styxpersist
 chan	/man/2/styxservers
 chan	/man/2/styxservers-nametree
@@ -7478,7 +7398,6 @@ channel	/man/2/popup
 channel	/man/2/prefab-compound
 channel	/man/2/security-login
 channel	/man/2/styxconv
-channel	/man/2/styxflush
 channel	/man/2/styxpersist
 channel	/man/2/styxservers
 channel	/man/2/styxservers-nametree
@@ -7640,7 +7559,6 @@ character	/man/2/filepat
 character	/man/2/filter-deflate
 character	/man/2/keyring-getmsg
 character	/man/2/msgio
-character	/man/2/palmfile
 character	/man/2/prof
 character	/man/2/regex
 character	/man/2/sexprs
@@ -7650,7 +7568,6 @@ character	/man/2/sys-0intro
 character	/man/2/sys-byte2char
 character	/man/2/sys-print
 character	/man/2/sys-tokenize
-character	/man/2/tftp
 character	/man/2/w3c-css
 character	/man/2/wmsrv
 character	/man/3/0intro
@@ -7759,7 +7676,6 @@ characters	/man/2/encoding
 characters	/man/2/factotum
 characters	/man/2/filepat
 characters	/man/2/filter-deflate
-characters	/man/2/palmfile
 characters	/man/2/sexprs
 characters	/man/2/sh
 characters	/man/2/spree
@@ -7863,7 +7779,6 @@ check	/man/10/sleep
 check	/man/10/strcat
 check	/man/10/styxserver
 check	/man/2/crc
-check	/man/2/format
 check	/man/2/keyring-crypt
 check	/man/2/security-0intro
 check	/man/2/styxservers
@@ -7915,7 +7830,6 @@ checking	/man/10/allocb
 checking	/man/10/error
 checking	/man/10/iar
 checking	/man/10/styxserver
-checking	/man/2/format
 checking	/man/2/spki
 checking	/man/2/spree
 checking	/man/2/styx
@@ -8048,7 +7962,6 @@ chosen	/man/1/wm-misc
 chosen	/man/10/conf
 chosen	/man/2/keyring-0intro
 chosen	/man/2/keyring-sha1
-chosen	/man/2/palmfile
 chosen	/man/2/security-auth
 chosen	/man/2/spree-cardlib
 chosen	/man/3/pnp
@@ -8129,7 +8042,6 @@ classes	/man/1/charon
 classes	/man/1/sh
 classes	/man/2/0intro
 classes	/man/2/asn1
-classes	/man/2/palmfile
 classes	/man/2/string
 classical	/man/2/math-0intro
 classified	/man/9/1copyright
@@ -8151,7 +8063,6 @@ clean	/man/4/acme
 cleanname	/man/1/basename
 cleanname	/man/1/cleanname
 cleanname.b	/man/1/cleanname
-cleanup	/man/2/styxflush
 clear	/man/1/crypt
 clear	/man/1/grid-monitor
 clear	/man/1/mash-make
@@ -8263,7 +8174,6 @@ client	/man/2/draw-context
 client	/man/2/draw-display
 client	/man/2/draw-image
 client	/man/2/factotum
-client	/man/2/format
 client	/man/2/keyring-auth
 client	/man/2/plumbmsg
 client	/man/2/security-0intro
@@ -8274,13 +8184,11 @@ client	/man/2/spree-allow
 client	/man/2/spree-cardlib
 client	/man/2/spree-gather
 client	/man/2/styx
-client	/man/2/styxflush
 client	/man/2/styxpersist
 client	/man/2/styxservers
 client	/man/2/sys-export
 client	/man/2/sys-file2chan
 client	/man/2/tkclient
-client	/man/2/virgil
 client	/man/2/wmsrv
 client	/man/3/0intro
 client	/man/3/draw
@@ -8771,7 +8679,6 @@ code	/man/2/draw-example
 code	/man/2/imagefile
 code	/man/2/keyring-crypt
 code	/man/2/math-0intro
-code	/man/2/palmfile
 code	/man/2/prefab-compound
 code	/man/2/print
 code	/man/2/prof
@@ -8794,7 +8701,6 @@ code	/man/9/0intro
 code	/man/9/text
 codec	/man/10/kproc
 coded	/man/2/convcs
-coded	/man/2/virgil
 coded	/man/8/virgild
 codepage	/man/2/convcs
 codes	/man/1/tr
@@ -9287,7 +9193,6 @@ compatible	/man/2/asn1
 compatible	/man/2/bufio
 compatible	/man/2/debug
 compatible	/man/2/filter-deflate
-compatible	/man/2/format
 compatible	/man/2/ip
 compatible	/man/2/sets
 compatible	/man/2/styx
@@ -9411,7 +9316,6 @@ completed	/man/1/wm-sh
 completed	/man/2/itslib
 completed	/man/2/keyring-0intro
 completed	/man/2/keyring-sha1
-completed	/man/2/tftp
 completed	/man/3/cmd
 completed	/man/5/flush
 completely	/man/1/0intro
@@ -9480,8 +9384,6 @@ component	/man/2/debug
 component	/man/2/dhcpclient
 component	/man/2/draw-0intro
 component	/man/2/draw-display
-component	/man/2/format
-component	/man/2/palmfile
 component	/man/2/prefab-element
 component	/man/2/print
 component	/man/2/secstore
@@ -9576,7 +9478,6 @@ compress	/man/10/5cv
 compress	/man/3/ip
 compressed	/man/10/5cv
 compressed	/man/10/9load
-compressed	/man/2/palmfile
 compressed	/man/2/spree
 compressed	/man/2/xml
 compressed	/man/3/draw
@@ -9656,7 +9557,6 @@ con	/man/2/draw-example
 con	/man/2/draw-image
 con	/man/2/ether
 con	/man/2/factotum
-con	/man/2/format
 con	/man/2/geodesy
 con	/man/2/itslib
 con	/man/2/keyring-crypt
@@ -9666,7 +9566,6 @@ con	/man/2/prof
 con	/man/2/readdir
 con	/man/2/secstore
 con	/man/2/styx
-con	/man/2/styxflush
 con	/man/2/styxservers-nametree
 con	/man/2/sys-stat
 con	/man/2/tkclient
@@ -9721,7 +9620,6 @@ concurrent	/man/3/pipe
 concurrently	/man/1/blur
 concurrently	/man/1/charon
 concurrently	/man/2/bufio
-concurrently	/man/2/styxflush
 concurrently	/man/2/sys-0intro
 concurrently	/man/2/sys-read
 condition	/man/1/alphabet-fs
@@ -9749,7 +9647,6 @@ conditions	/man/2/styxservers
 conditions	/man/3/usb
 conditions	/man/5/flush
 conditions	/man/5/stat
-conduit	/man/2/palmfile
 conf	/man/10/conf
 conf	/man/2/dhcpclient
 conf	/man/3/dbg
@@ -9790,7 +9687,6 @@ configuration	/man/10/plan9.ini
 configuration	/man/2/cfg
 configuration	/man/2/dhcpclient
 configuration	/man/2/print
-configuration	/man/2/tftp
 configuration	/man/3/cons
 configuration	/man/3/dbg
 configuration	/man/3/ds
@@ -9942,7 +9838,6 @@ conform	/man/2/alphabet-intro
 conform	/man/2/filter-deflate
 conform	/man/9/cursor
 conformance	/man/10/2c
-conforming	/man/2/format
 conforms	/man/2/convcs
 confound	/man/2/sys-0intro
 confused	/man/1/0intro
@@ -10206,7 +10101,6 @@ consequently	/man/10/dev
 consequently	/man/10/devattach
 consequently	/man/10/xalloc
 consequently	/man/2/asn1
-consequently	/man/2/palmfile
 consequently	/man/8/cs
 conserve	/man/3/fpga
 consider	/man/1/math-misc
@@ -10292,7 +10186,6 @@ consists	/man/10/mk
 consists	/man/10/odbc
 consists	/man/2/convcs
 consists	/man/2/dis
-consists	/man/2/format
 consists	/man/2/prof
 consists	/man/2/spree-cardlib
 consists	/man/2/string
@@ -10354,7 +10247,6 @@ constant	/man/10/styx
 constant	/man/2/dis
 constant	/man/2/draw-0intro
 constant	/man/2/factotum
-constant	/man/2/format
 constant	/man/2/keyring-crypt
 constant	/man/2/math-0intro
 constant	/man/2/math-linalg
@@ -10382,7 +10274,6 @@ constants	/man/2/dhcpclient
 constants	/man/2/dis
 constants	/man/2/draw-0intro
 constants	/man/2/draw-display
-constants	/man/2/format
 constants	/man/2/ir
 constants	/man/2/math-0intro
 constants	/man/2/math-fp
@@ -10438,7 +10329,6 @@ construction	/man/1/mash
 construction	/man/1/ns
 construction	/man/1/sh
 construction	/man/1/yacc
-construction	/man/2/palmfile
 construction	/man/2/prefab-element
 construction	/man/6/sbl
 construction	/man/9/menu
@@ -10564,7 +10454,6 @@ contains	/man/2/draw-rect
 contains	/man/2/factotum
 contains	/man/2/filter
 contains	/man/2/filter-deflate
-contains	/man/2/format
 contains	/man/2/hash
 contains	/man/2/ip
 contains	/man/2/keyring-0intro
@@ -10572,7 +10461,6 @@ contains	/man/2/keyring-gensk
 contains	/man/2/keyring-getmsg
 contains	/man/2/msgio
 contains	/man/2/newns
-contains	/man/2/palmfile
 contains	/man/2/plumbmsg
 contains	/man/2/prefab-0intro
 contains	/man/2/prefab-element
@@ -10670,10 +10558,8 @@ content	/man/1/mux
 content	/man/1/webgrab
 content	/man/10/mk
 content	/man/2/dbm
-content	/man/2/format
 content	/man/2/keyring-getmsg
 content	/man/2/msgio
-content	/man/2/palmfile
 content	/man/2/sys-stat
 content	/man/2/venti
 content	/man/2/w3c-css
@@ -10967,7 +10853,6 @@ convenience	/man/1/tiny
 convenience	/man/2/convcs
 convenience	/man/2/disks
 convenience	/man/2/draw-image
-convenience	/man/2/format
 convenience	/man/2/ip
 convenience	/man/2/sexprs
 convenience	/man/2/styxservers
@@ -11005,7 +10890,6 @@ conventional	/man/10/qio
 conventional	/man/2/0intro
 conventional	/man/2/alphabet-intro
 conventional	/man/2/keyring-auth
-conventional	/man/2/palmfile
 conventional	/man/2/sh
 conventional	/man/2/spree-cardlib
 conventional	/man/2/styxpersist
@@ -11047,7 +10931,6 @@ conventions	/man/2/daytime
 conventions	/man/2/factotum
 conventions	/man/2/keyring-sha1
 conventions	/man/2/msgio
-conventions	/man/2/palmfile
 conventions	/man/2/spree
 conventions	/man/2/string
 conventions	/man/2/sys-0intro
@@ -11144,7 +11027,6 @@ convert	/man/2/geodesy
 convert	/man/2/ip
 convert	/man/2/keyring-certtostr
 convert	/man/2/math-export
-convert	/man/2/palmfile
 convert	/man/2/security-0intro
 convert	/man/2/sh
 convert	/man/2/spki
@@ -11224,7 +11106,6 @@ converts	/man/10/styx
 converts	/man/2/convcs
 converts	/man/2/daytime
 converts	/man/2/debug
-converts	/man/2/format
 converts	/man/2/geodesy
 converts	/man/2/ir
 converts	/man/2/keyring-ipint
@@ -11416,7 +11297,6 @@ copy	/man/2/ip
 copy	/man/2/keyring-0intro
 copy	/man/2/keyring-ipint
 copy	/man/2/math-fp
-copy	/man/2/palmfile
 copy	/man/2/plumbmsg
 copy	/man/2/registries
 copy	/man/2/security-0intro
@@ -11493,7 +11373,6 @@ correct	/man/2/attrdb
 correct	/man/2/dis
 correct	/man/2/factotum
 correct	/man/2/security-0intro
-correct	/man/2/styxflush
 correct	/man/5/remove
 correct	/man/6/image
 correct	/man/8/register
@@ -11572,7 +11451,6 @@ corresponds	/man/9/menu
 corresponds	/man/9/options
 corresponds	/man/9/scale
 corresponds	/man/9/scrollbar
-corrupt	/man/2/palmfile
 corrupted	/man/1/calendar
 corrupted	/man/1/charon
 corrupted	/man/1/miniterm
@@ -11763,9 +11641,7 @@ cr	/man/1/ar
 cr	/man/10/iar
 crackerbarrel	/man/1/math-misc
 crackerbarrel.b	/man/1/math-misc
-cracks	/man/2/format
 crafted	/man/8/signer
-crag	/man/2/format
 crash	/man/1/tktester
 crash	/man/10/c2l
 crashed	/man/1/blur
@@ -11816,7 +11692,6 @@ create	/man/2/factotum
 create	/man/2/imagefile
 create	/man/2/keyring-0intro
 create	/man/2/mpeg
-create	/man/2/palmfile
 create	/man/2/security-0intro
 create	/man/2/security-login
 create	/man/2/styx
@@ -12074,7 +11949,6 @@ creating	/man/10/acid
 creating	/man/10/kproc
 creating	/man/2/dis
 creating	/man/2/lock
-creating	/man/2/palmfile
 creating	/man/2/security-0intro
 creating	/man/2/spree-cardlib
 creating	/man/2/styxservers
@@ -12096,7 +11970,6 @@ creation	/man/10/devattach
 creation	/man/10/kproc
 creation	/man/10/styxserver
 creation	/man/2/draw-font
-creation	/man/2/palmfile
 creation	/man/2/prefab-element
 creation	/man/2/spree
 creation	/man/2/styxservers
@@ -12107,7 +11980,6 @@ creation	/man/4/9srvfs
 creation	/man/4/import
 creation	/man/5/open
 creator	/man/1/tiny
-creator	/man/2/palmfile
 creator	/man/2/sys-0intro
 creator	/man/3/srv
 cred	/man/3/draw
@@ -12183,7 +12055,6 @@ cs	/man/2/security-login
 cs	/man/2/srv
 cs	/man/2/sys-0intro
 cs	/man/2/sys-dial
-cs	/man/2/virgil
 cs	/man/4/ftpfs
 cs	/man/4/namespace
 cs	/man/6/attrdb
@@ -12214,7 +12085,6 @@ ct65545	/man/3/vga
 ct65545hwgc	/man/3/vga
 ctext	/man/2/dial
 ctime	/man/2/daytime
-ctime	/man/2/palmfile
 ctl	/man/1/kill
 ctl	/man/1/secstore
 ctl	/man/1/wm
@@ -12553,7 +12423,6 @@ cycles	/man/2/sexprs
 cycles	/man/8/ftl
 cyclic	/man/10/c2l
 cyclic	/man/2/crc
-cyclic	/man/2/format
 cyclic	/man/2/prefab-element
 cyclic	/man/2/prof
 cyclic	/man/2/sexprs
@@ -12687,7 +12556,6 @@ data	/man/2/encoding
 data	/man/2/factotum
 data	/man/2/filter
 data	/man/2/filter-deflate
-data	/man/2/format
 data	/man/2/hash
 data	/man/2/imagefile
 data	/man/2/ip
@@ -12698,7 +12566,6 @@ data	/man/2/keyring-getstring
 data	/man/2/keyring-sha1
 data	/man/2/math-0intro
 data	/man/2/msgio
-data	/man/2/palmfile
 data	/man/2/plumbmsg
 data	/man/2/prefab-0intro
 data	/man/2/prefab-compound
@@ -12718,7 +12585,6 @@ data	/man/2/spki
 data	/man/2/spree
 data	/man/2/srv
 data	/man/2/styx
-data	/man/2/styxflush
 data	/man/2/styxservers
 data	/man/2/styxservers-nametree
 data	/man/2/sys-0intro
@@ -12730,7 +12596,6 @@ data	/man/2/sys-iounit
 data	/man/2/sys-pipe
 data	/man/2/sys-read
 data	/man/2/sys-self
-data	/man/2/tftp
 data	/man/2/timers
 data	/man/2/venti
 data	/man/2/wmsrv
@@ -12830,7 +12695,6 @@ database	/man/1/units
 database	/man/10/odbc
 database	/man/2/attrdb
 database	/man/2/dbm
-database	/man/2/palmfile
 database	/man/2/spree
 database	/man/4/dbfs
 database	/man/4/registry
@@ -12907,11 +12771,9 @@ datum	/man/5/stat
 datum	/man/6/dis
 datum2datum	/man/2/geodesy
 datums	/man/2/geodesy
-dawes	/man/2/format
 daylight	/man/2/daytime
 daytime	/man/1/date
 daytime	/man/2/daytime
-daytime	/man/2/palmfile
 daytime	/man/8/createsignerkey
 daytime.b	/man/2/daytime
 daytime.m	/man/2/daytime
@@ -12961,12 +12823,9 @@ dbgdata	/man/3/dbg
 dbglog	/man/3/dbg
 dbgstart	/man/3/dbg
 dbh	/man/7/db
-dbinfo	/man/2/palmfile
-dbinfo.name	/man/2/palmfile
 dbm	/man/2/dbm
 dbm.b	/man/2/dbm
 dbm.m	/man/2/dbm
-dbname	/man/2/palmfile
 dbname	/man/7/db
 dbopen	/man/7/db
 dbottom	/man/2/spree-cardlib
@@ -13004,7 +12863,6 @@ deal	/man/10/mk
 deal	/man/10/readnum
 deal	/man/2/geodesy
 deal	/man/2/spree-cardlib
-deal	/man/2/styxflush
 deal	/man/6/image
 deal	/man/8/svc
 dealing	/man/1/mash-tk
@@ -13017,11 +12875,9 @@ deallocations	/man/3/prof
 deals	/man/1/emu
 deals	/man/10/styxserver
 deals	/man/2/spree-cardlib
-deals	/man/2/styxflush
 deals	/man/2/tk
 dealt	/man/1/cprof
 dealt	/man/10/conf
-dealt	/man/2/styxflush
 deb	/man/1/0intro
 deb	/man/1/deb
 deb	/man/1/ps
@@ -13242,7 +13098,6 @@ declaring	/man/10/2c
 decls	/man/2/w3c-css
 decode	/man/1/uuencode
 decode	/man/2/asn1
-decode	/man/2/palmfile
 decoded	/man/1/uuencode
 decoded	/man/10/rune
 decoded	/man/2/asn1
@@ -13579,7 +13434,6 @@ define	/man/2/alphabet-intro
 define	/man/2/draw-0intro
 define	/man/2/draw-font
 define	/man/2/draw-rect
-define	/man/2/format
 define	/man/2/sh
 define	/man/2/spree-cardlib
 define	/man/2/styxservers
@@ -13633,7 +13487,6 @@ defined	/man/2/draw-context
 defined	/man/2/draw-font
 defined	/man/2/draw-image
 defined	/man/2/encoding
-defined	/man/2/format
 defined	/man/2/fsproto
 defined	/man/2/geodesy
 defined	/man/2/imagefile
@@ -13643,7 +13496,6 @@ defined	/man/2/keyring-gensk
 defined	/man/2/math-fp
 defined	/man/2/math-linalg
 defined	/man/2/newns
-defined	/man/2/palmfile
 defined	/man/2/pop3
 defined	/man/2/prefab-compound
 defined	/man/2/prefab-element
@@ -13660,7 +13512,6 @@ defined	/man/2/spki
 defined	/man/2/spki-verifier
 defined	/man/2/styx
 defined	/man/2/styxconv
-defined	/man/2/styxflush
 defined	/man/2/styxservers
 defined	/man/2/sys-bind
 defined	/man/2/sys-fversion
@@ -13729,7 +13580,6 @@ defines	/man/2/draw-font
 defines	/man/2/draw-image
 defines	/man/2/draw-rect
 defines	/man/2/filter
-defines	/man/2/format
 defines	/man/2/imagefile
 defines	/man/2/ir
 defines	/man/2/prefab-0intro
@@ -13786,7 +13636,6 @@ definition	/man/10/c2l
 definition	/man/10/strcat
 definition	/man/2/0intro
 definition	/man/2/draw-0intro
-definition	/man/2/format
 definition	/man/2/sh
 definition	/man/2/sys-bind
 definition	/man/2/sys-self
@@ -13870,7 +13719,6 @@ delay	/man/3/touch
 delay	/man/5/0intro
 delay	/man/8/virgild
 delayed	/man/2/spki
-delayed	/man/2/styxflush
 delayed	/man/9/options
 delays	/man/10/delay
 delays	/man/10/seconds
@@ -13896,7 +13744,6 @@ delete	/man/10/odbc
 delete	/man/2/dbm
 delete	/man/2/hash
 delete	/man/2/ir
-delete	/man/2/palmfile
 delete	/man/2/pop3
 delete	/man/2/spree
 delete	/man/2/styxservers
@@ -14137,7 +13984,6 @@ depends	/man/1/sh-file2chan
 depends	/man/10/mk
 depends	/man/2/alphabet-intro
 depends	/man/2/dbm
-depends	/man/2/palmfile
 depends	/man/2/prefab-element
 depends	/man/2/registries
 depends	/man/2/security-0intro
@@ -14212,7 +14058,6 @@ descending	/man/1/grid-session
 descending	/man/2/readdir
 descends	/man/2/xml
 descent	/man/1/limbo
-descr	/man/2/format
 describe	/man/1/auplay
 describe	/man/10/a.out
 describe	/man/10/plan9.ini
@@ -14372,7 +14217,6 @@ describes	/man/10/0intro
 describes	/man/10/devattach
 describes	/man/2/alphabet-intro
 describes	/man/2/draw-font
-describes	/man/2/format
 describes	/man/2/imagefile
 describes	/man/2/security-ssl
 describes	/man/2/spree
@@ -14549,9 +14393,7 @@ designed	/man/1/cook
 designed	/man/1/grid-monitor
 designed	/man/1/tiny
 designed	/man/1/toolbar
-designed	/man/2/format
 designed	/man/2/ir
-designed	/man/2/styxflush
 designed	/man/3/logfs
 designed	/man/6/colour
 designed	/man/6/utf
@@ -14596,7 +14438,6 @@ desired	/man/9/scale
 desired	/man/9/scrollbar
 desired	/man/9/text
 desklink	/man/4/palmsrv
-desktop	/man/2/palmfile
 despite	/man/2/asn1
 despite	/man/2/draw-image
 despite	/man/5/walk
@@ -15051,7 +14892,6 @@ device	/man/2/ip
 device	/man/2/ir
 device	/man/2/keyring-0intro
 device	/man/2/mpeg
-device	/man/2/palmfile
 device	/man/2/print
 device	/man/2/prof
 device	/man/2/security-0intro
@@ -15285,7 +15125,6 @@ diag	/man/2/secstore
 diag	/man/2/w3c-css
 diagnose	/man/2/styxservers
 diagnosed	/man/3/boot
-diagnoses	/man/2/palmfile
 diagnoses	/man/8/applylog
 diagnostic	/man/1/alphabet-main
 diagnostic	/man/1/bind
@@ -15310,7 +15149,6 @@ diagnostic	/man/2/ip
 diagnostic	/man/2/keyring-getmsg
 diagnostic	/man/2/keyset
 diagnostic	/man/2/msgio
-diagnostic	/man/2/palmfile
 diagnostic	/man/2/regex
 diagnostic	/man/2/registries
 diagnostic	/man/2/secstore
@@ -15323,7 +15161,6 @@ diagnostic	/man/2/styx
 diagnostic	/man/2/styxservers
 diagnostic	/man/2/sys-file2chan
 diagnostic	/man/2/sys-utfbytes
-diagnostic	/man/2/tftp
 diagnostic	/man/2/translate
 diagnostic	/man/2/w3c-css
 diagnostic	/man/3/cmd
@@ -15385,7 +15222,6 @@ diagnostics	/man/2/sys-fd2path
 diagnostics	/man/2/sys-fversion
 diagnostics	/man/2/sys-iounit
 diagnostics	/man/2/sys-pipe
-diagnostics	/man/2/virgil
 diagnostics	/man/2/w3c-css
 diagnostics	/man/2/xml
 diagnostics	/man/3/boot
@@ -15425,7 +15261,6 @@ dial	/man/2/sys-0intro
 dial	/man/2/sys-dial
 dial	/man/2/sys-export
 dial	/man/2/venti
-dial	/man/2/virgil
 dial	/man/3/ip
 dial	/man/3/plap
 dial	/man/3/tls
@@ -15504,7 +15339,6 @@ difference	/man/9/text
 differences	/man/1/charon
 differences	/man/1/diff
 differences	/man/1/yacc
-differences	/man/2/palmfile
 differences	/man/3/ip
 differences	/man/6/colour
 differences	/man/6/sexprs
@@ -15519,7 +15353,6 @@ differently	/man/2/draw-image
 differently	/man/9/menu
 differing	/man/1/cmp
 differing	/man/10/plan9.ini
-differing	/man/2/palmfile
 differing	/man/6/keyboard
 differs	/man/2/readdir
 differs	/man/3/ftl
@@ -15780,7 +15613,6 @@ directly	/man/2/crc
 directly	/man/2/dhcpclient
 directly	/man/2/draw-example
 directly	/man/2/ir
-directly	/man/2/palmfile
 directly	/man/2/plumbmsg
 directly	/man/2/prefab-0intro
 directly	/man/2/secstore
@@ -16073,7 +15905,6 @@ directory's	/man/4/tarfs
 directory.the	/man/2/styxservers
 directs	/man/1/cp
 directs	/man/1/sh
-directs	/man/2/virgil
 direntry	/man/2/fsproto
 dirfmt	/man/10/styx
 dirlen	/man/10/devattach
@@ -16250,7 +16081,6 @@ discarded	/man/10/allocb
 discarded	/man/10/qio
 discarded	/man/2/bufio
 discarded	/man/2/spree-gather
-discarded	/man/2/styxflush
 discarded	/man/3/cmd
 discarded	/man/3/eia
 discarded	/man/3/pbus
@@ -16706,7 +16536,6 @@ division	/man/1/mdb
 division	/man/1/sh-expr
 division	/man/2/0intro
 division	/man/2/math-fp
-division	/man/2/palmfile
 division	/man/8/prep
 divisor	/man/3/fpga
 divisor	/man/6/image
@@ -16777,11 +16606,7 @@ dnsdomainxx	/man/6/ndb
 dnsfile	/man/8/dns
 dnsquery	/man/8/dns
 dnsquery.b	/man/8/dns
-doc	/man/2/palmfile
 doc	/man/4/namespace
-doc.length	/man/2/palmfile
-doc.open	/man/2/palmfile
-doc.read	/man/2/palmfile
 docookies	/man/1/charon
 doctype	/man/2/xml
 document	/man/1/charon
@@ -16790,12 +16615,10 @@ document	/man/1/ebook
 document	/man/1/man
 document	/man/1/sh
 document	/man/2/math-fp
-document	/man/2/palmfile
 document	/man/2/xml
 document	/man/6/ndb
 document	/man/9/options
 document	/man/9/scrollbar
-document's	/man/2/palmfile
 document's	/man/9/text
 document.applets	/man/1/charon
 document.embeds	/man/1/charon
@@ -16820,7 +16643,6 @@ documented	/man/9/types
 documents	/man/1/charon
 documents	/man/1/ebook
 documents	/man/2/filter
-documents	/man/2/palmfile
 documents	/man/2/xml
 documents	/man/8/0intro
 documents	/man/9/0intro
@@ -16884,7 +16706,6 @@ don't	/man/10/c2l
 don't	/man/10/inm
 don't	/man/10/mk
 don't	/man/2/keyset
-don't	/man/2/palmfile
 don't	/man/2/sys-stat
 don't	/man/5/stat
 don't	/man/6/colour
@@ -17284,7 +17105,6 @@ dtop	/man/2/spree-cardlib
 dtr	/man/3/eia
 dtt	/man/7/cddb
 dtype	/man/2/disks
-dtype	/man/2/palmfile
 dtype	/man/2/styxservers
 dtype	/man/2/sys-stat
 du	/man/1/du
@@ -17645,7 +17465,6 @@ efficiency	/man/6/dis
 efficient	/man/1/acme
 efficient	/man/1/dd
 efficient	/man/2/draw-0intro
-efficient	/man/2/format
 efficient	/man/2/math-export
 efficient	/man/2/sets
 efficient	/man/2/sys-pipe
@@ -17694,7 +17513,6 @@ eg	/man/2/imagefile
 eg	/man/2/ip
 eg	/man/2/keyring-getmsg
 eg	/man/2/keyring-rc4
-eg	/man/2/palmfile
 eg	/man/2/plumbmsg
 eg	/man/2/print
 eg	/man/2/registries
@@ -17772,7 +17590,6 @@ eight	/man/5/0intro
 eight	/man/6/image
 eight	/man/9/text
 eighth	/man/2/keyring-crypt
-einterrupted	/man/2/styxflush
 einuse	/man/2/styxservers
 eject	/man/3/floppy
 ek	/man/6/keytext
@@ -17987,7 +17804,6 @@ enable	/man/10/plan9.ini
 enable	/man/10/splhi
 enable	/man/10/styxserver
 enable	/man/2/filter-deflate
-enable	/man/2/format
 enable	/man/2/security-0intro
 enable	/man/2/spree
 enable	/man/2/spree-objstore
@@ -18104,7 +17920,6 @@ encode	/man/10/ms2
 encode	/man/2/asn1
 encode	/man/2/encoding
 encode	/man/2/keyring-0intro
-encode	/man/2/palmfile
 encode	/man/3/tls
 encode	/man/6/dis
 encode	/man/6/image
@@ -18124,7 +17939,6 @@ encoded	/man/2/imagefile
 encoded	/man/2/keyring-crypt
 encoded	/man/2/keyring-ipint
 encoded	/man/2/math-export
-encoded	/man/2/palmfile
 encoded	/man/2/spki
 encoded	/man/2/wmsrv
 encoded	/man/3/tls
@@ -18163,7 +17977,6 @@ encoding	/man/2/filter
 encoding	/man/2/keyring-0intro
 encoding	/man/2/keyring-getmsg
 encoding	/man/2/msgio
-encoding	/man/2/palmfile
 encoding	/man/2/plumbmsg
 encoding	/man/2/secstore
 encoding	/man/2/sexprs
@@ -18269,7 +18082,6 @@ endian	/man/10/2c
 endian	/man/10/a.out
 endian	/man/2/keyring-ipint
 endian	/man/2/math-export
-endian	/man/2/palmfile
 endian	/man/2/sets
 endian	/man/3/audio
 endian	/man/3/cons
@@ -18490,7 +18302,6 @@ entries	/man/10/devattach
 entries	/man/10/plan9.ini
 entries	/man/2/disks
 entries	/man/2/fsproto
-entries	/man/2/palmfile
 entries	/man/2/pop3
 entries	/man/2/readdir
 entries	/man/2/spree-cardlib
@@ -18554,7 +18365,6 @@ entry	/man/2/dis
 entry	/man/2/disks
 entry	/man/2/factotum
 entry	/man/2/math-linalg
-entry	/man/2/palmfile
 entry	/man/2/readdir
 entry	/man/2/registries
 entry	/man/2/spree-cardlib
@@ -18609,7 +18419,6 @@ entry's	/man/1/fs
 entry's	/man/6/keys
 entry's	/man/9/entry
 entry's	/man/9/menu
-entry.attrs	/man/2/palmfile
 entrybox	/man/1/tktester
 entrycget	/man/9/menu
 entryconfigure	/man/9/menu
@@ -18748,7 +18557,6 @@ epoch	/man/1/ls
 epoch	/man/1/timestamp
 epoch	/man/10/seconds
 epoch	/man/2/daytime
-epoch	/man/2/palmfile
 epoch	/man/2/sys-millisec
 epoch	/man/2/sys-stat
 epoch	/man/3/cons
@@ -18848,7 +18656,6 @@ equivalent	/man/10/styx
 equivalent	/man/2/0intro
 equivalent	/man/2/draw-image
 equivalent	/man/2/factotum
-equivalent	/man/2/format
 equivalent	/man/2/geodesy
 equivalent	/man/2/ir
 equivalent	/man/2/keyring-rc4
@@ -18909,9 +18716,7 @@ err	/man/2/asn1
 err	/man/2/attrdb
 err	/man/2/debug
 err	/man/2/dhcpclient
-err	/man/2/format
 err	/man/2/keyset
-err	/man/2/palmfile
 err	/man/2/registries
 err	/man/2/security-auth
 err	/man/2/sexprs
@@ -19007,7 +18812,6 @@ error	/man/2/draw-image
 error	/man/2/ether
 error	/man/2/factotum
 error	/man/2/filter
-error	/man/2/format
 error	/man/2/fsproto
 error	/man/2/imagefile
 error	/man/2/ip
@@ -19021,7 +18825,6 @@ error	/man/2/keyset
 error	/man/2/math-elem
 error	/man/2/mpeg
 error	/man/2/msgio
-error	/man/2/palmfile
 error	/man/2/pop3
 error	/man/2/prof
 error	/man/2/readdir
@@ -19037,7 +18840,6 @@ error	/man/2/spki
 error	/man/2/spree
 error	/man/2/spree-gather
 error	/man/2/styx
-error	/man/2/styxflush
 error	/man/2/styxpersist
 error	/man/2/styxservers
 error	/man/2/styxservers-nametree
@@ -19056,7 +18858,6 @@ error	/man/2/sys-print
 error	/man/2/sys-read
 error	/man/2/sys-utfbytes
 error	/man/2/sys-werrstr
-error	/man/2/tftp
 error	/man/2/translate
 error	/man/2/venti
 error	/man/2/w3c-css
@@ -19193,7 +18994,6 @@ especially	/man/2/security-0intro
 especially	/man/2/smtp
 ess1688	/man/10/plan9.ini
 essential	/man/10/devattach
-essential	/man/2/palmfile
 essential	/man/8/signer
 essentially	/man/2/encoding
 essid	/man/10/plan9.ini
@@ -19270,7 +19070,6 @@ etc	/man/2/math-elem
 etc	/man/2/prefab-element
 etc	/man/2/spree
 etc	/man/2/styx
-etc	/man/2/styxflush
 etc	/man/2/styxservers
 etc	/man/2/w3c-css
 etc	/man/3/ftl
@@ -19443,7 +19242,6 @@ events	/man/9/grab
 events	/man/9/scale
 events	/man/9/text
 eventually	/man/10/0intro
-eventually	/man/2/palmfile
 evertical	/man/2/prefab-element
 everybody	/man/1/sh
 everyone	/man/3/fs
@@ -19957,7 +19755,6 @@ executing	/man/10/kprof
 executing	/man/10/lock
 executing	/man/10/mk
 executing	/man/2/debug
-executing	/man/2/format
 executing	/man/2/sys-fd2path
 executing	/man/2/sys-self
 executing	/man/3/flash
@@ -20041,8 +19838,6 @@ exist	/man/2/0intro
 exist	/man/2/draw-0intro
 exist	/man/2/draw-image
 exist	/man/2/ether
-exist	/man/2/format
-exist	/man/2/palmfile
 exist	/man/2/styxservers
 exist	/man/2/styxservers-nametree
 exist	/man/2/sys-bind
@@ -20109,7 +19904,6 @@ existing	/man/2/dbm
 existing	/man/2/dhcpclient
 existing	/man/2/draw-font
 existing	/man/2/filter
-existing	/man/2/format
 existing	/man/2/geodesy
 existing	/man/2/popup
 existing	/man/2/prefab-compound
@@ -20171,7 +19965,6 @@ exists	/man/1/webgrab
 exists	/man/10/styxserver
 exists	/man/2/dial
 exists	/man/2/hash
-exists	/man/2/palmfile
 exists	/man/2/spree
 exists	/man/2/styxservers
 exists	/man/2/sys-dial
@@ -20334,7 +20127,6 @@ expects	/man/1/logon
 expects	/man/1/sh-alphabet
 expects	/man/2/drawmux
 expects	/man/2/string
-expects	/man/2/virgil
 expects	/man/3/pbus
 expects	/man/4/registry
 expects	/man/8/rstyxd
@@ -20563,7 +20355,6 @@ expression	/man/10/acid
 expression	/man/10/c2l
 expression	/man/10/mk
 expression	/man/2/debug
-expression	/man/2/format
 expression	/man/2/regex
 expression	/man/2/sexprs
 expression	/man/2/spki
@@ -20588,7 +20379,6 @@ expressions	/man/1/sh-regex
 expressions	/man/1/sh-sexprs
 expressions	/man/10/acid
 expressions	/man/10/mk
-expressions	/man/2/format
 expressions	/man/2/math-0intro
 expressions	/man/2/regex
 expressions	/man/2/sexprs
@@ -20850,9 +20640,7 @@ failed	/man/1/alphabet-grid
 failed	/man/1/sh
 failed	/man/1/sh-test
 failed	/man/2/factotum
-failed	/man/2/format
 failed	/man/2/keyring-auth
-failed	/man/2/palmfile
 failed	/man/2/security-auth
 failed	/man/2/spki-verifier
 failed	/man/2/styxpersist
@@ -20954,7 +20742,6 @@ false	/man/2/draw-display
 false	/man/2/draw-image
 false	/man/2/ip
 false	/man/2/keyring-sha1
-false	/man/2/palmfile
 false	/man/2/secstore
 false	/man/2/sh
 false	/man/2/styxservers
@@ -20971,7 +20758,6 @@ familiar	/man/1/charon
 familiar	/man/1/units
 familiarity	/man/2/styxservers
 fan	/man/8/collabsrv
-fappinfodirty	/man/2/palmfile
 farm	/man/1/alphabet-abc
 farm	/man/1/alphabet-grid
 fars	/man/9/1copyright
@@ -21038,7 +20824,6 @@ favour	/man/1/sh
 favour	/man/1/sh-std
 favour	/man/3/ip
 favour	/man/8/applylog
-fbackup	/man/2/palmfile
 fc	/man/1/calc
 fc	/man/1/fc
 fcall	/man/10/styx
@@ -21082,7 +20867,6 @@ fd	/man/2/security-auth
 fd	/man/2/security-ssl
 fd	/man/2/styx
 fd	/man/2/styxconv
-fd	/man/2/styxflush
 fd	/man/2/styxpersist
 fd	/man/2/styxservers
 fd	/man/2/sys-0intro
@@ -21101,7 +20885,6 @@ fd	/man/2/sys-print
 fd	/man/2/sys-read
 fd	/man/2/sys-seek
 fd	/man/2/sys-stat
-fd	/man/2/tftp
 fd	/man/2/venti
 fd	/man/3/dup
 fd	/man/3/prog
@@ -21169,7 +20952,6 @@ fetch	/man/2/dhcpclient
 fetch	/man/2/popup
 fetch	/man/2/secstore
 fetch	/man/2/security-auth
-fetch	/man/2/tftp
 fetch	/man/4/ftpfs
 fetched	/man/1/mdb
 fetched	/man/2/secstore
@@ -21178,13 +20960,11 @@ fetched	/man/3/draw
 fetches	/man/1/mdb
 fetches	/man/1/webgrab
 fetches	/man/2/attrdb
-fetches	/man/2/tftp
 fetching	/man/10/allocb
 fetching	/man/10/print
 fetching	/man/2/sexprs
 fetching	/man/2/sys-print
 fetchwdata	/man/1/sh-file2chan
-fewer	/man/2/palmfile
 fewer	/man/6/colour
 fewer	/man/9/text
 ff	/man/2/ir
@@ -21227,7 +21007,6 @@ fids	/man/2/styx
 fids	/man/2/styxservers
 fids	/man/5/0intro
 fids	/man/5/version
-field's	/man/2/format
 fields	/man/1/alphabet-fs
 fields	/man/1/fs
 fields	/man/1/gettar
@@ -21251,9 +21030,7 @@ fields	/man/2/daytime
 fields	/man/2/dhcpclient
 fields	/man/2/draw-screen
 fields	/man/2/factotum
-fields	/man/2/format
 fields	/man/2/keyring-certtostr
-fields	/man/2/palmfile
 fields	/man/2/plumbmsg
 fields	/man/2/prefab-element
 fields	/man/2/print
@@ -21465,7 +21242,6 @@ file	/man/2/factotum
 file	/man/2/filepat
 file	/man/2/filter
 file	/man/2/filter-deflate
-file	/man/2/format
 file	/man/2/fsproto
 file	/man/2/imagefile
 file	/man/2/ir
@@ -21477,7 +21253,6 @@ file	/man/2/keyset
 file	/man/2/mpeg
 file	/man/2/msgio
 file	/man/2/newns
-file	/man/2/palmfile
 file	/man/2/plumbmsg
 file	/man/2/print
 file	/man/2/prof
@@ -21515,7 +21290,6 @@ file	/man/2/sys-read
 file	/man/2/sys-remove
 file	/man/2/sys-seek
 file	/man/2/sys-stat
-file	/man/2/tftp
 file	/man/2/tk
 file	/man/2/translate
 file	/man/2/wmsrv
@@ -21670,7 +21444,6 @@ file's	/man/10/mk
 file's	/man/2/dis
 file's	/man/2/disks
 file's	/man/2/fsproto
-file's	/man/2/palmfile
 file's	/man/2/styxservers
 file's	/man/2/styxservers-nametree
 file's	/man/2/sys-stat
@@ -21746,9 +21519,7 @@ filename	/man/2/bufio
 filename	/man/2/debug
 filename	/man/2/filter-deflate
 filename	/man/2/keyring-auth
-filename	/man/2/palmfile
 filename	/man/2/selectfile
-filename	/man/2/tftp
 filename	/man/4/dbfs
 filename	/man/6/attrdb
 filename.b	/man/1/filename
@@ -21898,14 +21669,12 @@ files	/man/2/disks
 files	/man/2/draw-display
 files	/man/2/draw-font
 files	/man/2/ether
-files	/man/2/format
 files	/man/2/fsproto
 files	/man/2/imagefile
 files	/man/2/ip
 files	/man/2/keyring-0intro
 files	/man/2/keyring-auth
 files	/man/2/mpeg
-files	/man/2/palmfile
 files	/man/2/plumbmsg
 files	/man/2/print
 files	/man/2/prof
@@ -21925,7 +21694,6 @@ files	/man/2/sys-file2chan
 files	/man/2/sys-iounit
 files	/man/2/sys-pctl
 files	/man/2/sys-stat
-files	/man/2/tftp
 files	/man/2/tkclient
 files	/man/2/translate
 files	/man/2/wmclient
@@ -22279,7 +22047,6 @@ fixed	/man/1/fc
 fixed	/man/10/odbc
 fixed	/man/2/draw-0intro
 fixed	/man/2/draw-image
-fixed	/man/2/palmfile
 fixed	/man/2/plumbmsg
 fixed	/man/2/prefab-element
 fixed	/man/2/security-0intro
@@ -22456,7 +22223,6 @@ flush	/man/2/dbm
 flush	/man/2/draw-image
 flush	/man/2/math-0intro
 flush	/man/2/styx
-flush	/man/2/styxflush
 flush	/man/3/0intro
 flush	/man/3/dbg
 flush	/man/3/draw
@@ -22468,23 +22234,19 @@ flush	/man/5/0intro
 flush	/man/5/flush
 flush	/man/9/update
 flush.ftpfs	/man/4/ftpfs
-flushc	/man/2/styxflush
 flushed	/man/1/xd
 flushed	/man/10/qio
 flushed	/man/2/bufio
 flushed	/man/2/convcs
 flushed	/man/2/draw-image
-flushed	/man/2/styxflush
 flushed	/man/4/ftpfs
 flushed	/man/5/flush
 flushed	/man/9/panel
 flushes	/man/2/draw-image
-flushes	/man/2/styxflush
 flushes	/man/3/boot
 flushes	/man/5/flush
 flushes	/man/9/update
 flushing	/man/2/draw-image
-flushing	/man/2/styxflush
 flushing	/man/5/flush
 flushnow	/man/2/draw-image
 flushoff	/man/2/draw-image
@@ -22499,17 +22261,12 @@ fmt	/man/10/acid
 fmt	/man/10/panic
 fmt	/man/10/print
 fmt	/man/10/styx
-fmt	/man/2/format
 fmt	/man/2/stringinttab
 fmt.b	/man/1/fmt
-fmtfile	/man/2/format
-fmtfile.new	/man/2/format
 fmtinstall	/man/10/print
 fmtinstall	/man/10/styx
-fmtspec	/man/2/format
 fmtstring	/man/2/stringinttab
 fmtstringtab	/man/2/stringinttab
-fmtval	/man/2/format
 fn	/man/1/calc
 fn	/man/1/mash
 fn	/man/1/sh-file2chan
@@ -22552,7 +22309,6 @@ fn	/man/2/factotum
 fn	/man/2/filepat
 fn	/man/2/filter
 fn	/man/2/filter-deflate
-fn	/man/2/format
 fn	/man/2/fsproto
 fn	/man/2/geodesy
 fn	/man/2/hash
@@ -22579,7 +22335,6 @@ fn	/man/2/math-linalg
 fn	/man/2/mpeg
 fn	/man/2/msgio
 fn	/man/2/newns
-fn	/man/2/palmfile
 fn	/man/2/plumbmsg
 fn	/man/2/pop3
 fn	/man/2/popup
@@ -22614,7 +22369,6 @@ fn	/man/2/string
 fn	/man/2/stringinttab
 fn	/man/2/styx
 fn	/man/2/styxconv
-fn	/man/2/styxflush
 fn	/man/2/styxpersist
 fn	/man/2/styxservers
 fn	/man/2/styxservers-nametree
@@ -22643,13 +22397,11 @@ fn	/man/2/sys-stat
 fn	/man/2/sys-tokenize
 fn	/man/2/sys-utfbytes
 fn	/man/2/tabs
-fn	/man/2/tftp
 fn	/man/2/timers
 fn	/man/2/tk
 fn	/man/2/tkclient
 fn	/man/2/translate
 fn	/man/2/venti
-fn	/man/2/virgil
 fn	/man/2/w3c-css
 fn	/man/2/wmclient
 fn	/man/2/wmlib
@@ -22662,7 +22414,6 @@ fn	/man/6/dis
 fn	/man/6/sbl
 fn	/man/7/db
 fn	/man/8/init
-fname	/man/2/palmfile
 fnd	/man/2/stringinttab
 fnn	/man/1/mux
 fns.h	/man/10/0intro
@@ -22914,7 +22665,6 @@ format	/man/2/draw-font
 format	/man/2/draw-image
 format	/man/2/draw-screen
 format	/man/2/filter-deflate
-format	/man/2/format
 format	/man/2/geodesy
 format	/man/2/imagefile
 format	/man/2/ip
@@ -22922,7 +22672,6 @@ format	/man/2/keyring-0intro
 format	/man/2/keyring-certtostr
 format	/man/2/keyring-ipint
 format	/man/2/newns
-format	/man/2/palmfile
 format	/man/2/plumbmsg
 format	/man/2/prefab-element
 format	/man/2/print
@@ -22991,9 +22740,7 @@ format	/man/8/styxchat
 format	/man/9/0intro
 format	/man/9/canvas
 format	/man/9/image
-format.b	/man/2/format
 format.b	/man/8/prep
-format.m	/man/2/format
 formats	/man/1/0intro
 formats	/man/1/crypt
 formats	/man/1/fc
@@ -23010,7 +22757,6 @@ formats	/man/2/draw-image
 formats	/man/2/geodesy
 formats	/man/2/imagefile
 formats	/man/2/keyring-0intro
-formats	/man/2/palmfile
 formats	/man/2/sys-print
 formats	/man/3/kprof
 formats	/man/3/logfs
@@ -23161,7 +22907,6 @@ fourth	/man/3/kprof
 fourth	/man/4/acme
 fourth	/man/8/create
 fourth	/man/9/text
-foverwrite	/man/2/palmfile
 fp	/man/1/fc
 fp	/man/2/0intro
 fp	/man/2/dis
@@ -23186,7 +22931,6 @@ fprint	/man/10/print
 fprint	/man/2/security-auth
 fprint	/man/2/sys-print
 fprintf	/man/10/print
-fprivate	/man/2/palmfile
 fpstatus	/man/2/math-fp
 fr	/man/1/rm
 fr	/man/1/tail
@@ -23291,12 +23035,9 @@ frequency	/man/3/fpga
 frequency	/man/3/prof
 frequency	/man/3/tv
 frequently	/man/2/draw-image
-freset	/man/2/palmfile
 fresh	/man/2/secstore
-fresh	/man/2/styxflush
 fresh	/man/4/iostats
 fresh	/man/5/attach
-fresource	/man/2/palmfile
 fri	/man/2/daytime
 friendly	/man/2/convcs
 friends	/man/10/print
@@ -23307,7 +23048,6 @@ fromfiles	/man/1/cp
 fromid	/man/2/spree
 fromuser	/man/3/cap
 fromwhom	/man/2/smtp
-fronly	/man/2/palmfile
 front	/man/1/acme
 front	/man/1/deb
 front	/man/10/iar
@@ -23497,7 +23237,6 @@ further	/man/10/newchan
 further	/man/10/plan9.ini
 further	/man/10/styxserver
 further	/man/2/bufio
-further	/man/2/palmfile
 further	/man/2/prefab-0intro
 further	/man/2/prof
 further	/man/2/sexprs
@@ -23578,7 +23317,6 @@ garbage	/man/2/registries
 garbage	/man/2/sys-dup
 garbage	/man/5/clunk
 garbled	/man/2/factotum
-gary	/man/2/palmfile
 gate	/man/1/alphabet-fs
 gate	/man/1/fs
 gate	/man/10/plan9.ini
@@ -23711,7 +23449,6 @@ generates	/man/9/text
 generating	/man/10/2c
 generating	/man/2/keyring-0intro
 generating	/man/2/math-0intro
-generating	/man/2/palmfile
 generating	/man/2/plumbmsg
 generating	/man/2/sh
 generating	/man/2/styx
@@ -23764,9 +23501,6 @@ geometry	/man/9/options
 geometry	/man/9/pack
 george	/man/9/grid
 gestures	/man/1/keyboard
-get2	/man/2/palmfile
-get3	/man/2/palmfile
-get4	/man/2/palmfile
 getall	/man/2/env
 getarchivearray	/man/2/spree-cardlib
 getarchiveobj	/man/2/spree-cardlib
@@ -23816,7 +23550,6 @@ gets	/man/1/sh-expr
 gets	/man/10/atoi
 gets	/man/2/bufio
 gets	/man/2/dhcpclient
-gets	/man/2/palmfile
 gets	/man/2/spree-cardlib
 gets	/man/5/0intro
 gets	/man/8/prep
@@ -23832,7 +23565,6 @@ gettags	/man/9/canvas
 gettar	/man/1/gettar
 gettar	/man/4/tarfs
 gettar.b	/man/1/gettar
-getting	/man/2/styxflush
 getting	/man/6/ubfa
 getting	/man/9/bind
 getuserpassd	/man/2/factotum
@@ -24041,7 +23773,6 @@ greater	/man/10/styx
 greater	/man/2/draw-0intro
 greater	/man/2/itslib
 greater	/man/2/math-fp
-greater	/man/2/palmfile
 greater	/man/2/spree-cardlib
 greater	/man/2/timers
 greater	/man/3/cons
@@ -24207,7 +23938,6 @@ gui	/man/9/grab
 guide	/man/1/acme
 guide	/man/1/ebook
 guide	/man/1/wm-misc
-guide	/man/2/palmfile
 guide	/man/4/namespace
 guiding	/man/6/keyboard
 gunzip	/man/1/gzip
@@ -24257,7 +23987,6 @@ handle	/man/2/dbm
 handle	/man/2/draw-screen
 handle	/man/2/print
 handle	/man/2/sh
-handle	/man/2/styxflush
 handle	/man/2/styxservers
 handle	/man/2/xml
 handle	/man/3/prog
@@ -24271,7 +24000,6 @@ handled	/man/1/units
 handled	/man/10/conf
 handled	/man/10/qio
 handled	/man/2/cfg
-handled	/man/2/styxflush
 handled	/man/2/sys-export
 handled	/man/3/cons
 handled	/man/3/ds
@@ -24285,7 +24013,6 @@ handler	/man/10/qio
 handler	/man/10/sleep
 handler	/man/2/0intro
 handler	/man/2/dis
-handler	/man/2/styxflush
 handler	/man/2/tkclient
 handler	/man/6/dis
 handlers	/man/10/allocb
@@ -24302,8 +24029,6 @@ handles	/man/10/2c
 handles	/man/10/error
 handles	/man/2/asn1
 handles	/man/2/imagefile
-handles	/man/2/palmfile
-handles	/man/2/styxflush
 handles	/man/9/text
 handling	/man/1/brutus
 handling	/man/1/charon
@@ -24313,7 +24038,6 @@ handling	/man/10/error
 handling	/man/10/styx
 handling	/man/2/0intro
 handling	/man/2/draw-0intro
-handling	/man/2/styxflush
 handling	/man/2/styxservers
 handling	/man/3/draw
 handling	/man/9/canvas
@@ -24357,9 +24081,6 @@ hard	/man/10/9load
 hard	/man/10/acid
 hard	/man/10/plan9.ini
 hard	/man/2/disks
-hard	/man/2/palmfile
-hard	/man/2/styxflush
-hard	/man/2/virgil
 hard	/man/8/prep
 hard	/man/8/virgild
 hardly	/man/1/asm
@@ -24796,7 +24517,6 @@ highlightthickness	/man/9/options
 highlightthickness	/man/9/radiobutton
 highlightthickness	/man/9/scale
 highwater	/man/1/wm-misc
-hillerson	/man/2/palmfile
 hinfo	/man/8/dns
 hinfox	/man/8/dns
 hint	/man/2/sexprs
@@ -24831,13 +24551,10 @@ hold	/man/1/zeros
 hold	/man/10/a.out
 hold	/man/2/draw-0intro
 hold	/man/2/draw-image
-hold	/man/2/format
-hold	/man/2/palmfile
 hold	/man/2/secstore
 hold	/man/2/sh
 hold	/man/2/spree
 hold	/man/2/styx
-hold	/man/2/styxflush
 hold	/man/2/styxservers-nametree
 hold	/man/2/sys-byte2char
 hold	/man/2/tk
@@ -24863,7 +24580,6 @@ holding	/man/2/alphabet-intro
 holding	/man/2/convcs
 holding	/man/2/daytime
 holding	/man/2/draw-display
-holding	/man/2/format
 holding	/man/2/keyset
 holding	/man/2/sets
 holding	/man/2/spree
@@ -24886,12 +24602,10 @@ holds	/man/10/styx
 holds	/man/2/alphabet-intro
 holds	/man/2/crc
 holds	/man/2/debug
-holds	/man/2/format
 holds	/man/2/imagefile
 holds	/man/2/keyring-auth
 holds	/man/2/keyring-crypt
 holds	/man/2/keyset
-holds	/man/2/palmfile
 holds	/man/2/prefab-compound
 holds	/man/2/print
 holds	/man/2/registries
@@ -24978,8 +24692,6 @@ host	/man/2/secstore
 host	/man/2/srv
 host	/man/2/sys-0intro
 host	/man/2/sys-dial
-host	/man/2/tftp
-host	/man/2/virgil
 host	/man/3/audio
 host	/man/3/boot
 host	/man/3/cap
@@ -25125,7 +24837,6 @@ i.e	/man/1/yacc
 i.e	/man/10/ms2
 i.e	/man/10/plan9.ini
 i.e	/man/2/debug
-i.e	/man/2/format
 i.e	/man/2/security-login
 i.e	/man/2/sh
 i.e	/man/2/spree
@@ -25217,7 +24928,6 @@ id	/man/2/draw-screen
 id	/man/2/factotum
 id	/man/2/filter
 id	/man/2/ir
-id	/man/2/palmfile
 id	/man/2/spree
 id	/man/2/spree-allow
 id	/man/2/spree-cardlib
@@ -25363,7 +25073,6 @@ identifies	/man/10/plan9.ini
 identifies	/man/2/asn1
 identifies	/man/2/draw-font
 identifies	/man/2/factotum
-identifies	/man/2/palmfile
 identifies	/man/2/prefab-0intro
 identifies	/man/2/spki
 identifies	/man/2/styxservers
@@ -25400,7 +25109,6 @@ identifying	/man/1/collab-clients
 identifying	/man/10/2c
 identifying	/man/10/plan9.ini
 identifying	/man/2/draw-0intro
-identifying	/man/2/palmfile
 identifying	/man/2/spree
 identifying	/man/2/wmsrv
 identifying	/man/3/pnp
@@ -25440,7 +25148,6 @@ ids	/man/1/kill
 ids	/man/10/iar
 ids	/man/10/kproc
 ids	/man/2/factotum
-ids	/man/2/palmfile
 ids	/man/2/spree
 ids	/man/2/spree-allow
 ids	/man/3/fs
@@ -25471,7 +25178,6 @@ ie	/man/2/dhcpclient
 ie	/man/2/dis
 ie	/man/2/draw-image
 ie	/man/2/ip
-ie	/man/2/palmfile
 ie	/man/2/plumbmsg
 ie	/man/2/registries
 ie	/man/2/secstore
@@ -26009,7 +25715,6 @@ inbalt	/man/2/dis
 inbound	/man/4/factotum
 inc	/man/1/avr
 inc	/man/2/keyring-0intro
-inc	/man/2/palmfile
 inc	/man/2/security-0intro
 inc	/man/3/ssl
 inc	/man/9/0intro
@@ -26096,7 +25801,6 @@ include	/man/2/factotum
 include	/man/2/filepat
 include	/man/2/filter
 include	/man/2/filter-deflate
-include	/man/2/format
 include	/man/2/fsproto
 include	/man/2/geodesy
 include	/man/2/hash
@@ -26124,7 +25828,6 @@ include	/man/2/math-linalg
 include	/man/2/mpeg
 include	/man/2/msgio
 include	/man/2/newns
-include	/man/2/palmfile
 include	/man/2/plumbmsg
 include	/man/2/pop3
 include	/man/2/popup
@@ -26163,7 +25866,6 @@ include	/man/2/string
 include	/man/2/stringinttab
 include	/man/2/styx
 include	/man/2/styxconv
-include	/man/2/styxflush
 include	/man/2/styxpersist
 include	/man/2/styxservers
 include	/man/2/styxservers-nametree
@@ -26200,7 +25902,6 @@ include	/man/2/tk
 include	/man/2/tkclient
 include	/man/2/translate
 include	/man/2/venti
-include	/man/2/virgil
 include	/man/2/w3c-css
 include	/man/2/wmclient
 include	/man/2/wmlib
@@ -26499,9 +26200,7 @@ index	/man/2/convcs
 index	/man/2/dialog
 index	/man/2/dis
 index	/man/2/draw-display
-index	/man/2/format
 index	/man/2/ip
-index	/man/2/palmfile
 index	/man/2/popup
 index	/man/2/prefab-compound
 index	/man/2/regex
@@ -26635,7 +26334,6 @@ indicating	/man/2/asn1
 indicating	/man/2/debug
 indicating	/man/2/keyring-getstring
 indicating	/man/2/msgio
-indicating	/man/2/palmfile
 indicating	/man/2/prof
 indicating	/man/3/prog
 indicating	/man/4/acme
@@ -26786,7 +26484,6 @@ inferno	/man/2/keyring-0intro
 inferno	/man/2/math-0intro
 inferno	/man/2/math-linalg
 inferno	/man/2/msgio
-inferno	/man/2/palmfile
 inferno	/man/2/plumbmsg
 inferno	/man/2/security-0intro
 inferno	/man/2/sh
@@ -26906,7 +26603,6 @@ info	/man/9/grid
 info.b	/man/8/create
 inform	/man/1/wm
 inform	/man/2/dividers
-inform	/man/2/styxflush
 inform	/man/2/tk
 inform	/man/8/prep
 informal	/man/1/acme
@@ -26972,7 +26668,6 @@ init	/man/2/ether
 init	/man/2/factotum
 init	/man/2/filter
 init	/man/2/filter-deflate
-init	/man/2/format
 init	/man/2/fsproto
 init	/man/2/geodesy
 init	/man/2/imagefile
@@ -26982,7 +26677,6 @@ init	/man/2/itslib
 init	/man/2/keyset
 init	/man/2/lock
 init	/man/2/msgio
-init	/man/2/palmfile
 init	/man/2/plumbmsg
 init	/man/2/popup
 init	/man/2/print
@@ -27006,13 +26700,11 @@ init	/man/2/spree-objstore
 init	/man/2/srv
 init	/man/2/styx
 init	/man/2/styxconv
-init	/man/2/styxflush
 init	/man/2/styxpersist
 init	/man/2/styxservers
 init	/man/2/styxservers-nametree
 init	/man/2/sys-self
 init	/man/2/tabs
-init	/man/2/tftp
 init	/man/2/timers
 init	/man/2/tkclient
 init	/man/2/translate
@@ -27068,7 +26760,6 @@ initialise	/man/2/dis
 initialise	/man/2/dividers
 initialise	/man/2/draw-0intro
 initialise	/man/2/ir
-initialise	/man/2/palmfile
 initialise	/man/2/popup
 initialise	/man/2/print
 initialise	/man/2/selectfile
@@ -27506,7 +27197,6 @@ installed	/man/4/namespace
 installed	/man/8/create
 installed	/man/8/prep
 installing	/man/1/m4
-installing	/man/2/palmfile
 installs	/man/1/sh-std
 installs	/man/8/changelogin
 installs	/man/8/create
@@ -27562,7 +27252,6 @@ instance	/man/2/factotum
 instance	/man/2/imagefile
 instance	/man/2/keyring-ipint
 instance	/man/2/keyset
-instance	/man/2/palmfile
 instance	/man/2/print
 instance	/man/2/registries
 instance	/man/2/secstore
@@ -27575,7 +27264,6 @@ instance	/man/2/spree
 instance	/man/2/spree-cardlib
 instance	/man/2/spree-gather
 instance	/man/2/styxconv
-instance	/man/2/styxflush
 instance	/man/2/styxservers
 instance	/man/2/styxservers-nametree
 instance	/man/2/sys-0intro
@@ -27620,7 +27308,6 @@ instances	/man/1/calendar
 instances	/man/1/ls
 instances	/man/10/error
 instances	/man/2/filter
-instances	/man/2/styxflush
 instances	/man/2/styxservers
 instances	/man/2/sys-dup
 instances	/man/3/draw
@@ -27737,7 +27424,6 @@ int	/man/2/ether
 int	/man/2/factotum
 int	/man/2/filepat
 int	/man/2/filter
-int	/man/2/format
 int	/man/2/geodesy
 int	/man/2/hash
 int	/man/2/imagefile
@@ -27760,7 +27446,6 @@ int	/man/2/math-fp
 int	/man/2/math-linalg
 int	/man/2/mpeg
 int	/man/2/msgio
-int	/man/2/palmfile
 int	/man/2/plumbmsg
 int	/man/2/pop3
 int	/man/2/popup
@@ -27789,7 +27474,6 @@ int	/man/2/string
 int	/man/2/stringinttab
 int	/man/2/styx
 int	/man/2/styxconv
-int	/man/2/styxflush
 int	/man/2/styxpersist
 int	/man/2/styxservers
 int	/man/2/styxservers-nametree
@@ -27818,7 +27502,6 @@ int	/man/2/sys-tokenize
 int	/man/2/sys-utfbytes
 int	/man/2/sys-werrstr
 int	/man/2/tabs
-int	/man/2/tftp
 int	/man/2/timers
 int	/man/2/tk
 int	/man/2/tkclient
@@ -27878,7 +27561,6 @@ integer	/man/2/math-elem
 integer	/man/2/math-export
 integer	/man/2/math-fp
 integer	/man/2/math-linalg
-integer	/man/2/palmfile
 integer	/man/2/prof
 integer	/man/2/rand
 integer	/man/2/readdir
@@ -28035,7 +27717,6 @@ interaction	/man/2/wmlib
 interaction	/man/2/wmsrv
 interaction	/man/7/db
 interactions	/man/1/tkcmd
-interactions	/man/2/virgil
 interactions	/man/9/scale
 interactive	/man/1/acme
 interactive	/man/1/look
@@ -28074,7 +27755,6 @@ interacts	/man/9/scrollbar
 interapplication	/man/8/plumber
 intercepted	/man/2/keyring-0intro
 intercepts	/man/2/ir
-interchange	/man/2/format
 interconnection	/man/1/alphabet-abc
 interconnection	/man/1/alphabet-grid
 interested	/man/9/scale
@@ -28133,7 +27813,6 @@ interface	/man/2/fsproto
 interface	/man/2/ip
 interface	/man/2/keyring-0intro
 interface	/man/2/mpeg
-interface	/man/2/palmfile
 interface	/man/2/plumbmsg
 interface	/man/2/pop3
 interface	/man/2/prefab-0intro
@@ -28155,7 +27834,6 @@ interface	/man/2/sys-werrstr
 interface	/man/2/tabs
 interface	/man/2/tk
 interface	/man/2/tkclient
-interface	/man/2/virgil
 interface	/man/2/wmclient
 interface	/man/2/wmsrv
 interface	/man/2/xml
@@ -28276,7 +27954,6 @@ internal	/man/2/spree-allow
 internal	/man/2/spree-cardlib
 internal	/man/2/spree-gather
 internal	/man/2/spree-objstore
-internal	/man/2/styxflush
 internal	/man/2/styxservers
 internal	/man/2/styxservers-nametree
 internal	/man/2/sys-millisec
@@ -28309,7 +27986,6 @@ internally	/man/2/alphabet-intro
 internally	/man/2/bufio
 internally	/man/2/draw-display
 internally	/man/2/hash
-internally	/man/2/palmfile
 internally	/man/2/spki
 internally	/man/2/srv
 internally	/man/2/styxservers
@@ -28329,7 +28005,6 @@ internet	/man/2/ip
 internet	/man/2/keyring-sha1
 internet	/man/2/sexprs
 internet	/man/2/srv
-internet	/man/2/tftp
 internet	/man/3/ip
 internet	/man/6/json
 internet	/man/6/ndb
@@ -28448,7 +28123,6 @@ interrupt	/man/3/pnp
 interrupt	/man/4/spree
 interrupted	/man/10/kproc
 interrupted	/man/10/sleep
-interrupted	/man/2/styxflush
 interrupted	/man/3/tls
 interrupts	/man/10/delay
 interrupts	/man/10/dev
@@ -28487,7 +28161,6 @@ intervals	/man/1/acme
 intervals	/man/9/text
 intervening	/man/1/mash
 intervening	/man/1/sh
-intialise	/man/2/styxflush
 intrdisable	/man/10/intrenable
 intrenable	/man/10/intrenable
 intrenable	/man/10/splhi
@@ -28646,7 +28319,6 @@ invalid	/man/2/spki
 invalid	/man/2/styx
 invalid	/man/2/styxservers
 invalid	/man/2/sys-byte2char
-invalid	/man/2/virgil
 invalid	/man/3/boot
 invalid	/man/3/cap
 invalid	/man/3/dbg
@@ -28817,14 +28489,12 @@ io	/man/3/eia
 io	/man/3/i2c
 io.h	/man/10/0intro
 ioalloc	/man/3/arch
-iob	/man/2/format
 iob	/man/2/xml
 iob	/man/3/arch
 iobfd	/man/3/arch
 iobuf	/man/1/yacc
 iobuf	/man/2/bufio
 iobuf	/man/2/bufio-chanfill
-iobuf	/man/2/format
 iobuf	/man/2/imagefile
 iobuf	/man/2/pslib
 iobuf	/man/2/sexprs
@@ -28837,7 +28507,6 @@ iol	/man/3/arch
 iostats	/man/4/iostats
 iostats.b	/man/4/iostats
 iostats.out	/man/4/iostats
-iota	/man/2/format
 iota	/man/2/geodesy
 iota	/man/2/readdir
 iota	/man/2/styxservers-nametree
@@ -28866,8 +28535,6 @@ ip	/man/2/ip
 ip	/man/2/keyring-getmsg
 ip	/man/2/msgio
 ip	/man/2/sys-dial
-ip	/man/2/tftp
-ip	/man/2/virgil
 ip	/man/3/ether
 ip	/man/3/fpga
 ip	/man/3/ip
@@ -28991,7 +28658,6 @@ isa	/man/3/pnp
 isa.h	/man/6/dis
 isaconfig	/man/10/inb
 isclient	/man/3/tls
-iscompressed	/man/2/palmfile
 isdir	/man/10/newchan
 isdir	/man/10/styxserver
 isdir	/man/6/plumbing
@@ -29025,7 +28691,6 @@ isn't	/man/9/scrollbar
 isn't	/man/9/text
 isnan	/man/2/math-fp
 iso	/man/1/charon
-iso	/man/2/palmfile
 iso	/man/4/dossrv
 iso	/man/6/utf
 iso11172	/man/3/mpeg
@@ -29126,7 +28791,6 @@ items	/man/10/devattach
 items	/man/2/asn1
 items	/man/2/dis
 items	/man/2/dividers
-items	/man/2/format
 items	/man/2/itslib
 items	/man/2/popup
 items	/man/2/prefab-0intro
@@ -29221,7 +28885,6 @@ joins	/man/2/draw-image
 joins	/man/2/spree
 joins	/man/3/draw
 joker	/man/2/spree-cardlib
-jonny	/man/2/format
 jpeg	/man/1/charon
 jpeg	/man/1/wm-misc
 jpeg	/man/2/imagefile
@@ -29389,13 +29052,11 @@ kernels	/man/10/dev
 kernels	/man/10/plan9.ini
 kernels	/man/10/print
 kernels	/man/10/styx
-kernels	/man/2/tftp
 kernels	/man/8/bootpd
 kernels	/man/8/init
 kernels	/man/8/prep
 kernighan	/man/1/m4
 kernighan	/man/1/yacc
-kexec	/man/2/tftp
 kexec	/man/3/boot
 key	/man/1/acme
 key	/man/1/alphabet-main
@@ -29718,7 +29379,6 @@ kill	/man/1/wm-misc
 kill	/man/10/acid
 kill	/man/2/debug
 kill	/man/2/ir
-kill	/man/2/styxflush
 kill	/man/2/sys-0intro
 kill	/man/2/timers
 kill	/man/2/tkclient
@@ -29859,7 +29519,6 @@ labels	/man/1/tsort
 labels	/man/10/c2l
 labels	/man/10/conf
 labels	/man/10/error
-labels	/man/2/palmfile
 labels	/man/6/ndb
 labels	/man/9/label
 labels	/man/9/menu
@@ -29888,7 +29547,6 @@ lalo2str	/man/2/geodesy
 lan	/man/10/plan9.ini
 lance	/man/3/ether
 landscape	/man/2/print
-lane	/man/2/format
 language	/man/1/0intro
 language	/man/1/acme
 language	/man/1/asm
@@ -29959,7 +29617,6 @@ lasterror	/man/2/prof
 lasterror	/man/9/variable
 lasting	/man/3/eia
 lastly	/man/3/ip
-lastuid	/man/2/palmfile
 latch	/man/3/lpt
 late	/man/10/c2l
 latency	/man/2/spree
@@ -29974,7 +29631,6 @@ latexproc	/man/2/stringinttab
 latexslides	/man/1/cook
 latexslides	/man/2/stringinttab
 latin	/man/10/kbdputc
-latin	/man/2/palmfile
 latin	/man/2/sys-0intro
 latin	/man/6/keyboard
 latin1	/man/2/convcs
@@ -29991,7 +29647,6 @@ latter	/man/2/dhcpclient
 latter	/man/2/dis
 latter	/man/2/factotum
 latter	/man/2/geodesy
-latter	/man/2/palmfile
 latter	/man/2/prof
 latter	/man/2/smtp
 latter	/man/2/spki
@@ -30030,7 +29685,6 @@ layout	/man/1/man
 layout	/man/1/mash-tk
 layout	/man/1/sh
 layout	/man/10/ar
-layout	/man/2/palmfile
 layout	/man/2/prefab-compound
 layout	/man/2/prefab-element
 layout	/man/2/prefab-environ
@@ -30149,7 +29803,6 @@ leaving	/man/10/qio
 leaving	/man/2/draw-display
 leaving	/man/2/draw-image
 leaving	/man/2/math-linalg
-leaving	/man/2/palmfile
 leaving	/man/2/prefab-element
 leaving	/man/2/sys-read
 leaving	/man/3/dbg
@@ -30195,7 +29848,6 @@ len	/man/10/print
 len	/man/10/qio
 len	/man/2/dial
 len	/man/2/keyring-sha1
-len	/man/2/styxflush
 len	/man/3/arch
 len	/man/3/cap
 length	/man/1/dd
@@ -30230,7 +29882,6 @@ length	/man/2/keyring-crypt
 length	/man/2/keyring-gensk
 length	/man/2/keyring-ipint
 length	/man/2/keyring-rc4
-length	/man/2/palmfile
 length	/man/2/plumbmsg
 length	/man/2/regex
 length	/man/2/security-0intro
@@ -30520,7 +30171,6 @@ lib	/man/2/ether
 lib	/man/2/factotum
 lib	/man/2/filepat
 lib	/man/2/filter-deflate
-lib	/man/2/format
 lib	/man/2/fsproto
 lib	/man/2/hash
 lib	/man/2/imagefile
@@ -30531,7 +30181,6 @@ lib	/man/2/lock
 lib	/man/2/mpeg
 lib	/man/2/msgio
 lib	/man/2/newns
-lib	/man/2/palmfile
 lib	/man/2/plumbmsg
 lib	/man/2/pop3
 lib	/man/2/popup
@@ -30557,16 +30206,13 @@ lib	/man/2/string
 lib	/man/2/stringinttab
 lib	/man/2/styx
 lib	/man/2/styxconv
-lib	/man/2/styxflush
 lib	/man/2/styxpersist
 lib	/man/2/styxservers
 lib	/man/2/styxservers-nametree
 lib	/man/2/tabs
-lib	/man/2/tftp
 lib	/man/2/tkclient
 lib	/man/2/translate
 lib	/man/2/venti
-lib	/man/2/virgil
 lib	/man/2/w3c-css
 lib	/man/2/wmclient
 lib	/man/2/wmlib
@@ -30783,7 +30429,6 @@ limbo	/man/2/keyring-0intro
 limbo	/man/2/keyring-ipint
 limbo	/man/2/math-0intro
 limbo	/man/2/math-fp
-limbo	/man/2/palmfile
 limbo	/man/2/prefab-0intro
 limbo	/man/2/prefab-element
 limbo	/man/2/prefab-style
@@ -30996,7 +30641,6 @@ link	/man/1/limbo
 link	/man/10/conf
 link	/man/10/styxserver
 link	/man/2/dis
-link	/man/2/format
 link	/man/2/styxservers
 link	/man/3/dbg
 link	/man/3/ip
@@ -31119,7 +30763,6 @@ list	/man/2/draw-example
 list	/man/2/env
 list	/man/2/factotum
 list	/man/2/filepat
-list	/man/2/format
 list	/man/2/geodesy
 list	/man/2/hash
 list	/man/2/ip
@@ -31159,7 +30802,6 @@ list	/man/2/sys-stat
 list	/man/2/sys-tokenize
 list	/man/2/tkclient
 list	/man/2/translate
-list	/man/2/virgil
 list	/man/2/w3c-css
 list	/man/2/wmclient
 list	/man/2/wmlib
@@ -31484,7 +31126,6 @@ load	/man/2/factotum
 load	/man/2/filepat
 load	/man/2/filter
 load	/man/2/filter-deflate
-load	/man/2/format
 load	/man/2/fsproto
 load	/man/2/geodesy
 load	/man/2/hash
@@ -31512,7 +31153,6 @@ load	/man/2/math-linalg
 load	/man/2/mpeg
 load	/man/2/msgio
 load	/man/2/newns
-load	/man/2/palmfile
 load	/man/2/plumbmsg
 load	/man/2/pop3
 load	/man/2/popup
@@ -31549,7 +31189,6 @@ load	/man/2/string
 load	/man/2/stringinttab
 load	/man/2/styx
 load	/man/2/styxconv
-load	/man/2/styxflush
 load	/man/2/styxpersist
 load	/man/2/styxservers
 load	/man/2/styxservers-nametree
@@ -31581,13 +31220,11 @@ load	/man/2/sys-tokenize
 load	/man/2/sys-utfbytes
 load	/man/2/sys-werrstr
 load	/man/2/tabs
-load	/man/2/tftp
 load	/man/2/timers
 load	/man/2/tk
 load	/man/2/tkclient
 load	/man/2/translate
 load	/man/2/venti
-load	/man/2/virgil
 load	/man/2/w3c-css
 load	/man/2/wmclient
 load	/man/2/wmlib
@@ -31655,7 +31292,6 @@ loaded	/man/2/prof
 loaded	/man/2/pslib
 loaded	/man/2/sh
 loaded	/man/2/spree
-loaded	/man/2/styxflush
 loaded	/man/2/styxservers
 loaded	/man/2/styxservers-nametree
 loaded	/man/2/translate
@@ -32025,7 +31661,6 @@ loop	/man/10/lock
 loop	/man/10/styxserver
 loop	/man/2/keyring-sha1
 loop	/man/2/math-linalg
-loop	/man/2/styxflush
 loop	/man/2/sys-read
 loop	/man/3/audio
 loopback	/man/10/styxserver
@@ -32170,7 +31805,6 @@ lsys	/man/2/dial
 lt	/man/1/sh-expr
 ltd	/man/2/keyring-crypt
 ltd	/man/6/attrdb
-lucas	/man/2/palmfile
 lucent	/man/10/plan9.ini
 lucent	/man/4/factotum
 lucent's	/man/3/indir
@@ -32186,7 +31820,6 @@ lwceb	/man/1/wc
 lx	/man/10/2c
 lz77	/man/6/image
 m.count	/man/2/styxservers
-m.tag	/man/2/styxflush
 m1args	/man/1/sh-alphabet
 m2args	/man/1/sh-alphabet
 mac	/man/2/ether
@@ -32372,7 +32005,6 @@ mainly	/man/1/acme
 mainly	/man/10/ar
 mainly	/man/10/styxserver
 mainly	/man/2/ip
-mainly	/man/2/palmfile
 mainly	/man/3/cons
 mainly	/man/3/dbg
 mainly	/man/3/ftl
@@ -32538,7 +32170,6 @@ manages	/man/1/secstore
 manages	/man/3/draw
 manages	/man/3/ftl
 manages	/man/9/grid
-managing	/man/2/styxflush
 managing	/man/4/factotum
 managing	/man/5/0intro
 managing	/man/9/text
@@ -32717,7 +32348,6 @@ mapping	/man/6/ndb
 mapping	/man/6/utf
 mappings	/man/1/miniterm
 maps	/man/10/9load
-maps	/man/2/palmfile
 maps	/man/2/print
 maps	/man/3/fs
 maps	/man/3/ip
@@ -32784,7 +32414,6 @@ markup	/man/1/charon
 markup	/man/1/man
 markup	/man/2/xml
 maroon	/man/9/types
-marshal	/man/2/format
 marshaled	/man/4/factotum
 marshals	/man/1/grid-register
 mash	/man/1/0intro
@@ -32807,7 +32436,6 @@ mask	/man/2/draw-example
 mask	/man/2/draw-image
 mask	/man/2/ip
 mask	/man/2/math-fp
-mask	/man/2/palmfile
 mask	/man/2/prefab-compound
 mask	/man/2/prefab-element
 mask	/man/2/tk
@@ -33057,7 +32685,6 @@ maximum	/man/2/dhcpclient
 maximum	/man/2/factotum
 maximum	/man/2/keyring-0intro
 maximum	/man/2/math-fp
-maximum	/man/2/palmfile
 maximum	/man/2/spree-gather
 maximum	/man/2/styx
 maximum	/man/2/sys-fversion
@@ -33265,7 +32892,6 @@ member	/man/2/dis
 member	/man/2/draw-0intro
 member	/man/2/draw-display
 member	/man/2/draw-pointer
-member	/man/2/format
 member	/man/2/plumbmsg
 member	/man/2/prefab-0intro
 member	/man/2/prefab-compound
@@ -33346,7 +32972,6 @@ memory	/man/2/draw-display
 memory	/man/2/draw-image
 memory	/man/2/imagefile
 memory	/man/2/math-0intro
-memory	/man/2/palmfile
 memory	/man/2/prof
 memory	/man/2/secstore
 memory	/man/2/sys-0intro
@@ -33503,7 +33128,6 @@ message	/man/2/smtp
 message	/man/2/spree
 message	/man/2/styx
 message	/man/2/styxconv
-message	/man/2/styxflush
 message	/man/2/styxservers
 message	/man/2/sys-0intro
 message	/man/2/sys-file2chan
@@ -33595,7 +33219,6 @@ messages	/man/2/smtp
 messages	/man/2/spree
 messages	/man/2/styx
 messages	/man/2/styxconv
-messages	/man/2/styxflush
 messages	/man/2/styxservers
 messages	/man/2/sys-bind
 messages	/man/2/sys-dial
@@ -33842,7 +33465,6 @@ mipsco	/man/10/acid
 mirror	/man/2/wmsrv
 mirror	/man/3/ds
 mirrored	/man/3/ds
-mirroring	/man/2/format
 mirroring	/man/3/ds
 misbehaving	/man/2/wmsrv
 misc	/man/1/emu
@@ -34031,7 +33653,6 @@ mode	/man/2/disks
 mode	/man/2/filter-deflate
 mode	/man/2/math-0intro
 mode	/man/2/math-fp
-mode	/man/2/palmfile
 mode	/man/2/print
 mode	/man/2/styx
 mode	/man/2/styxservers
@@ -34116,7 +33737,6 @@ modification	/man/10/iar
 modification	/man/10/mk
 modification	/man/2/daytime
 modification	/man/2/filter-deflate
-modification	/man/2/palmfile
 modification	/man/2/readdir
 modification	/man/2/sys-bind
 modification	/man/3/pointer
@@ -34147,7 +33767,6 @@ modified	/man/10/iar
 modified	/man/10/mk
 modified	/man/10/parsecmd
 modified	/man/2/draw-image
-modified	/man/2/palmfile
 modified	/man/2/prefab-element
 modified	/man/2/readdir
 modified	/man/2/spree-cardlib
@@ -34230,7 +33849,6 @@ modname	/man/1/cprof
 modname	/man/1/mprof
 modname	/man/1/prof
 modname	/man/1/yacc
-modno	/man/2/palmfile
 modprof	/man/2/prof
 mods	/man/2/prof
 modular	/man/1/0intro
@@ -34305,7 +33923,6 @@ module	/man/2/keyring-0intro
 module	/man/2/keyset
 module	/man/2/math-0intro
 module	/man/2/msgio
-module	/man/2/palmfile
 module	/man/2/plumbmsg
 module	/man/2/popup
 module	/man/2/prefab-0intro
@@ -34338,7 +33955,6 @@ module	/man/2/sys-0intro
 module	/man/2/sys-dup
 module	/man/2/sys-self
 module	/man/2/sys-werrstr
-module	/man/2/tftp
 module	/man/2/timers
 module	/man/2/tk
 module	/man/2/tkclient
@@ -34830,7 +34446,6 @@ msize	/man/5/0intro
 msize	/man/5/version
 mtime	/man/10/devattach
 mtime	/man/2/filter-deflate
-mtime	/man/2/palmfile
 mtime	/man/2/readdir
 mtime	/man/2/styxservers
 mtime	/man/2/sys-stat
@@ -35026,9 +34641,7 @@ names	/man/2/dis
 names	/man/2/disks
 names	/man/2/factotum
 names	/man/2/filepat
-names	/man/2/format
 names	/man/2/keyring-auth
-names	/man/2/palmfile
 names	/man/2/plumbmsg
 names	/man/2/readdir
 names	/man/2/secstore
@@ -35321,7 +34934,6 @@ necessary	/man/2/draw-image
 necessary	/man/2/draw-screen
 necessary	/man/2/ir
 necessary	/man/2/keyring-0intro
-necessary	/man/2/palmfile
 necessary	/man/2/prefab-element
 necessary	/man/2/prefab-environ
 necessary	/man/2/security-0intro
@@ -35372,7 +34984,6 @@ needed	/man/2/draw-image
 needed	/man/2/draw-screen
 needed	/man/2/factotum
 needed	/man/2/keyring-0intro
-needed	/man/2/palmfile
 needed	/man/2/plumbmsg
 needed	/man/2/pop3
 needed	/man/2/print
@@ -35418,7 +35029,6 @@ needs	/man/2/cfg
 needs	/man/2/debug
 needs	/man/2/prefab-element
 needs	/man/2/security-0intro
-needs	/man/2/styxflush
 needs	/man/2/styxservers
 needs	/man/3/cmd
 needs	/man/3/draw
@@ -35641,7 +35251,6 @@ network	/man/2/sys-dial
 network	/man/2/sys-open
 network	/man/2/sys-pctl
 network	/man/2/sys-stat
-network	/man/2/virgil
 network	/man/3/cmd
 network	/man/3/ip
 network	/man/3/plap
@@ -35900,7 +35509,6 @@ nil	/man/2/draw-screen
 nil	/man/2/env
 nil	/man/2/ether
 nil	/man/2/factotum
-nil	/man/2/format
 nil	/man/2/fsproto
 nil	/man/2/hash
 nil	/man/2/imagefile
@@ -35919,7 +35527,6 @@ nil	/man/2/keyset
 nil	/man/2/mpeg
 nil	/man/2/msgio
 nil	/man/2/newns
-nil	/man/2/palmfile
 nil	/man/2/plumbmsg
 nil	/man/2/pop3
 nil	/man/2/popup
@@ -35945,7 +35552,6 @@ nil	/man/2/spree-objstore
 nil	/man/2/string
 nil	/man/2/styx
 nil	/man/2/styxconv
-nil	/man/2/styxflush
 nil	/man/2/styxpersist
 nil	/man/2/styxservers
 nil	/man/2/styxservers-nametree
@@ -35961,11 +35567,9 @@ nil	/man/2/sys-open
 nil	/man/2/sys-self
 nil	/man/2/sys-stat
 nil	/man/2/sys-tokenize
-nil	/man/2/tftp
 nil	/man/2/tk
 nil	/man/2/tkclient
 nil	/man/2/translate
-nil	/man/2/virgil
 nil	/man/2/w3c-css
 nil	/man/2/wmclient
 nil	/man/2/wmlib
@@ -36095,7 +35699,6 @@ non	/man/2/keyring-sha1
 non	/man/2/keyset
 non	/man/2/math-fp
 non	/man/2/msgio
-non	/man/2/palmfile
 non	/man/2/plumbmsg
 non	/man/2/prefab-element
 non	/man/2/print
@@ -36111,7 +35714,6 @@ non	/man/2/spree-allow
 non	/man/2/spree-cardlib
 non	/man/2/spree-gather
 non	/man/2/stringinttab
-non	/man/2/styxflush
 non	/man/2/styxpersist
 non	/man/2/styxservers
 non	/man/2/sys-0intro
@@ -36120,7 +35722,6 @@ non	/man/2/sys-dial
 non	/man/2/sys-export
 non	/man/2/sys-read
 non	/man/2/sys-tokenize
-non	/man/2/tftp
 non	/man/2/translate
 non	/man/2/w3c-css
 non	/man/2/wmlib
@@ -36350,7 +35951,6 @@ note	/man/2/command
 note	/man/2/convcs
 note	/man/2/daytime
 note	/man/2/geodesy
-note	/man/2/palmfile
 note	/man/2/plumbmsg
 note	/man/2/pop3
 note	/man/2/prefab-style
@@ -36427,7 +36027,6 @@ notified	/man/2/draw-image
 notified	/man/2/spree
 notified	/man/2/timers
 notified	/man/3/dbg
-notifies	/man/2/styxflush
 notifies	/man/9/scrollbar
 notify	/man/10/qio
 notify	/man/2/mpeg
@@ -36464,7 +36063,6 @@ nr	/man/1/cp
 nr	/man/1/sort
 nr	/man/2/math-fp
 nread	/man/10/styxserver
-nrec	/man/2/palmfile
 nresrv	/man/8/prep
 ns	/man/1/grid-monitor
 ns	/man/1/grid-ns
@@ -36605,7 +36203,6 @@ numeric	/man/10/plan9.ini
 numeric	/man/10/print
 numeric	/man/2/styxservers
 numeric	/man/2/sys-print
-numeric	/man/2/virgil
 numeric	/man/3/cons
 numeric	/man/3/flash
 numeric	/man/4/tarfs
@@ -36918,7 +36515,6 @@ occurs	/man/2/bufio
 occurs	/man/2/debug
 occurs	/man/2/dis
 occurs	/man/2/fsproto
-occurs	/man/2/palmfile
 occurs	/man/2/registries
 occurs	/man/2/sh
 occurs	/man/2/styxpersist
@@ -37028,7 +36624,6 @@ offset	/man/2/dis
 offset	/man/2/disks
 offset	/man/2/draw-display
 offset	/man/2/draw-image
-offset	/man/2/palmfile
 offset	/man/2/spree
 offset	/man/2/spree-gather
 offset	/man/2/styx
@@ -37115,7 +36710,6 @@ older	/man/10/plan9.ini
 older	/man/2/0intro
 older	/man/2/daytime
 older	/man/2/keyring-crypt
-older	/man/2/palmfile
 older	/man/2/styxconv
 older	/man/3/audio
 older	/man/6/dis
@@ -37346,8 +36940,6 @@ opens	/man/2/attrdb
 opens	/man/2/dbm
 opens	/man/2/disks
 opens	/man/2/factotum
-opens	/man/2/format
-opens	/man/2/palmfile
 opens	/man/2/pop3
 opens	/man/2/smtp
 opens	/man/2/spree
@@ -37505,7 +37097,6 @@ operations	/man/2/draw-display
 operations	/man/2/draw-image
 operations	/man/2/drawmux
 operations	/man/2/factotum
-operations	/man/2/format
 operations	/man/2/ip
 operations	/man/2/keyring-certtostr
 operations	/man/2/math-0intro
@@ -37719,7 +37310,6 @@ option	/man/2/prof
 option	/man/2/readdir
 option	/man/2/styxservers
 option	/man/2/sys-chdir
-option	/man/2/virgil
 option	/man/3/cmd
 option	/man/3/dbg
 option	/man/3/env
@@ -37823,7 +37413,6 @@ optional	/man/2/draw-image
 optional	/man/2/factotum
 optional	/man/2/geodesy
 optional	/man/2/math-linalg
-optional	/man/2/palmfile
 optional	/man/2/spki
 optional	/man/2/string
 optional	/man/2/w3c-css
@@ -38063,7 +37652,6 @@ oread	/man/10/styxserver
 oread	/man/2/bufio
 oread	/man/2/dbm
 oread	/man/2/disks
-oread	/man/2/palmfile
 oread	/man/2/styxservers
 oread	/man/2/sys-open
 oread	/man/5/open
@@ -38110,7 +37698,6 @@ origin	/man/2/draw-0intro
 origin	/man/2/draw-context
 origin	/man/2/draw-image
 origin	/man/2/math-linalg
-origin	/man/2/palmfile
 origin	/man/2/styxservers
 origin	/man/2/tk
 origin	/man/2/wmsrv
@@ -38140,7 +37727,6 @@ original	/man/2/disks
 original	/man/2/draw-context
 original	/man/2/draw-screen
 original	/man/2/filter-deflate
-original	/man/2/format
 original	/man/2/geodesy
 original	/man/2/msgio
 original	/man/2/plumbmsg
@@ -38149,7 +37735,6 @@ original	/man/2/security-ssl
 original	/man/2/sh
 original	/man/2/spki
 original	/man/2/styxconv
-original	/man/2/styxflush
 original	/man/2/styxservers
 original	/man/2/sys-bind
 original	/man/2/sys-fd2path
@@ -38493,7 +38078,6 @@ outside	/man/10/intrenable
 outside	/man/2/draw-image
 outside	/man/2/plumbmsg
 outside	/man/2/sexprs
-outside	/man/2/styxflush
 outside	/man/2/sys-0intro
 outside	/man/2/sys-self
 outside	/man/2/w3c-css
@@ -38519,7 +38103,6 @@ outside	/man/9/scrollbar
 outsl	/man/10/inb
 outss	/man/10/inb
 outstanding	/man/1/sh-file2chan
-outstanding	/man/2/styxflush
 outstanding	/man/2/styxpersist
 outstanding	/man/2/wmsrv
 outstanding	/man/5/0intro
@@ -38593,7 +38176,6 @@ overview	/man/9/0intro
 overview	/man/9/canvas
 overwrite	/man/1/grid-session
 overwrite	/man/1/uuencode
-overwrite	/man/2/palmfile
 overwriting	/man/1/gettar
 overwritten	/man/1/mv
 overwritten	/man/1/tiny
@@ -38683,7 +38265,6 @@ p9any	/man/4/factotum
 p9sk1	/man/4/factotum
 pa	/man/6/ubfa
 pack	/man/1/tktester
-pack	/man/2/palmfile
 pack	/man/2/plumbmsg
 pack	/man/2/prefab-element
 pack	/man/2/sexprs
@@ -38953,16 +38534,10 @@ palette	/man/1/wm-misc
 palette	/man/3/vga
 palettedepth	/man/3/vga
 paleyellow	/man/2/draw-display
-palm	/man/2/palmfile
 palm	/man/4/palmsrv
-palmfile	/man/2/palmfile
 palmfile	/man/4/palmsrv
-palmfile.b	/man/2/palmfile
-palmfile.m	/man/2/palmfile
 palmsrv	/man/4/palmsrv
 palmsrv.b	/man/4/palmsrv
-palm®	/man/2/palmfile
-palm™	/man/2/palmfile
 pan	/man/3/vga
 pane	/man/1/grid-session
 panel	/man/1/charon
@@ -39299,10 +38874,8 @@ particular	/man/2/draw-display
 particular	/man/2/draw-example
 particular	/man/2/draw-image
 particular	/man/2/draw-screen
-particular	/man/2/format
 particular	/man/2/math-0intro
 particular	/man/2/math-fp
-particular	/man/2/palmfile
 particular	/man/2/plumbmsg
 particular	/man/2/prof
 particular	/man/2/readdir
@@ -39496,7 +39069,6 @@ password	/man/1/netkey
 password	/man/1/passwd
 password	/man/2/factotum
 password	/man/2/keyring-0intro
-password	/man/2/palmfile
 password	/man/2/pop3
 password	/man/2/secstore
 password	/man/2/security-0intro
@@ -39595,7 +39167,6 @@ path	/man/2/env
 path	/man/2/ether
 path	/man/2/factotum
 path	/man/2/filepat
-path	/man/2/format
 path	/man/2/fsproto
 path	/man/2/geodesy
 path	/man/2/hash
@@ -39623,7 +39194,6 @@ path	/man/2/math-linalg
 path	/man/2/mpeg
 path	/man/2/msgio
 path	/man/2/newns
-path	/man/2/palmfile
 path	/man/2/plumbmsg
 path	/man/2/pop3
 path	/man/2/popup
@@ -39660,7 +39230,6 @@ path	/man/2/string
 path	/man/2/stringinttab
 path	/man/2/styx
 path	/man/2/styxconv
-path	/man/2/styxflush
 path	/man/2/styxpersist
 path	/man/2/styxservers
 path	/man/2/styxservers-nametree
@@ -39691,13 +39260,11 @@ path	/man/2/sys-tokenize
 path	/man/2/sys-utfbytes
 path	/man/2/sys-werrstr
 path	/man/2/tabs
-path	/man/2/tftp
 path	/man/2/timers
 path	/man/2/tk
 path	/man/2/tkclient
 path	/man/2/translate
 path	/man/2/venti
-path	/man/2/virgil
 path	/man/2/w3c-css
 path	/man/2/wmclient
 path	/man/2/wmlib
@@ -39808,7 +39375,6 @@ patterns	/man/2/math-fp
 patterns	/man/2/spree-allow
 patterns	/man/6/plumbing
 patterns	/man/9/bind
-paul	/man/2/palmfile
 paul	/man/6/attrdb
 pause	/man/1/sleep
 pause	/man/1/wm-misc
@@ -39919,9 +39485,7 @@ pctl	/man/6/namespace
 pctosrc	/man/2/debug
 pcwidth	/man/2/print
 pd	/man/6/man
-pda	/man/2/palmfile
 pda	/man/3/pointer
-pdb	/man/2/palmfile
 pdc.minitelfr.com	/man/1/miniterm
 pdriver	/man/2/print
 pdv	/man/2/asn1
@@ -40019,7 +39583,6 @@ perimeter	/man/9/canvas
 periodic	/man/2/draw-image
 periodically	/man/10/kbdputc
 periodically	/man/2/dhcpclient
-periodically	/man/2/tftp
 periodically	/man/8/dhcp
 periodically	/man/8/rip
 periods	/man/2/spki
@@ -40032,7 +39595,6 @@ perm	/man/10/styx
 perm	/man/10/styxserver
 perm	/man/2/bufio
 perm	/man/2/dbm
-perm	/man/2/palmfile
 perm	/man/2/styx
 perm	/man/2/styxservers
 perm	/man/2/styxservers-nametree
@@ -40160,16 +39722,12 @@ persists	/man/3/pipe
 persists	/man/8/cs
 person	/man/4/import
 person	/man/8/create
-personal	/man/2/palmfile
 personal	/man/3/i82365
 personal	/man/6/attrdb
 pertain	/man/1/diff
 pexit	/man/10/error
 pexit	/man/10/kproc
-pf	/man/2/palmfile
 pfd	/man/2/print
-pfile	/man/2/palmfile
-pfile.open	/man/2/palmfile
 pg	/man/6/keyboard
 pgrp	/man/2/debug
 pgrp	/man/3/prog
@@ -40181,7 +39739,6 @@ phi	/man/2/draw-image
 phi	/man/3/draw
 phil	/man/10/acid
 phone	/man/1/miniterm
-phone	/man/2/format
 phone	/man/2/security-0intro
 photographic	/man/6/colour
 phrase	/man/2/secstore
@@ -40234,7 +39791,6 @@ pick	/man/2/hash
 pick	/man/2/sexprs
 pick	/man/2/spki
 pick	/man/2/styx
-pick	/man/2/styxflush
 pick	/man/2/styxservers
 pick	/man/2/styxservers-nametree
 pick	/man/2/w3c-css
@@ -40461,7 +40017,6 @@ places	/man/8/prep
 places	/man/9/text
 placing	/man/1/filename
 placing	/man/1/tktester
-placing	/man/2/format
 placing	/man/2/spree-cardlib
 placing	/man/9/canvas
 plain	/man/1/acme
@@ -40917,7 +40472,6 @@ port	/man/2/sys-export
 port	/man/2/sys-file2chan
 port	/man/2/sys-iounit
 port	/man/2/sys-print
-port	/man/2/virgil
 port	/man/3/arch
 port	/man/3/audio
 port	/man/3/boot
@@ -41022,7 +40576,6 @@ ports	/man/8/signer
 pos	/man/2/debug
 pos	/man/6/sbl
 pose	/man/1/collab-clients
-pose	/man/2/virgil
 posible	/man/9/image
 positioned	/man/2/draw-image
 positioned	/man/2/prefab-compound
@@ -41081,8 +40634,6 @@ possibly	/man/1/sh
 possibly	/man/1/tr
 possibly	/man/10/a.out
 possibly	/man/10/mk
-possibly	/man/2/format
-possibly	/man/2/palmfile
 possibly	/man/2/prefab-compound
 possibly	/man/2/security-0intro
 possibly	/man/2/styxservers
@@ -41166,7 +40717,6 @@ practice	/man/2/prefab-style
 pragma	/man/10/2c
 pragmas	/man/10/2c
 pragmatic	/man/2/sh
-prc	/man/2/palmfile
 pre	/man/1/acme
 pre	/man/1/sh-string
 pre	/man/10/a.out
@@ -41685,7 +41235,6 @@ print	/man/2/sets
 print	/man/2/sys-0intro
 print	/man/2/sys-print
 print	/man/2/sys-werrstr
-print	/man/2/tftp
 print	/man/2/w3c-css
 print	/man/3/cons
 print	/man/4/dossrv
@@ -42020,7 +41569,6 @@ process	/man/2/prof
 process	/man/2/secstore
 process	/man/2/sh
 process	/man/2/styxconv
-process	/man/2/styxflush
 process	/man/2/styxpersist
 process	/man/2/styxservers
 process	/man/2/styxservers-nametree
@@ -42134,7 +41682,6 @@ processes	/man/2/env
 processes	/man/2/lock
 processes	/man/2/sh
 processes	/man/2/spki-verifier
-processes	/man/2/styxflush
 processes	/man/2/sys-0intro
 processes	/man/2/sys-pctl
 processes	/man/2/sys-pipe
@@ -42249,7 +41796,6 @@ produced	/man/2/keyset
 produced	/man/2/secstore
 produced	/man/2/sexprs
 produced	/man/2/styx
-produced	/man/2/styxflush
 produced	/man/3/cap
 produced	/man/3/cons
 produced	/man/3/sign
@@ -42431,7 +41977,6 @@ programs	/man/2/arg
 programs	/man/2/command
 programs	/man/2/draw-context
 programs	/man/2/draw-image
-programs	/man/2/format
 programs	/man/2/ir
 programs	/man/2/keyring-0intro
 programs	/man/2/keyring-auth
@@ -42464,7 +42009,6 @@ programs	/man/9/0intro
 programs	/man/9/text
 progress	/man/1/charon
 progress	/man/1/webgrab
-progress	/man/2/tftp
 progresses	/man/1/charon
 projecting	/man/9/canvas
 projection	/man/2/geodesy
@@ -42651,13 +42195,11 @@ protocol	/man/2/smtp
 protocol	/man/2/srv
 protocol	/man/2/styx
 protocol	/man/2/styxconv
-protocol	/man/2/styxflush
 protocol	/man/2/styxservers
 protocol	/man/2/sys-fauth
 protocol	/man/2/sys-fversion
 protocol	/man/2/sys-iounit
 protocol	/man/2/sys-pipe
-protocol	/man/2/tftp
 protocol	/man/3/0intro
 protocol	/man/3/dbg
 protocol	/man/3/draw
@@ -42720,7 +42262,6 @@ prototype	/man/6/proto
 prototype	/man/8/applylog
 prototype	/man/8/create
 prototype	/man/8/mkfs
-prototypical	/man/2/styxflush
 prototypical	/man/5/0intro
 protrude	/man/9/options
 prove	/man/2/security-0intro
@@ -42754,7 +42295,6 @@ provide	/man/2/alphabet-intro
 provide	/man/2/dhcpclient
 provide	/man/2/draw-0intro
 provide	/man/2/draw-context
-provide	/man/2/format
 provide	/man/2/hash
 provide	/man/2/keyring-0intro
 provide	/man/2/keyring-certtostr
@@ -42829,7 +42369,6 @@ provided	/man/2/draw-context
 provided	/man/2/encoding
 provided	/man/2/factotum
 provided	/man/2/filter-deflate
-provided	/man/2/format
 provided	/man/2/geodesy
 provided	/man/2/ip
 provided	/man/2/keyring-0intro
@@ -42837,7 +42376,6 @@ provided	/man/2/keyring-crypt
 provided	/man/2/keyring-getstring
 provided	/man/2/keyring-sha1
 provided	/man/2/msgio
-provided	/man/2/palmfile
 provided	/man/2/prefab-element
 provided	/man/2/prof
 provided	/man/2/security-0intro
@@ -42940,7 +42478,6 @@ provides	/man/2/draw-image
 provides	/man/2/draw-screen
 provides	/man/2/env
 provides	/man/2/ether
-provides	/man/2/format
 provides	/man/2/fsproto
 provides	/man/2/geodesy
 provides	/man/2/hash
@@ -42953,7 +42490,6 @@ provides	/man/2/lock
 provides	/man/2/math-linalg
 provides	/man/2/mpeg
 provides	/man/2/msgio
-provides	/man/2/palmfile
 provides	/man/2/plumbmsg
 provides	/man/2/pop3
 provides	/man/2/prefab-0intro
@@ -42987,7 +42523,6 @@ provides	/man/2/tk
 provides	/man/2/tkclient
 provides	/man/2/translate
 provides	/man/2/venti
-provides	/man/2/virgil
 provides	/man/2/wmclient
 provides	/man/2/wmlib
 provides	/man/2/wmsrv
@@ -43039,7 +42574,6 @@ providing	/man/1/man
 providing	/man/1/sh-alphabet
 providing	/man/1/wm
 providing	/man/1/yacc
-providing	/man/2/format
 providing	/man/2/prefab-element
 providing	/man/2/sys-0intro
 providing	/man/3/dbg
@@ -43168,9 +42702,6 @@ pushed	/man/6/ubfa
 pushes	/man/1/sh-expr
 pushes	/man/2/security-ssl
 pushing	/man/10/error
-put2	/man/2/palmfile
-put3	/man/2/palmfile
-put4	/man/2/palmfile
 putall	/man/1/acme
 putb	/man/2/bufio
 putbytearray	/man/2/keyring-getstring
@@ -43194,7 +42725,6 @@ puts	/man/2/bufio
 puts	/man/2/debug
 puts	/man/2/dhcpclient
 puts	/man/2/drawmux
-puts	/man/2/palmfile
 puts	/man/3/pbus
 puts	/man/4/factotum
 puts	/man/4/ramfile
@@ -43693,7 +43223,6 @@ range	/man/2/debug
 range	/man/2/dis
 range	/man/2/draw-display
 range	/man/2/geodesy
-range	/man/2/palmfile
 range	/man/2/prof
 range	/man/2/spki
 range	/man/2/spree
@@ -43739,7 +43268,6 @@ rank	/man/2/spree-cardlib
 rankine	/man/1/units
 ranking	/man/2/spree-cardlib
 rapidly	/man/3/logfs
-rarchive	/man/2/palmfile
 rare	/man/1/diff
 rare	/man/2/sys-fauth
 rare	/man/2/sys-fversion
@@ -43814,7 +43342,6 @@ rblock	/man/1/sh-file2chan
 rc	/man/1/mash
 rc	/man/10/acid
 rc	/man/10/mk
-rc	/man/2/styxflush
 rc	/man/2/sys-file2chan
 rc	/man/2/wmsrv
 rc4	/man/1/alphabet-main
@@ -43849,8 +43376,6 @@ rdbg	/man/8/rdbgsrv
 rdbg.h	/man/3/dbg
 rdbgsrv	/man/8/rdbgsrv
 rdbgsrv.b	/man/8/rdbgsrv
-rdelete	/man/2/palmfile
-rdirty	/man/2/palmfile
 rdonly	/man/2/disks
 rdtog	/man/3/usb
 re	/man/1/acme
@@ -43972,7 +43497,6 @@ read	/man/2/draw-display
 read	/man/2/draw-font
 read	/man/2/draw-image
 read	/man/2/ether
-read	/man/2/format
 read	/man/2/fsproto
 read	/man/2/imagefile
 read	/man/2/ip
@@ -43981,7 +43505,6 @@ read	/man/2/keyring-auth
 read	/man/2/keyring-sha1
 read	/man/2/keyset
 read	/man/2/newns
-read	/man/2/palmfile
 read	/man/2/plumbmsg
 read	/man/2/prefab-0intro
 read	/man/2/prefab-element
@@ -43993,7 +43516,6 @@ read	/man/2/security-ssl
 read	/man/2/sexprs
 read	/man/2/spree
 read	/man/2/styx
-read	/man/2/styxflush
 read	/man/2/styxservers
 read	/man/2/sys-0intro
 read	/man/2/sys-dial
@@ -44107,7 +43629,6 @@ readauthinfo	/man/2/keyring-0intro
 readauthinfo	/man/2/keyring-auth
 readauthinfo	/man/2/security-auth
 readbytes	/man/2/styxservers
-readc	/man/2/styxflush
 readcmd	/man/1/sh-file2chan
 readdata	/man/1/sh-file2chan
 readdir	/man/1/ls
@@ -44136,7 +43657,6 @@ readers	/man/1/cp
 readers	/man/10/qio
 readers	/man/10/qlock
 readers	/man/2/imagefile
-readers	/man/2/palmfile
 readers	/man/3/pipe
 readers	/man/4/logfile
 readfile	/man/2/spree
@@ -44145,7 +43665,6 @@ readgif	/man/2/imagefile
 readgif.b	/man/2/imagefile
 readgifpath	/man/2/imagefile
 readheader	/man/2/spree
-readid	/man/2/palmfile
 readimage	/man/2/draw-display
 readiness	/man/2/crc
 reading	/man/1/alphabet-main
@@ -44171,12 +43690,10 @@ reading	/man/2/dial
 reading	/man/2/disks
 reading	/man/2/draw-font
 reading	/man/2/env
-reading	/man/2/format
 reading	/man/2/imagefile
 reading	/man/2/keyring-getmsg
 reading	/man/2/math-0intro
 reading	/man/2/msgio
-reading	/man/2/palmfile
 reading	/man/2/print
 reading	/man/2/readdir
 reading	/man/2/security-0intro
@@ -44296,7 +43813,6 @@ reads	/man/2/daytime
 reads	/man/2/dis
 reads	/man/2/disks
 reads	/man/2/ether
-reads	/man/2/format
 reads	/man/2/fsproto
 reads	/man/2/ir
 reads	/man/2/keyring-auth
@@ -44307,7 +43823,6 @@ reads	/man/2/newns
 reads	/man/2/plumbmsg
 reads	/man/2/readdir
 reads	/man/2/styx
-reads	/man/2/styxflush
 reads	/man/2/styxpersist
 reads	/man/2/sys-dirread
 reads	/man/2/sys-iounit
@@ -44359,7 +43874,6 @@ readxbmpath	/man/2/imagefile
 ready	/man/1/secstore
 ready	/man/10/kproc
 ready	/man/2/convcs
-ready	/man/2/format
 ready	/man/2/styxpersist
 ready	/man/2/styxservers
 ready	/man/2/sys-bind
@@ -44452,11 +43966,8 @@ rebound	/man/3/fs
 rebroadcast	/man/8/collabsrv
 rebuild	/man/8/kfscmd
 rebuilt	/man/10/iar
-rec	/man/2/format
-rec	/man/2/palmfile
 rec	/man/2/prof
 rec	/man/2/xml
-rec2val	/man/2/format
 recalculate	/man/2/prefab-element
 recall	/man/1/mux
 recall	/man/2/ir
@@ -44479,7 +43990,6 @@ receive	/man/2/styx
 receive	/man/2/styxpersist
 receive	/man/2/sys-bind
 receive	/man/2/sys-file2chan
-receive	/man/2/tftp
 receive	/man/2/tkclient
 receive	/man/2/wmsrv
 receive	/man/3/cmd
@@ -44510,7 +44020,6 @@ received	/man/2/styxpersist
 received	/man/2/sys-dial
 received	/man/2/sys-file2chan
 received	/man/2/tabs
-received	/man/2/tftp
 received	/man/2/tkclient
 received	/man/2/wmclient
 received	/man/2/wmlib
@@ -44549,7 +44058,6 @@ receives	/man/2/styx
 receives	/man/2/sys-export
 receives	/man/2/sys-file2chan
 receives	/man/2/tk
-receives	/man/2/virgil
 receives	/man/3/dbg
 receives	/man/3/ether
 receives	/man/3/ftl
@@ -44668,12 +44176,10 @@ record	/man/10/odbc
 record	/man/2/cfg
 record	/man/2/convcs
 record	/man/2/disks
-record	/man/2/format
 record	/man/2/ir
 record	/man/2/keyring-getmsg
 record	/man/2/keyring-getstring
 record	/man/2/msgio
-record	/man/2/palmfile
 record	/man/2/spree-cardlib
 record	/man/2/sys-0intro
 record	/man/2/wmsrv
@@ -44684,7 +44190,6 @@ record	/man/4/dbfs
 record	/man/6/keytext
 record	/man/8/prep
 record	/man/8/rip
-record's	/man/2/palmfile
 recorddir	/man/1/itest
 recorded	/man/1/cprof
 recorded	/man/1/itest
@@ -44708,8 +44213,6 @@ records	/man/1/alphabet-grid
 records	/man/1/dd
 records	/man/10/2c
 records	/man/10/odbc
-records	/man/2/format
-records	/man/2/palmfile
 records	/man/2/sys-0intro
 records	/man/2/sys-iounit
 records	/man/2/sys-werrstr
@@ -44745,8 +44248,6 @@ recreated	/man/5/0intro
 recreates	/man/1/uuencode
 recreation	/man/1/acme
 recroot	/man/1/itest
-recs	/man/2/format
-recsize	/man/2/palmfile
 rect	/man/1/sh-arg
 rect	/man/1/wm
 rect	/man/2/draw-0intro
@@ -44821,7 +44322,6 @@ recursively	/man/1/rm
 recursively	/man/1/vacget
 recursively	/man/10/styxserver
 recursively	/man/2/draw-0intro
-recursively	/man/2/format
 recursively	/man/2/sexprs
 recursively	/man/6/proto
 recursively	/man/8/create
@@ -44937,7 +44437,6 @@ ref	/man/2/drawmux
 ref	/man/2/factotum
 ref	/man/2/filter
 ref	/man/2/filter-deflate
-ref	/man/2/format
 ref	/man/2/fsproto
 ref	/man/2/hash
 ref	/man/2/imagefile
@@ -44957,7 +44456,6 @@ ref	/man/2/keyring-sha1
 ref	/man/2/lock
 ref	/man/2/mpeg
 ref	/man/2/msgio
-ref	/man/2/palmfile
 ref	/man/2/plumbmsg
 ref	/man/2/popup
 ref	/man/2/prefab-compound
@@ -44985,7 +44483,6 @@ ref	/man/2/spree-gather
 ref	/man/2/spree-objstore
 ref	/man/2/styx
 ref	/man/2/styxconv
-ref	/man/2/styxflush
 ref	/man/2/styxpersist
 ref	/man/2/styxservers
 ref	/man/2/styxservers-nametree
@@ -45007,7 +44504,6 @@ ref	/man/2/sys-seek
 ref	/man/2/sys-self
 ref	/man/2/sys-stat
 ref	/man/2/tabs
-ref	/man/2/tftp
 ref	/man/2/timers
 ref	/man/2/tk
 ref	/man/2/tkclient
@@ -45089,7 +44585,6 @@ reference	/man/2/keyring-auth
 reference	/man/2/keyring-certtostr
 reference	/man/2/keyring-ipint
 reference	/man/2/lock
-reference	/man/2/palmfile
 reference	/man/2/plumbmsg
 reference	/man/2/secstore
 reference	/man/2/security-login
@@ -45328,7 +44823,6 @@ register	/man/2/crc
 register	/man/2/math-fp
 register	/man/2/registries
 register	/man/2/security-0intro
-register	/man/2/virgil
 register	/man/3/dbg
 register	/man/3/gpio
 register	/man/3/lpt
@@ -45632,7 +45126,6 @@ remainder	/man/3/kprof
 remainder	/man/3/pnp
 remainder	/man/3/sd
 remainder	/man/6/regexp
-remained	/man/2/palmfile
 remaining	/man/1/cprof
 remaining	/man/1/ls
 remaining	/man/1/m4
@@ -45654,7 +45147,6 @@ remaining	/man/2/arg
 remaining	/man/2/bufio
 remaining	/man/2/dbm
 remaining	/man/2/dis
-remaining	/man/2/palmfile
 remaining	/man/2/pop3
 remaining	/man/2/sexprs
 remaining	/man/2/styx
@@ -45906,7 +45398,6 @@ renamed	/man/1/m4
 renamed	/man/1/mv
 renamed	/man/1/ns
 renamed	/man/1/pwd
-renamed	/man/2/palmfile
 renamed	/man/2/sys-fd2path
 renames	/man/3/logfs
 renaming	/man/1/tktester
@@ -46085,12 +45576,10 @@ replicating	/man/6/colour
 replication	/man/2/draw-0intro
 replication	/man/2/draw-image
 replied	/man/1/sh-file2chan
-replied	/man/2/styxflush
 replied	/man/5/0intro
 replies	/man/1/sh-file2chan
 replies	/man/2/bufio-chanfill
 replies	/man/2/styx
-replies	/man/2/styxflush
 replies	/man/2/styxservers
 replies	/man/2/sys-export
 replies	/man/2/wmsrv
@@ -46108,10 +45597,8 @@ reply	/man/2/dhcpclient
 reply	/man/2/draw-context
 reply	/man/2/filter
 reply	/man/2/styx
-reply	/man/2/styxflush
 reply	/man/2/styxservers
 reply	/man/2/sys-file2chan
-reply	/man/2/virgil
 reply	/man/2/wmsrv
 reply	/man/3/dbg
 reply	/man/3/ip
@@ -46131,7 +45618,6 @@ reply	/man/8/dhcp
 reply	/man/8/ping
 reply	/man/8/rdbgsrv
 reply	/man/8/sntp
-replyc	/man/2/styxflush
 replychan	/man/2/styxservers
 replydirect	/man/2/styxservers
 replying	/man/2/styxservers
@@ -46243,7 +45729,6 @@ representation	/man/2/draw-0intro
 representation	/man/2/draw-display
 representation	/man/2/ether
 representation	/man/2/factotum
-representation	/man/2/format
 representation	/man/2/imagefile
 representation	/man/2/ip
 representation	/man/2/keyring-auth
@@ -46252,7 +45737,6 @@ representation	/man/2/keyring-ipint
 representation	/man/2/keyring-rc4
 representation	/man/2/keyset
 representation	/man/2/math-export
-representation	/man/2/palmfile
 representation	/man/2/sexprs
 representation	/man/2/spki
 representation	/man/2/spree-allow
@@ -46383,11 +45867,9 @@ represents	/man/2/disks
 represents	/man/2/draw-0intro
 represents	/man/2/draw-display
 represents	/man/2/factotum
-represents	/man/2/format
 represents	/man/2/ip
 represents	/man/2/keyring-auth
 represents	/man/2/keyring-ipint
-represents	/man/2/palmfile
 represents	/man/2/readdir
 represents	/man/2/registries
 represents	/man/2/sexprs
@@ -46461,11 +45943,9 @@ request	/man/2/draw-context
 request	/man/2/draw-font
 request	/man/2/factotum
 request	/man/2/filter
-request	/man/2/format
 request	/man/2/spki
 request	/man/2/spree
 request	/man/2/spree-gather
-request	/man/2/styxflush
 request	/man/2/styxpersist
 request	/man/2/styxservers
 request	/man/2/sys-0intro
@@ -46474,7 +45954,6 @@ request	/man/2/sys-fversion
 request	/man/2/timers
 request	/man/2/tk
 request	/man/2/tkclient
-request	/man/2/virgil
 request	/man/2/wmclient
 request	/man/2/wmlib
 request	/man/2/wmsrv
@@ -46578,7 +46057,6 @@ requests	/man/2/filter
 requests	/man/2/spree
 requests	/man/2/spree-cardlib
 requests	/man/2/styx
-requests	/man/2/styxflush
 requests	/man/2/styxservers
 requests	/man/2/sys-export
 requests	/man/2/sys-fversion
@@ -46628,7 +46106,6 @@ require	/man/10/plan9.ini
 require	/man/2/0intro
 require	/man/2/factotum
 require	/man/2/keyring-0intro
-require	/man/2/palmfile
 require	/man/2/security-0intro
 require	/man/2/sys-fauth
 require	/man/2/sys-open
@@ -46673,7 +46150,6 @@ required	/man/2/factotum
 required	/man/2/geodesy
 required	/man/2/keyring-crypt
 required	/man/2/keyring-ipint
-required	/man/2/palmfile
 required	/man/2/print
 required	/man/2/prof
 required	/man/2/registries
@@ -46711,7 +46187,6 @@ requirement	/man/1/blur
 requirement	/man/1/sh-tk
 requirement	/man/2/security-0intro
 requirement	/man/2/spree-gather
-requirement	/man/2/styxflush
 requirement	/man/8/changelogin
 requirements	/man/1/sh-alphabet
 requirements	/man/8/svc
@@ -46823,7 +46298,6 @@ reset	/man/10/intrenable
 reset	/man/10/plan9.ini
 reset	/man/10/qio
 reset	/man/2/crc
-reset	/man/2/palmfile
 reset	/man/2/sh
 reset	/man/2/spree-objstore
 reset	/man/3/audio
@@ -46881,7 +46355,6 @@ resolution	/man/10/2c
 resolution	/man/2/print
 resolution	/man/2/srv
 resolution	/man/2/sys-millisec
-resolution	/man/2/virgil
 resolution	/man/3/ip
 resolution	/man/4/iostats
 resolution	/man/6/colour
@@ -46891,8 +46364,6 @@ resolve	/man/3/pnp
 resolve	/man/8/applylog
 resolved	/man/1/alphabet-fs
 resolved	/man/1/fs
-resolved	/man/2/virgil
-resolver	/man/2/virgil
 resolver	/man/6/ndb
 resolver	/man/8/dns
 resolvers	/man/6/ndb
@@ -46913,7 +46384,6 @@ resource	/man/10/error
 resource	/man/10/kproc
 resource	/man/10/lock
 resource	/man/10/qlock
-resource	/man/2/palmfile
 resource	/man/2/sys-pctl
 resource	/man/3/draw
 resource	/man/4/grid-cpu
@@ -46930,7 +46400,6 @@ resources	/man/10/kproc
 resources	/man/10/lock
 resources	/man/10/qlock
 resources	/man/2/draw-image
-resources	/man/2/palmfile
 resources	/man/2/sys-fauth
 resources	/man/2/sys-pctl
 resources	/man/3/draw
@@ -46942,7 +46411,6 @@ respect	/man/1/cp
 respect	/man/1/mk
 respect	/man/10/mk
 respect	/man/2/draw-display
-respect	/man/2/format
 respect	/man/2/tkclient
 respect	/man/2/wmclient
 respect	/man/8/create
@@ -47243,7 +46711,6 @@ retransmission	/man/10/allocb
 retransmission	/man/10/qio
 retransmissions	/man/2/keyring-rc4
 retransmitted	/man/3/ip
-retransmitting	/man/2/virgil
 retried	/man/1/mash
 retries	/man/10/malloc
 retries	/man/8/dhcp
@@ -47282,7 +46749,6 @@ retrieved	/man/9/listbox
 retrieves	/man/1/mash-tk
 retrieves	/man/1/sh-file2chan
 retrieves	/man/1/vacget
-retrieves	/man/2/palmfile
 retrieves	/man/2/secstore
 retrieves	/man/2/sh
 retrieves	/man/5/0intro
@@ -47354,7 +46820,6 @@ return	/man/2/draw-font
 return	/man/2/draw-image
 return	/man/2/draw-screen
 return	/man/2/factotum
-return	/man/2/format
 return	/man/2/hash
 return	/man/2/ip
 return	/man/2/ir
@@ -47363,7 +46828,6 @@ return	/man/2/keyring-getmsg
 return	/man/2/keyring-getstring
 return	/man/2/math-fp
 return	/man/2/msgio
-return	/man/2/palmfile
 return	/man/2/pop3
 return	/man/2/prefab-compound
 return	/man/2/prof
@@ -47380,7 +46844,6 @@ return	/man/2/spree-objstore
 return	/man/2/string
 return	/man/2/styx
 return	/man/2/styxconv
-return	/man/2/styxflush
 return	/man/2/styxservers
 return	/man/2/styxservers-nametree
 return	/man/2/sys-0intro
@@ -47488,7 +46951,6 @@ returned	/man/2/keyring-auth
 returned	/man/2/keyring-gensk
 returned	/man/2/keyring-sha1
 returned	/man/2/math-fp
-returned	/man/2/palmfile
 returned	/man/2/popup
 returned	/man/2/prefab-compound
 returned	/man/2/prof
@@ -47569,11 +47031,9 @@ returning	/man/2/alphabet-intro
 returning	/man/2/bufio
 returning	/man/2/dial
 returning	/man/2/draw-0intro
-returning	/man/2/format
 returning	/man/2/keyring-ipint
 returning	/man/2/math-fp
 returning	/man/2/mpeg
-returning	/man/2/palmfile
 returning	/man/2/readdir
 returning	/man/2/secstore
 returning	/man/2/sexprs
@@ -47583,7 +47043,6 @@ returning	/man/2/styxservers
 returning	/man/2/sys-dirread
 returning	/man/2/sys-read
 returning	/man/2/sys-sleep
-returning	/man/2/tftp
 returning	/man/2/translate
 returning	/man/2/venti
 returning	/man/3/mpeg
@@ -47657,7 +47116,6 @@ returns	/man/2/ether
 returns	/man/2/factotum
 returns	/man/2/filepat
 returns	/man/2/filter
-returns	/man/2/format
 returns	/man/2/hash
 returns	/man/2/imagefile
 returns	/man/2/ip
@@ -47678,7 +47136,6 @@ returns	/man/2/math-elem
 returns	/man/2/math-fp
 returns	/man/2/mpeg
 returns	/man/2/msgio
-returns	/man/2/palmfile
 returns	/man/2/plumbmsg
 returns	/man/2/pop3
 returns	/man/2/popup
@@ -47708,7 +47165,6 @@ returns	/man/2/srv
 returns	/man/2/string
 returns	/man/2/stringinttab
 returns	/man/2/styx
-returns	/man/2/styxflush
 returns	/man/2/styxpersist
 returns	/man/2/styxservers
 returns	/man/2/styxservers-nametree
@@ -47734,13 +47190,11 @@ returns	/man/2/sys-tokenize
 returns	/man/2/sys-utfbytes
 returns	/man/2/sys-werrstr
 returns	/man/2/tabs
-returns	/man/2/tftp
 returns	/man/2/timers
 returns	/man/2/tk
 returns	/man/2/tkclient
 returns	/man/2/translate
 returns	/man/2/venti
-returns	/man/2/virgil
 returns	/man/2/w3c-css
 returns	/man/2/wmclient
 returns	/man/2/wmlib
@@ -47957,7 +47411,6 @@ rijndael	/man/2/keyring-crypt
 rimagefile	/man/2/imagefile
 rings	/man/2/translate
 rint	/man/2/math-fp
-rinuse	/man/2/palmfile
 rio	/man/1/9win
 rip	/man/8/rip
 rip.b	/man/8/rip
@@ -47980,29 +47433,22 @@ rm	/man/1/rm
 rm	/man/1/tiny
 rm	/man/10/mk
 rm	/man/2/arg
-rm	/man/2/styxflush
 rm	/man/3/srv
 rm	/man/4/kfs
 rm	/man/4/registry
 rm.b	/man/1/rm
 rm.b	/man/1/tiny
-rm.pack	/man/2/styxflush
 rmargin	/man/9/text
-rmcat	/man/2/palmfile
 rmget	/man/3/dbg
 rmput	/man/3/dbg
 rmsg	/man/2/styx
-rmsg	/man/2/styxflush
 rmsg	/man/2/styxservers
 rmsg	/man/8/styxchat
 rmsg.create	/man/2/styxservers
-rmsg.error	/man/2/styxflush
 rmsg.error	/man/2/styxservers
-rmsg.open	/man/2/styxflush
 rmsg.open	/man/2/styxservers
 rmsg.qids	/man/2/styx
 rmsg.read	/man/2/styx
-rmsg.read	/man/2/styxflush
 rmsg.read	/man/2/styxservers
 rmsg.read	/man/8/styxchat
 rmsg.tag	/man/2/styx
@@ -48303,7 +47749,6 @@ rsa	/man/8/createsignerkey
 rsa's	/man/8/ai2key
 rsagen	/man/8/ai2key
 rsagen.b	/man/8/ai2key
-rsecret	/man/2/palmfile
 rserv	/man/2/dial
 rst	/man/3/ip
 rstart	/man/3/dbg
@@ -48446,7 +47891,6 @@ run	/man/2/itslib
 run	/man/2/keyring-0intro
 run	/man/2/math-0intro
 run	/man/2/sh
-run	/man/2/styxflush
 run	/man/2/sys-byte2char
 run	/man/2/sys-sleep
 run	/man/3/cmd
@@ -49009,7 +48453,6 @@ scripts	/man/9/text
 scroll	/man/1/acme
 scroll	/man/1/deb
 scroll	/man/1/tktester
-scroll	/man/2/palmfile
 scroll	/man/2/prefab-compound
 scroll	/man/2/prefab-element
 scroll	/man/4/acme
@@ -49069,12 +48512,10 @@ sdd0	/man/3/ds
 sdd0	/man/3/sd
 sdd1	/man/3/ds
 sdns	/man/8/dns
-se	/man/2/format
 se	/man/2/regex
 se	/man/2/spki
 se	/man/9/options
 se	/man/9/types
-se2fmt	/man/2/format
 search	/man/1/acme
 search	/man/1/brutus
 search	/man/1/calc
@@ -49151,9 +48592,7 @@ seconds	/man/10/seconds
 seconds	/man/2/daytime
 seconds	/man/2/dhcpclient
 seconds	/man/2/geodesy
-seconds	/man/2/palmfile
 seconds	/man/2/sys-stat
-seconds	/man/2/virgil
 seconds	/man/3/cap
 seconds	/man/3/prog
 seconds	/man/3/rtc
@@ -49172,7 +48611,6 @@ secret	/man/2/keyring-0intro
 secret	/man/2/keyring-auth
 secret	/man/2/keyring-certtostr
 secret	/man/2/keyring-crypt
-secret	/man/2/palmfile
 secret	/man/2/secstore
 secret	/man/2/security-0intro
 secret	/man/2/security-login
@@ -49271,7 +48709,6 @@ sections	/man/10/lock
 sections	/man/10/plan9.ini
 sections	/man/2/0intro
 sections	/man/2/dis
-sections	/man/2/palmfile
 sections	/man/2/prefab-0intro
 sections	/man/2/sys-0intro
 sections	/man/3/0intro
@@ -49365,13 +48802,11 @@ security.m	/man/2/security-auth
 security.m	/man/2/security-login
 security.m	/man/2/security-random
 security.m	/man/2/security-ssl
-security.m	/man/2/virgil
 security.m	/man/7/db
 sed	/man/1/mk
 sed	/man/10/mk
 seed	/man/2/keyring-ipint
 seed	/man/2/keyring-rc4
-seed	/man/2/palmfile
 seed	/man/2/rand
 seeing	/man/1/blur
 seeing	/man/2/sys-export
@@ -49651,13 +49086,11 @@ self	/man/2/draw-point
 self	/man/2/draw-rect
 self	/man/2/draw-screen
 self	/man/2/factotum
-self	/man/2/format
 self	/man/2/ip
 self	/man/2/itslib
 self	/man/2/keyring-0intro
 self	/man/2/keyring-ipint
 self	/man/2/lock
-self	/man/2/palmfile
 self	/man/2/plumbmsg
 self	/man/2/prefab-compound
 self	/man/2/prefab-element
@@ -49691,7 +49124,6 @@ semantics	/man/1/mash
 semantics	/man/10/c2l
 semantics	/man/2/convcs
 semantics	/man/2/spree-cardlib
-semantics	/man/2/styxflush
 semantics	/man/5/flush
 semaphore	/man/2/lock
 semaphore.new	/man/2/lock
@@ -49734,7 +49166,6 @@ send	/man/2/prof
 send	/man/2/spree
 send	/man/2/spree-allow
 send	/man/2/styx
-send	/man/2/styxflush
 send	/man/2/styxpersist
 send	/man/2/styxservers
 send	/man/2/sys-dial
@@ -49775,7 +49206,6 @@ sending	/man/2/filter
 sending	/man/2/ir
 sending	/man/2/plumbmsg
 sending	/man/2/security-0intro
-sending	/man/2/styxflush
 sending	/man/2/styxservers
 sending	/man/2/wmsrv
 sending	/man/3/ip
@@ -49792,7 +49222,6 @@ sendmsg	/man/2/keyring-getmsg
 sendmsg	/man/2/msgio
 sendpin	/man/2/secstore
 sendra	/man/2/ip
-sendreply	/man/2/styxflush
 sends	/man/1/acme
 sends	/man/1/collab-clients
 sends	/man/1/miniterm
@@ -49815,7 +49244,6 @@ sends	/man/2/security-login
 sends	/man/2/smtp
 sends	/man/2/spree
 sends	/man/2/spree-gather
-sends	/man/2/styxflush
 sends	/man/2/styxservers
 sends	/man/2/sys-file2chan
 sends	/man/2/tk
@@ -49876,7 +49304,6 @@ sent	/man/2/spree
 sent	/man/2/spree-cardlib
 sent	/man/2/spree-gather
 sent	/man/2/styxconv
-sent	/man/2/styxflush
 sent	/man/2/styxservers
 sent	/man/2/sys-file2chan
 sent	/man/2/timers
@@ -50096,7 +49523,6 @@ server	/man/10/styxserver
 server	/man/2/dhcpclient
 server	/man/2/dial
 server	/man/2/factotum
-server	/man/2/format
 server	/man/2/keyring-auth
 server	/man/2/plumbmsg
 server	/man/2/pop3
@@ -50107,7 +49533,6 @@ server	/man/2/smtp
 server	/man/2/spree
 server	/man/2/styx
 server	/man/2/styxconv
-server	/man/2/styxflush
 server	/man/2/styxpersist
 server	/man/2/styxservers
 server	/man/2/sys-0intro
@@ -50120,7 +49545,6 @@ server	/man/2/sys-fversion
 server	/man/2/sys-open
 server	/man/2/sys-pctl
 server	/man/2/sys-stat
-server	/man/2/tftp
 server	/man/2/venti
 server	/man/3/0intro
 server	/man/3/draw
@@ -50209,14 +49633,12 @@ servers	/man/10/eve
 servers	/man/10/plan9.ini
 servers	/man/2/dhcpclient
 servers	/man/2/factotum
-servers	/man/2/format
 servers	/man/2/registries
 servers	/man/2/styx
 servers	/man/2/styxpersist
 servers	/man/2/styxservers
 servers	/man/2/sys-0intro
 servers	/man/2/sys-stat
-servers	/man/2/virgil
 servers	/man/3/mnt
 servers	/man/4/0intro
 servers	/man/4/namespace
@@ -50357,7 +49779,6 @@ session	/man/1/grid-session
 session	/man/1/spree-join
 session	/man/2/prof
 session	/man/2/spree
-session	/man/2/styxflush
 session	/man/2/venti
 session	/man/3/dbg
 session	/man/3/tls
@@ -50369,13 +49790,11 @@ session	/man/8/rdbgsrv
 session.b	/man/1/grid-session
 session.rpc	/man/2/venti
 sessions	/man/2/spree
-sessions	/man/2/styxflush
 sessions	/man/4/spree
 set.bytes	/man/2/sets
 set.str	/man/2/sets
 setalpha	/man/2/draw-0intro
 setalpha	/man/6/colour
-setappinfo	/man/2/palmfile
 setarchivename	/man/2/spree-cardlib
 setattr	/man/2/spree
 setattrvisibility	/man/2/spree
@@ -50404,7 +49823,6 @@ sets.m	/man/2/sets
 sets.m	/man/2/spree
 sets.m	/man/2/spree-cardlib
 sets32.m	/man/2/sets
-setsortinfo	/man/2/palmfile
 setting	/man/1/auplay
 setting	/man/1/charon
 setting	/man/1/deb
@@ -50475,14 +49893,12 @@ seventh	/man/1/m4
 severity	/man/1/sh-test
 severity	/man/2/itslib
 sexp	/man/1/sh-sexprs
-sexp	/man/2/format
 sexp	/man/2/sexprs
 sexp	/man/2/spki
 sexp	/man/2/spki-verifier
 sexp	/man/6/sexprs
 sexp.binary	/man/2/sexprs
 sexp.list	/man/2/sexprs
-sexp.parse	/man/2/format
 sexp.parse	/man/2/sexprs
 sexp.read	/man/2/sexprs
 sexp.string	/man/2/sexprs
@@ -50491,7 +49907,6 @@ sexpr	/man/1/sh-sexprs
 sexpr	/man/2/spki
 sexpr	/man/6/sexprs
 sexprs	/man/1/sh-sexprs
-sexprs	/man/2/format
 sexprs	/man/2/sexprs
 sexprs	/man/2/spki
 sexprs	/man/2/spki-verifier
@@ -50501,7 +49916,6 @@ sexprs	/man/6/sexprs
 sexprs	/man/6/ubfa
 sexprs.b	/man/1/sh-sexprs
 sexprs.b	/man/2/sexprs
-sexprs.m	/man/2/format
 sexprs.m	/man/2/sexprs
 sexprs.m	/man/2/spki
 sexprs.m	/man/2/spki-verifier
@@ -50648,7 +50062,6 @@ share	/man/2/draw-0intro
 share	/man/2/draw-display
 share	/man/2/draw-rect
 share	/man/2/keyring-auth
-share	/man/2/styxflush
 share	/man/2/styxservers
 share	/man/2/sys-0intro
 share	/man/2/sys-pctl
@@ -50793,7 +50206,6 @@ short	/man/10/lock
 short	/man/10/print
 short	/man/10/splhi
 short	/man/10/styx
-short	/man/2/palmfile
 short	/man/2/print
 short	/man/3/mnt
 short	/man/3/tv
@@ -50840,7 +50252,6 @@ shown	/man/10/error
 shown	/man/10/kproc
 shown	/man/2/command
 shown	/man/2/math-linalg
-shown	/man/2/palmfile
 shown	/man/2/prof
 shown	/man/2/sexprs
 shown	/man/2/sys-stat
@@ -51177,7 +50588,6 @@ similar	/man/2/factotum
 similar	/man/2/keyring-crypt
 similar	/man/2/keyring-getmsg
 similar	/man/2/msgio
-similar	/man/2/palmfile
 similar	/man/2/print
 similar	/man/2/regex
 similar	/man/2/sexprs
@@ -51397,7 +50807,6 @@ size	/man/2/factotum
 size	/man/2/hash
 size	/man/2/keyring-crypt
 size	/man/2/math-linalg
-size	/man/2/palmfile
 size	/man/2/plumbmsg
 size	/man/2/prefab-compound
 size	/man/2/prefab-element
@@ -51499,7 +50908,6 @@ sizes	/man/2/draw-font
 sizes	/man/2/draw-image
 sizes	/man/2/keyring-crypt
 sizes	/man/2/math-linalg
-sizes	/man/2/palmfile
 sizes	/man/2/prefab-element
 sizes	/man/2/print
 sizes	/man/3/flash
@@ -51519,7 +50927,6 @@ sk	/man/2/keyring-sha1
 sk	/man/2/spki
 sk	/man/6/auth
 sk	/man/8/ai2key
-skeleton	/man/2/styxflush
 skeleton	/man/4/namespace
 skip	/man/1/dd
 skipped	/man/1/tiny
@@ -51546,7 +50953,6 @@ slash	/man/10/2c
 slash	/man/10/a.out
 slash	/man/10/c2l
 slash	/man/10/mk
-slash	/man/2/palmfile
 slash	/man/2/sys-0intro
 slash	/man/3/pnp
 slash	/man/5/0intro
@@ -51599,7 +51005,6 @@ slider's	/man/9/scale
 sliderlength	/man/9/scale
 sliderrelief	/man/9/scale
 sliding	/man/6/image
-slight	/man/2/palmfile
 slight	/man/9/scrollbar
 slightly	/man/1/acme
 slightly	/man/1/dd
@@ -51713,7 +51118,6 @@ software	/man/10/kproc
 software	/man/10/plan9.ini
 software	/man/10/sleep
 software	/man/2/keyring-sha1
-software	/man/2/palmfile
 software	/man/3/vga
 software	/man/8/create
 software	/man/9/1copyright
@@ -51792,7 +51196,6 @@ sort	/man/10/c2l
 sort	/man/10/inm
 sort	/man/10/newchan
 sort	/man/2/math-linalg
-sort	/man/2/palmfile
 sort	/man/2/readdir
 sort	/man/2/spree-cardlib
 sort	/man/2/tkclient
@@ -51810,10 +51213,8 @@ sorted	/man/2/readdir
 sorted	/man/2/sys-dirread
 sorted	/man/6/keyboard
 sorted	/man/9/text
-sortinfo	/man/2/palmfile
 sorting	/man/2/draw-rect
 sorting	/man/2/math-linalg
-sorting	/man/2/palmfile
 sorting	/man/2/readdir
 sortkey	/man/2/readdir
 sorts	/man/1/sort
@@ -52047,7 +51448,6 @@ source	/man/2/factotum
 source	/man/2/filepat
 source	/man/2/filter
 source	/man/2/filter-deflate
-source	/man/2/format
 source	/man/2/fsproto
 source	/man/2/geodesy
 source	/man/2/hash
@@ -52070,7 +51470,6 @@ source	/man/2/math-linalg
 source	/man/2/mpeg
 source	/man/2/msgio
 source	/man/2/newns
-source	/man/2/palmfile
 source	/man/2/plumbmsg
 source	/man/2/pop3
 source	/man/2/popup
@@ -52104,7 +51503,6 @@ source	/man/2/string
 source	/man/2/stringinttab
 source	/man/2/styx
 source	/man/2/styxconv
-source	/man/2/styxflush
 source	/man/2/styxpersist
 source	/man/2/styxservers
 source	/man/2/styxservers-nametree
@@ -52116,12 +51514,10 @@ source	/man/2/sys-file2chan
 source	/man/2/sys-iounit
 source	/man/2/sys-print
 source	/man/2/tabs
-source	/man/2/tftp
 source	/man/2/tk
 source	/man/2/tkclient
 source	/man/2/translate
 source	/man/2/venti
-source	/man/2/virgil
 source	/man/2/w3c-css
 source	/man/2/wmclient
 source	/man/2/wmlib
@@ -52325,7 +51721,6 @@ space	/man/2/ip
 space	/man/2/ir
 space	/man/2/keyring-0intro
 space	/man/2/newns
-space	/man/2/palmfile
 space	/man/2/prefab-compound
 space	/man/2/prefab-element
 space	/man/2/registries
@@ -52487,7 +51882,6 @@ spawn	/man/2/dial
 spawn	/man/2/draw-display
 spawn	/man/2/sh
 spawn	/man/2/styxconv
-spawn	/man/2/styxflush
 spawn	/man/2/sys-0intro
 spawn	/man/2/sys-export
 spawn	/man/3/cmd
@@ -52520,15 +51914,12 @@ spec	/man/1/fs
 spec	/man/10/dev
 spec	/man/10/devattach
 spec	/man/2/dial
-spec	/man/2/format
 spec	/man/2/spki
 spec	/man/2/spree-cardlib
 spec	/man/3/fs
 spec	/man/3/indir
 spec	/man/3/srv
 spec	/man/6/namespace
-spec2fmt	/man/2/format
-spec2se	/man/2/format
 specfies	/man/9/scale
 specialised	/man/1/zeros
 specialised	/man/10/0intro
@@ -52570,7 +51961,6 @@ specific	/man/2/convcs
 specific	/man/2/dhcpclient
 specific	/man/2/factotum
 specific	/man/2/filter
-specific	/man/2/palmfile
 specific	/man/2/prefab-element
 specific	/man/2/print
 specific	/man/2/prof
@@ -52627,8 +52017,6 @@ specification	/man/1/telnet
 specification	/man/10/devattach
 specification	/man/10/print
 specification	/man/2/filter
-specification	/man/2/format
-specification	/man/2/palmfile
 specification	/man/2/print
 specification	/man/2/string
 specification	/man/2/sys-print
@@ -52642,7 +52030,6 @@ specification	/man/6/regexp
 specification	/man/9/menu
 specifications	/man/1/sh-arg
 specifications	/man/10/print
-specifications	/man/2/format
 specifications	/man/2/spree-cardlib
 specifications	/man/2/sys-print
 specifications	/man/6/font
@@ -52698,7 +52085,6 @@ specifies	/man/2/draw-0intro
 specifies	/man/2/draw-font
 specifies	/man/2/draw-point
 specifies	/man/2/filter-deflate
-specifies	/man/2/format
 specifies	/man/2/imagefile
 specifies	/man/2/keyring-0intro
 specifies	/man/2/mpeg
@@ -52775,7 +52161,6 @@ specify	/man/10/a.out
 specify	/man/10/mk
 specify	/man/10/plan9.ini
 specify	/man/2/draw-image
-specify	/man/2/format
 specify	/man/2/keyring-0intro
 specify	/man/2/prefab-0intro
 specify	/man/2/prefab-environ
@@ -53200,7 +52585,6 @@ standard	/man/2/keyring-crypt
 standard	/man/2/math-0intro
 standard	/man/2/math-fp
 standard	/man/2/math-linalg
-standard	/man/2/palmfile
 standard	/man/2/prof
 standard	/man/2/security-0intro
 standard	/man/2/sexprs
@@ -53446,7 +52830,6 @@ stat	/man/10/styx
 stat	/man/10/styxserver
 stat	/man/2/disks
 stat	/man/2/fsproto
-stat	/man/2/palmfile
 stat	/man/2/pop3
 stat	/man/2/readdir
 stat	/man/2/styx
@@ -53757,7 +53140,6 @@ stopped	/man/10/acid
 stopped	/man/10/devattach
 stopped	/man/10/ntsrv
 stopped	/man/2/debug
-stopped	/man/2/palmfile
 stopped	/man/2/prof
 stopped	/man/2/sys-export
 stopped	/man/2/timers
@@ -53823,7 +53205,6 @@ store	/man/2/dbm
 store	/man/2/disks
 store	/man/2/draw-context
 store	/man/2/draw-screen
-store	/man/2/palmfile
 store	/man/2/secstore
 store	/man/2/spree-gather
 store	/man/2/spree-objstore
@@ -53865,7 +53246,6 @@ stored	/man/2/hash
 stored	/man/2/imagefile
 stored	/man/2/ip
 stored	/man/2/keyring-0intro
-stored	/man/2/palmfile
 stored	/man/2/prof
 stored	/man/2/secstore
 stored	/man/2/security-login
@@ -53909,7 +53289,6 @@ stores	/man/1/webgrab
 stores	/man/2/0intro
 stores	/man/2/disks
 stores	/man/2/draw-0intro
-stores	/man/2/palmfile
 stores	/man/2/sets
 stores	/man/2/spree-allow
 stores	/man/2/sys-fd2path
@@ -54123,7 +53502,6 @@ string	/man/2/factotum
 string	/man/2/filepat
 string	/man/2/filter
 string	/man/2/filter-deflate
-string	/man/2/format
 string	/man/2/fsproto
 string	/man/2/geodesy
 string	/man/2/hash
@@ -54143,7 +53521,6 @@ string	/man/2/keyset
 string	/man/2/mpeg
 string	/man/2/msgio
 string	/man/2/newns
-string	/man/2/palmfile
 string	/man/2/plumbmsg
 string	/man/2/pop3
 string	/man/2/popup
@@ -54196,12 +53573,10 @@ string	/man/2/sys-stat
 string	/man/2/sys-tokenize
 string	/man/2/sys-werrstr
 string	/man/2/tabs
-string	/man/2/tftp
 string	/man/2/tk
 string	/man/2/tkclient
 string	/man/2/translate
 string	/man/2/venti
-string	/man/2/virgil
 string	/man/2/w3c-css
 string	/man/2/wmclient
 string	/man/2/wmlib
@@ -54324,7 +53699,6 @@ strings	/man/2/dis
 strings	/man/2/keyring-0intro
 strings	/man/2/keyring-getstring
 strings	/man/2/msgio
-strings	/man/2/palmfile
 strings	/man/2/prefab-element
 strings	/man/2/security-0intro
 strings	/man/2/sexprs
@@ -54439,7 +53813,6 @@ struct	/man/10/ref
 struct	/man/10/styx
 struct	/man/10/styxserver
 struct	/man/6/man
-structurally	/man/2/format
 structure	/man/1/0intro
 structure	/man/1/alphabet-fs
 structure	/man/1/dd
@@ -54476,18 +53849,15 @@ structure	/man/2/draw-0intro
 structure	/man/2/draw-display
 structure	/man/2/draw-image
 structure	/man/2/draw-screen
-structure	/man/2/format
 structure	/man/2/ip
 structure	/man/2/keyring-getmsg
 structure	/man/2/keyring-getstring
 structure	/man/2/msgio
-structure	/man/2/palmfile
 structure	/man/2/plumbmsg
 structure	/man/2/prefab-compound
 structure	/man/2/prefab-element
 structure	/man/2/sexprs
 structure	/man/2/styx
-structure	/man/2/styxflush
 structure	/man/2/styxservers
 structure	/man/2/sys-dial
 structure	/man/2/sys-dirread
@@ -54512,7 +53882,6 @@ structure	/man/6/colour
 structure	/man/6/dis
 structure	/man/6/sexprs
 structured	/man/2/asn1
-structured	/man/2/format
 structured	/man/2/prefab-0intro
 structured	/man/3/logfs
 structured	/man/6/json
@@ -54531,14 +53900,12 @@ structures	/man/2/asn1
 structures	/man/2/debug
 structures	/man/2/dis
 structures	/man/2/draw-0intro
-structures	/man/2/format
 structures	/man/2/prefab-compound
 structures	/man/2/prefab-element
 structures	/man/2/print
 structures	/man/2/prof
 structures	/man/2/spki
 structures	/man/2/styx
-structures	/man/2/styxflush
 structures	/man/2/sys-0intro
 structures	/man/2/sys-dirread
 structures	/man/3/dbg
@@ -54622,7 +53989,6 @@ styx	/man/10/styxserver
 styx	/man/2/registries
 styx	/man/2/styx
 styx	/man/2/styxconv
-styx	/man/2/styxflush
 styx	/man/2/styxpersist
 styx	/man/2/styxservers
 styx	/man/2/styxservers-nametree
@@ -54670,7 +54036,6 @@ styx.h	/man/10/styx
 styx.h	/man/10/styxserver
 styx.h	/man/5/0intro
 styx.m	/man/2/styx
-styx.m	/man/2/styxflush
 styx.m	/man/2/styxservers
 styx.m	/man/2/styxservers-nametree
 styx.sh	/man/8/svc
@@ -54688,9 +54053,6 @@ styxdebug	/man/10/styxserver
 styxend	/man/10/styxserver
 styxfile	/man/10/styxserver
 styxfindfile	/man/10/styxserver
-styxflush	/man/2/styxflush
-styxflush.b	/man/2/styxflush
-styxflush.m	/man/2/styxflush
 styxfree	/man/10/styxserver
 styxinit	/man/10/styxserver
 styxlisten	/man/1/listen
@@ -54739,7 +54101,6 @@ sub	/man/1/deb
 sub	/man/1/toolbar
 sub	/man/1/webgrab
 sub	/man/2/draw-point
-sub	/man/2/format
 sub	/man/2/keyring-ipint
 sub	/man/2/prefab-element
 sub	/man/2/sexprs
@@ -54871,7 +54232,6 @@ subsequently	/man/9/variable
 subset	/man/1/freq
 subset	/man/10/kproc
 subset	/man/2/factotum
-subset	/man/2/format
 subset	/man/2/sys-self
 subset	/man/3/audio
 subset	/man/3/ip
@@ -54970,7 +54330,6 @@ succeed	/man/3/ip
 succeed	/man/5/walk
 succeeded	/man/10/devattach
 succeeded	/man/2/factotum
-succeeded	/man/2/styxflush
 succeeded	/man/4/factotum
 succeeding	/man/1/uniq
 succeeds	/man/1/runas
@@ -55016,7 +54375,6 @@ success	/man/2/sys-dial
 success	/man/2/sys-export
 success	/man/2/sys-pipe
 success	/man/2/sys-stat
-success	/man/2/tftp
 success	/man/3/boot
 success	/man/3/cmd
 success	/man/3/flash
@@ -55181,7 +54539,6 @@ suitable	/man/2/factotum
 suitable	/man/2/keyring-certtostr
 suitable	/man/2/keyset
 suitable	/man/2/newns
-suitable	/man/2/palmfile
 suitable	/man/2/prefab-0intro
 suitable	/man/2/pslib
 suitable	/man/2/registries
@@ -55316,7 +54673,6 @@ support	/man/10/dmainit
 support	/man/10/plan9.ini
 support	/man/2/asn1
 support	/man/2/disks
-support	/man/2/format
 support	/man/2/hash
 support	/man/2/imagefile
 support	/man/2/keyring-ipint
@@ -55366,7 +54722,6 @@ supported	/man/10/styxserver
 supported	/man/2/convcs
 supported	/man/2/geodesy
 supported	/man/2/keyring-ipint
-supported	/man/2/palmfile
 supported	/man/2/print
 supported	/man/2/spki-verifier
 supported	/man/2/sys-0intro
@@ -55446,7 +54801,6 @@ suppresses	/man/10/acid
 suppresses	/man/10/iar
 surfer	/man/1/charon
 surprisingly	/man/1/0intro
-surprisingly	/man/2/styxflush
 surrounded	/man/1/bind
 surrounded	/man/1/mash
 surrounded	/man/1/sh
@@ -55569,7 +54923,6 @@ symbolic	/man/1/webgrab
 symbolic	/man/10/acid
 symbolic	/man/10/seconds
 symbolic	/man/2/dis
-symbolic	/man/2/format
 symbolic	/man/2/registries
 symbolic	/man/2/sexprs
 symbolic	/man/2/sys-stat
@@ -55616,7 +54969,6 @@ synchronisation	/man/6/dis
 synchronise	/man/10/sleep
 synchronise	/man/2/sh
 synchronise	/man/2/sys-read
-synchronised	/man/2/palmfile
 synchronize	/man/2/sys-0intro
 synchronize	/man/3/tls
 synchronous	/man/2/sys-0intro
@@ -55753,7 +55105,6 @@ sys	/man/2/keyring-getstring
 sys	/man/2/keyring-sha1
 sys	/man/2/msgio
 sys	/man/2/newns
-sys	/man/2/palmfile
 sys	/man/2/plumbmsg
 sys	/man/2/print
 sys	/man/2/readdir
@@ -55767,7 +55118,6 @@ sys	/man/2/spree
 sys	/man/2/srv
 sys	/man/2/styx
 sys	/man/2/styxconv
-sys	/man/2/styxflush
 sys	/man/2/styxpersist
 sys	/man/2/styxservers
 sys	/man/2/styxservers-nametree
@@ -55798,10 +55148,8 @@ sys	/man/2/sys-stat
 sys	/man/2/sys-tokenize
 sys	/man/2/sys-utfbytes
 sys	/man/2/sys-werrstr
-sys	/man/2/tftp
 sys	/man/2/timers
 sys	/man/2/venti
-sys	/man/2/virgil
 sys	/man/2/wmsrv
 sys	/man/2/workdir
 sys	/man/3/0intro
@@ -55866,13 +55214,11 @@ sys.m	/man/1/yacc
 sys.m	/man/2/0intro
 sys.m	/man/2/arg
 sys.m	/man/2/draw-example
-sys.m	/man/2/format
 sys.m	/man/2/ir
 sys.m	/man/2/itslib
 sys.m	/man/2/security-ssl
 sys.m	/man/2/spree
 sys.m	/man/2/spree-cardlib
-sys.m	/man/2/styxflush
 sys.m	/man/2/styxpersist
 sys.m	/man/2/styxservers
 sys.m	/man/2/styxservers-nametree
@@ -56111,7 +55457,6 @@ tag	/man/2/spki
 tag	/man/2/spki-verifier
 tag	/man/2/spree-allow
 tag	/man/2/styx
-tag	/man/2/styxflush
 tag	/man/2/wmlib
 tag	/man/2/wmsrv
 tag	/man/2/xml
@@ -56166,7 +55511,6 @@ tagname	/man/10/2c
 tagname	/man/9/text
 tagno	/man/4/factotum
 tagof	/man/2/asn1
-tagof	/man/2/styxflush
 tagorid	/man/9/canvas
 tags	/man/1/acme
 tags	/man/1/brutus
@@ -56676,10 +56020,8 @@ text	/man/2/draw-image
 text	/man/2/encoding
 text	/man/2/ether
 text	/man/2/factotum
-text	/man/2/format
 text	/man/2/ip
 text	/man/2/keyring-certtostr
-text	/man/2/palmfile
 text	/man/2/plumbmsg
 text	/man/2/pop3
 text	/man/2/popup
@@ -56771,7 +56113,6 @@ textels	/man/1/sh-sexprs
 textfd	/man/2/print
 textfile	/man/10/acid
 textfont	/man/2/prefab-style
-textlength	/man/2/palmfile
 textop	/man/2/draw-image
 texts	/man/2/security-0intro
 texts	/man/9/text
@@ -56785,7 +56126,6 @@ textual	/man/2/draw-font
 textual	/man/2/encoding
 textual	/man/2/ether
 textual	/man/2/factotum
-textual	/man/2/format
 textual	/man/2/ip
 textual	/man/2/keyring-0intro
 textual	/man/2/keyring-certtostr
@@ -56846,10 +56186,8 @@ tflush	/man/5/0intro
 tflush	/man/5/flush
 tflush	/man/8/styxchat
 tftp	/man/2/dhcpclient
-tftp	/man/2/tftp
 tftp	/man/3/boot
 tftp	/man/8/bootpd
-tftp.b	/man/2/tftp
 tftpd	/man/8/bootpd
 tftpd	/man/8/mangaload
 tftpd.b	/man/8/bootpd
@@ -56896,7 +56234,6 @@ therefore	/man/10/styxserver
 therefore	/man/2/draw-image
 therefore	/man/2/geodesy
 therefore	/man/2/math-0intro
-therefore	/man/2/palmfile
 therefore	/man/2/security-0intro
 therefore	/man/2/sh
 therefore	/man/2/styxservers
@@ -57084,7 +56421,6 @@ time	/man/2/keyring-certtostr
 time	/man/2/keyring-crypt
 time	/man/2/keyring-sha1
 time	/man/2/math-0intro
-time	/man/2/palmfile
 time	/man/2/prof
 time	/man/2/readdir
 time	/man/2/registries
@@ -57100,7 +56436,6 @@ time	/man/2/sys-byte2char
 time	/man/2/sys-millisec
 time	/man/2/sys-sleep
 time	/man/2/sys-stat
-time	/man/2/tftp
 time	/man/2/w3c-css
 time	/man/2/wmsrv
 time	/man/3/boot
@@ -57164,7 +56499,6 @@ timefile	/man/8/applylog
 timekeeper	/man/3/rtc
 timeout	/man/10/plan9.ini
 timeout	/man/10/sleep
-timeout	/man/2/tftp
 timeout	/man/2/timers
 timeout	/man/3/vga
 timeout	/man/5/stat
@@ -57369,7 +56703,6 @@ tls	/man/4/factotum
 tls1	/man/3/tls
 tlsv1.0	/man/3/tls
 tm	/man/2/daytime
-tm	/man/2/styxflush
 tm2epoch	/man/2/daytime
 tmget	/man/3/dbg
 tmp	/man/1/alphabet-abc
@@ -57398,7 +56731,6 @@ tmp	/man/8/rdbgsrv
 tmp.dis	/man/1/uuencode
 tmput	/man/3/dbg
 tmsg	/man/2/styx
-tmsg	/man/2/styxflush
 tmsg	/man/2/styxservers
 tmsg	/man/8/styxchat
 tmsg.attach	/man/2/styxservers
@@ -57410,7 +56742,6 @@ tmsg.read	/man/2/styx
 tmsg.read	/man/2/styxservers
 tmsg.read	/man/2/styxservers-nametree
 tmsg.readerror	/man/2/styx
-tmsg.readerror	/man/2/styxflush
 tmsg.remove	/man/2/styxservers
 tmsg.stat	/man/2/styxservers
 tmsg.tag	/man/2/styx
@@ -57674,7 +57005,6 @@ transfer	/man/2/smtp
 transfer	/man/2/spree
 transfer	/man/2/spree-cardlib
 transfer	/man/2/sys-iounit
-transfer	/man/2/tftp
 transfer	/man/3/boot
 transfer	/man/3/i2c
 transfer	/man/3/ip
@@ -57993,7 +57323,6 @@ triple	/man/2/draw-display
 triple	/man/2/w3c-css
 triple	/man/6/colour
 triplets	/man/2/draw-0intro
-trivial	/man/2/tftp
 trivial	/man/6/colour
 trivial	/man/8/httpd
 trnote	/man/3/dbg
@@ -58098,7 +57427,6 @@ tuple	/man/2/dhcpclient
 tuple	/man/2/dis
 tuple	/man/2/draw-context
 tuple	/man/2/factotum
-tuple	/man/2/format
 tuple	/man/2/fsproto
 tuple	/man/2/geodesy
 tuple	/man/2/imagefile
@@ -58108,7 +57436,6 @@ tuple	/man/2/keyset
 tuple	/man/2/math-elem
 tuple	/man/2/math-fp
 tuple	/man/2/msgio
-tuple	/man/2/palmfile
 tuple	/man/2/plumbmsg
 tuple	/man/2/pop3
 tuple	/man/2/prefab-compound
@@ -58125,7 +57452,6 @@ tuple	/man/2/spree-allow
 tuple	/man/2/string
 tuple	/man/2/stringinttab
 tuple	/man/2/styx
-tuple	/man/2/styxflush
 tuple	/man/2/styxpersist
 tuple	/man/2/styxservers
 tuple	/man/2/styxservers-nametree
@@ -58285,12 +57611,10 @@ type	/man/2/draw-point
 type	/man/2/draw-rect
 type	/man/2/filter
 type	/man/2/filter-deflate
-type	/man/2/format
 type	/man/2/fsproto
 type	/man/2/hash
 type	/man/2/imagefile
 type	/man/2/keyring-sha1
-type	/man/2/palmfile
 type	/man/2/plumbmsg
 type	/man/2/prefab-0intro
 type	/man/2/prefab-compound
@@ -58426,7 +57750,6 @@ types	/man/2/draw-display
 types	/man/2/imagefile
 types	/man/2/ip
 types	/man/2/keyring-0intro
-types	/man/2/palmfile
 types	/man/2/prefab-0intro
 types	/man/2/prefab-element
 types	/man/2/prefab-environ
@@ -58525,7 +57848,6 @@ typically	/man/2/drawmux
 typically	/man/2/factotum
 typically	/man/2/keyring-certtostr
 typically	/man/2/newns
-typically	/man/2/palmfile
 typically	/man/2/popup
 typically	/man/2/prefab-compound
 typically	/man/2/registries
@@ -58537,7 +57859,6 @@ typically	/man/2/sys-fd2path
 typically	/man/2/sys-pctl
 typically	/man/2/sys-pipe
 typically	/man/2/sys-self
-typically	/man/2/tftp
 typically	/man/3/cons
 typically	/man/3/dbg
 typically	/man/3/dynld
@@ -58629,7 +57950,6 @@ udp	/man/2/dhcpclient
 udp	/man/2/dial
 udp	/man/2/srv
 udp	/man/2/sys-dial
-udp	/man/2/virgil
 udp	/man/3/ip
 udp	/man/6/ndb
 udp	/man/8/bootpd
@@ -58654,9 +57974,7 @@ uid	/man/6/proto
 uid	/man/8/applylog
 uid	/man/8/create
 uid	/man/8/styxchat
-uids	/man/2/palmfile
 uids	/man/3/logfs
-uidseed	/man/2/palmfile
 uint	/man/10/devattach
 uint	/man/10/styx
 uint	/man/10/styxserver
@@ -58746,7 +58064,6 @@ unbound	/man/2/sys-bind
 unbound	/man/3/ip
 unbound	/man/9/bind
 unbuffered	/man/1/xd
-unbuffered	/man/2/styxflush
 unbuffered	/man/3/flash
 unbundle	/man/1/alphabet-fs
 unbundle	/man/1/fs
@@ -58771,12 +58088,10 @@ unclassified	/man/2/security-0intro
 unclear	/man/2/styxpersist
 uncompressed	/man/1/gzip
 uncompressed	/man/10/5cv
-uncompressed	/man/2/palmfile
 uncompressed	/man/3/boot
 uncompressed	/man/3/draw
 uncompressed	/man/6/image
 uncompressed	/man/8/collabsrv
-uncompressing	/man/2/palmfile
 unconfig	/man/3/logfs
 unconstrained	/man/9/canvas
 unconsumed	/man/10/allocb
@@ -58896,7 +58211,6 @@ undone	/man/2/sys-bind
 undone	/man/4/acme
 unencoded	/man/2/sexprs
 unencrypted	/man/10/plan9.ini
-unencrypted	/man/2/palmfile
 unescaped	/man/6/regexp
 unexecuted	/man/1/cprof
 unexpectedly	/man/1/acme
@@ -59011,7 +58325,6 @@ unique	/man/10/newchan
 unique	/man/10/plan9.ini
 unique	/man/10/styxserver
 unique	/man/2/draw-screen
-unique	/man/2/palmfile
 unique	/man/2/prefab-0intro
 unique	/man/2/spree
 unique	/man/2/spree-cardlib
@@ -59213,7 +58526,6 @@ unmapped	/man/9/destroy
 unmapped	/man/9/pack
 unmaps	/man/9/grid
 unmaps	/man/9/pack
-unmarshal	/man/2/format
 unmasks	/man/10/intrenable
 unmatched	/man/1/tiny
 unmatched	/man/2/attrdb
@@ -59244,7 +58556,6 @@ unoccupied	/man/9/grid
 unopened	/man/2/styxservers
 unordered	/man/2/asn1
 unpack	/man/2/dis
-unpack	/man/2/palmfile
 unpack	/man/2/plumbmsg
 unpack	/man/2/sexprs
 unpack	/man/2/styx
@@ -59254,15 +58565,12 @@ unpackdir	/man/5/stat
 unpacked	/man/2/styx
 unpacked	/man/8/mkfs
 unpackentry	/man/2/venti
-unpacking	/man/2/palmfile
 unpacking	/man/2/venti
 unpacking	/man/8/mkfs
 unpackroot	/man/2/venti
 unpacks	/man/1/gettar
 unpacks	/man/2/plumbmsg
 unpacks	/man/8/mkfs
-unpacktext	/man/2/palmfile
-unpaddable	/man/2/palmfile
 unparse	/man/1/alphabet-main
 unparsed	/man/2/sexprs
 unpartitioned	/man/8/prep
@@ -59368,7 +58676,6 @@ unused	/man/1/limbo
 unused	/man/10/2c
 unused	/man/10/ar
 unused	/man/2/asn1
-unused	/man/2/palmfile
 unused	/man/2/spree-cardlib
 unused	/man/2/styx
 unused	/man/2/styxservers
@@ -59618,7 +58925,6 @@ user	/man/2/keyring-certtostr
 user	/man/2/keyring-gensk
 user	/man/2/keyset
 user	/man/2/newns
-user	/man/2/palmfile
 user	/man/2/plumbmsg
 user	/man/2/pop3
 user	/man/2/prefab-0intro
@@ -59891,7 +59197,6 @@ using	/man/2/sys-pctl
 using	/man/2/sys-read
 using	/man/2/sys-self
 using	/man/2/sys-stat
-using	/man/2/tftp
 using	/man/2/timers
 using	/man/2/tk
 using	/man/2/translate
@@ -60025,7 +59330,6 @@ usual	/man/2/secstore
 usual	/man/2/sh
 usual	/man/2/spki
 usual	/man/2/spree-cardlib
-usual	/man/2/styxflush
 usual	/man/3/ip
 usual	/man/4/acme
 usual	/man/5/attach
@@ -60059,7 +59363,6 @@ utf	/man/2/draw-0intro
 utf	/man/2/draw-image
 utf	/man/2/keyring-getmsg
 utf	/man/2/msgio
-utf	/man/2/palmfile
 utf	/man/2/plumbmsg
 utf	/man/2/sexprs
 utf	/man/2/styxservers
@@ -60163,7 +59466,6 @@ val	/man/2/attrdb
 val	/man/2/debug
 val	/man/2/env
 val	/man/2/factotum
-val	/man/2/format
 val	/man/2/hash
 val	/man/2/plumbmsg
 val	/man/2/registries
@@ -60205,7 +59507,6 @@ valid	/man/2/dis
 valid	/man/2/factotum
 valid	/man/2/ip
 valid	/man/2/keyring-sha1
-valid	/man/2/palmfile
 valid	/man/2/regex
 valid	/man/2/security-0intro
 valid	/man/2/spki
@@ -60345,7 +59646,6 @@ value	/man/2/draw-screen
 value	/man/2/env
 value	/man/2/factotum
 value	/man/2/filter
-value	/man/2/format
 value	/man/2/hash
 value	/man/2/ip
 value	/man/2/keyring-certtostr
@@ -60356,7 +59656,6 @@ value	/man/2/math-0intro
 value	/man/2/math-export
 value	/man/2/math-fp
 value	/man/2/msgio
-value	/man/2/palmfile
 value	/man/2/plumbmsg
 value	/man/2/popup
 value	/man/2/prefab-compound
@@ -60573,14 +59872,12 @@ values	/man/2/draw-0intro
 values	/man/2/draw-display
 values	/man/2/draw-image
 values	/man/2/factotum
-values	/man/2/format
 values	/man/2/geodesy
 values	/man/2/hash
 values	/man/2/ip
 values	/man/2/keyring-0intro
 values	/man/2/math-export
 values	/man/2/math-fp
-values	/man/2/palmfile
 values	/man/2/popup
 values	/man/2/readdir
 values	/man/2/registries
@@ -60991,7 +60288,6 @@ version	/man/10/9load
 version	/man/10/newchan
 version	/man/10/styx
 version	/man/10/styxserver
-version	/man/2/palmfile
 version	/man/2/security-0intro
 version	/man/2/styx
 version	/man/2/styxconv
@@ -61177,11 +60473,8 @@ viewing	/man/1/grid-monitor
 views	/man/9/scrollbar
 villas	/man/6/attrdb
 virgil	/man/1/mux
-virgil	/man/2/virgil
 virgil	/man/8/virgild
-virgil.b	/man/2/virgil
 virgild	/man/1/mux
-virgild	/man/2/virgil
 virgild	/man/8/virgild
 virgild.b	/man/8/virgild
 virtual	/man/1/0intro
@@ -61418,7 +60711,6 @@ waits	/man/2/bufio-chanfill
 waits	/man/2/debug
 waits	/man/2/dialog
 waits	/man/2/plumbmsg
-waits	/man/2/virgil
 waits	/man/3/mpeg
 waits	/man/4/factotum
 waits	/man/8/styxchat
@@ -61983,7 +61275,6 @@ wise	/man/3/dbg
 wish	/man/1/0intro
 wish	/man/1/9win
 wish	/man/1/wish
-wish	/man/2/format
 wish	/man/2/ir
 wish	/man/2/math-fp
 wish	/man/2/spree-gather
@@ -62255,7 +61546,6 @@ write	/man/2/keyring-auth
 write	/man/2/plumbmsg
 write	/man/2/spree
 write	/man/2/styx
-write	/man/2/styxflush
 write	/man/2/styxpersist
 write	/man/2/styxservers
 write	/man/2/sys-0intro
@@ -62389,7 +61679,6 @@ writes	/man/2/dhcpclient
 writes	/man/2/draw-example
 writes	/man/2/draw-image
 writes	/man/2/factotum
-writes	/man/2/format
 writes	/man/2/keyring-auth
 writes	/man/2/keyring-getstring
 writes	/man/2/mpeg
@@ -62403,7 +61692,6 @@ writes	/man/2/sys-iounit
 writes	/man/2/sys-pipe
 writes	/man/2/sys-print
 writes	/man/2/sys-read
-writes	/man/2/tftp
 writes	/man/2/venti
 writes	/man/3/arch
 writes	/man/3/audio
@@ -62460,7 +61748,6 @@ writing	/man/2/env
 writing	/man/2/imagefile
 writing	/man/2/keyring-crypt
 writing	/man/2/keyring-getmsg
-writing	/man/2/palmfile
 writing	/man/2/plumbmsg
 writing	/man/2/pslib
 writing	/man/2/security-0intro
@@ -62558,11 +61845,9 @@ written	/man/2/dhcpclient
 written	/man/2/dial
 written	/man/2/draw-image
 written	/man/2/ether
-written	/man/2/format
 written	/man/2/keyring-0intro
 written	/man/2/keyring-getstring
 written	/man/2/msgio
-written	/man/2/palmfile
 written	/man/2/plumbmsg
 written	/man/2/registries
 written	/man/2/secstore
@@ -62645,7 +61930,6 @@ ws2	/man/2/xml
 wstat	/man/10/dev
 wstat	/man/10/devattach
 wstat	/man/10/styxserver
-wstat	/man/2/palmfile
 wstat	/man/2/styx
 wstat	/man/2/styxservers-nametree
 wstat	/man/2/sys-0intro

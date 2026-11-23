@@ -110,7 +110,6 @@ filter filter
 deflate filter-deflate
 filter-deflate filter-deflate
 inflate filter-deflate
-format format
 fsproto fsproto
 readprotofile fsproto
 readprotostring fsproto
@@ -257,13 +256,6 @@ senderrmsg msgio
 sendmsg msgio
 newns newns
 newuser newns
-categories palmfile
-dbinfo palmfile
-doc palmfile
-entry palmfile
-palmfile palmfile
-pfile palmfile
-record palmfile
 plumbmsg plumbmsg
 pop3 pop3
 add popup
@@ -371,7 +363,6 @@ styx styx
 tmsg styx
 unpackdir styx
 styxconv styxconv
-styxflush styxflush
 styxpersist styxpersist
 styxservers styxservers
 nametree styxservers-nametree
@@ -452,7 +443,6 @@ werrstr sys-werrstr
 mktabs tabs
 tabs tabs
 tabsctl tabs
-tftp tftp
 timers timers
 cmd tk
 imageget tk
@@ -479,7 +469,6 @@ opendict translate
 opendicts translate
 translate translate
 venti venti
-virgil virgil
 w3c w3c-css
 w3c-css w3c-css
 makedrawcontext wmclient
