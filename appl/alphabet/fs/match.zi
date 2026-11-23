@@ -1,11 +1,13 @@
 // /fs/match [-ar] string -> gate: entries whose name fits a shell pattern;
-// -a tries the whole path, -r takes the pattern as a regular expression.
+// -a tries the whole path, -r takes the pattern as a regular expression,
+// with appl/lib/regex.b's syntax and unanchored match.
 Al :: #import "alpha_eval";
 Va :: #import "alpha_values";
 Ty :: #import "alpha_types";
 using Io :: #import "taijios_io";
 using Fs :: #import "fs/fsvalue";
 Filepat :: #import "fs/filepat";
+Rx :: #import "shell_regexp";
 
 Register :: (reg: s32) { Al.RegisterModule(reg, "match", "ps-a-r", Run) }
 
@@ -18,24 +20,42 @@ Run :: (call: *Al.Call) -> s32 {
         if Al.OptLetter(call, i) == #char "a" { all = true }
         if Al.OptLetter(call, i) == #char "r" { regex = true }
     }
-    if regex {
-        // no ZX regex library yet
-        out: Vec(u8);
-        BuilderPrint(*out, "fs: match: regex error on %: regular expressions are not available to ZX programs yet\n", Ty.QQ(pat));
-        unused Io.WriteBytes(2, BuilderFinish(out));
-        return -1;
-    }
     v := Va.NewValue(#char "p", prod);
     Va.SetText(v, pat);
     Va.SetN0(v, ifx all then 1 else 0);
+    if regex {
+        r: Regex;
+        err: Text;
+        if !Rx.Compile(pat, 0, *r.re, *err) {
+            out: Vec(u8);
+            BuilderPrint(*out, "fs: match: regex error on %: %\n", Ty.QQ(pat), TextView(err));
+            unused Io.WriteBytes(2, BuilderFinish(out));
+            return -1;
+        }
+        VecPush(regexes, r);
+        Va.SetN1(v, regexes.count);
+    }
     return v;
 }
 
 #scope_file
 
+// A compiled regular expression: the value's N1 is its index here plus one.
+Regex :: struct {
+    re: Rx.Re;
+}
+
 prod: s32 = -1;
+regexes: Vec(Regex);
 
 Gate :: (v: s32, e: *EntryItem) -> bool {
     name := ifx Va.N0(v) == 1 then e.path else e.dir.name;
+    n := Va.N1(v);
+    if n > 0 {
+        w: Vec(s32);
+        Filepat.Runes(name, *w);
+        m: Rx.Match;
+        return Rx.Execute(*regexes[n - 1].re, *w, *m);
+    }
     return Filepat.Match(Va.ValueText(v), name);
 }

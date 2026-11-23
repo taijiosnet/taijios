@@ -14,7 +14,8 @@
 // /fs/exec, /fs/pipe, /fs/query and /fs/run run their command through
 // /dis/sh.zx, as the Dis modules ran one in a shell of their own. /auth's
 // protocol waits for a ZX Inferno Auth client; only its key file is
-// checked here. /fs/match -r waits for a regular expression library.
+// checked here. /fs/match -r uses the regular expression module of the ZX
+// shell (appl/cmd/sh/shell_regexp.zi), a port of appl/lib/regex.b.
 // grid's working parts (the endpoint server, /grid/local and
 // /grid/line2rec) have their own test, tests/alphabet/grid_test.sh; its
 // remote, rexec and farm need a process started beside the caller.
@@ -303,7 +304,22 @@ block13: [6]Case = Case.[
     .{name = "grid:types-bad", script = "echo ${types /grid}\n\n", input = "", status = "error", out = "", err = "unknown typeset /grid\n"},
 ];
 
-CASES :: 214;
+block14: [12]Case = Case.[
+    .{name = "fs:match-r", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r txt}}} 1}\n", input = "", status = "", out = "tree/a.txt\ntree/sub/c.txt\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:match-r-end", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r '\\.txt$'}}} 1}\n", input = "", status = "", out = "tree/a.txt\ntree/sub/c.txt\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:match-r-start", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r '^a'}}} 1}\n", input = "", status = "", out = "tree/a.txt\n", err = ""},
+    .{name = "fs:match-r-all", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -a -r '^tree/sub'}}} 1}\n", input = "", status = "", out = "tree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:match-r-alt", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r 'b\\.b|z\\.txt'}}} 1}\n", input = "", status = "", out = "tree/b.b\n", err = ""},
+    .{name = "fs:match-r-sub", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r sub}}} 1}\n", input = "", status = "", out = "tree/sub\n", err = ""},
+    .{name = "fs:match-r-dir", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r '^d'}}} 1}\n", input = "", status = "", out = "tree/sub/d.b\ntree/sub/deep\n", err = ""},
+    .{name = "fs:match-caret", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match '^a'}}} 1}\n", input = "", status = "", out = "", err = ""},
+    .{name = "fs:match-r-bad", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r '['}}} 1}\n", input = "", status = "no value", out = "", err = "fs: match: regex error on '[': invalid regular expression\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:match-r-paren", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -a -r 'sub/(c|d)\\.txt$'}}} 1}\n", input = "", status = "", out = "tree/sub/c.txt\n", err = ""},
+    .{name = "fs:match-r-empty", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -r ''}}} 1}\n", input = "", status = "no value", out = "", err = "fs: match: regex error on '': missing expression\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:match-r-any", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -a -r '.'}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+];
+
+CASES :: 226;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -334,6 +350,8 @@ CaseAt :: (i: s64) -> Case {
     if i < 208 { return block12[i - 192] }
 
     if i < 214 { return block13[i - 208] }
+
+    if i < 226 { return block14[i - 214] }
 
     return block0[0];
 }

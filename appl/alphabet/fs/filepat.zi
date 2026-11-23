@@ -10,8 +10,7 @@ Match :: (pat: string, name: string) -> bool {
     return Match1(p[:], n[:]);
 }
 
-#scope_file
-
+// The runes of s, as Limbo's string-to-rune decoding gave them.
 Runes :: (s: string, out: *Vec(s32)) {
     i: s64 = 0;
     while i < s.count {
@@ -31,6 +30,8 @@ Runes :: (s: string, out: *Vec(s32)) {
         i += width;
     }
 }
+
+#scope_file
 
 Match1 :: (pat_in: []s32, name: []s32) -> bool {
     pat := pat_in;
