@@ -2,7 +2,8 @@
 // Ziran: env, date, chgrp, chmod, comm, cmp, ... Every expected status, output
 // and diagnostic below is what the Limbo original printed. Each case runs
 // through the guest shell, which starts /dis/NAME.zx. While /dis/NAME.dis is
-// still installed the same case also runs it, and both must agree exactly.
+// still installed the same case also runs it, from the same starting state,
+// and both must agree exactly.
 //
 // From the TaijiOS root, after "(cd appl/cmd && mk install)":
 //     ziran run --target=c --root tests/commands tests/commands/commands_a_l_test.zi -- [EMU]
@@ -15,13 +16,16 @@
 Case :: struct {
     tool: string // empty: args is a whole shell command
     args: string
-    before: string // shell lines run first, in the same guest shell
+    before: string // shell lines run before each run, in the same guest shell
     input: string // fixture used as standard input; empty reads /dev/null
     status: string
     out: string
     err: string
     binary_out: bool // standard output must equal the binary fixture
-}
+    modes: string // files whose ls -ld mode and name are checked after the run
+    owner: string // files whose ls -l owner and group are checked after the run
+    after_out: string // expected output of the modes or owner check
+};
 
 WORK :: "build/dis-commands-a-l/test";
 
@@ -29,8 +33,9 @@ ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 SQUEEZE :: "abczz\naabb\n";
 
+
 // The emulator's own variables name this host, so env's cases remove them first.
-cases: [30]Case = Case.[
+cases: [88]Case = Case.[
     .{tool = "env", before = "rm /env/emuargs /env/emuroot /env/emuhost /env/emuwdir\na=one\nb='two words'\n", out = "b='two words'\na=one\n"},
     .{tool = "env", args = "x", status = "usage", err = "Usage: env\n"},
     .{tool = "date", args = "-u 0", out = "Thu Jan 01 00:00:00 GMT 1970\n"},
@@ -64,6 +69,66 @@ cases: [30]Case = Case.[
     // Without an argument date reads /dev/time; only the shape is fixed.
     .{args = "date -n | sed 's/^[0-9][0-9]*$/number/'", out = "number\n"},
     .{args = "date | sed 's/^[A-Z][a-z][a-z] [A-Z][a-z][a-z] [0-9][0-9] [0-9:]* [A-Z]+ 20[0-9][0-9]$/date/'", before = "rm /env/timezone\n", out = "date\n"},
+    // chgrp: the hosted filesystem resolves owner and group by name only.
+    .{tool = "chgrp", status = "usage", err = "usage: chgrp [-uo] group file ...\n"},
+    .{tool = "chgrp", args = "-x", status = "usage", err = "usage: chgrp [-uo] group file ...\n"},
+    .{tool = "chgrp", args = "-h 100 f", before = "rm -f f\necho x > f\n", status = "usage", err = "usage: chgrp [-uo] group file ...\n"},
+    .{tool = "chgrp", args = "-u", status = "usage", err = "usage: chgrp [-uo] group file ...\n"},
+    .{tool = "chgrp", args = "100 f", before = "rm -f f\necho x > f\n", status = "error", err = "chgrp: can't change f: unknown user or group id\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-u 100 f", before = "rm -f f\necho x > f\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-o 100 f", before = "rm -f f\necho x > f\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-uo 100 f", before = "rm -f f\necho x > f\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-- 100 f", before = "rm -f f\necho x > f\n", status = "error", err = "chgrp: can't change f: unknown user or group id\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "100 nonexist", status = "error", err = "chgrp: can't change nonexist: 'nonexist' file does not exist\n"},
+    .{tool = "chgrp", args = "100 nonexist f", before = "rm -f f\necho x > f\n", status = "error", err = "chgrp: can't change nonexist: 'nonexist' file does not exist\nchgrp: can't change f: unknown user or group id\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "root f", before = "rm -f f\necho x > f\n", status = "error", err = "chgrp: can't change f: Operation not permitted\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "$u f", before = "rm -f f\necho x > f\nu=`{cat /dev/user}\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-u $u f", before = "rm -f f\necho x > f\nu=`{cat /dev/user}\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-uo $u f", before = "rm -f f\necho x > f\nu=`{cat /dev/user}\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "-ou $u f", before = "rm -f f\necho x > f\nu=`{cat /dev/user}\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "100", before = "rm -f f\necho x > f\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "100 ''", before = "rm -f f\necho x > f\n", status = "error", err = "chgrp: can't change : empty file name\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "'' f", before = "rm -f f\necho x > f\n", owner = "f", after_out = "user user\n"},
+    .{tool = "chgrp", args = "$u d", before = "rm -r d\nmkdir d\nu=`{cat /dev/user}\n", owner = "d", after_out = "user user\n"},
+    // chmod: an octal mode, or [augo][+-=][rwxalt] against the current mode.
+    .{tool = "chmod", status = "usage", err = "usage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n"},
+    .{tool = "chmod", args = "644", status = "usage", err = "usage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n"},
+    .{tool = "chmod", args = "600 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rw------- f\n"},
+    .{tool = "chmod", args = "8r600 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rw------- f\n"},
+    .{tool = "chmod", args = "0755 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rwxr-xr-x f\n"},
+    .{tool = "chmod", args = "' 644' f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rw-r--r-- f\n"},
+    .{tool = "chmod", args = "1000 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "----------- f\n"},
+    .{tool = "chmod", args = "8r0 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "----------- f\n"},
+    .{tool = "chmod", args = "8r777777 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rwxrwxrwx f\n"},
+    .{tool = "chmod", args = "8r-1 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rwxrwxrwx f\n"},
+    .{tool = "chmod", args = "8r77777777777777777777777 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rwxrwxrwx f\n"},
+    .{tool = "chmod", args = "77777777777777777777777777 f", before = "rm -f f\necho x > f\n", modes = "f", after_out = "--rwxrwxrwx f\n"},
+    .{tool = "chmod", args = "-777 f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "----------x f\n"},
+    .{tool = "chmod", args = "u+x f", before = "rm -f f\necho x > f\nchmod 600 f\n", modes = "f", after_out = "--rwx------ f\n"},
+    .{tool = "chmod", args = "go-rx f", before = "rm -f f\necho x > f\nchmod 755 f\n", modes = "f", after_out = "--rwx------ f\n"},
+    .{tool = "chmod", args = "'a=rw' f", before = "rm -f f\necho x > f\nchmod 600 f\n", modes = "f", after_out = "--rw-rw-rw- f\n"},
+    .{tool = "chmod", args = "+x f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "--rwxr-xr-x f\n"},
+    .{tool = "chmod", args = "g+w f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "--rw-rw-r-- f\n"},
+    .{tool = "chmod", args = "ug+r f", before = "rm -f f\necho x > f\nchmod 600 f\n", modes = "f", after_out = "--rw-r----- f\n"},
+    .{tool = "chmod", args = "'u=' f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "-----r--r-- f\n"},
+    .{tool = "chmod", args = "'u+' f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "--rw-r--r-- f\n"},
+    .{tool = "chmod", args = "a+l f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "--rw-r--r-- f\n"},
+    .{tool = "chmod", args = "a+t f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "--rw-r--r-- f\n"},
+    .{tool = "chmod", args = "a+a f", before = "rm -f f\necho x > f\nchmod 644 f\n", modes = "f", after_out = "--rw-r--r-- f\n"},
+    .{tool = "chmod", args = "755 f g", before = "rm -f f g\necho x > f\necho y > g\n", modes = "f g", after_out = "--rwxr-xr-x f\n--rwxr-xr-x g\n"},
+    .{tool = "chmod", args = "644 d", before = "rm -r d\nmkdir d\nchmod 755 d\n", modes = "d", after_out = "d-rw-r--r-- d\n"},
+    .{tool = "chmod", args = "999 f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode '999'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n", modes = "f", after_out = "--rw------- f\n"},
+    .{tool = "chmod", args = "bad f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode 'bad'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "0x1ff f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode '0x1ff'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "8r f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode ''\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "'' f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode ''\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "x f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode 'x'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "a+x+l+t f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode 'a+x+l+t'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "u+x+y f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode 'u+x+y'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "'u=rw,go-w' f", before = "rm -f f\necho x > f\n", status = "usage", err = "chmod: bad mode 'u=rw,go-w'\nusage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n",},
+    .{tool = "chmod", args = "644 nonexist", err = "chmod: cannot stat nonexist: 'nonexist' file does not exist\n"},
+    .{tool = "chmod", args = "644 nonexist f", before = "rm -f f\necho x > f\nchmod 600 f\n", err = "chmod: cannot stat nonexist: 'nonexist' file does not exist\n", modes = "f", after_out = "--rw-r--r-- f\n"},
+    .{tool = "chmod", args = "a+w nonexist f", before = "rm -f f\necho x > f\nchmod 600 f\n", err = "chmod: cannot stat nonexist: 'nonexist' file does not exist\n", modes = "f", after_out = "--rw--w--w- f\n"},
 ];
 
 failures: s32;
@@ -111,26 +176,54 @@ DisInstalled :: (tool: string) -> bool {
     return PathExists(BuilderFinish(path))
 }
 
+// The shell lines that record the state a case checks after its run.
+After :: (item: Case) -> string {
+    text: Vec(u8)
+    // ls -ld without the owner, group, size and date columns.
+    if item.modes != "" {
+        BuilderPrint(*text, "ls -ld % | sed 's/ [A-Z] [0-9][0-9]* [^ ]* [^ ]* [0-9][0-9]* [A-Z][a-z][a-z] [0-9][0-9]* [0-9:]*//'", item.modes)
+        return BuilderFinish(text)
+    }
+    // ls -ld with only the owner and group, the user's own name as "user".
+    if item.owner != "" {
+        BuilderPrint(*text, "ls -ld % | sed 's/^.* [A-Z] [0-9][0-9]* //' | sed 's/ [0-9][0-9]* .*//' | sed s/$u/user/g", item.owner)
+        return BuilderFinish(text)
+    }
+    return ""
+}
+
 // One guest shell script runs every case: the ZX command, and the Dis one
-// while it is installed, each keeping its results in a file.
+// while it is installed, each from the same starting state and each keeping
+// its results in a file.
 Script :: () -> Text {
     script: Vec(u8)
     BuilderPrint(*script, "cd /%/work\n", WORK)
     for cases {
-        if it.before != "" { BuilderAppend(script, it.before) }
+        after := After(it)
         input := ifx it.input == "" then "/dev/null" else it.input
         if it.tool == "" {
+            if it.before != "" { BuilderAppend(script, it.before) }
             BuilderPrint(*script, "{%}", it.args)
         } else {
             if DisInstalled(it.tool) {
+                if it.before != "" { BuilderAppend(script, it.before) }
                 BuilderPrint(*script, "/dis/%.dis %", it.tool, it.args)
                 BuilderPrint(*script, " < % > ../result/dis.out.% >[2] ../result/dis.err.%\n", input, it_index, it_index)
                 BuilderPrint(*script, "echo $status > ../result/dis.status.%\n", it_index)
+                if after != "" {
+                    if it.owner != "" { unused BuilderAppend(script, "u=`{cat /dev/user}\n") }
+                    BuilderPrint(*script, "{%\n} > ../result/dis.after.% >[2] ../result/dis.after.%\n", after, it_index, it_index)
+                }
             }
+            if it.before != "" { BuilderAppend(script, it.before) }
             BuilderPrint(*script, "% %", it.tool, it.args)
         }
         BuilderPrint(*script, " < % > ../result/zx.out.% >[2] ../result/zx.err.%\n", input, it_index, it_index)
         BuilderPrint(*script, "echo $status > ../result/zx.status.%\n", it_index)
+        if after != "" {
+            if it.owner != "" { unused BuilderAppend(script, "u=`{cat /dev/user}\n") }
+            BuilderPrint(*script, "{%\n} > ../result/zx.after.% >[2] ../result/zx.after.%\n", after, it_index, it_index)
+        }
     }
     return BuilderFinish(script)
 }
@@ -168,13 +261,22 @@ main :: (argc: s32, argv: **u8) -> s32 {
         Expect(out == want, it_index, "stdout", out, want)
         err := Result("zx.err", it_index)
         Expect(err == it.err, it_index, "stderr", err, it.err)
-        if it.tool != "" && DisInstalled(it.tool) {
+        compared := it.tool != "" && DisInstalled(it.tool)
+        if compared {
             dis_status := Result("dis.status", it_index)
             Expect(dis_status == got_status, it_index, "Dis status", dis_status, got_status)
             dis_out := Result("dis.out", it_index)
             Expect(dis_out == out, it_index, "Dis stdout", dis_out, out)
             dis_err := Result("dis.err", it_index)
             Expect(dis_err == err, it_index, "Dis stderr", dis_err, err)
+        }
+        if it.modes != "" || it.owner != "" {
+            after := Result("zx.after", it_index)
+            Expect(after == it.after_out, it_index, "after", after, it.after_out)
+            if compared {
+                dis_after := Result("dis.after", it_index)
+                Expect(dis_after == after, it_index, "Dis after", dis_after, after)
+            }
         }
     }
     if failures != 0 { print("commands a-l: % failures in % cases\n", failures, cases.count); return 1 }

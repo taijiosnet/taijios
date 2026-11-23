@@ -240,8 +240,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/cd.dis | appl/cmd/cd.b |  | - |  |
 | dis/cddb.dis | appl/cmd/cddb.b |  | - |  |
 | dis/charon.dis | appl/charon/charon.b |  | - |  |
-| dis/chgrp.dis | appl/cmd/chgrp.b |  | - |  |
-| dis/chmod.dis | appl/cmd/chmod.b |  | - |  |
 | dis/cmp.dis | appl/cmd/cmp.b |  | - |  |
 | dis/comm.dis | appl/cmd/comm.b |  | - |  |
 | dis/cook.dis | appl/cmd/cook.b |  | - |  |

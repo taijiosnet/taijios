@@ -1,0 +1,56 @@
+// chgrp: change the group or owner of files, following appl/cmd/chgrp.b.
+using Args :: #import "taijios_args";
+using Arg :: #import "zx_arg";
+using Cli :: #import "zx_cli";
+using Fs :: #import "taijios_stat";
+using Io :: #import "taijios_io";
+
+Usage :: "usage: chgrp [-uo] group file ...\n";
+
+// The hosted filesystem resolves the owner and group by name.
+Change :: (path: string, id: string, set_user: bool) -> bool {
+    handle := Io.OpenFile(path, 0);
+    if handle < 0 { return false }
+    metadata: [Fs.BufferSize]u8;
+    size := Io.FstatPacked(handle, metadata[:]);
+    if size <= 0 { unused Io.CloseFile(handle); return false }
+    info := Fs.Decode(metadata[:size]);
+    if set_user { info.owner = id } else { info.group = id }
+    changed := Fs.Change(handle, info, false, false, set_user, !set_user);
+    if Io.CloseFile(handle) < 0 { return false }
+    return changed;
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan;
+    set_user := false;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "u" || option == #char "o" { set_user = true }
+        else { return Cli.Usage(Usage) }
+    }
+    if scan.next >= Args.OperandCount() { return Cli.Usage(Usage) }
+    id := Args.Operand(scan.next);
+    scan.next += 1;
+    failed := false;
+    while scan.next < Args.OperandCount() {
+        path := Args.Operand(scan.next);
+        scan.next += 1;
+        if !Change(path, id, set_user) {
+            reason := Io.LastError();
+            unused Cli.WriteAll(2, "chgrp: can't change ");
+            unused Cli.WriteAll(2, path);
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, reason);
+            unused Cli.WriteAll(2, "\n");
+            failed = true;
+        }
+    }
+    if failed {
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    return 0;
+}

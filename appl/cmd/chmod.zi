@@ -1,0 +1,128 @@
+// chmod: change file permission bits, following appl/cmd/chmod.b.
+using Args :: #import "taijios_args";
+using Cli :: #import "zx_cli";
+using Fs :: #import "taijios_stat";
+using Io :: #import "taijios_io";
+
+Usage :: "usage: chmod [8r]777 file ... or chmod [augo][+-=][rwxal] file ...\n";
+User :: 448;
+Group :: 56;
+Other :: 7;
+All :: 511;
+Read :: 292;
+Write :: 146;
+Exec :: 73;
+
+// String->toint(text, 8): blanks, an optional sign and octal digits, wrapping
+// in 32 bits; rest is whatever follows the digits.
+Octal :: (text: string) -> (value: u32, rest: string, ok: bool) {
+    i: s64;
+    while i < text.count && (text[i] == 32 || text[i] == 9 || text[i] == 10) { i += 1 }
+    negative := false;
+    if i < text.count && (text[i] == 45 || text[i] == 43) {
+        negative = text[i] == 45;
+        i += 1;
+    }
+    start := i;
+    value: u32;
+    while i < text.count {
+        digit: s32;
+        digit = -1;
+        if text[i] >= 48 && text[i] <= 55 { digit = cast(s32)text[i] - 48 }
+        if digit < 0 { break }
+        value = value * 8 + cast(u32)digit;
+        i += 1;
+    }
+    if i == start { return 0, text, false }
+    if negative { value = 0 - value }
+    return value, text[i:], true;
+}
+
+// [augo]*[+-=][rwxalt]: the mask holds the bits the operation may touch.
+ParseMode :: (spec: string) -> (ok: bool, mask: u32, mode: u32) {
+    mask: u32 = Fs.AppendOnly | Fs.Exclusive | Fs.Temporary;
+    i: s64;
+    while i < spec.count {
+        if spec[i] == #char "u" { mask |= User }
+        else if spec[i] == #char "g" { mask |= Group }
+        else if spec[i] == #char "o" { mask |= Other }
+        else if spec[i] == #char "a" { mask |= All }
+        else { break }
+        i += 1;
+    }
+    if i == spec.count { return false, 0, 0 }
+    if i == 0 { mask |= All }
+    operator := spec[i];
+    i += 1;
+    if operator != #char "+" && operator != #char "-" && operator != #char "=" { return false, 0, 0 }
+    mode: u32;
+    while i < spec.count {
+        if spec[i] == #char "r" { mode |= Read }
+        else if spec[i] == #char "w" { mode |= Write }
+        else if spec[i] == #char "x" { mode |= Exec }
+        else if spec[i] == #char "a" { mode |= Fs.AppendOnly }
+        else if spec[i] == #char "l" { mode |= Fs.Exclusive }
+        else if spec[i] == #char "t" { mode |= Fs.Temporary }
+        else { return false, 0, 0 }
+        i += 1;
+    }
+    if operator == #char "+" || operator == #char "-" { mask &= mode }
+    if operator == #char "-" { mode = ~mode }
+    return true, mask, mode;
+}
+
+// A stat record for path, or a zero size when it cannot be read.
+Stat :: (path: string, metadata: []u8) -> Fs.Info {
+    size := Io.StatPacked(path, metadata);
+    if size <= 0 { return .{} }
+    return Fs.Decode(metadata[:size]);
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 2 { return Cli.Usage(Usage) }
+    text := Args.Operand(0);
+    if text.count >= 2 && text[0] == #char "8" && text[1] == #char "r" { text = text[2:] }
+    mode, rest, numeric := Octal(text);
+    mask: u32 = All;
+    if !numeric || rest != "" {
+        parsed, parsed_mask, parsed_mode := ParseMode(text);
+        if !parsed {
+            unused Cli.WriteAll(2, "chmod: bad mode '");
+            unused Cli.WriteAll(2, text);
+            unused Cli.WriteAll(2, "'\n");
+            return Cli.Usage(Usage);
+        }
+        mask = parsed_mask;
+        mode = parsed_mode;
+    }
+    for i: 1..count-1 {
+        path := Args.Operand(i);
+        metadata: [Fs.BufferSize]u8;
+        info := Stat(path, metadata[:]);
+        if info.size == 0 {
+            reason := Io.LastError();
+            unused Cli.WriteAll(2, "chmod: cannot stat ");
+            unused Cli.WriteAll(2, path);
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, reason);
+            unused Cli.WriteAll(2, "\n");
+            continue;
+        }
+        info.mode = (info.mode & ~mask) | (mode & mask);
+        handle := Io.OpenFile(path, 0);
+        if handle >= 0 {
+            changed := Fs.Change(handle, info, true, false, false, false);
+            if Io.CloseFile(handle) < 0 { changed = false }
+            if changed { continue }
+        }
+        reason := Io.LastError();
+        unused Cli.WriteAll(2, "chmod: cannot wstat ");
+        unused Cli.WriteAll(2, path);
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, reason);
+        unused Cli.WriteAll(2, "\n");
+    }
+    return 0;
+}
