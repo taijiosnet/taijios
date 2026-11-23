@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the installed ZX and Dis clocks in an owned Xvfb display."""
+"""Exercise the installed ZX clock in an owned Xvfb display."""
 
 import io
 import math
@@ -38,7 +38,7 @@ def stop(process):
 
 
 def face_center(image):
-    # Both versions use a 100px face with four cardinal marks 42px from center.
+    # The 100px face has four cardinal marks 42px from center.
     pix = image.load()
     for y in range(3, image.height - 85):
         for x in range(44, image.width - 44):
@@ -71,17 +71,15 @@ def hand_at(image, center, radius, step, blue):
     )
 
 
-def check_clock(env, zx):
+def check_clock(env):
     # Set UTC to 02:44:47 and select a daylight offset of +03:00. The
     # namespace and clock offset belong to this single emulator process.
     setup = "echo 9887000000 >/dev/time; echo 'EET 7200 EEST 10800 0 100000000' >/env/timezone"
-    app = "zxrun -w /dis/wm/clock.zx" if zx else "/dis/wm/clock.dis"
     child = subprocess.Popen(
         [ROOT / 'Linux/386/bin/emu', '-r', ROOT, '-g', '800x600', 'wm/wm', 'sh',
-         '-c', f'{setup}; {app}; echo CLOCK_CLOSED'],
+         '-c', f'{setup}; zxrun -w /dis/wm/clock.zx; echo CLOCK_CLOSED'],
         env=env, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
-    name = 'ZX' if zx else 'Dis'
 
     def capture():
         data = subprocess.check_output(['import', '-window', window, 'png:-'], env=env, timeout=5)
@@ -93,7 +91,7 @@ def check_clock(env, zx):
                                    env=env, capture_output=True, text=True, timeout=4).stdout.splitlines()
             return found[0] if len(found) == 1 else None
 
-        window = wait_for(window_id, f'{name} emulator window missing')
+        window = wait_for(window_id, 'emulator window missing')
 
         def initial():
             image = capture()
@@ -102,7 +100,7 @@ def check_clock(env, zx):
                 return center, image.crop((center[0] - 40, center[1] - 40, center[0] + 40, center[1] + 40))
             return None
 
-        center, before = wait_for(initial, f'{name} face at guest local time 05:44 missing')
+        center, before = wait_for(initial, 'face at guest local time 05:44 missing')
         x, y = center
         interior = (x - 40, y - 40, x + 40, y + 40)
 
@@ -111,12 +109,12 @@ def check_clock(env, zx):
             return (hand_at(image, center, 29, 45, 187)
                     and ImageChops.difference(before, image.crop(interior)).getbbox())
 
-        wait_for(updated, f'{name} Clock never reached 05:45 while idle', seconds=34)
+        wait_for(updated, 'Clock never reached 05:45 while idle', seconds=34)
         close_x, close_y = close_point(capture(), center)
         subprocess.run(['xdotool', 'mousemove', '--sync', '--window', window, str(close_x), str(close_y),
                         'mousedown', '1', 'sleep', '0.15', 'mouseup', '1'],
                        env=env, check=True, timeout=4)
-        wait_for(lambda: face_center(capture()) is None, f'{name} clock did not close')
+        wait_for(lambda: face_center(capture()) is None, 'clock did not close')
         transcript = bytearray()
 
         def returned():
@@ -125,10 +123,9 @@ def check_clock(env, zx):
                 transcript.extend(os.read(child.stdout.fileno(), 4096))
             return b'CLOCK_CLOSED\n' in transcript
 
-        wait_for(returned, f'{name} launch did not return to the guest shell')
-        if zx:
-            assert b'0\n' in transcript.splitlines(keepends=True), transcript[:512]
-        print(f'Clock {name}: guest daylight time, idle minute update, and close passed', flush=True)
+        wait_for(returned, 'launch did not return to the guest shell')
+        assert b'0\n' in transcript.splitlines(keepends=True), transcript[:512]
+        print('Clock: guest daylight time, idle minute update, and close passed', flush=True)
     finally:
         stop(child)
         errors = child.stderr.read(4096).decode('utf-8', 'replace').strip()
@@ -154,8 +151,7 @@ def main():
         display = os.read(reader, 32).strip() if ready else b''
         assert display.isdigit(), 'private Xvfb launch failed'
         env['DISPLAY'] = ':' + display.decode('ascii')
-        check_clock(env, zx=True)
-        check_clock(env, zx=False)
+        check_clock(env)
     finally:
         os.close(reader)
         stop(xvfb)

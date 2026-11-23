@@ -67,12 +67,8 @@ if {ftest -f /dis/wm/date.zx} {
 } {
 	menu Utilities 'Date and Time' {wmrun wm/date}
 }
-if {ftest -f /dis/wm/clock.zx} {
-	menu Utilities Clock    {wmrun zxrun -w /dis/wm/clock.zx}
-} {
-	menu Utilities Clock    {wmrun wm/clock}
-}
-menu Utilities Stopwatch    {wmrun wm/stopwatch -zx}
+menu Utilities Clock        {wmrun zxrun -w /dis/wm/clock.zx}
+menu Utilities Stopwatch    {wmrun zxrun -w /dis/wm/stopwatch.zx}
 menu Utilities Counter      {wmrun zxrun -w /dis/wm/counter.zx}
 menu Games Tetris            {wmrun wm/tetris}
 menu Games Bounce            {wmrun wm/bounce}

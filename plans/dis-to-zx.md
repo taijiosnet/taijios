@@ -42,7 +42,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (95 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
-6. WM apps with zx-twins (7 rows) and the rest of dis/wm (59 rows total): delete or port through the desktop-core owner.
+6. WM apps with zx-twins (5 rows) and the rest of dis/wm (57 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
 ## Open rows
@@ -510,7 +510,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 59 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 57 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -525,7 +525,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/wm/c4.dis | appl/wm/c4.b |  | - |  |
 | dis/wm/calendar.dis | appl/wm/calendar.b |  | - |  |
 | dis/wm/chat.dis | unknown |  | - |  |
-| dis/wm/clock.dis | appl/wm/clock.b |  | - | zx-twin |
 | dis/wm/coffee.dis | appl/wm/coffee.b |  | - |  |
 | dis/wm/collide.dis | appl/wm/collide.b |  | - |  |
 | dis/wm/colors.dis | appl/wm/colors.b |  | - |  |
@@ -563,7 +562,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/wm/sh.dis | appl/wm/sh.b | module/sh.m | - |  |
 | dis/wm/smenu.dis | appl/wm/smenu.b |  | - |  |
 | dis/wm/snake.dis | appl/wm/snake.b |  | - |  |
-| dis/wm/stopwatch.dis | appl/wm/stopwatch.b |  | - | zx-twin |
 | dis/wm/sweeper.dis | appl/wm/sweeper.b |  | - |  |
 | dis/wm/task.dis | appl/wm/task.b |  | - |  |
 | dis/wm/telnet.dis | appl/wm/telnet.b |  | - |  |

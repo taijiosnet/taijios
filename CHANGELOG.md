@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Clock and Stopwatch only as ZX and remove their Dis versions.
+
 - Open the Rill desktop without loading Dis when the emulator starts without a command and the ZX window manager is installed, start command names from their ZX bundles, and hide catalog entries that need Dis there.
 
 - Exit the ZX desktop cleanly after closing a window whose application was still drawing.

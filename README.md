@@ -163,15 +163,14 @@ From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
 (cd appl/cmd && mk zxrun.install)
 (
     cd appl/wm
-    mk wm.install stopwatch.install install-stopwatch-zx
+    mk wm.install install-stopwatch-zx
 )
-Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm wm/stopwatch -zx
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /dis/wm/stopwatch.zx
 ```
 
 The hosted ZX Stopwatch runs with `-p main=32M` when built with
-the runtime settings above. `wm/stopwatch` without `-zx` runs the original Dis
-app. To launch any compatible bundle in a TaijiOS window manager context, use
-`zxrun -w /path/to/app.zx`.
+the runtime settings above. To launch any compatible bundle in a TaijiOS
+window manager context, use `zxrun -w /path/to/app.zx`.
 
 The runner binds Kryon's `zx_surface` calls `Open`, `Event`, `Present`, and
 `Close` to the guest window manager and Draw. `Present` accepts packed RGBA8
@@ -226,7 +225,6 @@ python3 -u appl/wm/clock_zx_test.py
 
 Clock draws through Kryon's hosted surface and reads `/dev/time`,
 `/env/timezone`, and `/locale/timezone` through `taijios_files.ReadAt`.
-The original Clock remains available as `/dis/wm/clock.dis`.
 
 ### Build and run the ZX desktop panel
 
