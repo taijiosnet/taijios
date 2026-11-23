@@ -1,0 +1,72 @@
+#import "std/vec"
+M :: #import "filename_model";
+
+Fail :: (msg: string) -> s32 {
+    print("FAIL: %\n", msg);
+    return 1;
+}
+
+#program_export
+main :: () -> s32 {
+    // ParseArgs tests
+    a0: [0]string;
+    o0 := M.ParseArgs(a0[:]);
+    if o0.usage_error || o0.startdir != "." || o0.title != "Select a file" || o0.pattern_start != 0 {
+        return Fail("default ParseArgs");
+    }
+
+    a1: [5]string = .["-d", "/usr", "-t", "Pick", "*.zi (Ziran)"];
+    o1 := M.ParseArgs(a1[:]);
+    if o1.usage_error || o1.startdir != "/usr" || o1.title != "Pick" || o1.pattern_start != 4 {
+        return Fail("ParseArgs -d -t");
+    }
+
+    a2: [1]string = .["-z"];
+    o2 := M.ParseArgs(a2[:]);
+    if !o2.usage_error || o2.error_opt != #char "z" {
+        return Fail("ParseArgs unknown opt");
+    }
+
+    a3: [1]string = .["-d"];
+    o3 := M.ParseArgs(a3[:]);
+    if !o3.usage_error || o3.error_opt != 0 {
+        return Fail("ParseArgs missing arg");
+    }
+
+    // MakePats & GlobMatch tests
+    raw: [3]string = .["*.zi (Ziran files)", "*", "*.txt (Text)"];
+    pats: Vec(M.Pattern);
+    defer M.FreePatterns(*pats);
+    filter: Vec(u8);
+    defer VecFree(filter);
+    M.MakePats(raw[:], *pats, *filter);
+    if TextView(filter[:]) != "*.zi *.txt" || pats.count != 2 {
+        return Fail("MakePats");
+    }
+    if !M.MatchesAny(pats[:], "foo.zi", false) { return Fail("match .zi"); }
+    if !M.MatchesAny(pats[:], "bar.txt", false) { return Fail("match .txt"); }
+    if M.MatchesAny(pats[:], "baz.b", false) { return Fail("reject .b"); }
+    if !M.MatchesAny(pats[:], "subdir", true) { return Fail("always match dir"); }
+
+    if !M.GlobMatch("a?c", "abc") || M.GlobMatch("a?c", "abdc") { return Fail("glob ?"); }
+    if !M.GlobMatch("[a-c]1", "b1") || M.GlobMatch("[a-c]1", "d1") { return Fail("glob range"); }
+    if !M.GlobMatch("[^a-c]1", "d1") || M.GlobMatch("[^a-c]1", "a1") { return Fail("glob neg"); }
+
+    // Path helpers
+    e1, r1 := M.NextElem("/usr/inferno/lib");
+    if e1 != "/" || r1 != "usr/inferno/lib" { return Fail("NextElem root"); }
+    e2, r2 := M.NextElem(r1);
+    if e2 != "usr" || r2 != "inferno/lib" { return Fail("NextElem usr"); }
+    if M.IsLastElem("a/b") || !M.IsLastElem("b") { return Fail("IsLastElem"); }
+    if M.Deslash("dir/") != "dir" || M.Deslash("file") != "file" { return Fail("Deslash"); }
+
+    joined: Vec(u8);
+    defer VecFree(joined);
+    M.PathCat("/", "usr", *joined);
+    if TextView(joined[:]) != "/usr" { return Fail("PathCat root"); }
+    M.PathCat("/usr", "lib", *joined);
+    if TextView(joined[:]) != "/usr/lib" { return Fail("PathCat sub"); }
+
+    print("filename_model_test ok\n");
+    return 0;
+}
