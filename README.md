@@ -28,7 +28,10 @@ Dis task inspection.
 Run `python3 tests/desktop/zx_boot_test.py` to verify direct startup in a guest
 root containing only ZX programs. Add `--graphics` to test compositing, clipped
 updates, workspace and focus policy, pointer input, and keyboard input on a
-private Xvfb display. Direct graphical bundles can import `guest_draw` and
+private Xvfb display. It then starts every graphical catalog entry whose program
+is a ZX bundle on the native desktop, checks that each window is drawn, focused,
+moved, resized and closed, and lists the catalog applications that still need
+Dis. Direct graphical bundles can import `guest_draw` and
 `guest_input` from `appl/lib`.
 The input module receives pointer motion and buttons, key transitions, and
 composed text from one blocking device stream.
@@ -57,7 +60,9 @@ and manage them through its task list. Its window actions, workspaces, and
 panel regions use the native manager.
 Under a desktop, each ZX window gets a native title bar drawn in Ziran with
 Kryon's window chrome and the Rill theme's control sprites. Drag it to move the
-window, and use its Hide, Maximize and Close controls.
+window, and use its Hide, Maximize and Close controls. Closing a window ends
+its application, and the manager does not report that as a failure when it
+exits.
 The default desktop continues to start Rill through the regular desktop runner.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including

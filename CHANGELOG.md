@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Exit the ZX desktop cleanly after closing a window whose application was still drawing.
+
 - Let System Log and other ZX windows poll stdin under the native window manager, so all installed ZX app bundles run without Dis.
 
 - List and end running ZX processes in Task Manager when the guest runs without Dis.

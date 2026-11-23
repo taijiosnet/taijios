@@ -4,6 +4,7 @@ import argparse
 import io
 import os
 import select
+import shutil
 import subprocess
 import sys
 import time
@@ -458,6 +459,126 @@ def check_desktop_shell(emulator, root, env):
     print('Private ZX desktop launched windows and used native title bars to move, resize, maximize, restore, minimize and close')
 
 
+def catalog_programs(catalog):
+    """Map each graphical entry the menu shows to the guest program it starts."""
+    programs = {}
+    for entry in sorted(catalog.glob('*.desktop')):
+        lines = entry.read_text(encoding='utf-8').splitlines()
+        fields = dict(line.split('=', 1) for line in lines if '=' in line)
+        if fields.get('NoDisplay') != 'true' and fields.get('Terminal') != 'true':
+            programs[entry.name] = fields['Exec'].split()[0]
+    return programs
+
+
+def check_catalog_apps(emulator, root, env):
+    from PIL import Image
+    from test_logwindow import private_display
+    from test_tcltk import launch, stop, until
+
+    catalog = ROOT / 'lib/apps'
+    assert any(catalog.glob('*.desktop')), 'run tools/generate-app-catalog.py --guest-assets first'
+    wm = ROOT / 'appl/wm'
+    bundles = root / 'dis/wm'
+    bundles.mkdir(parents=True)
+    for bundle in sorted((ROOT / 'dis/wm').glob('*.zx')):
+        if bundle.stem not in ('rill', 'desktop_panel'):
+            shutil.copy2(bundle, bundles / bundle.name)
+    # Colours and Date are built here until the installer ships them.
+    for name, hosts in (('colors', ('taijios_draw',)), ('date', ('taijios_files',))):
+        if not (bundles / f'{name}.zx').exists():
+            subprocess.run([
+                'ziran', 'bundle', '--project', '--module-path', '../cmd', '--bind-host', 'kryon/pixmap',
+                *(word for host in hosts for word in ('--bind-host', host)),
+                '--entry', f'{name}:main', '-o', bundles / f'{name}.zx', f'{name}.zi',
+            ], cwd=wm, env=env, check=True, timeout=120)
+    # The generator names the ZX bundle once it is installed; do the same for the staged ones.
+    (root / 'lib/apps').mkdir(parents=True)
+    for entry in sorted(catalog.glob('*.desktop')):
+        text = entry.read_text(encoding='utf-8')
+        program = next((line[5:].split()[0] for line in text.splitlines() if line.startswith('Exec=')), '')
+        if program.endswith('.dis') and (root / program[1:]).with_suffix('.zx').exists():
+            text = text.replace(program, program[:-4] + '.zx')
+        (root / 'lib/apps' / entry.name).write_text(text, encoding='utf-8')
+    for name in ('fonts', 'icons', 'lib/rill'):
+        if (ROOT / name).exists():
+            (root / name).symlink_to(ROOT / name, target_is_directory=True)
+    (root / 'appl/cmd/tcltk').mkdir(parents=True)
+    for script in (ROOT / 'appl/cmd/tcltk').glob('*.tcl'):
+        shutil.copy2(script, root / 'appl/cmd/tcltk' / script.name)
+    for name in ('tmp', 'usr/inferno'):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    source = Path(__file__).with_name('zx_app_compat.zi')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
+        '--module-path', ROOT / 'appl/cmd/tcltk', '--bind-host', 'taijios_desktop',
+        '--bind-host', 'taijios_wm', '--bind-host', 'taijios_args', '--bind-host', 'zx_surface',
+        '--bind-host', 'taijios_io', '--entry', 'zx_app_compat:main', '-o', root / 'apps.zx', source,
+    ], env=env, check=True, timeout=60)
+    assert not any(path.suffix == '.dis' for path in root.rglob('*') if not path.is_symlink())
+
+    programs = catalog_programs(root / 'lib/apps')
+    expected = sorted(Path(program).stem for program in programs.values()
+                      if program.endswith('.zx') and (root / program[1:]).exists())
+    need_dis = sorted(Path(program).stem for program in programs.values() if program.endswith('.dis'))
+    assert expected, 'no ZX application bundles are installed in dis/wm'
+
+    with private_display() as display:
+        private_env = env | {'DISPLAY': display['DISPLAY']}
+        shell = launch(private_env, emulator, '-v', '-r', root, '-g', '1024x768', '/wm.zx', '--desktop', '/apps.zx',
+                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        transcript = bytearray()
+        handled = 0
+        seen = {'ZX_APP_OPEN': [], 'ZX_APP_RESIZED': []}
+
+        def desktop(*args, check=True):
+            return subprocess.run(args, env=private_env, capture_output=True, check=check, timeout=5).stdout
+
+        def painted(window, x, y, width, height):
+            frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
+            content = frame.crop((x, y, x + width, y + height))
+            # The desktop background shows wherever the application has not drawn its current size.
+            colors = [(count, rgb) for count, rgb in content.getcolors(width * height) or []
+                      if rgb != (24, 56, 88)]
+            return len(colors) >= 2 and sum(count for count, _ in colors) >= 0.98 * width * height
+
+        try:
+            window = until(lambda: desktop('xdotool', 'search', '--onlyvisible', '--name',
+                                           '^inferno$', check=False).decode().strip(), 'ZX desktop window missing')
+            deadline = time.monotonic() + 40 * len(expected)
+            while b'ZX_APPS_OK' not in transcript:
+                assert time.monotonic() < deadline, 'catalog applications took too long'
+                if select.select([shell.stdout], [], [], 0.2)[0]:
+                    data = shell.stdout.read1(4096)
+                    assert data, 'the desktop exited early'
+                    transcript.extend(data)
+                lines = transcript.split(b'\n')[:-1]
+                for line in lines[handled:]:
+                    words = line.decode(errors='replace').split()
+                    if len(words) == 6 and words[0] in seen:
+                        name, bounds = words[1], tuple(map(int, words[2:]))
+                        until(lambda: painted(window, *bounds), f'{name} did not paint its window ({words[0]})',
+                              timeout=20)
+                        seen[words[0]].append(name)
+                        (root / 'ack').write_bytes(b'')
+                handled = len(lines)
+            status = shell.wait(timeout=10)
+            transcript.extend(shell.stdout.read(4096))
+            assert status == 0, f'the desktop exited with status {status}'
+            assert b'Initial Dis:' not in transcript
+            assert sorted(seen['ZX_APP_OPEN']) == sorted(seen['ZX_APP_RESIZED']) == expected, (seen, expected)
+            assert f'ZX_APPS_OK {len(expected)}\n'.encode() in transcript
+        except (AssertionError, subprocess.SubprocessError) as error:
+            stop(shell)
+            transcript.extend(shell.stdout.read(4096))
+            raise AssertionError((str(error), bytes(transcript[-2048:]))) from error
+        finally:
+            stop(shell)
+            shell.stdout.close()
+    print(f'Private ZX desktop opened, focused, moved, resized and closed {len(expected)} catalog applications '
+          f'without Dis: {" ".join(expected)}')
+    print(f'{len(need_dis)} catalog applications still need Dis: {" ".join(need_dis)}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--emu', type=Path, default=ROOT / 'emu/Linux/o.emu')
@@ -556,6 +677,7 @@ def main():
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)
             check_desktop_shell(emulator, root, env)
+            check_catalog_apps(emulator, root, env)
 
 
 if __name__ == '__main__':

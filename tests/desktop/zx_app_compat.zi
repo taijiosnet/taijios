@@ -1,0 +1,171 @@
+// A desktop shell that starts every visible catalog entry in turn under the
+// native window manager and drives its window: open, focus, move, resize, close.
+// The host harness checks the pixels and answers each marker by creating /ack.
+Desktop :: #import "taijios_desktop";
+Surface :: #import "zx_surface";
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+
+Window :: struct {
+    fields: [9]s32; // ID, x, y, width, height, workspace, focused, minimized, maximized.
+    title: [128]u8;
+    app_id: [128]u8;
+}
+
+failure: [256]u8;
+
+Fail :: (app: string, message: string) -> s32 {
+    n: s64;
+    for c: app { if n < failure.count { failure[n] = c; n += 1 } }
+    if app != "" && n < failure.count - 1 { failure[n] = #char ":"; failure[n + 1] = #char " "; n += 2 }
+    for c: message { if n < failure.count { failure[n] = c; n += 1 } }
+    unused Args.SetFailure(TextView(failure[:n]));
+    return 1;
+}
+
+Text :: (bytes: []u8) -> string {
+    n: s64;
+    while n < bytes.count && bytes[n] != 0 { n += 1 }
+    return TextView(bytes[:n]);
+}
+
+// Copy a catalog entry's NUL-terminated file path out of its registry record.
+EntryPath :: (index: s32, output: []u8) -> bool {
+    record := Desktop.CatalogAt(index);
+    if record == null { return false }
+    n: s64;
+    while n < record.path.count && n < output.count - 1 && record.path[n] != 0 {
+        output[n] = record.path[n];
+        n += 1;
+    }
+    output[n] = 0;
+    return n > 0;
+}
+
+WindowCount :: () -> s32 {
+    state: [7]s32;
+    if Desktop.Capture(state[:]) < 0 { return -1 }
+    return state[1];
+}
+
+Find :: (id: s32, window: *Window) -> bool {
+    count := WindowCount();
+    for i: 0 .. count - 1 {
+        if Desktop.WindowAt(i, window.fields[:], window.title[:], window.app_id[:]) && window.fields[0] == id { return true }
+    }
+    return false;
+}
+
+// Wait for a titled window other than the anchor.
+Opened :: (anchor: s32, window: *Window) -> bool {
+    for attempt: 0 .. 400 {
+        count := WindowCount();
+        for i: 0 .. count - 1 {
+            if Desktop.WindowAt(i, window.fields[:], window.title[:], window.app_id[:]) &&
+               window.fields[0] != anchor && window.title[0] != 0 { return true }
+        }
+        unused Surface.Event(50);
+    }
+    return false;
+}
+
+Closed :: (remaining: s32) -> bool {
+    for attempt: 0 .. 200 {
+        if WindowCount() == remaining { return true }
+        unused Surface.Event(50);
+    }
+    return false;
+}
+
+// Report a window to the harness and wait until it has checked the frame.
+Checked :: (label: string, window: *Window) -> bool {
+    print("% % % % % %\n", label, Text(window.app_id[:]), window.fields[1], window.fields[2],
+          window.fields[3], window.fields[4]);
+    for attempt: 0 .. 600 {
+        handle := IO.Open("/ack", 0);
+        if handle >= 0 {
+            unused IO.Close(handle);
+            return IO.Remove("/ack") == 0;
+        }
+        unused Surface.Event(50);
+    }
+    return false;
+}
+
+Focused :: (id: s32) -> bool {
+    window: Window;
+    return Find(id, *window) && window.fields[6] == 1;
+}
+
+Exercise :: (path: string, anchor: s32) -> s32 {
+    files: [0]string;
+    if !Desktop.LaunchEntry(path, "", files[:]) { return Fail(path, "catalog entry did not launch") }
+    window: Window;
+    if !Opened(anchor, *window) { return Fail(path, "no window opened") }
+    id := window.fields[0];
+    app := Text(window.app_id[:]);
+    if app == "" || window.fields[6] != 1 || window.fields[7] != 0 { return Fail(path, "new window is not focused") }
+    if !Checked("ZX_APP_OPEN", *window) { return Fail(app, "first frame was not accepted") }
+
+    if anchor != 0 {
+        if !Desktop.WindowAction(anchor, "focus", 0, 0, 0, 0) || !Focused(anchor) || Focused(id) {
+            return Fail(app, "focus did not leave the window");
+        }
+    }
+    if !Desktop.WindowAction(id, "focus", 0, 0, 0, 0) || !Focused(id) { return Fail(app, "focus did not return") }
+
+    // Hide the anchor so that nothing but the desktop shows behind the window.
+    if anchor != 0 && !Desktop.WindowAction(anchor, "minimize", 0, 0, 0, 0) { return Fail(app, "hide the anchor") }
+    width := window.fields[3];
+    height := window.fields[4];
+    if !Desktop.WindowAction(id, "move", 60, 140, 0, 0) || !Find(id, *window) || window.fields[1] != 60 ||
+       window.fields[2] != 140 || window.fields[3] != width || window.fields[4] != height {
+        return Fail(app, "move");
+    }
+    if !Desktop.WindowAction(id, "resize", 60, 140, width + 48, height + 36) || !Find(id, *window) ||
+       window.fields[3] != width + 48 || window.fields[4] != height + 36 { return Fail(app, "resize") }
+    // An application may answer with its own size. Give it time, then check
+    // that it is still running and filled whatever size it settled on.
+    for attempt: 0 .. 10 { unused Surface.Event(50) }
+    if !Find(id, *window) || window.fields[3] <= 0 || window.fields[4] <= 0 { return Fail(app, "window lost after resize") }
+    if !Checked("ZX_APP_RESIZED", *window) { return Fail(app, "resized frame was not accepted") }
+
+    if anchor != 0 && !Desktop.WindowAction(anchor, "restore", 0, 0, 0, 0) { return Fail(app, "show the anchor") }
+    remaining: s32 = ifx anchor != 0 then 1 else 0;
+    if !Desktop.WindowAction(id, "close", 0, 0, 0, 0) || !Closed(remaining) { return Fail(app, "close") }
+    return 0;
+}
+
+main :: () -> s32 {
+    if !Desktop.BindDesktop() { return Fail("", "desktop binding denied") }
+    state: [7]s32;
+    if Desktop.Capture(state[:]) < 0 || state[1] != 0 || state[3] <= 0 || state[4] <= 0 {
+        return Fail("", "initial desktop snapshot");
+    }
+    if !Surface.Open("ZX application compatibility", state[3], state[4]) { return Fail("", "open desktop surface") }
+    panel: [4]s32 = .{0, 0, state[3], 24};
+    if !Desktop.SetChromeRegions(panel[:]) { return Fail("", "reserve desktop panel") }
+
+    Desktop.CatalogReload();
+    count := Desktop.CatalogCount();
+    if count <= 0 { return Fail("", "the catalog shows no applications") }
+
+    // The first entry stays open so that focus has another window to move to.
+    files: [0]string;
+    anchor: Window;
+    first_path: [1024]u8;
+    if !EntryPath(0, first_path[:]) { return Fail("", "first catalog entry has no path") }
+    first := Text(first_path[:]);
+    if !Desktop.LaunchEntry(first, "", files[:]) || !Opened(0, *anchor) { return Fail(first, "anchor window") }
+    for i: 0 .. count - 1 {
+        path: [1024]u8;
+        if !EntryPath(i, path[:]) { return Fail("", "catalog entry has no path") }
+        status := Exercise(Text(path[:]), anchor.fields[0]);
+        if status != 0 { return status }
+    }
+    if !Desktop.WindowAction(anchor.fields[0], "close", 0, 0, 0, 0) || !Closed(0) { return Fail(first, "close anchor") }
+    unused Surface.Event(100);
+    Surface.Close();
+    print("ZX_APPS_OK %\n", count);
+    return 0;
+}

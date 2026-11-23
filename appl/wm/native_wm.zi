@@ -59,6 +59,7 @@ Application :: struct {
     click: TitlePolicy.State;
     maximized: bool;
     open: bool;
+    closing: bool; // The manager closed this window; its exit is not a failure.
 }
 
 Manager :: struct {
@@ -318,6 +319,7 @@ NotifyResize :: (app: *Application, width: s32, height: s32) {
 }
 
 CloseWindow :: (manager: *Manager, app: *Application) {
+    app.closing = true;
     Link.Disconnect(app.id);
     RemoveWindow(manager, app);
 }
@@ -428,7 +430,8 @@ Run :: (manager: *Manager, input: s32) -> s32 {
                 i += 1;
                 continue;
             }
-            if outcome.status < 0 || outcome.value != 0 {
+            // A request can fail under an application whose window was just closed.
+            if !app.closing && (outcome.status < 0 || outcome.value != 0) {
                 status = 1;
                 if outcome.error != "" { unused Args.SetFailure(outcome.error) }
             }
