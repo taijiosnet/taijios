@@ -172,5 +172,7 @@ y.debug
 /icons/taijios/[0-9]*.png
 /appl/cmd/ndb/*.zx
 /dis/ndb/*.zx
+/appl/cmd/auth/*.zx
+/dis/auth/*.zx
 /appl/cmd/auxi/*.zx
 /dis/auxi/*.zx

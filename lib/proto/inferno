@@ -363,7 +363,7 @@ appl
 		archfs.b
 		auplay.b
 		auth
-			aescbc.b
+			aescbc.zi
 			changelogin.b
 			countersigner.b
 			convpasswd.b

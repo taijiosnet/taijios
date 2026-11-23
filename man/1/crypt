@@ -91,7 +91,7 @@ The other options are just as for
 .SH SOURCE
 .B /appl/cmd/crypt.b
 .br
-.B /appl/cmd/auth/aescbc.b
+.B /appl/cmd/auth/aescbc.zi
 .SH SEE ALSO
 .IR ssl (3),
 .IR keyfs (4)

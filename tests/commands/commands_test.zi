@@ -1,7 +1,7 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
 // ndb/csquery, ndb/dnsquery, ndb/mkhash, ndb/query, ndb/regquery,
-// auxi/digest, export and mntgen.
+// auxi/digest, export, mntgen and auth/aescbc.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -37,10 +37,14 @@ TCL_FILE :: "puts file-one\nset y 7\nnoSuch arg\nputs after-error\n";
 REGISTRY :: "service=tcp!alpha.example!1\n\tname=alpha owner='a b' kind=x\nservice=tcp!beta.example!2\n\tname=beta kind=y\nservice=tcp!gamma.example!3\n\tname=gamma kind=x\n";
 NDB_MAIN :: "database=\n\tfile=/build/tests/commands/work/ndb.main\n\tfile=/build/tests/commands/work/ndb.second\n\tfile=/build/tests/commands/work/ndb.missing\n\n# a comment line\nsys=alpha ip=10.0.0.1 ether=0011aa\n\tdom=alpha.example\n\tip=10.0.0.9   # second address\nsys=beta ip=10.0.0.2\n\tnote='it''s quoted' empty= bare\n\tdom=\"double q\"\nipnet=lan ip=10.0.0.0 ipmask=255.255.255.0\n\tdns=10.0.0.53 dns=10.0.0.54\n\tauth=alpha\nbad='unclosed\n\tsys=gamma\n";
 NDB_SECOND :: "sys=delta ip=10.1.0.1\n\tdom=delta.example\nsys=alpha ip=10.1.0.2\n";
+// A file the Limbo auth/aescbc encrypted with the key "secret", and one in
+// the older secstore form it also read, both in hexadecimal.
+AES_CLEAR :: "4145532043424320534841312020320ad8836a7e1866ac41668a7252c41e3daa12b70f8ccc6ec4acf12b469698c8c935d0445abbe5457bd0f252a7926515863a4d7a5326297019619f6e9f579a313c5bf95d7a6d8d553c92ab7b238c6c1c8b72fef8";
+AES_OLD :: "30313233343536373839616263646566a1013d70569efef1a8384a987afbf4365c42261d0e637edf0ba4795123af7eba09a65cd4116bafe9cbe0a2fc0163f2a1c9b86789263996a8";
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [120]Case = Case.[
+cases: [136]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -107,7 +111,7 @@ cases: [120]Case = Case.[
     .{tool = "test", args = "-d m2/a/b"},
     .{tool = "mkdir", args = "a.txt", status = "error", err = "mkdir: a.txt already exists\n"},
     .{tool = "mkdir", args = "missing/x", status = "error", err = "mkdir: can't create missing/x: 'missing' file does not exist\n"},
-    .{args = "whatis cat echo basename cleanname wc uniq tr tee cp test ls mkdir date", out = "/dis/cat.zx\n/dis/echo.zx\n/dis/basename.zx\n/dis/cleanname.zx\n/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n/dis/tee.zx\n/dis/cp.zx\n/dis/test.zx\n/dis/ls.zx\n/dis/mkdir.zx\n/dis/date.dis\n"},
+    .{args = "whatis cat echo basename cleanname wc uniq tr tee cp test ls mkdir sh", out = "/dis/cat.zx\n/dis/echo.zx\n/dis/basename.zx\n/dis/cleanname.zx\n/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n/dis/tee.zx\n/dis/cp.zx\n/dis/test.zx\n/dis/ls.zx\n/dis/mkdir.zx\n/dis/sh.dis\n"},
     .{tool = "tclsh", input = "lines.tcl", out = "tcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% In function set y.....\n\tcan't read \"y\": no such variable\ntcl% "},
     // A file stops at its first error without a report; its variables stay set.
     .{tool = "tclsh", args = "file.tcl missing.tcl two.tcl", input = "lines.tcl", out = "file-one\nfile-two\ntcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% 7\ntcl% "},
@@ -170,12 +174,30 @@ cases: [120]Case = Case.[
     .{args = "mount {mntgen} mnt >[2] /dev/null; echo hi | tee mnt/y; mkdir mnt/z; rm mnt/q; ls mnt/a/b; cd mnt/k; pwd; cd ../..; ls mnt; unmount mnt; kill Mntgen Nametree Styx Styxservers Zxrun > /dev/null >[2] /dev/null; echo end",
         out = "/build/tests/commands/work/mnt/k\nmnt/q\nend\n",
         err = "tee: cannot open mnt/y: permission denied\nmkdir: mnt/z already exists\nrm: mnt/q: permission denied\nls: mnt/a/b: 'mnt/a/b' does not exist\n"},
+    // auth/aescbc decrypts what the Limbo command encrypted, writes the text
+    // before checking it, and reads its own output back.
+    .{tool = "auth/aescbc", args = "-d -k secret", input = "clear.aes", out = "the clear text\nsecond line ü\n"},
+    .{tool = "auth/aescbc", args = "-d -f aes.key", input = "clear.aes", out = "the clear text\nsecond line ü\n"},
+    .{tool = "auth/aescbc", args = "-d -k secret", input = "old.aes", out = "old secstore data, not a block multiple\n"},
+    .{args = "auth/aescbc -d -k wrong < clear.aes > /dev/null", status = "failed to authenticate", err = "aescbc: decrypted file failed to authenticate\n"},
+    .{args = "auth/aescbc -d -k wrong < old.aes > /dev/null", status = "failed to authenticate", err = "aescbc: decrypted file failed to authenticate\n"},
+    .{args = "auth/aescbc -e -k k2 < a.txt > a.aes; auth/aescbc -d -k k2 < a.aes", out = "alpha\nbeta\nbeta\ncafé κ\n"},
+    .{args = "auth/aescbc -e -f aes.key < bin > bin.aes; auth/aescbc -d -k secret < bin.aes", binary_out = true},
+    .{args = "auth/aescbc -e -k k < empty > empty.aes; ls -l empty.aes | sed 's/.* ([0-9]+) [A-Z][a-z][a-z] .*/\\1/'; auth/aescbc -d -k k < empty.aes", out = "68\n"},
+    .{tool = "auth/aescbc", args = "-d -k secret", input = "a.txt", status = "read error", err = "aescbc: unexpectedly short read\n"},
+    .{tool = "auth/aescbc", args = "-d -f blank.key", input = "clear.aes", status = "no key", err = "aescbc: no key\n"},
+    .{tool = "auth/aescbc", args = "-d -f 'no file'", input = "clear.aes", status = "keyfile", err = "aescbc: can't open 'no file': 'no file' file does not exist\n"},
+    .{tool = "auth/aescbc", args = "-k secret", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
+    .{tool = "auth/aescbc", args = "-d -e -k x", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
+    .{tool = "auth/aescbc", args = "-d -k x extra", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
+    .{tool = "auth/aescbc", args = "-d -k", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
+    .{tool = "auth/aescbc", args = "-x", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},
     // The shell exports path to /env, so these two stay last.
     // A .zx that is not executable, or is a directory, falls through to the next path entry.
-    .{args = "path=(fake /dis); whatis date ls", out = "/dis/date.dis\n/dis/ls.zx\n"},
+    .{args = "path=(fake /dis); whatis sh ls", out = "/dis/sh.dis\n/dis/ls.zx\n"},
     // An executable .zx wins even when it is not a valid bundle.
     .{args = "path=(fake /dis); whatis cat; cat >[2] /dev/null", status = "zx", out = "fake/cat.zx\n"},
 ];
@@ -207,6 +229,18 @@ Binary :: () -> Text {
     return BuilderFinish(bytes)
 }
 
+// Writes the bytes that hexadecimal text stands for.
+WriteHex :: (name: string, hex: string) -> bool {
+    bytes: Vec(u8)
+    value: u8 = 0
+    for hex {
+        digit := ifx it >= #char "a" then it - #char "a" + 10 else it - #char "0"
+        value = value * 16 + digit
+        if it_index % 2 == 1 { VecPush(bytes, value); value = 0 }
+    }
+    return Write(name, TextView(bytes[:]))
+}
+
 Prepare :: (binary: string) -> bool {
     digits, digits_ok := ReadEntireFile("lib/strokes/digits.cl")
     if !digits_ok { return false }
@@ -221,7 +255,8 @@ Prepare :: (binary: string) -> bool {
         Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("file.tcl", TCL_FILE) && Write("two.tcl", "puts file-two\n") && Write("lines.tcl", TCL_LINES) &&
         Write("reg.db", REGISTRY) && Write("digits.cl", digits) && Write("ndb.main", NDB_MAIN) && Write("ndb.second", NDB_SECOND) && Directory("work/mnt") &&
-        Write("fake/date.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
+        WriteHex("clear.aes", AES_CLEAR) && WriteHex("old.aes", AES_OLD) && Write("aes.key", "secret\n\n") && Write("blank.key", "\n\n") &&
+        Write("fake/sh.zx", "not a ZX bundle\n") && Write("fake/cat.zx", "not a ZX bundle\n") &&
         SetPathMode("build/tests/commands/work/fake/cat.zx", 493) // 0755
 }
 

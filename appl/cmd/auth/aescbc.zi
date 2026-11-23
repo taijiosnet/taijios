@@ -1,0 +1,204 @@
+// auth/aescbc -e|-d [-k key] [-f keyfile] < input > output: encrypts or
+// decrypts a file with a password, as the Limbo command and Plan 9's did.
+//
+// An encrypted file is the header "AES CBC SHA1  2\n", a random 16-byte
+// vector, AES-CBC of a random block and the file, and HMAC-SHA1 of that
+// ciphertext. The AES key is the first 16 bytes of SHA1("aescbc file" key)
+// and the HMAC key the MD5 of those. Files without the header are taken to
+// be in the older secstore form: a vector, then AES-CBC of the file and
+// sixteen X's.
+//
+// Decrypted text is written before it is checked, as the Limbo command
+// wrote it, so a failed check still leaves output.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Crypto :: #import "taijios_keyring";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Quote :: #import "taijios_quote";
+
+USAGE :: "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n";
+HEADER :: "AES CBC SHA1  2\n";
+CHECK :: "XXXXXXXXXXXXXXXX";
+BLOCK :: 16;
+MAC :: 20;
+KEYFILE_LIMIT :: 4116; // the Limbo command read a key file into a 4116-byte buffer
+
+Fail :: (message: string, status: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "aescbc: %\n", message);
+    unused Cli.WriteAll(2, TextView(out[:]));
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+Usage :: () -> s32 {
+    unused Cli.WriteAll(2, USAGE);
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+ReadAll :: (handle: s32, out: *Vec(u8), limit: s64) -> bool {
+    chunk: [8192]u8;
+    while limit < 0 || out.count < limit {
+        want: s64 = chunk.count;
+        if limit >= 0 && limit - out.count < want { want = limit - out.count }
+        n := Io.Read(handle, chunk[:want]);
+        if n < 0 { return false }
+        if n == 0 { break }
+        BuilderAppend(<<out, TextView(chunk[:n]));
+    }
+    return true;
+}
+
+// Reads a password from the console with echo off, as the Limbo command
+// did: backspace and delete rub out, control-U starts again.
+ReadPassword :: (password: *Vec(u8)) -> bool {
+    cons := Io.Open("/dev/cons", 2);
+    if cons < 0 { return false }
+    control := Io.Open("/dev/consctl", 1);
+    if control < 0 || Io.Write(control, "rawon") <= 0 {
+        unused Cli.WriteAll(2, "aescbc: warning: cannot hide typed password\n");
+    }
+    unused Cli.WriteAll(cons, "password: ");
+    byte: [1]u8;
+    while Io.Read(cons, byte[:]) == 1 {
+        c := byte[0];
+        if c == #char "\n" { break }
+        if c == 8 || c == 127 {
+            if password.count > 0 { unused VecResize(<<password, password.count - 1) }
+        } else if c == 21 {
+            VecClear(<<password);
+            unused Cli.WriteAll(cons, "\npassword: ");
+        } else {
+            VecPush(<<password, c);
+        }
+    }
+    unused Cli.WriteAll(cons, "\n");
+    unused Io.Close(cons);
+    if control >= 0 { unused Io.Close(control) }
+    return true;
+}
+
+// The AES key and the HMAC key of a password.
+Keys :: (password: string, aes: []u8, hmac: []u8) {
+    salted: Vec(u8);
+    BuilderAppend(salted, "aescbc file");
+    BuilderAppend(salted, password);
+    digest: [20]u8;
+    unused Crypto.Digest(Crypto.SHA1, TextView(salted[:]), digest[:]);
+    for i: 0..BLOCK - 1 { aes[i] = digest[i] }
+    unused Crypto.Digest(Crypto.MD5, TextView(aes[:BLOCK]), hmac);
+}
+
+Write :: (data: string) -> bool {
+    if Cli.WriteAll(1, data) { return true }
+    message: Vec(u8);
+    BuilderPrint(*message, "write error: %", Io.Error());
+    unused Fail(TextView(message[:]), "write error");
+    return false;
+}
+
+Encrypt :: (input: string, aes: []u8, hmac: []u8) -> s32 {
+    start: [32]u8; // the vector, then the random block
+    if Crypto.Random(start[:]) != start.count { return Fail("can't read random numbers", "read random") }
+    plain: Vec(u8);
+    BuilderAppend(plain, TextView(start[BLOCK:]));
+    BuilderAppend(plain, input);
+    cipher: Vec(u8);
+    unused VecResize(cipher, plain.count);
+    next: [16]u8;
+    unused Crypto.AesCbc(TextView(aes[:BLOCK]), TextView(start[:BLOCK]), TextView(plain[:]), true, cipher[:], next[:]);
+    mac: [20]u8;
+    unused Crypto.Hmac(Crypto.SHA1, TextView(hmac[:BLOCK]), TextView(cipher[:]), mac[:]);
+    if !Write(HEADER) || !Write(TextView(start[:BLOCK])) || !Write(TextView(cipher[:])) || !Write(TextView(mac[:])) { return 1 }
+    return 0;
+}
+
+Decrypt :: (input: string, aes: []u8, hmac: []u8) -> s32 {
+    if input.count < BLOCK { return Fail("unexpectedly short read", "read error") }
+    if input[:BLOCK] == HEADER {
+        if input.count < BLOCK + 2 * BLOCK + MAC { return Fail("unexpectedly short read", "read error") }
+        vector := input[BLOCK:2 * BLOCK];
+        body := input[2 * BLOCK:input.count - MAC];
+        mac := input[input.count - MAC:];
+        plain: Vec(u8);
+        unused VecResize(plain, body.count);
+        next: [16]u8;
+        unused Crypto.AesCbc(TextView(aes[:BLOCK]), vector, body, false, plain[:], next[:]);
+        if !Write(TextView(plain[BLOCK:])) { return 1 }
+        digest: [20]u8;
+        unused Crypto.Hmac(Crypto.SHA1, TextView(hmac[:BLOCK]), body, digest[:]);
+        if TextView(digest[:]) != mac { return Fail("decrypted file failed to authenticate", "failed to authenticate") }
+        return 0;
+    }
+    // The older secstore form: the vector, then the file and CHECK.
+    if input.count < 2 * BLOCK { return Fail("unexpectedly short read", "read error") }
+    body := input[BLOCK:];
+    plain: Vec(u8);
+    unused VecResize(plain, body.count);
+    next: [16]u8;
+    unused Crypto.AesCbc(TextView(aes[:BLOCK]), input[:BLOCK], body, false, plain[:], next[:]);
+    if !Write(TextView(plain[:plain.count - BLOCK])) { return 1 }
+    if TextView(plain[plain.count - BLOCK:]) != CHECK { return Fail("decrypted file failed to authenticate", "failed to authenticate") }
+    return 0;
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    mode: s64 = -1; // 1 encrypts, 0 decrypts
+    keyfile := "";
+    password := "";
+    has_keyfile := false;
+    has_password := false;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "d" || option == #char "e" {
+            if mode >= 0 { return Usage() }
+            mode = ifx option == #char "e" then 1 else 0;
+        } else if option == #char "f" || option == #char "k" {
+            value, ok := Arg.Value(*scan);
+            if !ok { return Usage() }
+            if option == #char "f" { keyfile = value; has_keyfile = true } else { password = value; has_password = true }
+        } else {
+            return Usage();
+        }
+    }
+    if scan.next < Args.OperandCount() || mode < 0 { return Usage() }
+
+    key: Vec(u8);
+    if has_keyfile && keyfile.count > 0 {
+        fd := Io.Open(keyfile, 0);
+        if fd < 0 {
+            message: Vec(u8);
+            BuilderAppend(message, "can't open ");
+            Quote.Quote(*message, keyfile);
+            BuilderPrint(*message, ": %", Io.Error());
+            return Fail(TextView(message[:]), "keyfile");
+        }
+        unused ReadAll(fd, *key, KEYFILE_LIMIT);
+        unused Io.Close(fd);
+        while key.count > 0 && key[key.count - 1] == #char "\n" { unused VecResize(key, key.count - 1) }
+        if key.count == 0 { return Fail("no key", "no key") }
+    } else {
+        if has_password && password.count > 0 {
+            BuilderAppend(key, password);
+        } else if !ReadPassword(*key) || key.count == 0 {
+            return Fail("no key", "no key");
+        }
+    }
+    aes: [16]u8;
+    hmac: [16]u8;
+    Keys(TextView(key[:]), aes[:], hmac[:]);
+    for i: 0..key.count - 1 { key[i] = 0 }
+
+    input: Vec(u8);
+    if !ReadAll(0, *input, -1) {
+        message: Vec(u8);
+        BuilderPrint(*message, "read error: %", Io.Error());
+        return Fail(TextView(message[:]), "read error");
+    }
+    if mode == 1 { return Encrypt(TextView(input[:]), aes[:], hmac[:]) }
+    return Decrypt(TextView(input[:]), aes[:], hmac[:]);
+}
