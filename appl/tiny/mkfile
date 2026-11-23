@@ -2,7 +2,6 @@
 
 TARG=\
 	kill.dis\
-	sh.dis\
 
 MODULES=\
 
@@ -17,7 +16,7 @@ DISBIN=$ROOT/dis/tiny
 
 <$ROOT/mkfiles/mkdis
 
-# rm and broke are ZX programs; sh also has a ZX version.
+# rm, broke and sh are ZX programs.
 ZXCMD=../cmd
 ZXSH=../cmd/sh
 

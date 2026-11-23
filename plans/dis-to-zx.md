@@ -222,11 +222,11 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 127 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 126 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh parity 85/86, gap: env isolation needs taijios_namespace ForkEnv; also open: ${pid} (Pid), pctl newns/newpgrp/nodevs. A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, sh/mload |
+| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh: all cases match sh.dis; open: the tk, mload, mk and alphabet builtin modules, and the step budget (a long CPU-bound script ends a ZX program). A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, sh/mload |
 | dis/9win.dis | appl/cmd/9win.b |  | - |  |
 | dis/B.dis | appl/cmd/B.b |  | - |  |
 | dis/acme.dis | appl/acme/acme.b |  | - |  |
@@ -335,7 +335,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/tcs.dis | appl/cmd/tcs.b |  | - |  |
 | dis/telnet.dis | appl/cmd/telnet.b |  | - |  |
 | dis/time.dis | appl/cmd/time.b |  | - |  |
-| dis/tiny/sh.dis | appl/tiny/sh.b | module/sh.m | - | zx-twin /dis/tiny/sh.zx (appl/tiny/sh.zi), tests/sh tiny-sh cases match; stays until taijios_namespace has ForkEnv: without -e the Limbo tiny/sh copied its environment group. os/cerf1110/cerf, os/cerf250/cerf, os/gum/gum and os/ipaq1110/ipaq also name it as their root /dis/sh.dis |
 | dis/tkcmd.dis | appl/cmd/tkcmd.b |  | - |  |
 | dis/touchcal.dis | appl/cmd/touchcal.b |  | - |  |
 | dis/tsort.dis | appl/cmd/tsort.b |  | - |  |
@@ -751,4 +750,5 @@ The `os/*/` kernel configuration files and `os/init/*.b` still name Dis files th
 - `/dis/cat.dis`, `/dis/echo.dis`, `/dis/ls.dis`: `os/cerf1110/cerf`, `os/cerf250/cerf`, `os/cerf405/cerf`, `os/gum/gum`, `os/ipaq1110/ipaq`, `os/manga/manga`, `os/pc/pc`, `os/pc/pc4e`, `os/pc/pcdisk`, `os/pc/pix`.
 - `/dis/cp.dis`, `/dis/mkdir.dis`, `/dis/pcmcia.dis`: `os/cerf1110/cerf`, `os/cerf250/cerf`, `os/gum/gum`, `os/ipaq1110/ipaq`.
 - `/dis/disk/kfscmd.dis`: `os/ipaq1110/ipaq`.
+- `/dis/tiny/sh.dis` (their root `/dis/sh.dis`; `/dis/tiny/sh.zx` replaces it): `os/cerf1110/cerf`, `os/cerf250/cerf`, `os/gum/gum`, `os/ipaq1110/ipaq`.
 - `/dis/lib/srv.dis`: `os/init/reminit.b`. `/dis/mux/mux.dis`: `os/init/init.b`.

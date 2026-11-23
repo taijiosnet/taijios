@@ -1877,9 +1877,11 @@ UnloadModule :: (name: string) -> Text {
     return TextCopy("");
 }
 
-// A new context, as Context.new: the environment, the shell's builtins and
-// the $autoload modules.
+// A new context, as Context.new: a copy of the environment, the shell's
+// builtins and the $autoload modules.
 NewContext :: (autoload: bool) {
+    // env->clone(): this shell's variables stay its own.
+    unused Ns.ForkEnv();
     scope: Scope;
     scope.flags = VERBOSE;
     VecPush(scopes, scope);

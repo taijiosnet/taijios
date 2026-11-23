@@ -5,6 +5,7 @@
 #import "std/option";
 Io :: #import "taijios_io";
 Ns :: #import "taijios_namespace";
+Process :: #import "taijios_process";
 #import "shell_parse";
 #import "shell_util";
 #import "shell";
@@ -329,6 +330,9 @@ BuiltinPctl :: (args: *Items) -> Text {
     if args.count < 2 { StdUsage("pctl option... [fdnum...]"); return TextCopy("") }
     newfd := false;
     forkns := false;
+    newns := false;
+    newpgrp := false;
+    nodevs := false;
     keep: Vec(s32);
     for i: 1..args.count - 1 {
         w: Text = TextCopy(TextView(args.*[i].word));
@@ -337,19 +341,17 @@ BuiltinPctl :: (args: *Items) -> Text {
         if v == "newfd" { newfd = true }
         else if v == "forkfd" { }
         else if v == "forkns" { forkns = true }
-        else if v == "newns" || v == "newpgrp" || v == "nodevs" {
-            msg: Vec(u8);
-            BuilderPrint(*msg, "pctl: % has no ZX host call", v);
-            Fail("usage", TextView(msg[:]));
-            return TextCopy("");
-        } else {
+        else if v == "newns" { newns = true }
+        else if v == "newpgrp" { newpgrp = true }
+        else if v == "nodevs" { nodevs = true }
+        else {
             msg: Vec(u8);
             BuilderPrint(*msg, "pctl: unknown flag %", v);
             Fail("usage", TextView(msg[:]));
             return TextCopy("");
         }
     }
-    if forkns { unused Ns.Fork() }
+    // In the order Sys->pctl applies them.
     if newfd {
         for fd: 0..FDMAX - 1 {
             kept := false;
@@ -357,6 +359,10 @@ BuiltinPctl :: (args: *Items) -> Text {
             if !kept { fds[fd] = -1 }
         }
     }
+    if newns { unused Ns.NewNs() }
+    if forkns { unused Ns.Fork() }
+    if newpgrp { unused Process.NewPgrp() }
+    if nodevs { unused Ns.NoDevs() }
     return TextCopy("");
 }
 
@@ -603,8 +609,11 @@ StdSRunList :: (args: *Items) -> Items {
     if val.count != 0 { return RunSubfn(*val, args) }
     w := TextView(name);
     if w == "pid" {
-        Fail("pid", "pid: the guest has no ZX host call for a process id");
-        return NoItems();
+        id: Vec(u8);
+        BuilderPrint(*id, "%", Process.Pid());
+        pid: Items;
+        PushWord(*pid, TextView(id[:]));
+        return pid;
     }
     if w == "hd" {
         first: Items;

@@ -427,9 +427,7 @@ main :: () -> s32 {
         i += 1;
     }
     if lflag { Startup() }
-    // Without -e the Limbo shell copied its environment group (FORKENV);
-    // the guest has no call for that yet, so the group stays shared.
-    if eflag { }
+    if !eflag { unused Ns.ForkEnv() }
     if !nflag { unused Ns.Fork() }
     if hascmd {
         line: Vec(u8);

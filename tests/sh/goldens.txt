@@ -344,3 +344,7 @@ err: sh: or: './or' file does not exist\nsh: and: './and' file does not exist\ne
 status: usage\n
 out: 
 err: expr: invalid radix 99\n
+=== std-pctl-more
+status: \n
+out: newpgrp ok\nnodevs status errors\ndevices still there\n      1\n
+err: 
