@@ -1,0 +1,62 @@
+// Table-driven unit tests for appl/demo/lego/rcx_protocol.zi.
+#import "std/vec"
+using Proto :: #import "rcx_protocol"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    // 1. RCX packet encode & decode round-trip
+    payload: [3]u8 = .[0x65, 0x01, 0x03];
+    pkt: Vec(u8);
+    Proto.EncodeRcxPacket(payload[:], *pkt);
+    Expect(pkt.count == 3 + 2 * 3 + 2, "RCX packet length");
+    Expect(pkt[0] == 0x55 && pkt[1] == 0xFF && pkt[2] == 0x00, "RCX header");
+    decoded: Vec(u8);
+    Expect(Proto.DecodeRcxReply(VecSlice(pkt, 0, pkt.count), *decoded) == "", "RCX decode valid");
+    Expect(decoded.count == 3 && decoded[0] == 0x65 && decoded[1] == 0x01 && decoded[2] == 0x03, "RCX payload match");
+
+    // Corrupt checksum
+    pkt[pkt.count - 2] ^= 1;
+    Expect(Proto.DecodeRcxReply(VecSlice(pkt, 0, pkt.count), *decoded) == "bad cksum", "RCX reject bad cksum");
+
+    // 2. Motorola S-record parser (S0 header, S1 data at 0x8000, S9 start address 0x8004)
+    // S1: count=05, addr=8000, data=DE AD, sum=05+80+00+DE+AD=0x210 -> cksum=~0x10=0xEF
+    // S9: count=03, addr=8004, sum=03+80+04=0x87 -> cksum=~0x87=0x78
+    srec := "S00600004844521B\nS1058000DEADEF\nS903800478\n";
+    img: Proto.FirmImage;
+    Expect(Proto.ParseSrec(srec, *img) == "", "ParseSrec valid");
+    Expect(img.start == 0x8004 && img.length == 2 && img.data[0] == 0xDE && img.data[1] == 0xAD, "ParseSrec fields");
+
+    Expect(Proto.ParseSrec("S1058000DEADEE\n", *img) == "bad S-record checksum", "ParseSrec bad cksum");
+    Expect(Proto.ParseSrec("BADLINE\n", *img) == "short S-record", "ParseSrec short");
+
+    // 3. RLE encode & decode round-trip (zeros, runs of >=3 zeros, literal 0x88)
+    raw: [12]u8 = .[1, 0, 2, 0, 0, 3, 0, 0, 0, 0, 0x88, 9];
+    comp: Vec(u8);
+    uncomp: Vec(u8);
+    Proto.RlEncode(raw[:], *comp);
+    Expect(Proto.RlDecode(VecSlice(comp, 0, comp.count), *uncomp), "RlDecode valid");
+    Expect(uncomp.count == raw.count, "RLE round-trip length");
+    for i: 0..raw.count-1 {
+        Expect(uncomp[i] == raw[i], "RLE round-trip byte");
+    }
+
+    // Reject truncated 0x88 escape
+    bad_rle: [2]u8 = .[1, 0x88];
+    Expect(!Proto.RlDecode(bad_rle[:], *uncomp), "RlDecode reject truncated escape");
+
+    // 4. Link packet framing
+    link_pkt: Vec(u8);
+    Proto.EncodeLinkPacket(1, raw[:], *link_pkt);
+    Expect(link_pkt.count > 10 && link_pkt[0] == 0x55 && link_pkt[3] == 0x4D, "EncodeLinkPacket seq=1");
+
+    if failures == 0 { print("lego_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

@@ -1,0 +1,190 @@
+// Lego RCX serial-to-/net/legolink bridge via file2chan,
+// ported from appl/demo/lego/legolink.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using Clock :: #import "taijios_clock"
+using IO :: #import "taijios_io"
+using F2C :: #import "taijios_file2chan"
+using Proto :: #import "rcx_protocol"
+using Serial :: #import "rcx_serial"
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    for i: 0..s.count-1 {
+        if s[i] < 48 || s[i] > 57 { break }
+        v = v * 10 + cast(s32)(s[i] - 48);
+    }
+    return v;
+}
+
+DataSend :: (sp: *Serial.SerialPort, seqnum: s32, data: []u8, startup: bool,
+             reply_data: *Vec(u8), poll_out: *s32) -> string {
+    unused VecResize(<<reply_data, 0);
+    <<poll_out = 0;
+
+    if startup {
+        dummy: [4]u8 = .[255, 0, 255, 0];
+        unused IO.Write(sp.wfd, TextView(dummy[:]));
+        trash: Vec(u8);
+        unused Serial.NbRead(sp, 100, 100, *trash);
+    }
+
+    rcxdata: Vec(u8);
+    Proto.EncodeLinkPacket(seqnum, data, *rcxdata);
+    rslice := VecSlice(rcxdata, 0, rcxdata.count);
+
+    echo: Vec(u8);
+    hdr: Vec(u8);
+    body: Vec(u8);
+    err := "";
+
+    for try: 0..7 {
+        err = "";
+        i: s64 = 0;
+        while err.count == 0 && i < rslice.count {
+            step: s64 = 8;
+            if i + step > rslice.count { step = rslice.count - i }
+            if IO.Write(sp.wfd, TextView(rslice[i:i + step])) != cast(s32)step { return "hangup" }
+            if Serial.NbRead(sp, 300, step, *echo) != step { err = "tower not responding"; break }
+            for ei: 0..step-1 {
+                if echo[ei] != rslice[i + ei] { err = "serial comms error"; break }
+            }
+            i += step;
+        }
+        if err.count > 0 { Serial.Consume(sp); continue }
+
+        if Serial.NbRead(sp, 300, 9, *hdr) != 9 { err = "brick not responding"; Serial.Consume(sp); continue }
+        if hdr[0] != 0x55 || hdr[1] != 0xFF || hdr[2] != 0 || hdr[5] != ~hdr[6] || hdr[7] != ~hdr[8] {
+            err = "bad reply from brick";
+            Serial.Consume(sp);
+            continue;
+        }
+        replen := cast(s64)hdr[5] + (cast(s64)hdr[7] << 8) + 1;
+        cksum := cast(s32)hdr[3] + cast(s32)hdr[5] + cast(s32)hdr[7];
+        if Serial.NbRead(sp, 200, replen * 2, *body) != replen * 2 {
+            err = "short reply from brick";
+            Serial.Consume(sp);
+            continue;
+        }
+        unpacked: Vec(u8);
+        for k: 0..replen-1 {
+            b := body[k * 2];
+            unused VecPush(unpacked, b);
+            if k < replen - 1 { cksum += cast(s32)b }
+        }
+        if unpacked[replen - 1] != cast(u8)(cksum & 0xFF) {
+            err = "bad checksum from brick";
+            Serial.Consume(sp);
+            continue;
+        }
+        if (unpacked[0] & 1) != cast(u8)(seqnum & 1) {
+            err = "bad seqnum from brick";
+            continue;
+        }
+        lnhdr := cast(s32)unpacked[0];
+        <<poll_out = lnhdr & Proto.LN_POLLMASK;
+        if replen > 2 {
+            payload := VecSlice(unpacked, 1, replen - 1);
+            if (lnhdr & Proto.LN_COMPMASK) != 0 {
+                if !Proto.RlDecode(payload, reply_data) {
+                    err = "bad brick msg compression";
+                    continue;
+                }
+            } else {
+                for k: 0..payload.count-1 { unused VecPush(<<reply_data, payload[k]) }
+            }
+        }
+        return "";
+    }
+    return err;
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        print("usage: legolink portnum\n");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    portnum := ParseInt(Args.Operand(0));
+
+    sp: Serial.SerialPort;
+    serr: Text;
+    if !Serial.OpenSerial(*sp, portnum, false, *serr) {
+        print("%\n", TextView(serr));
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    Serial.Consume(*sp);
+
+    f2c: F2C.File;
+    if !F2C.Create(*f2c, "/net", "legolink") {
+        Serial.CloseSerial(*sp);
+        print("cannot create legolink channel: %\n", IO.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    rxbuf: Vec(u8);
+    reply_data: Vec(u8);
+    rdfid: s32 = -1;
+    wrfid: s32 = -1;
+    seqnum: s32 = 0;
+    last_tx: s64 = 0;
+    pending_read := false;
+    read_req: F2C.Request;
+    req: F2C.Request;
+
+    while true {
+        status := F2C.Next(*f2c, *req, false);
+        if status < 0 { break }
+        if status == 1 {
+            if req.kind == F2C.Close {
+                if req.fid == rdfid { rdfid = -1; pending_read = false }
+                if req.fid == wrfid { wrfid = -1 }
+            } else if req.kind == F2C.Read {
+                if rdfid == -1 { rdfid = req.fid }
+                if req.fid != rdfid {
+                    unused F2C.ReplyError(*f2c, *req, "file in use");
+                } else if rxbuf.count > 0 {
+                    take := ifx cast(s64)req.count < rxbuf.count then cast(s64)req.count else rxbuf.count;
+                    unused F2C.ReplyRead(*f2c, *req, VecSlice(rxbuf, 0, take));
+                    rem := rxbuf.count - take;
+                    for i: 0..rem-1 { rxbuf[i] = rxbuf[take + i] }
+                    unused VecResize(rxbuf, rem);
+                } else {
+                    read_req = req;
+                    pending_read = true;
+                }
+            } else if req.kind == F2C.Write {
+                if wrfid == -1 { wrfid = req.fid }
+                if req.fid != wrfid {
+                    unused F2C.ReplyError(*f2c, *req, "file in use");
+                } else {
+                    startup := Clock.Millis() - last_tx > 1500;
+                    poll: s32 = 0;
+                    derr := DataSend(*sp, seqnum, req.data[:req.count], startup, *reply_data, *poll);
+                    seqnum += 1;
+                    last_tx = Clock.Millis();
+                    if derr.count > 0 {
+                        unused F2C.ReplyError(*f2c, *req, derr);
+                        break;
+                    }
+                    unused F2C.ReplyWrite(*f2c, *req, req.count);
+                    for i: 0..reply_data.count-1 { unused VecPush(rxbuf, reply_data[i]) }
+                    if pending_read && rxbuf.count > 0 {
+                        take := ifx cast(s64)read_req.count < rxbuf.count then cast(s64)read_req.count else rxbuf.count;
+                        unused F2C.ReplyRead(*f2c, *read_req, VecSlice(rxbuf, 0, take));
+                        rem := rxbuf.count - take;
+                        for i: 0..rem-1 { rxbuf[i] = rxbuf[take + i] }
+                        unused VecResize(rxbuf, rem);
+                        pending_read = false;
+                    }
+                }
+            }
+        }
+    }
+
+    F2C.Remove(*f2c);
+    Serial.CloseSerial(*sp);
+    return 0;
+}
