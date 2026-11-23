@@ -1,0 +1,91 @@
+// /grid/line2rec fd -> records: the input split into records at newlines,
+// from appl/alphabet/grid/line2rec.b. The Dis filter wrote each record to
+// a pipe as "data N\n" and its N bytes, the newline included; here the
+// records value gives those same bytes to its reader, one record at a time,
+// so nothing runs between reading and writing.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "line2rec", "bf", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    v := Va.NewValue(#char "b", Prod());
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "line2rec"));
+    VecPush(states, "");
+    Va.SetN2(v, states.count - 1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+states: Vec(string); // what each records value has read and not yet framed
+
+Cat2 :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+Prod :: () -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("line2rec");
+        p.read = Read;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    return prod;
+}
+
+// The bytes of this record, "data N\n" first, in the reader's buffer.
+Read :: (v: s32, buffer: []u8) -> s64 {
+    at := Va.N0(v);
+    while at >= Va.ValueText(v).count {
+        line, ok := NextLine(v);
+        if !ok { return 0 }
+        record: Vec(u8);
+        BuilderPrint(*record, "data %\n", line.count);
+        BuilderAppend(record, line);
+        Va.SetText(v, BuilderFinish(record));
+        at = 0;
+    }
+    text := Va.ValueText(v);
+    n := text.count - at;
+    if n > buffer.count { n = buffer.count }
+    for i: 0..n - 1 { buffer[i] = text[at + i] }
+    Va.SetN0(v, at + n);
+    return n;
+}
+
+// The next line including its newline, or the rest at the end of the input.
+NextLine :: (v: s32) -> (line: string, ok: bool) {
+    st := Va.N2(v);
+    while true {
+        pending := states[st];
+        for i: 0..pending.count - 1 {
+            if pending[i] == #char "\n" {
+                got := pending[0:i + 1];
+                states[st] = pending[i + 1:];
+                return got, true;
+            }
+        }
+        chunk: [4096]u8;
+        n := Va.Read(Va.Kid(v, 0), chunk[:]);
+        if n <= 0 {
+            if pending.count > 0 {
+                states[st] = "";
+                return pending, true;
+            }
+            return "", false;
+        }
+        states[st] = Cat2(pending, TextView(chunk[:n]));
+    }
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { Va.Free(Va.Kid(v, 0), false) }
+    return 0;
+}

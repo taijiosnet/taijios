@@ -1,0 +1,79 @@
+// /grid/local [-v] endpoint -> fd: everything the endpoint brings, from
+// appl/alphabet/grid/local.b. The endpoint is opened on the first read; a
+// read that fails is reported, and the end of the endpoint ends the fd.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ep :: #import "grid/endpoints";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "local", "fe-v", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    v := Va.NewValue(#char "f", Prod());
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "local"));
+    Va.SetN0(v, ifx Al.OptCount(call) > 0 then 1 else 0);
+    Va.SetRawHandle(v, -1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Prod :: () -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("local");
+        p.read = Read;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    return prod;
+}
+
+// N1: 0 not opened, 1 open, 2 failed or ended.
+Read :: (v: s32, buffer: []u8) -> s64 {
+    if Va.N1(v) == 0 { Open(v) }
+    if Va.N1(v) != 1 { return 0 }
+    n := Io.ReadBytes(Va.RawHandle(v), buffer);
+    if n < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "read error: %", Io.LastError());
+        Va.Report(Va.ErrcOf(v), BuilderFinish(out));
+        Close(v);
+        return 0;
+    }
+    if n == 0 { Close(v) }
+    return n;
+}
+
+Open :: (v: s32) {
+    Va.SetN1(v, 2);
+    ep := Ep.ValueEndpoint(Va.Kid(v, 0));
+    if Va.N0(v) != 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "endpoint % at %: %", Ep.QQ(ep.id), Ep.QQ(ep.addr), ep.about);
+        Va.Report(Va.ErrcOf(v), BuilderFinish(out));
+    }
+    h, err := Ep.Open("", ep);
+    if h < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "error: local: cannot open endpoint (% %): %", Ep.QQ(ep.addr), Ep.QQ(ep.id), err);
+        Va.Report(Va.ErrcOf(v), BuilderFinish(out));
+        return;
+    }
+    Va.SetRawHandle(v, h);
+    Va.SetN1(v, 1);
+}
+
+Close :: (v: s32) {
+    h := Va.RawHandle(v);
+    if h >= 0 { unused Io.CloseFile(h) }
+    Va.SetRawHandle(v, -1);
+    Va.SetN1(v, 2);
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { Close(v) }
+    return 0;
+}

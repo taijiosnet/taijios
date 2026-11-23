@@ -1,11 +1,13 @@
-// Every typeset this alphabet serves, registered once at start: "/" and,
-// as their ports land, abc, fs and grid.
+// Every typeset this alphabet serves, registered once at start: "/", abc,
+// fs and grid.
 Main :: #import "main/typeset";
 Abc :: #import "abc/abctypes";
 Fs :: #import "fs/fstypes";
+Grid :: #import "grid/gridtypes";
 
 Register :: () {
     Main.Register();
     Abc.Register();
     Fs.Register();
+    Grid.Register();
 }

@@ -1,0 +1,112 @@
+// endpointsrv addr dir: serve an endpoint server's ids in dir, from
+// appl/alphabet/auxi/endpointsrv.b. A read of dir/clone makes an endpoint:
+// the reply is "addr id", and dir/id and dir/id.in become the two ends of
+// a pipe, the reader's and the writer's, that listen then carries to the
+// network address. Writing clone is refused.
+using Io :: #import "taijios_io";
+using Ns :: #import "taijios_namespace";
+using F2c :: #import "taijios_file2chan";
+using Args :: #import "taijios_args";
+
+DMDIR :: 0x80000000;
+PERM :: 0x1ED; // 0755
+
+Cat2 :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+Cat3 :: (a: string, b: string, c: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    return BuilderFinish(out);
+}
+
+Cat4 :: (a: string, b: string, c: string, d: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    BuilderAppend(out, d);
+    return BuilderFinish(out);
+}
+
+Cat6 :: (a: string, b: string, c: string, d: string, e: string, f: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    BuilderAppend(out, d);
+    BuilderAppend(out, e);
+    BuilderAppend(out, f);
+    return BuilderFinish(out);
+}
+
+
+Fatal :: (message: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "endpointsrv: %\n", message);
+    unused Io.WriteBytes(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+// The two ends of a fresh #| pipe, named name and name.in in dir.
+MkPipe :: (dir: string, name: string) {
+    if Ns.Bind("#|", "/tmp", Ns.Replace) < 0 { return }
+    h := Io.OpenFile("/tmp/data", 2);
+    if h < 0 { return }
+    renamed := Io.RenameSameDir(h, name) >= 0;
+    unused Io.CloseFile(h);
+    if !renamed { return }
+    h = Io.OpenFile("/tmp/data1", 2);
+    if h < 0 { return }
+    inname := Cat2(name, ".in");
+    renamed = Io.RenameSameDir(h, inname) >= 0;
+    unused Io.CloseFile(h);
+    if !renamed { return }
+    unused Ns.Bind("/tmp", dir, Ns.Before);
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() != 2 { return Fatal("usage: endpointsrv addr [dir]") }
+    addr := Args.Operand(0);
+    dir := Args.Operand(1);
+    record: [256]u8;
+    if Io.StatPacked(dir, record[:]) < 0 {
+        h := Io.Create(dir, 0, DMDIR | PERM);
+        if h < 0 { return Fatal(Cat4("cannot make ", dir, ": ", Io.LastError())) }
+        unused Io.CloseFile(h);
+    }
+    file: F2c.File;
+    if !F2c.Create(*file, dir, "clone") {
+        return Fatal(Cat4("cannot serve ", dir, "/clone: ", Io.LastError()));
+    }
+    n: s64 = 0;
+    while true {
+        request: F2c.Request;
+        status := F2c.Next(*file, *request, true);
+        if status != 1 { break }
+        if request.kind == F2c.Read {
+            if request.offset > 0 {
+                empty: Vec(u8);
+                unused F2c.ReplyRead(*file, *request, empty[:]);
+            } else {
+                name: Vec(u8);
+                BuilderPrint(*name, "%", n);
+                MkPipe(dir, BuilderFinish(name));
+                reply: Vec(u8);
+                BuilderPrint(*reply, "% %", addr, n);
+                unused F2c.ReplyRead(*file, *request, reply[:]);
+                n += 1;
+            }
+        } else if request.kind == F2c.Write {
+            unused F2c.ReplyError(*file, *request, "cannot write");
+        }
+    }
+    return 0;
+}

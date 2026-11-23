@@ -1,0 +1,136 @@
+// The grid typeset's parts that run: the endpoint server, an endpoint made
+// on it, /grid/local reading one, and /grid/line2rec framing an fd into
+// records. The Dis originals needed a Limbo program to drive them; here one
+// ZX program calls the same procedures the alphabet's modules do.
+//
+// An endpoint's writer stays open while its reader reads: this guest's #|
+// pipe only tells its reader of the end when the reader was already open.
+//
+// From the TaijiOS root, after "(cd appl/alphabet && mk install-zx)":
+//     sh tests/alphabet/grid_test.sh
+using Io :: #import "taijios_io";
+Ep :: #import "grid/endpoints";
+Local :: #import "grid/local";
+L2r :: #import "grid/line2rec";
+St :: #import "alpha_streams";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+fails: s32;
+
+Cat2 :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+Check :: (ok: bool, what: string, got: string, want: string) {
+    if ok { return }
+    fails += 1;
+    out: Vec(u8);
+    BuilderPrint(*out, "FAIL %:\n  got  [%]\n  want [%]\n", what, got, want);
+    unused Io.WriteBytes(2, BuilderFinish(out));
+}
+
+ReadAll :: (v: s32) -> string {
+    out: Vec(u8);
+    buffer: [1024]u8;
+    while true {
+        n := Va.Read(v, buffer[:]);
+        if n <= 0 { break }
+        for buffer[:n] { VecPush(out, it) }
+    }
+    return BuilderFinish(out);
+}
+
+// An endpoint value as the alphabet would pass one to a module.
+Call :: (v: s32) -> Al.Call {
+    call: Al.Call;
+    call.report = -1;
+    call.errc = -1;
+    VecPush(call.args, v);
+    return call;
+}
+
+// A new endpoint of addr, once the server is listening for it.
+New :: () -> (fd: s32, ep: Ep.Endpoint, err: string) {
+    tries: s64 = 0;
+    while tries < 100 {
+        h, e, message := Ep.Create("local");
+        if h >= 0 { return h, e, "" }
+        tries += 1;
+    }
+    none: Ep.Endpoint;
+    return -1, none, "endpointsrv did not answer";
+}
+
+// The bytes of a value's next read.
+Next :: (v: s32) -> string {
+    buffer: [1024]u8;
+    n := Va.Read(v, buffer[:]);
+    out: Vec(u8);
+    for buffer[:ifx n > 0 then n else 0] { VecPush(out, it) }
+    return BuilderFinish(out);
+}
+
+main :: () -> s32 {
+    // Endpoint.text and Endpoint.mk read each other back.
+    ep: Ep.Endpoint;
+    ep.addr = "local";
+    ep.id = "3";
+    ep.about = "a b";
+    text := Ep.Text(ep);
+    Check(text == "local 3 'a b'", "endpoint text", text, "local 3 'a b'");
+    back, ok := Ep.Mk(text);
+    Check(ok && back.addr == ep.addr && back.id == ep.id && back.about == ep.about, "endpoint mk", text, "the same fields");
+
+    err := Ep.MountGen();
+    Check(err == "", "mount mntgen", err, "");
+    ops := string.["local", Cat2(Ep.DIR, "/local")];
+    launch := Ep.Start("/dis/endpointsrv.zx", ops[:]);
+    Check(launch.id != 0, "start endpointsrv", launch.error, "");
+
+    // One endpoint's two ends: written on the .in side, read as its data.
+    w, one, cerr := New();
+    Check(w >= 0, "create endpoint", cerr, "");
+    Check(one.addr == "local" && one.id == "0", "endpoint id", Cat2(one.addr, Cat2(" ", one.id)), "local 0");
+    unused Io.WriteBytes(w, "hello");
+    r, oerr := Ep.Open("", one);
+    Check(r >= 0, "open endpoint", oerr, "");
+    if r >= 0 {
+        buffer: [16]u8;
+        n := Io.ReadBytes(r, buffer[:]);
+        Check(n == 5 && TextView(buffer[:5]) == "hello", "endpoint data", TextView(buffer[:ifx n > 0 then n else 0]), "hello");
+        unused Io.CloseFile(w);
+        n = Io.ReadBytes(r, buffer[:]);
+        Check(n == 0, "endpoint end", Cat2("read ", "after"), "0");
+        unused Io.CloseFile(r);
+    }
+
+    // /grid/local reads an endpoint as an fd.
+    w2, two, cerr2 := New();
+    Check(w2 >= 0, "create second endpoint", cerr2, "");
+    unused Io.WriteBytes(w2, "world");
+    call := Call(Ep.MkValue(two));
+    local := Local.Run(*call);
+    Check(Next(local) == "world", "local", "", "world");
+    unused Io.CloseFile(w2);
+    end: [16]u8;
+    Check(Va.Read(local, end[:]) == 0, "local end", "", "0");
+
+    // /grid/line2rec frames each line, the last without its newline.
+    in := St.TextStream("one\ntwo");
+    call2 := Call(in);
+    got := ReadAll(L2r.Run(*call2));
+    Check(got == "data 4\none\ndata 3\ntwo", "line2rec", got, "data 4\none\ndata 3\ntwo");
+
+    if fails != 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "grid: % failures\n", fails);
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return 1;
+    }
+    unused Io.WriteBytes(1, "grid: all checks pass\n");
+    return 0;
+}

@@ -1,0 +1,17 @@
+// The grid typeset, as appl/alphabet/typesets/gridtypes.b served it: an
+// endpoint is a place two parties meet, and records are data split into
+// numbered pieces. Its root types (fd, wfd, status, cmd and string) are the
+// alphabet's own; the modules are those of the ZX alphabet in grid/.
+// remote, rexec and farm are not here yet: they need a process started
+// beside the caller, which Ziran has no host call for.
+Ty :: #import "alpha_types";
+Local :: #import "grid/local";
+Line2rec :: #import "grid/line2rec";
+
+Register :: () {
+    reg := Ty.RegisterTypeset("grid", "bewcrfs");
+    Ty.RegisterType(reg, #char "b", "records");
+    Ty.RegisterType(reg, #char "e", "endpoint");
+    Local.Register(reg);
+    Line2rec.Register(reg);
+}

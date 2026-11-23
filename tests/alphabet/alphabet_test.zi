@@ -1,9 +1,10 @@
 // Guest regression for Alphabet in Ziran: the core (parser, type checker,
 // evaluator, the builtins of "load alphabet"), the modules of the root
-// typeset "/", the abc typeset, whose values are alphabets, and the fs
-// typeset's file trees, entries, gates and selectors. An fs case's tree is
-// made afresh with fixed modes and times; @USER@ stands for the user
-// running the test, who owns its files. Each case is a script of alphabet builtin commands; it runs
+// typeset "/", the abc typeset, whose values are alphabets, the fs
+// typeset's file trees, entries, gates and selectors, and the grid
+// typeset's endpoints and records. An fs case's tree is made afresh with
+// fixed modes and times; @USER@ stands for the user running the test, who
+// owns its files. Each case is a script of alphabet builtin commands; it runs
 // as /dis/alphabet.zx SCRIPT, and its status, output and diagnostics must
 // be what the Dis "load alphabet" builtin gave for the same script, run
 // with sh. A case with a note says where the Dis original could not be
@@ -14,6 +15,9 @@
 // /dis/sh.zx, as the Dis modules ran one in a shell of their own. /auth's
 // protocol waits for a ZX Inferno Auth client; only its key file is
 // checked here. /fs/match -r waits for a regular expression library.
+// grid's working parts (the endpoint server, /grid/local and
+// /grid/line2rec) have their own test, tests/alphabet/grid_test.sh; its
+// remote, rexec and farm need a process started beside the caller.
 //
 // From the TaijiOS root, after "(cd appl/alphabet && mk install-zx)":
 //     ziran run --target=c --root tests/alphabet tests/alphabet/alphabet_test.zi -- [EMU]
@@ -271,7 +275,7 @@ block11: [16]Case = Case.[
     .{name = "fs:query", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/query \"{test -d $file}}}} 1}\n\n", input = "", status = "", out = "tree\ntree/sub\ntree/sub/deep\n", err = ""},
 ];
 
-block12: [12]Case = Case.[
+block12: [16]Case = Case.[
     .{name = "fs:query-p", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/query -p \"{test $length -gt 3}}}} 1}\n\n", input = "", status = "", out = "tree/a.txt\ntree/b.b\ntree/sub/c.txt\ntree/sub/d.b\n", err = ""},
     .{name = "fs:query-P", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree/sub}} {/fs/query -P \"{echo $name $dtype}}}} 1}\n", input = "", status = "", out = "tree/sub U\ntree/sub\nc.txt U\ntree/sub/c.txt\nd.b U\ntree/sub/d.b\ndeep U\ntree/sub/deep\ne.txt U\ntree/sub/deep/e.txt\n", err = ""},
     .{name = "fs:pipe", script = "typeset /fs\n- {/fs/pipe {/fs/walk tree/sub} \"{cat}}\n\n", input = "", status = "", out = "sea\ndee\ne\n", err = ""},
@@ -284,9 +288,22 @@ block12: [12]Case = Case.[
     .{name = "fs:run-none", script = "typeset /fs\n- {/print {/echo {/fs/run \"{x=1}}} 1}\n\n", input = "", status = "no value", out = "", err = "fs: run: $s has 0 members; exactly one is required\nalphabet: 0. eval: error: command failed\n"},
     .{name = "fs:run-raise", script = "typeset /fs\n- {/print {/echo {/fs/run \"{raise oops}}} 1}\n\n", input = "", status = "no value", out = "", err = "sh: raise: './raise' file does not exist\nfs: run: $s has 0 members; exactly one is required\nalphabet: 0. eval: error: command failed\n"},
     .{name = "fs:run-cmd", script = "typeset /fs\n- {/print {/echo {/fs/run \"{s={a b}}}} 1}\n\n", input = "", status = "", out = "{a b}\n", err = ""},
+    .{name = "grid:types", script = "typeset /grid\necho ${types /grid}\n\n", input = "", status = "", out = "records endpoint\n", err = ""},
+    .{name = "grid:type", script = "typeset /grid\ntype /grid/endpoint /grid/records\necho ${types}\n\n", input = "", status = "", out = "records endpoint /data /wfd /fd /status /string /cmd\n", err = ""},
+    .{name = "grid:usage", script = "typeset /grid\necho ${usage /grid/local}\necho ${usage /grid/line2rec}\n\n", input = "", status = "", out = "[-v] /grid/endpoint -> /fd\n/fd -> /grid/records\n", err = ""},
+    .{name = "grid:declared", script = "typeset /grid\ndeclare /grid/local\ndeclare /grid/line2rec\necho ${modules}\n\n", input = "", status = "", out = "/grid/local /grid/line2rec\n", err = ""},
 ];
 
-CASES :: 204;
+block13: [6]Case = Case.[
+    .{name = "grid:auto", script = "typeset /grid\ntype /fd /grid/endpoint\nautoconvert fd endpoint /grid/local\n\n", input = "", status = "error", out = "", err = "e: error: no way to get from /fd to /grid/endpoint\ne: error: conversion failed for /grid/local\ne: error: usage: /grid/local [-v] endpoint -> fd\ncannot autoconvert fd to endpoint via /grid/local: cannot rewrite transformation {(fd);/grid/local $1}\n"},
+    .{name = "grid:local-string", script = "typeset /grid\ntype /grid/endpoint\n- {/grid/local hello}\n\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /grid/endpoint\nalphabet: 0. eval: error: conversion failed for /grid/local\nalphabet: 0. eval: error: usage: /grid/local [-v] endpoint -> /fd\n"},
+    .{name = "grid:local-badstring", script = "typeset /grid\ntype /grid/endpoint\n- {/grid/local 'a b'}\n\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /grid/endpoint\nalphabet: 0. eval: error: conversion failed for /grid/local\nalphabet: 0. eval: error: usage: /grid/local [-v] endpoint -> /fd\n"},
+    .{name = "grid:line2rec-string", script = "typeset /grid\ntype /grid/records\n- {/grid/line2rec hello}\n\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /fd\nalphabet: 0. eval: error: conversion failed for /grid/line2rec\nalphabet: 0. eval: error: usage: /grid/line2rec /fd -> records\n"},
+    .{name = "grid:type-bad", script = "typeset /grid\ntype /grid/nosuch\n\n", input = "", status = "type declare error", out = "", err = "alphabet: cannot import type /grid/nosuch: /grid does not hold type nosuch\n"},
+    .{name = "grid:types-bad", script = "echo ${types /grid}\n\n", input = "", status = "error", out = "", err = "unknown typeset /grid\n"},
+];
+
+CASES :: 214;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -314,7 +331,9 @@ CaseAt :: (i: s64) -> Case {
 
     if i < 192 { return block11[i - 176] }
 
-    if i < 204 { return block12[i - 192] }
+    if i < 208 { return block12[i - 192] }
+
+    if i < 214 { return block13[i - 208] }
 
     return block0[0];
 }

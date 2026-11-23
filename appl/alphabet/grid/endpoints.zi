@@ -1,0 +1,234 @@
+// An endpoint of the grid typeset, and the endpoint server behind it, from
+// appl/alphabet/auxi/endpoints.b: an endpoint names a place in the network
+// where two parties meet. mntgen serves /n/endpoint, endpointsrv makes an
+// endpoint's id pair there, and listen carries the pair to a network
+// address. The endpoint itself is the text %q %q %q of its address, id and
+// description, as Endpoint.text made it.
+using Io :: #import "taijios_io";
+Ns :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+Dial :: #import "taijios_dial";
+Quote :: #import "taijios_quote";
+Va :: #import "alpha_values";
+
+DIR :: "/n/endpoint";
+DMDIR :: 0x80000000;
+PERM :: 0x1ED; // 0755
+
+Endpoint :: struct {
+    addr: string;
+    id: string;
+    about: string;
+}
+
+Keep :: (s: string) -> string { return TextDetach(TextCopy(s)) }
+
+// %#q: always quoted.
+QQ :: (word: string) -> string {
+    out: Vec(u8);
+    VecPush(out, #char "'");
+    for word {
+        if it == #char "'" { VecPush(out, #char "'") }
+        VecPush(out, it);
+    }
+    VecPush(out, #char "'");
+    return BuilderFinish(out);
+}
+
+Cat2 :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+Cat3 :: (a: string, b: string, c: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    return BuilderFinish(out);
+}
+
+Cat4 :: (a: string, b: string, c: string, d: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    BuilderAppend(out, d);
+    return BuilderFinish(out);
+}
+
+Cat6 :: (a: string, b: string, c: string, d: string, e: string, f: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    BuilderAppend(out, d);
+    BuilderAppend(out, e);
+    BuilderAppend(out, f);
+    return BuilderFinish(out);
+}
+
+
+// Endpoint.text: the three fields, each %q quoted when it must be.
+Text :: (ep: Endpoint) -> string {
+    out: Vec(u8);
+    Quote.Quote(*out, ep.addr);
+    VecPush(out, #char " ");
+    Quote.Quote(*out, ep.id);
+    VecPush(out, #char " ");
+    Quote.Quote(*out, ep.about);
+    return BuilderFinish(out);
+}
+
+// Endpoint.mk: reads text back, ok false when it is not three words.
+Mk :: (text: string) -> (ep: Endpoint, ok: bool) {
+    words: Vec(Text);
+    Quote.Unquoted(text, *words);
+    ep: Endpoint;
+    if words.count != 3 {
+        ep.about = "invalid endpoint string";
+        return ep, false;
+    }
+    ep.addr = Keep(TextView(words[0]));
+    ep.id = Keep(TextView(words[1]));
+    ep.about = Keep(TextView(words[2]));
+    return ep, true;
+}
+
+// A value of type e holding ep.
+MkValue :: (ep: Endpoint) -> s32 {
+    v := Va.NewValue(#char "e", Va.PlainProducer());
+    Va.SetText(v, Text(ep));
+    return v;
+}
+
+ValueEndpoint :: (v: s32) -> Endpoint {
+    ep, ok := Mk(Va.ValueText(v));
+    if !ok { ep.about = "invalid endpoint string" }
+    return ep;
+}
+
+HasSlash :: (s: string) -> bool {
+    for s { if it == #char "/" { return true } }
+    return false;
+}
+
+// Split2: exactly two space-separated words, as tokenize(text, " ") gave them.
+Split2 :: (text: string) -> (a: string, b: string, ok: bool) {
+    i: s64 = 0;
+    while i < text.count && text[i] == #char " " { i += 1 }
+    start := i;
+    while i < text.count && text[i] != #char " " { i += 1 }
+    if i == start { return "", "", false }
+    first: Vec(u8);
+    for text[start:i] { VecPush(first, it) }
+    while i < text.count && text[i] == #char " " { i += 1 }
+    start = i;
+    while i < text.count && text[i] != #char " " { i += 1 }
+    if i == start { return "", "", false }
+    second: Vec(u8);
+    for text[start:i] { VecPush(second, it) }
+    while i < text.count && text[i] == #char " " { i += 1 }
+    if i != text.count { return "", "", false }
+    return BuilderFinish(first), BuilderFinish(second), true;
+}
+
+// Starts program with operands; a launch of id 0 carries the reason.
+Start :: (path: string, operands: []string) -> Process.Launch {
+    return Process.StartWith(path, operands, -1, -1, -1);
+}
+
+// mntgen on DIR, which it creates: a name appears there when walked to.
+MountGen :: () -> string {
+    ends: [2]s32;
+    if Ns.Pipe(ends[:]) < 0 { return Cat2("mount mntgen failed: ", Io.LastError()) }
+    none := string.[];
+    launch := Process.StartWith("/dis/mntgen.zx", none[:], ends[0], -1, -1);
+    unused Io.CloseFile(ends[0]);
+    if launch.id == 0 {
+        unused Io.CloseFile(ends[1]);
+        return Cat2("mount mntgen failed: ", launch.error);
+    }
+    record: [256]u8;
+    if Io.StatPacked(DIR, record[:]) < 0 {
+        h := Io.Create(DIR, 0, DMDIR | PERM);
+        if h < 0 {
+            unused Io.CloseFile(ends[1]);
+            return Cat2("mount mntgen failed: ", Io.LastError());
+        }
+        unused Io.CloseFile(h);
+    }
+    if Ns.Mount(ends[1], -1, DIR, Ns.Replace, "") < 0 {
+        unused Io.CloseFile(ends[1]);
+        return Cat2("mount mntgen failed: ", Io.LastError());
+    }
+    unused Io.CloseFile(ends[1]);
+    return "";
+}
+
+// new: the endpoint server of addr and, over listen, its network address.
+New :: (addr: string, force: bool) -> string {
+    record: [256]u8;
+    d := Cat3(DIR, "/", addr);
+    if !force && Io.StatPacked(Cat2(d, "/clone"), record[:]) >= 0 { return "" }
+    err := MountGen();
+    if err.count > 0 { return err }
+    args := string.[addr, d];
+    launch := Start("/dis/endpointsrv.zx", args[:]);
+    if launch.id == 0 { return Cat2("endpoint failed: ", launch.error) }
+    listened := string.[addr, "export", d];
+    launch = Start("/dis/listen.zx", listened[:]);
+    if launch.id == 0 {
+        unused Ns.Unmount("", d);
+        return Cat2("listen failed: ", launch.error);
+    }
+    return "";
+}
+
+// create: the handle that writes into a new endpoint of addr.
+Create :: (addr: string) -> (fd: s32, ep: Endpoint, err: string) {
+    none: Endpoint;
+    ep: Endpoint;
+    d := Cat3(DIR, "/", addr);
+    h := Io.OpenFile(Cat2(d, "/clone"), 0);
+    if h < 0 { return -1, none, Cat4("cannot open ", d, "/clone: ", Io.LastError()) }
+    buffer: [1024]u8;
+    n := Io.ReadBytes(h, buffer[:]);
+    unused Io.CloseFile(h);
+    if n <= 0 { return -1, none, "read id failed" }
+    text := Keep(TextView(buffer[:n]));
+    a, b, ok := Split2(text);
+    if !ok { return -1, none, Cat2("invalid id read ", QQ(text)) }
+    ep.addr = a;
+    ep.id = b;
+    f := Io.OpenFile(Cat4(d, "/", ep.id, ".in"), 1);
+    if f < 0 { return -1, none, Cat6("cannot write to ", d, "/", ep.id, ": ", Io.LastError()) }
+    return f, ep, "";
+}
+
+// open: the handle that reads from ep. When the endpoint is not there and
+// net names a server, its address is mounted first.
+Open :: (net: string, ep: Endpoint) -> (fd: s32, err: string) {
+    if HasSlash(ep.addr) { return -1, "bad address" }
+    if HasSlash(ep.id) { return -1, "bad id" }
+    d := Cat3(DIR, "/", ep.addr);
+    h := Io.OpenFile(Cat3(d, "/", ep.id), 0);
+    if h >= 0 { return h, "" }
+    e := Io.LastError();
+    record: [256]u8;
+    if Io.StatPacked(Cat2(d, "/clone"), record[:]) >= 0 { return -1, Cat2("endpoint does not exist: ", e) }
+    if net.count > 0 {
+        handles: [2]s32;
+        directory: [Dial.DirectoryBytes]u8;
+        if Dial.Dial(Cat2(net, ep.addr), "", handles[:], directory[:]) >= 0 {
+            unused Ns.Mount(handles[0], -1, d, Ns.Replace, "");
+            unused Io.CloseFile(handles[0]);
+            unused Io.CloseFile(handles[1]);
+        }
+    }
+    h = Io.OpenFile(Cat3(d, "/", ep.id), 0);
+    if h < 0 { return -1, Cat2("endpoint does not exist: ", Io.LastError()) }
+    return h, "";
+}
