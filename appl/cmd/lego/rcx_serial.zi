@@ -1,0 +1,152 @@
+// Lego RCX serial port setup and send/echo/reply exchange, matching rcxsend.b.
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Proto :: #import "lego_proto";
+
+RcxPort :: struct {
+    rfd: s32;
+    wfd: s32;
+    debug: bool;
+}
+
+OpenPort :: (p: *RcxPort, port: string, debug: bool, err: *Text) -> bool {
+    VecClear(err.bytes);
+    p.rfd = -1;
+    p.wfd = -1;
+    p.debug = debug;
+    serport: Vec(u8);
+    BuilderPrint(*serport, "/dev/eia%", port);
+    ser := BuilderFinish(serport);
+    serctl: Vec(u8);
+    BuilderPrint(*serctl, "%ctl", ser);
+    ctlpath := BuilderFinish(serctl);
+
+    p.rfd = Io.OpenFile(ser, 0);
+    if p.rfd < 0 {
+        BuilderPrint(*err.bytes, "cannot read %: %", ser, Io.LastError());
+        return false;
+    }
+    p.wfd = Io.OpenFile(ser, 1);
+    if p.wfd < 0 {
+        unused Io.CloseFile(p.rfd);
+        p.rfd = -1;
+        BuilderPrint(*err.bytes, "cannot write %: %", ser, Io.LastError());
+        return false;
+    }
+    ctlfd := Io.OpenFile(ctlpath, 1);
+    if ctlfd < 0 {
+        unused Io.CloseFile(p.rfd);
+        unused Io.CloseFile(p.wfd);
+        p.rfd = -1;
+        p.wfd = -1;
+        BuilderPrint(*err.bytes, "cannot open %: %", ctlpath, Io.LastError());
+        return false;
+    }
+    cfg: [7]string = .["b2400", "l8", "po", "m0", "s1", "d1", "r1"];
+    for cfg {
+        if Io.WriteBytes(ctlfd, it) <= 0 {
+            BuilderPrint(*err.bytes, "serial config (%): %", it, Io.LastError());
+            unused Io.CloseFile(ctlfd);
+            unused Io.CloseFile(p.rfd);
+            unused Io.CloseFile(p.wfd);
+            p.rfd = -1;
+            p.wfd = -1;
+            return false;
+        }
+    }
+    unused Io.CloseFile(ctlfd);
+    return true;
+}
+
+ClosePort :: (p: *RcxPort) {
+    if p.rfd >= 0 { unused Io.CloseFile(p.rfd); p.rfd = -1 }
+    if p.wfd >= 0 { unused Io.CloseFile(p.wfd); p.wfd = -1 }
+}
+
+ReadExact :: (fd: s32, dst: []u8) -> s64 {
+    tot: s64 = 0;
+    while tot < dst.count {
+        n := Io.ReadBytes(fd, dst[tot:]);
+        if n <= 0 { break }
+        tot += cast(s64)n;
+    }
+    return tot;
+}
+
+HexDump :: (data: []u8) {
+    digits := "0123456789abcdef";
+    out: Vec(u8);
+    for data {
+        VecPush(out, digits[(it >> 4) & 0xF]);
+        VecPush(out, digits[it & 0xF]);
+        VecPush(out, #char " ");
+    }
+    VecPush(out, #char "\n");
+    unused Cli.WriteAll(1, BuilderFinish(out));
+}
+
+// Encodes and transmits an RCX packet in 8-byte chunks with echo check,
+// reads the reply (rlen payload bytes, or -1 for any available), and verifies checksum.
+Send :: (p: *RcxPort, data: []u8, rlen: s64, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    obuf: Vec(u8);
+    Proto.EncodeRcxPacket(data, *obuf);
+    needr: s64 = ifx rlen > 0 then 3 + 2 * rlen + 2 else rlen;
+
+    for try_n: 0..4 {
+        ok := true;
+        err := "";
+        i: s64 = 0;
+        while ok && i < obuf.count {
+            step: s64 = 8;
+            if i + step > obuf.count { step = obuf.count - i }
+            if Io.WriteBytes(p.wfd, TextView(obuf[i:i + step])) != cast(s32)step {
+                if p.debug {
+                    msg: Vec(u8);
+                    BuilderPrint(*msg, "serial tx error: %\n", Io.LastError());
+                    unused Cli.WriteAll(1, BuilderFinish(msg));
+                }
+                return false;
+            }
+            echo: [8]u8;
+            got := ReadExact(p.rfd, echo[:step]);
+            if got != step {
+                err = "short echo";
+                ok = false;
+            } else {
+                for ei: 0..step - 1 {
+                    if echo[ei] != obuf[i + ei] {
+                        err = "bad echo";
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            i += step;
+        }
+        if ok {
+            if needr == 0 { return true }
+            rbuf: [1024]u8;
+            want := ifx needr < 0 then 1024 else needr;
+            if want > rbuf.count { want = rbuf.count }
+            got := ifx needr < 0 then cast(s64)Io.ReadBytes(p.rfd, rbuf[:want]) else ReadExact(p.rfd, rbuf[:want]);
+            minr := ifx needr < 0 then 5 else needr;
+            if got < minr {
+                err = "short reply";
+                ok = false;
+            } else if Proto.DecodeRcxReply(rbuf[:got], out) {
+                return true;
+            } else {
+                err = "bad cksum";
+                ok = false;
+            }
+        }
+        if p.debug && !ok && err != "" {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "try % %: \n", try_n, err);
+            unused Cli.WriteAll(1, BuilderFinish(msg));
+        }
+    }
+    return false;
+}

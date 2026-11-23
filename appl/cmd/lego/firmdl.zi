@@ -1,9 +1,40 @@
-// lego/firmdl portnum file: download an S-record firmware image to a Lego RCX.
+// lego/firmdl portnum file: download an S-record firmware image to a Lego RCX,
+// matching appl/cmd/lego/firmdl.b.
 #import "std/vec";
 using Args :: #import "taijios_args";
 using Io :: #import "taijios_io";
 using Cli :: #import "zx_cli";
 using Proto :: #import "lego_proto";
+using Serial :: #import "rcx_serial";
+
+DL_DATA :: 0xC8;
+
+CheckReply :: (got: []u8, expect: []u8, label: string) -> bool {
+    if got.count < expect.count {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: short reply\n", label);
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+        return false;
+    }
+    first := got[0] & 0xF7;
+    if first != expect[0] {
+        Serial.HexDump(got);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: reply mismatch at 0\n", label);
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+        return false;
+    }
+    for i: 1..expect.count - 1 {
+        if got[i] != expect[i] {
+            Serial.HexDump(got);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: reply mismatch at %\n", label, i);
+            unused Cli.WriteAll(1, BuilderFinish(msg));
+            return false;
+        }
+    }
+    return true;
+}
 
 main :: () -> s32 {
     if Args.OperandCount() != 2 {
@@ -33,6 +64,7 @@ main :: () -> s32 {
         Cli.PrintLine(TextView(img.err));
         return 0;
     }
+    cksum := Proto.ByteSum(img.data[:img.length]);
     hdr: Vec(u8);
     BuilderAppend(hdr, "length ");
     Proto.AppendHex4(*hdr, cast(u32)img.length);
@@ -41,16 +73,87 @@ main :: () -> s32 {
     BuilderAppend(hdr, " \n");
     unused Cli.WriteAll(1, BuilderFinish(hdr));
 
-    serport: Vec(u8);
-    BuilderPrint(*serport, "/dev/eia%", port);
-    ser := BuilderFinish(serport);
-    rfd := Io.OpenFile(ser, 0);
-    if rfd < 0 {
-        msg: Vec(u8);
-        BuilderPrint(*msg, "cannot read %: %\n", ser, Io.LastError());
-        unused Cli.WriteAll(1, BuilderFinish(msg));
+    p: Serial.RcxPort;
+    err: Text;
+    if !Serial.OpenPort(*p, port, true, *err) {
+        Cli.PrintLine(TextView(err));
         return 0;
     }
-    unused Io.CloseFile(rfd);
+
+    // 1. Delete firmware
+    Cli.PrintLine("delete firmware");
+    rmfirm: [6]u8 = .[0x65, 1, 3, 5, 7, 11];
+    reply: Vec(u8);
+    if !Serial.Send(*p, rmfirm[:], 1, *reply) {
+        Cli.PrintLine("delete firmware failed");
+        Serial.ClosePort(*p);
+        return 0;
+    }
+    exp_rm: [1]u8 = .[0x92];
+    if !CheckReply(reply[:], exp_rm[:], "delete firmware") {
+        Serial.ClosePort(*p);
+        return 0;
+    }
+
+    // 2. Start download
+    Cli.PrintLine("start download");
+    dlstart: [6]u8 = .[
+        0x75,
+        cast(u8)(img.start & 0xFF),
+        cast(u8)((img.start >> 8) & 0xFF),
+        cast(u8)(cksum & 0xFF),
+        cast(u8)((cksum >> 8) & 0xFF),
+        0,
+    ];
+    unused Serial.Send(*p, dlstart[:], 2, *reply);
+    exp_dl: [2]u8 = .[0x82, 0];
+    if !CheckReply(reply[:], exp_dl[:], "start download") {
+        Serial.ClosePort(*p);
+        return 0;
+    }
+
+    // 3. Send image in 200-byte (0xC8) chunks
+    pkt: Vec(u8);
+    seqnum: u32 = 1;
+    i: s64 = 0;
+    exp_tx: [2]u8 = .[0xB2, 0];
+    while i < img.length {
+        step: s64 = DL_DATA;
+        if i + step > img.length {
+            step = img.length - i;
+            seqnum = 0;
+        }
+        unused Cli.WriteAll(1, ".");
+        VecClear(pkt);
+        op: u8 = ifx (seqnum & 1) != 0 then 0x4D else 0x45;
+        VecPush(pkt, op);
+        VecPush(pkt, cast(u8)(seqnum & 0xFF));
+        VecPush(pkt, cast(u8)((seqnum >> 8) & 0xFF));
+        VecPush(pkt, cast(u8)(step & 0xFF));
+        VecPush(pkt, cast(u8)((step >> 8) & 0xFF));
+        for j: 0..step - 1 { VecPush(pkt, img.data[i + j]) }
+        VecPush(pkt, cast(u8)(Proto.ByteSum(img.data[i:i + step]) & 0xFF));
+        unused Serial.Send(*p, pkt[:], 2, *reply);
+        if !CheckReply(reply[:], exp_tx[:], "tx data") {
+            Serial.ClosePort(*p);
+            return 0;
+        }
+        seqnum += 1;
+        i += step;
+    }
+
+    // 4. Unlock firmware
+    unused Cli.WriteAll(1, "\nunlock firmware\n");
+    ulfirm: [6]u8 = .[0xA5, #char "L", #char "E", #char "G", #char "O", 174];
+    unused Serial.Send(*p, ulfirm[:], 26, *reply);
+    exp_ul: [1]u8 = .[0x52];
+    if !CheckReply(reply[:], exp_ul[:], "unlock firmware") {
+        Serial.ClosePort(*p);
+        return 0;
+    }
+    res: Vec(u8);
+    BuilderPrint(*res, "result: %\n", TextView(reply[1:]));
+    unused Cli.WriteAll(1, BuilderFinish(res));
+    Serial.ClosePort(*p);
     return 0;
 }

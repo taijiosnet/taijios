@@ -1,17 +1,25 @@
 <../../../mkconfig
 
 TARG=\
+	clock.dis\
+	clockface.dis\
+	link.dis\
+	timers.dis\
 
 SYSMODULES=\
+	sys.m\
+	draw.m\
+	bufio.m\
 
 MODULES=\
+	timers.m\
 
 DISBIN=$ROOT/dis/lego
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=clock clockface firmdl link send
-ZXUTIL=lego_proto.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi
+ZXCOMMANDS=firmdl send
+ZXUTIL=lego_proto.zi rcx_serial.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 

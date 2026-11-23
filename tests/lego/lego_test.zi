@@ -1,8 +1,8 @@
 // Table-driven tests for Lego RCX framing, RLE codec, S-record firmware loader,
-// clockface click math, and guest CLI parity.
+// clockface click math, and guest CLI parity for lego/send and lego/firmdl.
 //
 // Run from TaijiOS root:
-//   ziran run --target=c --root appl/cmd/lego tests/lego/lego_test.zi -- [EMU] [PREFIX] [SUFFIX]
+//   ziran run --target=c --root appl/cmd/lego tests/lego/lego_test.zi -- [EMU]
 #import "std/byte_text_linux"
 #import "std/file"
 #import "std/file_linux"
@@ -20,13 +20,11 @@ CliCase :: struct {
     out: string;
 }
 
-cli_cases: [6]CliCase = CliCase.[
-    .{name = "send usage", cmd = "SEND", status = "", out = "usage: send portnum XX...\n"},
-    .{name = "send bad hex", cmd = "SEND 0 zz", status = "", out = "bad arg zz\n\n"},
-    .{name = "firmdl usage", cmd = "FIRMDL 0", status = "", out = "usage: portnum file\n"},
-    .{name = "firmdl missing", cmd = "FIRMDL 0 missing.srec", status = "", out = "cannot open missing.srec: 'missing.srec' file does not exist\n"},
-    .{name = "link usage", cmd = "LINK", status = "", out = "usage: lego/link portnum\n"},
-    .{name = "clockface usage", cmd = "CLOCKFACE", status = "usage", out = "usage: [-v] legodir\n"},
+cli_cases: [4]CliCase = CliCase.[
+    .{name = "send usage", cmd = "lego/send", status = "", out = "usage: send portnum XX...\n"},
+    .{name = "send bad hex", cmd = "lego/send 0 zz", status = "", out = "bad arg zz\n\n"},
+    .{name = "firmdl usage", cmd = "lego/firmdl 0", status = "", out = "usage: portnum file\n"},
+    .{name = "firmdl missing", cmd = "lego/firmdl 0 missing.srec", status = "", out = "cannot open missing.srec: 'missing.srec' file does not exist\n"},
 ];
 
 failures: s32;
@@ -39,7 +37,6 @@ Expect :: (ok: bool, what: string) {
 }
 
 TestProto :: () {
-    // ParseHexArg
     v, ok := Proto.ParseHexArg("a5");
     Expect(ok && v == 0xA5, "ParseHexArg a5");
     v, ok = Proto.ParseHexArg("f");
@@ -47,11 +44,9 @@ TestProto :: () {
     _, ok = Proto.ParseHexArg("xyz");
     Expect(!ok, "ParseHexArg rejects >2 chars");
 
-    // RCX packet encode / decode round-trip
     msg: [3]u8 = .[0x10, 0x20, 0x30];
     pkt: Vec(u8);
     Proto.EncodeRcxPacket(msg[:], *pkt);
-    // 55 ff 00 | 10 ef | 20 df | 30 cf | 60 9f -> 11 bytes
     Expect(pkt.count == 11 && pkt[0] == 0x55 && pkt[1] == 0xFF && pkt[2] == 0x00 &&
         pkt[3] == 0x10 && pkt[4] == 0xEF && pkt[9] == 0x60 && pkt[10] == 0x9F, "RCX packet encoding");
     dec: Vec(u8);
@@ -59,56 +54,25 @@ TestProto :: () {
     pkt[9] ^= 1;
     Expect(!Proto.DecodeRcxReply(pkt[:], *dec), "RCX reply rejects bad checksum");
 
-    // RLE encode/decode round-trip (including 0x88 escape and zero runs of 1, 2, 5)
     raw: [12]u8 = .[0x01, 0x00, 0x02, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF];
     enc: Vec(u8);
     Proto.RleEncode(raw[:], *enc);
     Expect(enc.count < raw.count, "RLE compresses 5-zero run");
     rt: Vec(u8);
     Expect(Proto.RleDecode(enc[:], *rt) && rt.count == raw.count, "RLE round-trip length");
-    for i: 0..raw.count - 1 {
-        Expect(rt[i] == raw[i], "RLE round-trip byte");
-    }
+    for i: 0..raw.count - 1 { Expect(rt[i] == raw[i], "RLE round-trip byte") }
     bad_rle: [1]u8 = .[0x88];
     Expect(!Proto.RleDecode(bad_rle[:], *rt), "RLE rejects truncated 0x88 escape");
 
-    // Firmware S-record loader (address 0x8000 -> offset 0, 4 bytes 01 02 03 04)
-    // S1 07 80 00 01 02 03 04 -> sum = 07+80+00+01+02+03+04 = 0x91 -> cksum = 0x6E
-    // S9 03 80 00 -> sum = 03+80+00 = 0x83 -> cksum = 0x7C
     srec := "S1078000010203046E\nS90380007C\n";
     img: Proto.FirmwareImage;
     Expect(Proto.ParseFirmwareText(srec, *img), "ParseFirmwareText valid");
     Expect(img.start == 0x8000 && img.length == 4 && img.data[0] == 1 && img.data[3] == 4, "ParseFirmwareText contents");
 
-    // Clockface click math
     hclk, mclk := Proto.ClockClicks(3, 30);
     Expect(hclk == 35 && mclk == 60, "ClockClicks 3:30");
     Expect(Proto.ClickDistance(110, 10, 120) == 20, "ClickDistance wrap forward");
     Expect(Proto.ClickDistance(10, 110, 120) == -20, "ClickDistance wrap backward");
-}
-
-Subst :: (tpl: string, prefix: string, suffix: string) -> Text {
-    out: Vec(u8);
-    i: s64 = 0;
-    while i < tpl.count {
-        if i + 4 <= tpl.count && tpl[i:i + 4] == "SEND" {
-            BuilderPrint(*out, "%send%", prefix, suffix);
-            i += 4;
-        } else if i + 6 <= tpl.count && tpl[i:i + 6] == "FIRMDL" {
-            BuilderPrint(*out, "%firmdl%", prefix, suffix);
-            i += 6;
-        } else if i + 4 <= tpl.count && tpl[i:i + 4] == "LINK" {
-            BuilderPrint(*out, "%link%", prefix, suffix);
-            i += 4;
-        } else if i + 9 <= tpl.count && tpl[i:i + 9] == "CLOCKFACE" {
-            BuilderPrint(*out, "%clockface%", prefix, suffix);
-            i += 9;
-        } else {
-            VecPush(out, tpl[i]);
-            i += 1;
-        }
-    }
-    return BuilderFinish(out);
 }
 
 Result :: (kind: string, index: s64) -> string {
@@ -118,7 +82,7 @@ Result :: (kind: string, index: s64) -> string {
     return ifx ok then text else "<missing>";
 }
 
-TestGuest :: (emu: string, prefix: string, suffix: string) {
+TestGuest :: (emu: string) {
     unused RemoveTree(WORK);
     unused CreateDirectory("build");
     unused CreateDirectory("build/dis-legacy-math");
@@ -131,8 +95,7 @@ TestGuest :: (emu: string, prefix: string, suffix: string) {
     script: Vec(u8);
     BuilderPrint(*script, "cd /%/work\n", WORK);
     for cli_cases {
-        cmd: Text = Subst(it.cmd, prefix, suffix);
-        BuilderPrint(*script, "% < /dev/null > ../result/out.% >[2] ../result/err.%\n", TextView(cmd), it_index, it_index);
+        BuilderPrint(*script, "% < /dev/null > ../result/out.% >[2] ../result/err.%\n", it.cmd, it_index, it_index);
         BuilderPrint(*script, "echo $status > ../result/status.%\n", it_index);
     }
     unused WriteEntireFile("build/dis-legacy-math/lego/script", BuilderFinish(script));
@@ -165,10 +128,8 @@ TestGuest :: (emu: string, prefix: string, suffix: string) {
 
 main :: (argc: s32, argv: **u8) -> s32 {
     emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
-    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "lego/";
-    suffix := ifx argc > 3 then TextFromCString(argv[3]) else "";
     TestProto();
-    TestGuest(emu, prefix, suffix);
+    TestGuest(emu);
     if failures != 0 {
         print("lego_test: % failures\n", failures);
         return 1;

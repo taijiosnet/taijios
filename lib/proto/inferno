@@ -564,7 +564,12 @@ appl
 		itreplay.b
 		kill.b
 		lego
+			clock.b
+			clockface.b
+			link.b
 			mkfile
+			timers.b
+			timers.m
 		limbo
 			arg.m
 			asm.b
@@ -787,7 +792,12 @@ appl
 		lego
 			clockreg.sh
 			legolink.b
+			clock.b
+			clockface.b
+			link.b
 			mkfile
+			timers.b
+			timers.m
 			styx.srec
 		mkfile
 		ns
