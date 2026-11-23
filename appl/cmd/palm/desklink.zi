@@ -419,6 +419,25 @@ ReadStorageInfo :: (c: *Client, cardno: u8, cards: *CardList, err: *Text) -> (mo
     return more, true;
 }
 
+PackReadDBCountReq :: (cardno: u8, out: *Vec(u8)) {
+    arg: [2]u8 = .[cardno, 0];
+    Proto.PackDlpReq(Proto.T_READ_STORAGE_INFO, A2, arg[:], true, out);
+}
+
+UnpackReadDBCountReply :: (body: []u8) -> (c0: s32, c1: s32, ok: bool) {
+    if body.count < 20 { return -1, -1, false }
+    return cast(s32)Proto.Get2(body, 0), cast(s32)Proto.Get2(body, 2), true;
+}
+
+ReadDBCount :: (c: *Client, cardno: u8, err: *Text) -> (c0: s32, c1: s32, ok: bool) {
+    req: [2]u8 = .[cardno, 0];
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_STORAGE_INFO, A2, req[:], true, 20, *body, err) {
+        return -1, -1, false;
+    }
+    return UnpackReadDBCountReply(body[:]);
+}
+
 ReadDBList :: (c: *Client, cardno: u8, flags: u8, start: u16, dbs: *DBList, err: *Text) -> (more: bool, ok: bool) {
     VecClear(dbs.items);
     req: Vec(u8);
@@ -440,6 +459,67 @@ ReadDBList :: (c: *Client, cardno: u8, flags: u8, start: u16, dbs: *DBList, err:
         p += nb;
     }
     return more, true;
+}
+
+CopyTextField :: (dst: *Text, src: *Text) {
+    VecClear(dst.bytes);
+    for i: 0..src.bytes.count - 1 { VecPush(dst.bytes, src.bytes[i]) }
+}
+
+CopyDBInfo :: (dst: *DBInfo, src: *DBInfo) {
+    dst.attr = src.attr;
+    CopyTextField(*dst.dtype, *src.dtype);
+    CopyTextField(*dst.creator, *src.creator);
+    dst.version = src.version;
+    dst.modno = src.modno;
+    dst.ctime = src.ctime;
+    dst.mtime = src.mtime;
+    dst.btime = src.btime;
+    dst.index = src.index;
+    CopyTextField(*dst.name, *src.name);
+}
+
+MatchDBInfoInList :: (dbs: *DBList, dbname: string, dtype: string, creator: string, info_out: *DBInfo) -> (matched: bool, next_start: u16) {
+    next: u16 = 0;
+    for i: 0..dbs.items.count - 1 {
+        item := *dbs.items[i];
+        name_ok := dbname.count == 0 || TextView(item.name) == dbname;
+        type_ok := dtype.count == 0 || TextView(item.dtype) == dtype;
+        crea_ok := creator.count == 0 || TextView(item.creator) == creator;
+        if name_ok && type_ok && crea_ok {
+            CopyDBInfo(info_out, item);
+            return true, item.index;
+        }
+        next = item.index + 1;
+    }
+    return false, next;
+}
+
+MatchDB :: (c: *Client, cardno: u8, flag: u8, start_in: u16, dbname: string, dtype: string, creator: string, info_out: *DBInfo, err: *Text) -> bool {
+    start := start_in;
+    while true {
+        dbs: DBList;
+        more, ok := ReadDBList(c, cardno, flag, start, *dbs, err);
+        if !ok || dbs.items.count == 0 { break }
+        matched, next := MatchDBInfoInList(*dbs, dbname, dtype, creator, info_out);
+        if matched { return true }
+        start = next;
+        if !more { break }
+    }
+    return false;
+}
+
+FindDBInfo :: (c: *Client, cardno: u8, start: u16, dbname: string, dtype: string, creator: string, info_out: *DBInfo, err: *Text) -> bool {
+    if start < 0x1000 {
+        if MatchDB(c, cardno, Proto.DB_LIST_RAM, start, dbname, dtype, creator, info_out, err) {
+            return true;
+        }
+    }
+    if MatchDB(c, cardno, Proto.DB_LIST_ROM, start & 0x0FFF, dbname, dtype, creator, info_out, err) {
+        info_out.index = info_out.index | 0x1000;
+        return true;
+    }
+    return false;
 }
 
 DeleteDB :: (c: *Client, name: string, err: *Text) -> bool {
@@ -471,11 +551,25 @@ AddSyncLogEntry :: (c: *Client, entry: string, err: *Text) -> bool {
     return Exec(c, T_ADD_SYNC_LOG_ENTRY, A1, req[:], true, 0, *out, err);
 }
 
-DbStat :: (c: *Client, db: *OpenDB, info: *DBInfo, err: *Text) -> bool {
+PackFindDBReq :: (handle: u8, out: *Vec(u8)) {
+    arg: [2]u8 = .[0x80, handle];
+    Proto.PackDlpReq(T_FIND_DB, A2, arg[:], true, out);
+}
+
+UnpackFindDBReply :: (body: []u8, info: *DBInfo) -> bool {
+    if body.count < 54 { return false }
+    return UnpackDbInfo(body[10:], info) > 0;
+}
+
+FindDB :: (c: *Client, db: *OpenDB, info: *DBInfo, err: *Text) -> bool {
     req: [2]u8 = .[0x80, db.handle];
     body: Vec(u8);
     if !Exec(c, T_FIND_DB, A2, req[:], true, 54, *body, err) { return false }
-    return UnpackDbInfo(body[10:], info) > 0;
+    return UnpackFindDBReply(body[:], info);
+}
+
+DbStat :: (c: *Client, db: *OpenDB, info: *DBInfo, err: *Text) -> bool {
+    return FindDB(c, db, info, err);
 }
 
 DbOpen :: (c: *Client, name: string, mode: u8, db: *OpenDB, err: *Text) -> bool {
@@ -516,11 +610,295 @@ DbClose :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
     return Exec(c, Proto.T_CLOSE_DB, A1, req[:], true, 0, *out, err);
 }
 
-DbNEntries :: (c: *Client, db: *OpenDB, err: *Text) -> s32 {
+PackReadOpenDBInfoReq :: (handle: u8, out: *Vec(u8)) {
+    arg: [1]u8 = .[handle];
+    Proto.PackDlpReq(T_READ_OPEN_DB_INFO, A1, arg[:], true, out);
+}
+
+UnpackReadOpenDBInfoReply :: (body: []u8) -> (nentries: s32, ok: bool) {
+    if body.count < 2 { return -1, false }
+    return cast(s32)Proto.Get2(body, 0), true;
+}
+
+ReadOpenDBInfo :: (c: *Client, db: *OpenDB, err: *Text) -> s32 {
     req: [1]u8 = .[db.handle];
     body: Vec(u8);
     if !Exec(c, T_READ_OPEN_DB_INFO, A1, req[:], true, 2, *body, err) { return -1 }
-    return cast(s32)Proto.Get2(body[:], 0);
+    n, _ := UnpackReadOpenDBInfoReply(body[:]);
+    return n;
+}
+
+DbNEntries :: (c: *Client, db: *OpenDB, err: *Text) -> s32 {
+    return ReadOpenDBInfo(c, db, err);
+}
+
+PackReadRecordIDListReq :: (handle: u8, sort: bool, start: u16, max: u16, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, ifx sort then cast(u8)0x80 else cast(u8)0);
+    Proto.Put2(*arg, start);
+    Proto.Put2(*arg, max);
+    Proto.PackDlpReq(T_READ_RECORD_ID_LIST, A1, arg[:], true, out);
+}
+
+UnpackReadRecordIDListReply :: (body: []u8, ids: *Vec(u32)) -> bool {
+    VecClear(<<ids);
+    if body.count < 2 { return false }
+    ret := cast(s64)Proto.Get2(body, 0);
+    off: s64 = ifx body.count >= 8 + ret * 4 then 8 else 2;
+    if body.count < off + ret * 4 { return false }
+    for i: 0..ret - 1 {
+        VecPush(<<ids, Proto.Get4(body, off + i * 4));
+    }
+    return true;
+}
+
+ReadRecordIDList :: (c: *Client, db: *OpenDB, sort: bool, ids: *Vec(u32), err: *Text) -> bool {
+    VecClear(<<ids);
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, ifx sort then cast(u8)0x80 else cast(u8)0);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, 0xFFFF);
+    body: Vec(u8);
+    if !Exec(c, T_READ_RECORD_ID_LIST, A1, req[:], true, 2, *body, err) { return false }
+    return UnpackReadRecordIDListReply(body[:], ids);
+}
+
+PackReadAppBlockReq :: (handle: u8, offset: u16, req_len: u16, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, 0);
+    Proto.Put2(*arg, offset);
+    Proto.Put2(*arg, req_len);
+    Proto.PackDlpReq(T_READ_APP_BLOCK, A1, arg[:], true, out);
+}
+
+UnpackReadAppBlockReply :: (body: []u8, data_out: *Vec(u8), err: *Text) -> bool {
+    VecClear(<<data_out);
+    if body.count < 2 {
+        BuilderAppend(err.bytes, "short reply");
+        return false;
+    }
+    sz := cast(s64)Proto.Get2(body, 0);
+    if sz < body.count - 2 {
+        BuilderAppend(err.bytes, "short reply");
+        return false;
+    }
+    for i: 2..body.count - 1 { VecPush(<<data_out, body[i]) }
+    return true;
+}
+
+ReadAppBlock :: (c: *Client, db: *OpenDB, data_out: *Vec(u8), err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, 0xFFFF);
+    body: Vec(u8);
+    if !Exec(c, T_READ_APP_BLOCK, A1, req[:], true, 2, *body, err) { return false }
+    return UnpackReadAppBlockReply(body[:], data_out, err);
+}
+
+PackWriteAppBlockReq :: (handle: u8, data: []u8, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, 0);
+    Proto.Put2(*arg, cast(u16)data.count);
+    for data { VecPush(arg, it) }
+    Proto.PackDlpReq(T_WRITE_APP_BLOCK, A1, arg[:], true, out);
+}
+
+WriteAppBlock :: (c: *Client, db: *OpenDB, data: []u8, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put2(*req, cast(u16)data.count);
+    for data { VecPush(req, it) }
+    out: Vec(u8);
+    return Exec(c, T_WRITE_APP_BLOCK, A1, req[:], true, 0, *out, err);
+}
+
+PackReadSortBlockReq :: (handle: u8, offset: u16, req_len: u16, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, 0);
+    Proto.Put2(*arg, offset);
+    Proto.Put2(*arg, req_len);
+    Proto.PackDlpReq(T_READ_SORT_BLOCK, A1, arg[:], true, out);
+}
+
+UnpackReadSortBlockReply :: (body: []u8, sort_out: *Vec(u16)) -> bool {
+    VecClear(<<sort_out);
+    if body.count < 2 { return false }
+    n := (body.count - 2) / 2;
+    for i: 0..n - 1 {
+        VecPush(<<sort_out, Proto.Get2(body, 2 + i * 2));
+    }
+    return true;
+}
+
+ReadSortBlock :: (c: *Client, db: *OpenDB, sort_out: *Vec(u16), err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, 0xFFFF);
+    body: Vec(u8);
+    if !Exec(c, T_READ_SORT_BLOCK, A1, req[:], true, 2, *body, err) { return false }
+    return UnpackReadSortBlockReply(body[:], sort_out);
+}
+
+PackWriteSortBlockReq :: (handle: u8, s: []u16, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, 0);
+    Proto.Put2(*arg, cast(u16)(2 * s.count));
+    for s { Proto.Put2(*arg, it) }
+    Proto.PackDlpReq(T_WRITE_SORT_BLOCK, A1, arg[:], true, out);
+}
+
+WriteSortBlock :: (c: *Client, db: *OpenDB, s: []u16, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put2(*req, cast(u16)(2 * s.count));
+    for s { Proto.Put2(*req, it) }
+    out: Vec(u8);
+    return Exec(c, T_WRITE_SORT_BLOCK, A1, req[:], true, 0, *out, err);
+}
+
+PackResetSyncFlagsReq :: (handle: u8, out: *Vec(u8)) {
+    arg: [1]u8 = .[handle];
+    Proto.PackDlpReq(T_RESET_SYNC_FLAGS, A1, arg[:], true, out);
+}
+
+ResetSyncFlags :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
+    req: [1]u8 = .[db.handle];
+    out: Vec(u8);
+    return Exec(c, T_RESET_SYNC_FLAGS, A1, req[:], true, 0, *out, err);
+}
+
+PackMoveCategoryReq :: (handle: u8, from_cat: u8, to_cat: u8, out: *Vec(u8)) {
+    arg: [4]u8 = .[handle, from_cat, to_cat, 0];
+    Proto.PackDlpReq(T_MOVE_CATEGORY, A1, arg[:], true, out);
+}
+
+MoveCategory :: (c: *Client, db: *OpenDB, from_cat: u8, to_cat: u8, err: *Text) -> bool {
+    req: [4]u8 = .[db.handle, from_cat, to_cat, 0];
+    out: Vec(u8);
+    return Exec(c, T_MOVE_CATEGORY, A1, req[:], true, 0, *out, err);
+}
+
+PackReadNextModifiedRecReq :: (handle: u8, out: *Vec(u8)) {
+    arg: [1]u8 = .[handle];
+    Proto.PackDlpReq(T_READ_NEXT_MODIFIED_REC, A1, arg[:], true, out);
+}
+
+ReadNextModifiedRec :: (c: *Client, db: *OpenDB, rec: *Record, err: *Text) -> bool {
+    req: [1]u8 = .[db.handle];
+    body: Vec(u8);
+    if !Exec(c, T_READ_NEXT_MODIFIED_REC, A1, req[:], true, 10, *body, err) { return false }
+    return UnpackRec(body[:], rec);
+}
+
+PdbResetNext :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
+    req: [1]u8 = .[db.handle];
+    out: Vec(u8);
+    return Exec(c, T_RESET_DB_INDEX, A1, req[:], true, 0, *out, err);
+}
+
+PdbReadId :: (c: *Client, db: *OpenDB, id: u32, rec: *Record, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put4(*req, id);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, MAXRECBYTES);
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_RECORD, A1, req[:], true, 10, *body, err) { return false }
+    return UnpackRec(body[:], rec);
+}
+
+PdbDeleteCat :: (c: *Client, db: *OpenDB, cat: u8, err: *Text) -> bool {
+    req: [8]u8 = .[db.handle, 0x40, 0, 0, 0, 0, 0, cat];
+    out: Vec(u8);
+    return Exec(c, T_DELETE_RECORD, A1, req[:], true, 0, *out, err);
+}
+
+PdbTruncate :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
+    req: [8]u8 = .[db.handle, 0x80, 0, 0, 0, 0, 0, 0];
+    out: Vec(u8);
+    return Exec(c, T_DELETE_RECORD, A1, req[:], true, 0, *out, err);
+}
+
+PackWriteResourceReq :: (handle: u8, res: *Resource, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, 0);
+    Proto.Put4(*arg, res.name);
+    Proto.Put2(*arg, res.id);
+    Proto.Put2(*arg, cast(u16)res.data.count);
+    for res.data { VecPush(arg, it) }
+    Proto.PackDlpReq(T_WRITE_RESOURCE, A1, arg[:], true, out);
+}
+
+WriteResource :: (c: *Client, db: *OpenDB, res: *Resource, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put4(*req, res.name);
+    Proto.Put2(*req, res.id);
+    Proto.Put2(*req, cast(u16)res.data.count);
+    for res.data { VecPush(req, it) }
+    out: Vec(u8);
+    return Exec(c, T_WRITE_RESOURCE, A1, req[:], true, 0, *out, err);
+}
+
+PrcWrite :: (c: *Client, db: *OpenDB, res: *Resource, err: *Text) -> bool {
+    return WriteResource(c, db, res, err);
+}
+
+PackDeleteResourceReq :: (handle: u8, name: u32, id: u16, out: *Vec(u8)) {
+    arg: Vec(u8);
+    VecPush(arg, handle);
+    VecPush(arg, 0);
+    Proto.Put4(*arg, name);
+    Proto.Put2(*arg, id);
+    Proto.PackDlpReq(T_DELETE_RESOURCE, A1, arg[:], true, out);
+}
+
+DeleteResource :: (c: *Client, db: *OpenDB, name: u32, id: u16, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put4(*req, name);
+    Proto.Put2(*req, id);
+    out: Vec(u8);
+    return Exec(c, T_DELETE_RESOURCE, A1, req[:], true, 0, *out, err);
+}
+
+PrcDelete :: (c: *Client, db: *OpenDB, name: u32, id: u16, err: *Text) -> bool {
+    return DeleteResource(c, db, name, id, err);
+}
+
+PrcReadType :: (c: *Client, db: *OpenDB, name: u32, id: u16, res: *Resource, err: *Text) -> bool {
+    req: Vec(u8);
+    VecPush(req, db.handle);
+    VecPush(req, 0);
+    Proto.Put4(*req, name);
+    Proto.Put2(*req, id);
+    Proto.Put2(*req, 0);
+    Proto.Put2(*req, MAXRECBYTES);
+    body: Vec(u8);
+    if !Exec(c, T_READ_RESOURCE, A2, req[:], true, 10, *body, err) { return false }
+    return UnpackResource(body[:], res);
+}
+
+PrcTruncate :: (c: *Client, db: *OpenDB, err: *Text) -> bool {
+    req: [8]u8 = .[db.handle, 0x80, 0, 0, 0, 0, 0, 0];
+    out: Vec(u8);
+    return Exec(c, T_DELETE_RESOURCE, A1, req[:], true, 0, *out, err);
 }
 
 PdbRead :: (c: *Client, db: *OpenDB, index: u16, rec: *Record, err: *Text) -> bool {

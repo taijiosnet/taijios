@@ -9,6 +9,7 @@
 #import "std/process_run_linux"
 #import "std/vec"
 using Proto :: #import "palm_proto"
+using DL :: #import "desklink"
 
 WORK :: "build/dis-legacy-math/palm";
 
@@ -75,6 +76,153 @@ TestProto :: () {
     Expect(cno == 2 && name == "MemoDB", "ParseDbName card 2");
 }
 
+DlpReqCase :: struct {
+    label: string;
+    cmd: u8;
+    argid: u8;
+    arg_len: s64;
+    b0: u8;
+    b1: u8;
+}
+
+CheckReqHeader :: (wire: []u8, tc: DlpReqCase) {
+    ok := wire.count == 4 + tc.arg_len &&
+          wire[0] == tc.cmd &&
+          wire[1] == 1 &&
+          wire[2] == tc.argid &&
+          cast(s64)wire[3] == tc.arg_len &&
+          (tc.arg_len < 1 || wire[4] == tc.b0) &&
+          (tc.arg_len < 2 || wire[5] == tc.b1);
+    Expect(ok, tc.label);
+}
+
+TestDesklinkDlp14 :: () {
+    // Table of request encodings for the 14 DLP functions
+    w: Vec(u8);
+
+    // 1. ReadDBCount (T_ReadStorageInfo=0x15, A2=0x21, [cardno, 0])
+    DL.PackReadDBCountReq(1, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ReadDBCount", cmd = Proto.T_READ_STORAGE_INFO, argid = DL.A2, arg_len = 2, b0 = 1, b1 = 0});
+    cnt_body: [20]u8 = .[0, 12, 0, 34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    c0, c1, cok := DL.UnpackReadDBCountReply(cnt_body[:]);
+    Expect(cok && c0 == 12 && c1 == 34, "DLP reply ReadDBCount");
+
+    // 2. FindDBInfo / MatchDBInfoInList
+    dbl: DL.DBList;
+    db0: DL.DBInfo;
+    db0.index = 3;
+    BuilderAppend(db0.name.bytes, "MemoDB");
+    BuilderAppend(db0.dtype.bytes, "DATA");
+    BuilderAppend(db0.creator.bytes, "memo");
+    VecPush(dbl.items, db0);
+    db1: DL.DBInfo;
+    db1.index = 7;
+    BuilderAppend(db1.name.bytes, "AddressDB");
+    BuilderAppend(db1.dtype.bytes, "DATA");
+    BuilderAppend(db1.creator.bytes, "addr");
+    VecPush(dbl.items, db1);
+    found_info: DL.DBInfo;
+    matched, next_s := DL.MatchDBInfoInList(*dbl, "AddressDB", "DATA", "addr", *found_info);
+    Expect(matched && found_info.index == 7 && TextView(found_info.name) == "AddressDB" && next_s == 7, "DLP FindDBInfo match");
+    matched2, next_s2 := DL.MatchDBInfoInList(*dbl, "MissingDB", "", "", *found_info);
+    Expect(!matched2 && next_s2 == 8, "DLP FindDBInfo miss advances start");
+
+    // 3. ReadAppBlock (T_ReadAppBlock=0x1B, A1=0x20, [handle, 0, off_hi, off_lo, len_hi, len_lo])
+    DL.PackReadAppBlockReq(5, 0, 0xFFFF, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ReadAppBlock", cmd = DL.T_READ_APP_BLOCK, argid = DL.A1, arg_len = 6, b0 = 5, b1 = 0});
+    app_rep: [6]u8 = .[0, 4, 0xCA, 0xFE, 0xBA, 0xBE];
+    app_out: Vec(u8);
+    err: Text;
+    Expect(DL.UnpackReadAppBlockReply(app_rep[:], *app_out, *err) && app_out.count == 4 && app_out[0] == 0xCA && app_out[3] == 0xBE, "DLP reply ReadAppBlock");
+
+    // 4. WriteAppBlock (T_WriteAppBlock=0x1C, A1=0x20, [handle, 0, len_hi, len_lo, data...])
+    app_in: [3]u8 = .[0x11, 0x22, 0x33];
+    DL.PackWriteAppBlockReq(5, app_in[:], *w);
+    CheckReqHeader(w[:], .{label = "DLP req WriteAppBlock", cmd = DL.T_WRITE_APP_BLOCK, argid = DL.A1, arg_len = 7, b0 = 5, b1 = 0});
+    Expect(Proto.Get2(w[:], 6) == 3 && w[8] == 0x11 && w[10] == 0x33, "DLP req WriteAppBlock payload");
+
+    // 5. ReadSortBlock (T_ReadSortBlock=0x1D, A1=0x20, [handle, 0, 0, 0, 0xFF, 0xFF])
+    DL.PackReadSortBlockReq(5, 0, 0xFFFF, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ReadSortBlock", cmd = DL.T_READ_SORT_BLOCK, argid = DL.A1, arg_len = 6, b0 = 5, b1 = 0});
+    sort_rep: [6]u8 = .[0, 4, 0x01, 0x02, 0x03, 0x04];
+    sort_out: Vec(u16);
+    Expect(DL.UnpackReadSortBlockReply(sort_rep[:], *sort_out) && sort_out.count == 2 && sort_out[0] == 0x0102 && sort_out[1] == 0x0304, "DLP reply ReadSortBlock");
+
+    // 6. WriteSortBlock (T_WriteSortBlock=0x1E, A1=0x20, [handle, 0, byte_len_hi, byte_len_lo, u16...])
+    sort_in: [2]u16 = .[0x000A, 0x0014];
+    DL.PackWriteSortBlockReq(5, sort_in[:], *w);
+    CheckReqHeader(w[:], .{label = "DLP req WriteSortBlock", cmd = DL.T_WRITE_SORT_BLOCK, argid = DL.A1, arg_len = 8, b0 = 5, b1 = 0});
+    Expect(Proto.Get2(w[:], 6) == 4 && Proto.Get2(w[:], 8) == 10 && Proto.Get2(w[:], 10) == 20, "DLP req WriteSortBlock payload");
+
+    // 7. ReadNextModifiedRec (T_ReadNextModifiedRec=0x1F, A1=0x20, [handle])
+    DL.PackReadNextModifiedRecReq(5, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ReadNextModifiedRec", cmd = DL.T_READ_NEXT_MODIFIED_REC, argid = DL.A1, arg_len = 1, b0 = 5, b1 = 0});
+    rec_rep: [13]u8 = .[0x00, 0x10, 0x20, 0x30, 0x00, 0x04, 0x00, 0x03, 0x10, 0x02, #char "a", #char "b", #char "c"];
+    rec: DL.Record;
+    Expect(DL.UnpackRec(rec_rep[:], *rec) && rec.id == 0x00102030 && rec.index == 4 && rec.attr == 0x10 && rec.cat == 2 && TextView(rec.data[:]) == "abc", "DLP reply ReadNextModifiedRec");
+
+    // 8. WriteResource (T_WriteResource=0x24, A1=0x20, [handle, 0, type(4), id(2), size(2), data...])
+    res: DL.Resource;
+    res.name = DL.S2Id("code");
+    res.id = 1;
+    VecPush(res.data, 0x4E);
+    VecPush(res.data, 0x75);
+    DL.PackWriteResourceReq(6, *res, *w);
+    CheckReqHeader(w[:], .{label = "DLP req WriteResource", cmd = DL.T_WRITE_RESOURCE, argid = DL.A1, arg_len = 12, b0 = 6, b1 = 0});
+    Expect(Proto.Get4(w[:], 6) == DL.S2Id("code") && Proto.Get2(w[:], 10) == 1 && Proto.Get2(w[:], 12) == 2 && w[14] == 0x4E && w[15] == 0x75, "DLP req WriteResource payload");
+
+    // 9. DeleteResource (T_DeleteResource=0x25, A1=0x20, [handle, 0, type(4), id(2)])
+    DL.PackDeleteResourceReq(6, DL.S2Id("tFRM"), 1000, *w);
+    CheckReqHeader(w[:], .{label = "DLP req DeleteResource", cmd = DL.T_DELETE_RESOURCE, argid = DL.A1, arg_len = 8, b0 = 6, b1 = 0});
+    Expect(Proto.Get4(w[:], 6) == DL.S2Id("tFRM") && Proto.Get2(w[:], 10) == 1000, "DLP req DeleteResource payload");
+
+    // 10. MoveCategory (T_MoveCategory=0x2C, A1=0x20, [handle, from, to, 0])
+    DL.PackMoveCategoryReq(5, 1, 3, *w);
+    CheckReqHeader(w[:], .{label = "DLP req MoveCategory", cmd = DL.T_MOVE_CATEGORY, argid = DL.A1, arg_len = 4, b0 = 5, b1 = 1});
+    Expect(w[6] == 3 && w[7] == 0, "DLP req MoveCategory payload");
+
+    // 11. ResetSyncFlags (T_ResetSyncFlags=0x27, A1=0x20, [handle])
+    DL.PackResetSyncFlagsReq(5, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ResetSyncFlags", cmd = DL.T_RESET_SYNC_FLAGS, argid = DL.A1, arg_len = 1, b0 = 5, b1 = 0});
+
+    // 12. FindDB (T_FindDB=0x39, A2=0x21, [0x80, handle])
+    DL.PackFindDBReq(5, *w);
+    CheckReqHeader(w[:], .{label = "DLP req FindDB", cmd = DL.T_FIND_DB, argid = DL.A2, arg_len = 2, b0 = 0x80, b1 = 5});
+    find_rep: Vec(u8);
+    for i: 0..9 { VecPush(find_rep, 0) } // 10-byte FindDB header before DBInfo
+    VecPush(find_rep, 52); // size = 44 + 8 ("MemoPad\0")
+    VecPush(find_rep, 0);
+    Proto.Put2(*find_rep, DL.F_RESOURCE);
+    Proto.Put4(*find_rep, DL.S2Id("appl"));
+    Proto.Put4(*find_rep, DL.S2Id("memo"));
+    Proto.Put2(*find_rep, 2);
+    Proto.Put4(*find_rep, 99);
+    DL.PutDate(*find_rep, 0);
+    DL.PutDate(*find_rep, 0);
+    DL.PutDate(*find_rep, 0);
+    Proto.Put2(*find_rep, 11);
+    DL.PutCStr(*find_rep, "MemoPad", 32);
+    finfo: DL.DBInfo;
+    Expect(DL.UnpackFindDBReply(find_rep[:], *finfo) && finfo.attr == DL.F_RESOURCE &&
+        TextView(finfo.dtype) == "appl" && TextView(finfo.creator) == "memo" &&
+        finfo.version == 2 && finfo.modno == 99 && finfo.index == 11 &&
+        TextView(finfo.name) == "MemoPad", "DLP reply FindDB");
+
+    // 13. ReadOpenDBInfo (T_ReadOpenDBInfo=0x2B, A1=0x20, [handle])
+    DL.PackReadOpenDBInfoReq(5, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ReadOpenDBInfo", cmd = DL.T_READ_OPEN_DB_INFO, argid = DL.A1, arg_len = 1, b0 = 5, b1 = 0});
+    odb_rep: [2]u8 = .[0x01, 0x2C];
+    nent, nok := DL.UnpackReadOpenDBInfoReply(odb_rep[:]);
+    Expect(nok && nent == 300, "DLP reply ReadOpenDBInfo");
+
+    // 14. ReadRecordIDList (T_ReadRecordIDList=0x31, A1=0x20, [handle, sort_flag, start(2), max(2)])
+    DL.PackReadRecordIDListReq(5, true, 0, 0xFFFF, *w);
+    CheckReqHeader(w[:], .{label = "DLP req ReadRecordIDList", cmd = DL.T_READ_RECORD_ID_LIST, argid = DL.A1, arg_len = 6, b0 = 5, b1 = 0x80});
+    id_rep: [16]u8 = .[0, 2, 0, 0, 0, 0, 0, 0, 0x00, 0x01, 0x02, 0x03, 0x00, 0x04, 0x05, 0x06];
+    ids: Vec(u32);
+    Expect(DL.UnpackReadRecordIDListReply(id_rep[:], *ids) && ids.count == 2 && ids[0] == 0x00010203 && ids[1] == 0x00040506, "DLP reply ReadRecordIDList");
+}
+
 TestGuest :: (emu: string) {
     unused RemoveTree(WORK);
     unused CreateDirectory("build");
@@ -110,6 +258,7 @@ TestGuest :: (emu: string) {
 main :: (argc: s32, argv: **u8) -> s32 {
     emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
     TestProto();
+    TestDesklinkDlp14();
     TestGuest(emu);
     if failures != 0 {
         print("palm_test: % failures\n", failures);
