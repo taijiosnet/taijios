@@ -30,7 +30,7 @@ WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [245]Case = Case.[
+cases: [251]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -328,6 +328,14 @@ fakenet/2/status
     .{args = "{ time echo hi >[2] /dev/null }", out = "hi\n"},
     .{tool = "time", err = "usage: time cmd ...\n"},
     .{args = "{ time echo hi >[2] t.err; cat t.err | sed 's/[0-9][0-9.]*/N/g' }", out = "hi\nNl Nr Nt\n"},
+    // puttar: two 512-byte blocks of header and data, then two empty blocks.
+    .{args = "{ puttar short > one.tar }"},
+    .{args = "{ puttar short > one.tar; wc -c one.tar }", out = "  10240 one.tar\n"},
+    // The first block names the file, then the standard ustar fields.
+    .{args = "{ puttar short > one.tar; read 5 < one.tar }", out = "short"},
+    .{args = "{ puttar short > one.tar; read -o 257 5 < one.tar }", out = "ustar"},
+    .{args = "{ puttar < listfile > list.tar; wc -c list.tar }", out = "  10240 list.tar\n"},
+    .{args = "{ puttar nosuch > bad.tar }", err = "warning: puttar: cannot stat nosuch: 'nosuch' file does not exist\n"},
 ];
 
 failures: s32;
@@ -420,6 +428,7 @@ Prepare :: (binary: string) -> bool {
         Write("lines.txt", Lines()) &&
         Write("unsorted", UNSORTED) &&
         Write("blankin", "\n \n\t\n") &&
+        Write("listfile", "short\n") &&
         Write("graph", "a b c\nb d\nc d\nd\n") && Write("graph2", "x y\nx z\ny z\n") &&
         Write("chain", "1 2\n2 3\n3 4\n4 5\n") && Write("solo", "solo\n") &&
         Write("blank", "\n  \n\t\n") && Write("selfedge", "a a\n") &&

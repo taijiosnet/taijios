@@ -95,7 +95,6 @@ TARG=\
 	plumb.dis\
 	plumber.dis\
 	prof.dis\
-	puttar.dis\
 	ramfile.dis\
 	raw2iaf.dis\
 	rawdbfs.dis\
@@ -198,6 +197,7 @@ ZXCOMMANDS=$ZXCOMMANDS unicode
 ZXCOMMANDS=$ZXCOMMANDS mv
 ZXCOMMANDS=$ZXCOMMANDS xargs
 ZXCOMMANDS=$ZXCOMMANDS time
+ZXCOMMANDS=$ZXCOMMANDS puttar
 ZXCOMMANDS=$ZXCOMMANDS fs
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -344,6 +344,9 @@ xargs.zx: xargs.zi taijios_process.zi $UTILZX
 time.zx: time.zi taijios_process.zi taijios_clock.zi $UTILZX
 	zi2zx --root . --bind-host taijios_clock --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry time:main -o $target time.zi
 
+puttar.zx: puttar.zi taijios_stat.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry puttar:main -o $target puttar.zi
+
 # Only package-aware ZX targets resolve the Tcl/Tk dependencies.
 $TCLZX:Ppython3 ziran_package_inputs.py check tcl: ziran_package_inputs.py
 	python3 ziran_package_inputs.py write tcl "$target"
@@ -465,6 +468,7 @@ $DISBIN/unicode.zx: unicode.zx mkfile
 $DISBIN/mv.zx: mv.zx mkfile
 $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
+$DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
 
 $DISBIN/%.zx: %.zx

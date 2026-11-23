@@ -1,0 +1,231 @@
+// Write a POSIX tar from the paths on standard input or the arguments,
+// replacing the Limbo puttar.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+BlockSize :: 512;
+GroupBlocks :: 20;
+
+State :: struct {
+    header: [BlockSize]u8;
+    buffer: [GroupBlocks * BlockSize]u8;
+    blocks: s32;
+    failed: bool;
+}
+
+// One diagnostic with the guest's reason.
+Warn :: (before: string, name: string, reason: string) {
+    unused Cli.WriteAll(2, before);
+    unused Cli.WriteAll(2, name);
+    if reason.count > 0 {
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, reason);
+    }
+    unused Cli.WriteAll(2, "\n");
+}
+
+// Write the buffered blocks, padding the group to its full size.
+Flush :: (state: *State) {
+    if state.blocks <= 0 { return }
+    if state.blocks < GroupBlocks {
+        for i: state.blocks * BlockSize..state.buffer.count-1 { state.buffer[i] = 0 }
+    }
+    if !Cli.WriteAll(1, TextView(state.buffer[:])) { state.failed = true }
+    state.blocks = 0
+}
+
+// Append one 512-byte block to the group.
+Put :: (state: *State, data: []u8) {
+    if data.count != BlockSize {
+        Warn("puttar: ", "putblock wants TBLOCK chunks", "")
+        state.failed = true
+        return
+    }
+    for i: 0..BlockSize-1 { state.buffer[state.blocks * BlockSize + i] = data[i] }
+    state.blocks += 1
+    if state.blocks >= GroupBlocks { Flush(state) }
+}
+
+// The octal field width bytes wide, zero padded, as the Limbo octal built it.
+Octal :: (header: []u8, at: s64, width: s32, value: s64) {
+    remaining := value
+    place := at + width - 1
+    while place >= at {
+        header[place] = cast(u8)(48 + cast(s64)(remaining & 7))
+        remaining = remaining >> 3
+        place -= 1
+    }
+}
+
+// Put a name in the header, splitting one longer than a hundred bytes into the
+// name field and the prefix field, as tar expects.
+PackName :: (header: []u8, name: string) {
+    if name.count <= 100 {
+        for i: 0..name.count-1 { header[i] = name[i] }
+        return
+    }
+    at := name.count - 101
+    while at < name.count && name[at] != #char "/" { at += 1 }
+    if at == name.count {
+        Warn("puttar: ", name, "> 100 bytes")
+        return
+    }
+    if at > 155 {
+        Warn("puttar: ", name, "too long")
+        return
+    }
+    short := name[at+1:]
+    for i: 0..short.count-1 { header[i] = short[i] }
+    prefix := name[:at]
+    for i: 0..prefix.count-1 { header[345 + i] = prefix[i] }
+}
+
+// The unsigned sum of all header bytes.
+Checksum :: (header: []u8) -> s64 {
+    sum: s64
+    for header { sum += cast(s64)it }
+    return sum
+}
+
+// A short string into the header at an offset.
+Place :: (header: []u8, at: s64, text: string) {
+    for i: 0..text.count-1 { header[at + i] = text[i] }
+}
+
+// Write one path and, for a directory, its contents.
+Archive :: (state: *State, name: string, recursive: bool) {
+    bytes: [Fs.BufferSize]u8
+    size := Io.StatPacked(name, bytes[:])
+    if size <= 0 {
+        Warn("warning: puttar: cannot stat ", name, Io.LastError())
+        return
+    }
+    info := Fs.Decode(bytes[:size])
+    header: []u8 = state.header[:]
+    for i: 0..BlockSize-1 { header[i] = 0 }
+    PackName(header, name)
+    Octal(header, 100, 7, cast(s64)(info.mode & 0x1ff))
+    Octal(header, 108, 7, 1)
+    Octal(header, 116, 7, 1)
+    Octal(header, 124, 11, info.length)
+    Octal(header, 136, 11, cast(s64)info.modified)
+    Place(header, 148, "        ")
+    header[156] = cast(u8)(48)
+    if (info.mode & Fs.Directory) != 0 { header[156] = cast(u8)(53) }
+    Place(header, 257, "ustar")
+    Place(header, 263, "00")
+    Place(header, 265, info.owner)
+    Place(header, 297, info.group)
+    // The tar fields carry the 4-byte device and the low 32 bits of the qid
+    // path, as Limbo's stat.dev and stat.qid.path did.
+    // Limbo's stat.dev is the four bytes after the type byte, and qid.path the
+    // eight at offset 13, which is the low half of the identity's qid here.
+    Octal(header, 329, 8, cast(s64)Fs.Uint(bytes[:size], 3, 4))
+    Octal(header, 337, 8, cast(s64)(info.identity.qid & 0xffffffff))
+    Octal(header, 148, 7, Checksum(header))
+    header[155] = 0
+    Put(state, state.header[:])
+    if state.failed { return }
+    if (info.mode & Fs.Directory) == 0 {
+        // The file's bytes, padded to whole blocks.
+        handle := Io.OpenFile(name, 0)
+        if handle < 0 {
+            Warn("puttar: ", name, "cannot open")
+            state.failed = true
+            return
+        }
+        left := info.length
+        while left > 0 {
+            chunk: [8192]u8
+            got := Io.ReadBytes(handle, chunk[:])
+            if got <= 0 {
+                Warn("puttar: ", name, "read error")
+                state.failed = true
+                break
+            }
+            data: Vec(u8)
+            for i: 0..got-1 { unused VecPush(data, chunk[i]) }
+            padded := ((got + BlockSize - 1) / BlockSize) * BlockSize
+            for i: got..padded-1 { unused VecPush(data, 0) }
+            at: s64 = 0
+            while at < padded {
+                Put(state, data[at:at+BlockSize])
+                at += BlockSize
+            }
+            left -= got
+        }
+        unused Io.CloseFile(handle)
+        return
+    }
+    if !recursive { return }
+    directory := Io.OpenFile(name, 0)
+    if directory < 0 {
+        Warn("puttar: ", name, "cannot open")
+        state.failed = true
+        return
+    }
+    entries: [Fs.BufferSize]u8
+    while true {
+        size := Io.ReadBytes(directory, entries[:])
+        if size <= 0 { break }
+        offset: s64 = 0
+        while offset < size {
+            entry := Fs.Decode(entries[offset:size])
+            if entry.size == 0 { break }
+            offset += entry.size
+            child: Vec(u8)
+            unused BuilderAppend(child, name)
+            if name.count > 0 && name[name.count-1] != #char "/" { unused BuilderAppend(child, "/") }
+            unused BuilderAppend(child, entry.name)
+            Archive(state, TextDetach(BuilderFinish(child)), true)
+            if state.failed { break }
+        }
+        if state.failed { break }
+    }
+    unused Io.CloseFile(directory)
+}
+
+#program_export
+main :: () -> s32 {
+    state: State
+    count := Args.OperandCount()
+    if count == 0 {
+        // The paths come from standard input, one per line.
+        reader := Io.OpenFile("/dev/stdin", 0)
+        line: Vec(u8)
+        buffer: [4096]u8
+        handle := ifx reader >= 0 then reader else 0
+        while true {
+            got := Io.ReadBytes(handle, buffer[:])
+            if got <= 0 { break }
+            for i: 0..got-1 {
+                if buffer[i] == cast(u8)10 {
+                    if line.count > 0 {
+                        Archive(*state, TextDetach(BuilderFinish(line)), true)
+                        line = .{}
+                    }
+                } else {
+                    unused VecPush(line, buffer[i])
+                }
+            }
+        }
+        if line.count > 0 { Archive(*state, TextDetach(BuilderFinish(line)), true) }
+    } else {
+        for i: 0..count-1 {
+            Archive(*state, Args.Operand(i), true)
+        }
+    }
+    // The format requires two empty blocks at the end.
+    zero: [BlockSize]u8
+    Put(*state, zero[:])
+    Put(*state, zero[:])
+    Flush(*state)
+    if state.failed {
+        unused Args.SetFailure("error")
+        return 1
+    }
+    return 0
+}

@@ -67,6 +67,7 @@ y.debug
 /appl/cmd/mv.zx
 /appl/cmd/xargs.zx
 /appl/cmd/time.zx
+/appl/cmd/puttar.zx
 /appl/cmd/sleep.zx
 /appl/cmd/pause.zx
 /appl/cmd/runas.zx
@@ -131,6 +132,7 @@ y.debug
 /dis/mv.zx
 /dis/xargs.zx
 /dis/time.zx
+/dis/puttar.zx
 /dis/sleep.zx
 /dis/pause.zx
 /dis/runas.zx
