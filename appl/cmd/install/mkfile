@@ -12,17 +12,13 @@ TARG=\
 	proto.dis\
 	wrap2list.dis\
 	wfind.dis\
-	applylog.dis\
-	logs.dis\
 	log.dis\
-	updatelog.dis\
 	eproto.dis\
 
 MODULES=\
 	wrap.m\
 	arch.m\
 	archfs.m\
-	logs.m\
 	proto.m\
 	protocaller.m\
 
@@ -38,10 +34,13 @@ DISBIN=$ROOT/dis/install
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=mkproto ckproto proto2list mergelog
-ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../../lib/taijios_quote.zi
+ZXCOMMANDS=mkproto ckproto proto2list mergelog updatelog applylog
+ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../taijios_clock.zi ../taijios_keyring.zi ../../lib/taijios_quote.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+updatelog.zx: updatelog.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --bind-host taijios_keyring --entry updatelog:main -o $target updatelog.zi
 
 &.zx: &.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi

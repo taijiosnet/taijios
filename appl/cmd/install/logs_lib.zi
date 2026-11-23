@@ -168,8 +168,48 @@ DbSort :: (db: *LogDb, key: s32) {
 DbEntryCount :: (db: *LogDb) -> s64 { return db.entries.count }
 DbEntryAction :: (db: *LogDb, i: s64) -> u8 { return db.entries[i].action }
 DbEntryMtime :: (db: *LogDb, i: s64) -> s32 { return db.entries[i].mtime }
+DbEntrySeq :: (db: *LogDb, i: s64) -> s64 { return db.entries[i].seq }
+DbEntryX :: (db: *LogDb, i: s64) -> s32 { return db.entries[i].x }
+DbSetX :: (db: *LogDb, i: s64, x: s32) { db.entries[i].x = x }
+DbGetEntry :: (db: *LogDb, i: s64, out: *LogEntry) { CopyLogEntry(out, *db.entries[i]) }
 DbUpdateAt :: (db: *LogDb, i: s64, n: *LogEntry) { UpdateEntry(*db.entries[i], n) }
 DbAppendEntryTextAt :: (db: *LogDb, i: s64, out: *Vec(u8)) { AppendEntryText(out, *db.entries[i]) }
+DbAppendDbTextAt :: (db: *LogDb, i: s64, out: *Vec(u8)) { AppendDbText(out, *db.entries[i]) }
+
+AppendSumText :: (out: *Vec(u8), e: *LogEntry) {
+    if e.action == 97 || e.action == 109 {
+        VecPush(out.*, e.action);
+        unused BuilderAppend(out.*, " ");
+        Quote.Quote(out, TextView(e.path));
+        unused BuilderAppend(out.*, " ");
+        Util.AppendOctal(out, cast(u64)e.mode);
+        unused BuilderAppend(out.*, " ");
+        Quote.Quote(out, TextView(e.uid));
+        unused BuilderAppend(out.*, " ");
+        Quote.Quote(out, TextView(e.gid));
+        BuilderPrint(out, " %", cast(u64)cast(u32)e.mtime);
+    } else if e.action == 100 || e.action == 99 {
+        VecPush(out.*, e.action);
+        unused BuilderAppend(out.*, " ");
+        Quote.Quote(out, TextView(e.path));
+    } else {
+        unused BuilderAppend(out.*, "? ");
+        Quote.Quote(out, TextView(e.path));
+    }
+}
+
+AppendDbText :: (out: *Vec(u8), e: *LogEntry) {
+    BuilderPrint(out, "% % ", e.seq >> 32, e.seq & 0xFFFFFFFF);
+    Quote.Quote(out, TextView(e.path));
+    unused BuilderAppend(out.*, " - ");
+    Util.AppendOctal(out, cast(u64)e.mode);
+    unused BuilderAppend(out.*, " ");
+    Quote.Quote(out, TextView(e.uid));
+    unused BuilderAppend(out.*, " ");
+    Quote.Quote(out, TextView(e.gid));
+    BuilderPrint(out, " % %", cast(u64)cast(u32)e.mtime, e.length);
+    AppendContents(out, e);
+}
 
 AppendContents :: (out: *Vec(u8), e: *LogEntry) {
     for i: 0..e.contents.count - 1 {

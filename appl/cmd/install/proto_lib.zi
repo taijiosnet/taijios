@@ -372,3 +372,4 @@ DiagMsg :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(r
 ItemCount :: (res: *ProtoResult) -> s64 { return res.items.count }
 ItemNewPath :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(res.items[i].new_path)) }
 ItemOldPath :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(res.items[i].old_path)) }
+ItemDir :: (res: *ProtoResult, i: s64, out: *Util.DirEntry) { Util.CopyDirEntry(out, *res.items[i].dir) }

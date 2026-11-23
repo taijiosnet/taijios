@@ -800,7 +800,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/fs/void.dis | appl/cmd/fs/void.b |  | - |  |
 | dis/fs/walk.dis | appl/cmd/fs/walk.b |  | - |  |
 | dis/fs/write.dis | appl/cmd/fs/write.b |  | - |  |
-| dis/install/applylog.dis | appl/cmd/install/applylog.b |  | - |  |
 | dis/install/arch.dis | appl/cmd/install/arch.b |  | - |  |
 | dis/install/archfs.dis | appl/cmd/install/archfs.b |  | - |  |
 | dis/install/create.dis | appl/cmd/install/create.b |  | - |  |
@@ -809,9 +808,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/install/inst.dis | appl/cmd/install/inst.b |  | - |  |
 | dis/install/install.dis | appl/cmd/install/install.b |  | - |  |
 | dis/install/log.dis | appl/cmd/install/log.b |  | - |  |
-| dis/install/logs.dis | appl/cmd/install/logs.b |  | - |  |
 | dis/install/proto.dis | appl/cmd/install/proto.b |  | - |  |
-| dis/install/updatelog.dis | appl/cmd/install/updatelog.b |  | - |  |
 | dis/install/wdiff.dis | appl/cmd/install/wdiff.b |  | - |  |
 | dis/install/wfind.dis | appl/cmd/install/wfind.b |  | - |  |
 | dis/install/wrap.dis | appl/cmd/install/wrap.b |  | - |  |

@@ -1,0 +1,483 @@
+// Apply a Plan 9-style replica log to a client tree (replaces appl/cmd/install/applylog.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Quote :: #import "taijios_quote";
+Util :: #import "install_util";
+Logs :: #import "logs_lib";
+#import "std/format"
+#import "std/vec"
+
+ACT_APPLY :: 0
+ACT_APPLYDB :: 1
+ACT_INSTALL :: 2
+ACT_ASIS :: 3
+ACT_SKIP :: 4
+
+client: Logs.LogDb;
+updates: Logs.LogDb;
+
+nerror: s32;
+nconflict: s32;
+debug: bool;
+verbose: bool;
+resolve: u8;
+setuid: bool;
+setgid: bool;
+nflag: bool;
+noerr: bool;
+timefile: string = "";
+clientroot: string = "";
+srvroot: string = "";
+logfd: s32 = -1;
+
+Usage :: () -> s32 {
+    Util.WriteErr("usage: applylog [-vuged] [-sc] [-T timefile] clientlog clientroot serverroot [path ... ] <serverlog\n");
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+Fail :: (msg: string) -> s32 {
+    err: Vec(u8);
+    BuilderPrint(*err, "applylog: %\n", msg);
+    Util.WriteErr(TextView(err[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Note :: (path: string, msg: string) {
+    err: Vec(u8);
+    unused BuilderAppend(err, "applylog: note: ");
+    Quote.Quote(*err, path);
+    BuilderPrint(*err, " %\n", msg);
+    Util.WriteErr(TextView(err[:]));
+}
+
+Warn :: (msg: string) {
+    err: Vec(u8);
+    BuilderPrint(*err, "applylog: warning: %\n", msg);
+    Util.WriteErr(TextView(err[:]));
+    nerror += 1;
+}
+
+Conflict :: (name: string, why: string, wont: string) {
+    err: Vec(u8);
+    Quote.Quote(*err, name);
+    BuilderPrint(*err, ": %; will not %\n", why, wont);
+    Util.WriteErr(TextView(err[:]));
+    nconflict += 1;
+}
+
+ActionName :: (a: u8) -> string {
+    if a == 97 { return "create" }
+    if a == 99 { return "update" }
+    if a == 100 { return "delete" }
+    if a == 109 { return "update metadata" }
+    return "unknown action";
+}
+
+Contains :: (s: string, sub: string) -> bool {
+    if sub.count == 0 { return true }
+    if s.count < sub.count { return false }
+    for i: 0..s.count - sub.count {
+        if s[i:i + sub.count] == sub { return true }
+    }
+    return false;
+}
+
+SameContents :: (p1: string, p2: string) -> bool {
+    f1 := IO.Open(p1, 0);
+    if f1 < 0 { return false }
+    f2 := IO.Open(p2, 0);
+    if f2 < 0 { unused IO.Close(f1); return false }
+    b1: [8192]u8;
+    b2: [8192]u8;
+    n: s64 = 256;
+    same := true;
+    while true {
+        n1 := IO.Read(f1, b1[:n]);
+        n2 := IO.Read(f2, b2[:n]);
+        if n1 != n2 { same = false; break }
+        if n1 <= 0 { break }
+        for i: 0..cast(s64)n1 - 1 {
+            if b1[i] != b2[i] { same = false; break }
+        }
+        if !same { break }
+        n = 8192;
+    }
+    unused IO.Close(f1);
+    unused IO.Close(f2);
+    return same;
+}
+
+SameStat :: (a: *Logs.LogEntry, b: *Util.DirEntry) -> bool {
+    if (a.mode & Stat.Directory) != 0 { return (b.mode & Stat.Directory) != 0 }
+    return a.length == b.length && a.mtime == b.mtime && a.qtype == b.qtype;
+}
+
+SameMeta :: (a: *Logs.LogEntry, b: *Util.DirEntry) -> bool {
+    if a.mode != b.mode { return false }
+    if setuid && TextView(a.uid) != TextView(b.owner) { return false }
+    if setgid && TextView(a.gid) != TextView(b.group) { return false }
+    return SameStat(a, b);
+}
+
+ReplayClientLine :: (log: *Logs.LogEntry) {
+    path := TextView(log.path);
+    idx := Logs.DbLook(*client, path);
+    indb := idx >= 0 && Logs.DbEntryAction(*client, idx) != 100;
+    if log.action == 97 {
+        if indb { Note(path, "duplicate create"); return }
+    } else if log.action == 99 {
+        if !indb { Note(path, "contents but no entry"); return }
+    } else if log.action == 100 {
+        if !indb { Note(path, "deleted but no entry"); return }
+        if Logs.DbEntryMtime(*client, idx) > log.mtime { Note(path, "deleted but it's newer"); return }
+    } else if log.action == 109 {
+        if !indb { Note(path, "metadata but no entry"); return }
+    }
+    if idx < 0 { idx = Logs.DbAdd(*client, log) }
+    Logs.DbUpdateAt(*client, idx, log);
+}
+
+ChooseAction :: (e: *Logs.LogEntry) -> s32 {
+    cf: Vec(u8);
+    sf: Vec(u8);
+    Util.MkPath(clientroot, TextView(e.path), *cf);
+    Util.MkPath(srvroot, TextView(e.serverpath), *sf);
+
+    cd: Util.DirEntry;
+    ishere := Util.StatEntry(TextView(cf[:]), *cd);
+    db_idx := Logs.DbLook(*client, TextView(e.path));
+    indb := db_idx >= 0 && Logs.DbEntryAction(*client, db_idx) != 100;
+
+    db: Logs.LogEntry;
+    if db_idx >= 0 { Logs.DbGetEntry(*client, db_idx, *db) }
+
+    unchanged := false;
+    if indb && ishere {
+        unchanged = SameStat(*db, *cd) || SameContents(TextView(sf[:]), TextView(cf[:]));
+    } else if !indb && !ishere {
+        unchanged = true;
+    }
+
+    if unchanged && (e.action != 109 || SameMeta(*db, *cd)) {
+        return ACT_APPLY;
+    }
+    if !ishere && e.action == 100 {
+        if indb { return ACT_APPLYDB }
+        return ACT_ASIS;
+    }
+    if resolve == 99 { return ACT_ASIS }
+    if resolve == 115 {
+        if !ishere || (e.action == 109 && !unchanged) { return ACT_INSTALL }
+        return ACT_APPLY;
+    }
+    if indb {
+        if ishere {
+            if e.action == 109 && unchanged && !SameMeta(*db, *cd) {
+                Conflict(TextView(e.path), "locally modified metadata", ActionName(e.action));
+            } else {
+                Conflict(TextView(e.path), "locally modified", ActionName(e.action));
+            }
+        } else {
+            Conflict(TextView(e.path), "locally removed", ActionName(e.action));
+        }
+    } else {
+        if db_idx >= 0 {
+            Conflict(TextView(e.path), "locally retained or recreated", ActionName(e.action));
+        } else {
+            Conflict(TextView(e.path), "locally created", ActionName(e.action));
+        }
+    }
+    return ACT_SKIP;
+}
+
+ApplyWstat :: (fd: s32, mode: u32, mtime: s32, uid: string, gid: string, set_m: bool, set_t: bool, set_u: bool, set_g: bool) -> bool {
+    info: Stat.Info;
+    info.mode = mode;
+    info.modified = mtime;
+    info.owner = uid;
+    info.group = gid;
+    return Stat.Change(fd, info, set_m, set_t, set_u, set_g);
+}
+
+Enact :: (e: *Logs.LogEntry) -> bool {
+    if nflag { return false }
+    srcfile: Vec(u8);
+    dstfile: Vec(u8);
+    Util.MkPath(srvroot, TextView(e.serverpath), *srcfile);
+    Util.MkPath(clientroot, TextView(e.path), *dstfile);
+    src_s := TextView(srcfile[:]);
+    dst_s := TextView(dstfile[:]);
+
+    if e.action == 97 || e.action == 99 {
+        if e.action == 97 && (e.mode & Stat.Directory) != 0 {
+            fd := IO.Create(dst_s, 0, cast(s32)e.mode);
+            if fd < 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "can't mkdir %: %", dst_s, IO.Error());
+                Warn(TextView(msg[:]));
+                return false;
+            }
+            unused ApplyWstat(fd, e.mode, e.mtime, TextView(e.uid), TextView(e.gid), true, false, setuid, setgid);
+            unused IO.Close(fd);
+            return true;
+        }
+        sf := IO.Open(src_s, 0);
+        if sf < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "can't open %: %", src_s, IO.Error());
+            Warn(TextView(msg[:]));
+            return false;
+        }
+        df: s32 = -1;
+        dowstat := e.action == 97;
+        st_d: Util.DirEntry;
+        if !Util.StatEntry(dst_s, *st_d) {
+            df = IO.Create(dst_s, 1, cast(s32)(e.mode | 0x92));
+            dowstat = true;
+        } else {
+            df = IO.Open(dst_s, 1 | 16); // OWRITE | OTRUNC
+        }
+        if df < 0 {
+            unused IO.Close(sf);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "can't create %: %", dst_s, IO.Error());
+            Warn(TextView(msg[:]));
+            return false;
+        }
+        buf: [8192]u8;
+        nw: s64 = 0;
+        while true {
+            n := IO.Read(sf, buf[:]);
+            if n < 0 {
+                unused IO.Close(sf);
+                unused IO.Close(df);
+                Warn("error reading source file");
+                return false;
+            }
+            if n == 0 { break }
+            if IO.Write(df, TextView(buf[:n])) != n {
+                unused IO.Close(sf);
+                unused IO.Close(df);
+                Warn("error writing destination file");
+                return false;
+            }
+            nw += cast(s64)n;
+        }
+        unused IO.Close(sf);
+        if nw != e.length {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: log said % bytes, copied % bytes", dst_s, e.length, nw);
+            Warn(TextView(msg[:]));
+        }
+        if dowstat {
+            unused ApplyWstat(df, e.mode, e.mtime, TextView(e.uid), TextView(e.gid), true, false, setuid, setgid);
+        }
+        unused ApplyWstat(df, e.mode, e.mtime, "", "", false, true, false, false);
+        unused IO.Close(df);
+        return true;
+    } else if e.action == 100 {
+        if IO.Remove(dst_s) < 0 {
+            err := IO.Error();
+            if !Contains(err, "entry not found") && !Contains(err, "not exist") {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "can't remove %: %", dst_s, err);
+                Warn(TextView(msg[:]));
+                return false;
+            }
+        }
+        return true;
+    } else if e.action == 109 {
+        df := IO.Open(dst_s, 0);
+        if df < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: can't open for wstat", dst_s);
+            Warn(TextView(msg[:]));
+            return false;
+        }
+        unused ApplyWstat(df, e.mode, e.mtime, TextView(e.uid), TextView(e.gid), true, false, setuid, setgid);
+        unused IO.Close(df);
+        return true;
+    }
+    return false;
+}
+
+ReadSeq :: (file: string) -> (seq: s64, ok: bool) {
+    buf: Vec(u8);
+    if !Util.ReadAllFile(file, *buf) { return 0, false }
+    words: Vec(Text);
+    Quote.Unquoted(TextView(buf[:]), *words);
+    if words.count != 2 { return 0, false }
+    n0, ok0 := Util.ParseIntBase(TextView(words[0]), 10);
+    n1, ok1 := Util.ParseIntBase(TextView(words[1]), 10);
+    if !ok0 || !ok1 { return 0, false }
+    return (n0 << 32) | (n1 & 0xFFFFFFFF), true;
+}
+
+WriteSeq :: (file: string, n: s64) -> bool {
+    fd := IO.Create(file, 1, 0x1B6); // 0666
+    if fd < 0 { return false }
+    out: Vec(u8);
+    BuilderPrint(*out, "% %", n >> 32, n & 0xFFFFFFFF);
+    ok := IO.Write(fd, TextView(out[:])) >= 0;
+    unused IO.Close(fd);
+    return ok;
+}
+
+main :: () -> s32 {
+    dump := false;
+    scan: Arg.Scan;
+    while true {
+        o := Arg.Option(*scan);
+        if o == 0 { break }
+        if o == 84 { v, ok := Arg.Value(*scan); if !ok { return Usage() }; timefile = v }
+        else if o == 100 { dump = true; debug = true }
+        else if o == 101 { noerr = true }
+        else if o == 103 { setgid = true }
+        else if o == 110 { nflag = true; verbose = true }
+        else if o == 115 || o == 99 { resolve = o }
+        else if o == 117 { setuid = true }
+        else if o == 118 { verbose = true }
+        else { return Usage() }
+    }
+    argc := Args.OperandCount();
+    if argc - scan.next < 3 { return Usage() }
+    clientlog := Args.Operand(scan.next);
+    clientroot = Args.Operand(scan.next + 1);
+    srvroot = Args.Operand(scan.next + 2);
+    if argc - scan.next > 3 { return Fail("restriction by path not yet done") }
+
+    cd: Util.DirEntry;
+    if !Util.StatEntry(clientroot, *cd) || (cd.mode & Stat.Directory) == 0 {
+        return Fail("invalid client root");
+    }
+    sd: Util.DirEntry;
+    if !Util.StatEntry(srvroot, *sd) || (sd.mode & Stat.Directory) == 0 {
+        return Fail("invalid server root");
+    }
+
+    logfd = IO.Open(clientlog, ifx nflag then 0 else 2);
+    if logfd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", clientlog, IO.Error());
+        return Fail(TextView(msg[:]));
+    }
+    cbuf: Vec(u8);
+    Util.ReadAllFd(logfd, *cbuf);
+    cstr := TextView(cbuf[:]);
+    pos: s64 = 0;
+    while pos < cstr.count {
+        end := pos;
+        while end < cstr.count && cstr[end] != 10 { end += 1 }
+        line := cstr[pos:end];
+        if end < cstr.count { end += 1 }
+        pos = end;
+        if line.count == 0 { continue }
+        e: Logs.LogEntry;
+        ok, err := Logs.ParseLogLine(line, *e);
+        if !ok { return Fail(err) }
+        ReplayClientLine(*e);
+    }
+    unused IO.Seek(logfd, 0, 2);
+
+    if dump {
+        dout: Vec(u8);
+        cnt := Logs.DbEntryCount(*client);
+        for i: 0..cnt - 1 {
+            BuilderPrint(*dout, "%\t", i);
+            Logs.DbAppendEntryTextAt(*client, i, *dout);
+            VecPush(dout, 10);
+        }
+        Util.WriteOut(TextView(dout[:]));
+    }
+
+    minseq: s64 = 0;
+    if timefile.count > 0 {
+        s, ok := ReadSeq(timefile);
+        if !ok { return Fail("can't read sequence number") }
+        minseq = s;
+    }
+
+    sbuf: Vec(u8);
+    Util.ReadAllFd(0, *sbuf);
+    sstr := TextView(sbuf[:]);
+    pos = 0;
+    while pos < sstr.count {
+        end := pos;
+        while end < sstr.count && sstr[end] != 10 { end += 1 }
+        line := sstr[pos:end];
+        if end < sstr.count { end += 1 }
+        pos = end;
+        if line.count == 0 { continue }
+        e: Logs.LogEntry;
+        ok, err := Logs.ParseLogLine(line, *e);
+        if !ok { return Fail(err) }
+        if e.seq > minseq {
+            uidx := Logs.DbLook(*updates, TextView(e.path));
+            if uidx < 0 { uidx = Logs.DbAdd(*updates, *e) }
+            Logs.DbUpdateAt(*updates, uidx, *e);
+        }
+    }
+    Logs.DbSort(*updates, Logs.Byseq);
+
+    maxseq := minseq;
+    skip := false;
+    ucnt := Logs.DbEntryCount(*updates);
+    for i: 0..ucnt - 1 {
+        e: Logs.LogEntry;
+        Logs.DbGetEntry(*updates, i, *e);
+        ce_idx := Logs.DbLook(*client, TextView(e.path));
+        if ce_idx >= 0 && Logs.DbEntrySeq(*client, ce_idx) >= e.seq {
+            if !nflag && !skip { maxseq = e.seq }
+            continue;
+        }
+        if verbose {
+            vout: Vec(u8);
+            Logs.AppendSumText(*vout, *e);
+            VecPush(vout, 10);
+            Util.WriteOut(TextView(vout[:]));
+        }
+        act := ChooseAction(*e);
+        if act == ACT_INSTALL {
+            e.action = 97;
+            if !Enact(*e) { skip = true; continue }
+        } else if act == ACT_APPLY {
+            if !Enact(*e) { skip = true; continue }
+        } else if act == ACT_SKIP {
+            skip = true;
+            continue;
+        }
+        if ce_idx < 0 { ce_idx = Logs.DbAdd(*client, *e) }
+        Logs.DbUpdateAt(*client, ce_idx, *e);
+        if !nflag {
+            if !skip { maxseq = e.seq }
+            if logfd >= 0 {
+                lout: Vec(u8);
+                Logs.AppendLogText(*lout, *e);
+                VecPush(lout, 10);
+                if IO.Write(logfd, TextView(lout[:])) < 0 {
+                    return Fail("error writing client log");
+                }
+            }
+        }
+    }
+    if logfd >= 0 { unused IO.Close(logfd) }
+    mout: Vec(u8);
+    BuilderPrint(*mout, "maxseq: % %\n", maxseq >> 32, maxseq & 0xFFFFFFFF);
+    Util.WriteErr(TextView(mout[:]));
+    if !nflag && !skip && timefile.count > 0 {
+        unused WriteSeq(timefile, maxseq);
+    }
+    if nconflict > 0 {
+        unused Args.SetFailure("conflicts");
+        return 1;
+    }
+    if nerror > 0 {
+        unused Args.SetFailure("errors");
+        return 1;
+    }
+    return 0;
+}

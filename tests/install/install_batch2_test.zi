@@ -1,0 +1,97 @@
+// Guest parity test for install batch 2: updatelog and applylog.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/install tests/install/install_batch2_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/inst2";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".dis";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/inst2/srv") ||
+        !CreateDirectory("build/dis-legacy-math/inst2/srv/sub") ||
+        !CreateDirectory("build/dis-legacy-math/inst2/cli") ||
+        !CreateDirectory("build/dis-legacy-math/inst2/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    unused WriteEntireFile("build/dis-legacy-math/inst2/srv/hello.txt", "replica world\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst2/srv/sub/item.txt", "nested item\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst2/srv.proto", "hello.txt\nsub\n\titem.txt\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst2/srv.log", "");
+    unused WriteEntireFile("build/dis-legacy-math/inst2/cli.log", "");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    // 1. updatelog -s -p srv.proto -r /.../srv -t 1700000000 0 srv.log
+    BuilderPrint(*script, "/dis/install/updatelog% -s -p srv.proto -r /%/srv -t 1700000000 0 srv.log > result/upd.log >[2] result/upd.err\n", suffix, WORK);
+    BuilderPrint(*script, "echo $status > result/upd.st\n");
+    // 2. applylog -v cli.log /.../cli /.../srv < result/upd.log
+    BuilderPrint(*script, "/dis/install/applylog% -v cli.log /%/cli /%/srv < result/upd.log > result/app.out >[2] result/app.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "echo $status > result/app.st\n");
+    BuilderPrint(*script, "cat cli/hello.txt > result/cli_hello.txt\n");
+    BuilderPrint(*script, "cat cli/sub/item.txt > result/cli_item.txt\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst2/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("upd.st") == "\n", "updatelog status");
+    Expect(Result("upd.err") == "", "updatelog no stderr");
+    Expect(Contains(Result("upd.log"), " a hello.txt - "), "updatelog emitted hello.txt");
+    Expect(Contains(Result("upd.log"), " a sub/item.txt - "), "updatelog emitted sub/item.txt");
+    Expect(Result("app.st") == "\n", "applylog status");
+    Expect(Result("cli_hello.txt") == "replica world\n", "applylog copied hello.txt");
+    Expect(Result("cli_item.txt") == "nested item\n", "applylog copied sub/item.txt");
+    Expect(Contains(Result("app.err"), "maxseq: "), "applylog printed maxseq");
+
+    if failures != 0 {
+        print("install_batch2_test: % failures\n", failures);
+        return 1;
+    }
+    print("install_batch2_test: all checks passed\n");
+    return 0;
+}

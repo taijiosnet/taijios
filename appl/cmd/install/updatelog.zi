@@ -1,0 +1,350 @@
+// Update a Plan 9-style replica log from a proto file (replaces appl/cmd/install/updatelog.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Clock :: #import "taijios_clock";
+Keyring :: #import "taijios_keyring";
+Quote :: #import "taijios_quote";
+Util :: #import "install_util";
+Proto :: #import "proto_lib";
+Logs :: #import "logs_lib";
+#import "std/format"
+#import "std/vec"
+
+SEEN_BIT :: 0x40000000
+
+now_sec: s64;
+gen: s64;
+changesonly: bool;
+opt_uid: string = "";
+opt_gid: string = "";
+debug: bool;
+sums: bool;
+rootdir: string = ".";
+scanonly: Vec(Text);
+exclude: Vec(Text);
+state: Logs.LogDb;
+out: Vec(u8);
+
+FlushOut :: () {
+    if out.count > 0 {
+        Util.WriteOut(TextView(out[:]));
+        VecClear(out);
+    }
+}
+
+Usage :: () -> s32 {
+    Util.WriteErr("usage: updatelog [-p proto] [-r root] [-t now gen] [-c] [-x path] x.log [path ...]\n");
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+Fail :: (msg: string) -> s32 {
+    FlushOut();
+    err: Vec(u8);
+    BuilderPrint(*err, "updatelog: %\n", msg);
+    Util.WriteErr(TextView(err[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Note :: (path: string, msg: string) {
+    err: Vec(u8);
+    unused BuilderAppend(err, "updatelog: note: ");
+    Quote.Quote(*err, path);
+    BuilderPrint(*err, " %\n", msg);
+    Util.WriteErr(TextView(err[:]));
+}
+
+IsPrefix :: (a: string, b: string) -> bool {
+    if a.count > b.count { return false }
+    if a.count == b.count { return a == b }
+    return b[:a.count] == a && b[a.count] == 47;
+}
+
+TrimPath :: (s_in: string) -> string {
+    s := s_in;
+    while s.count > 1 && s[s.count - 1] == 47 { s = s[:s.count - 1] }
+    while s.count > 0 && s[0] == 47 { s = s[1:] }
+    return s;
+}
+
+Relative :: (name_in: string, root: string) -> string {
+    if root.count == 0 || name_in.count == 0 { return name_in }
+    name := name_in;
+    if IsPrefix(root, name) {
+        name = name[root.count:];
+        while name.count > 0 && name[0] == 47 { name = name[1:] }
+    }
+    return name;
+}
+
+IsListed :: (s: string, list: *Vec(Text)) -> bool {
+    for i: 0..list.count - 1 {
+        if IsPrefix(TextView(list.*[i]), s) { return true }
+    }
+    return false;
+}
+
+Considered :: (s: string) -> bool {
+    if scanonly.count > 0 && !IsListed(s, *scanonly) { return false }
+    if exclude.count > 0 && IsListed(s, *exclude) { return false }
+    return true;
+}
+
+NextSeq :: () -> s64 {
+    s := (now_sec << 32) | (gen & 0xFFFFFFFF);
+    gen += 1;
+    return s;
+}
+
+SameStat :: (a: *Logs.LogEntry, b: *Util.DirEntry) -> bool {
+    if (a.mode & Stat.Directory) != 0 { return (b.mode & Stat.Directory) != 0 }
+    return a.length == b.length && a.mtime == b.mtime && a.qtype == b.qtype;
+}
+
+SameMeta :: (a: *Logs.LogEntry, b: *Util.DirEntry) -> bool {
+    if a.mode != b.mode { return false }
+    if opt_uid.count > 0 && TextView(a.uid) != TextView(b.owner) { return false }
+    if opt_gid.count > 0 && TextView(a.gid) != TextView(b.group) { return false }
+    return SameStat(a, b);
+}
+
+Md5File :: (path: string, hex_out: *Vec(u8)) -> bool {
+    VecClear(hex_out.*);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    ds: Keyring.DigestState;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n < 0 {
+            unused IO.Close(fd);
+            return false;
+        }
+        if n == 0 { break }
+        unused Keyring.DigestAdd(Keyring.MD5, *ds, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    dig: [16]u8;
+    unused Keyring.DigestEnd(Keyring.MD5, *ds, dig[:]);
+    hex: [16]u8 = .[48,49,50,51,52,53,54,55,56,57,97,98,99,100,101,102];
+    for i: 0..15 {
+        VecPush(hex_out.*, hex[(dig[i] >> 4) & 0xF]);
+        VecPush(hex_out.*, hex[dig[i] & 0xF]);
+    }
+    return true;
+}
+
+EmitChange :: (act: u8, idx: s64, seq: s64, d: *Util.DirEntry, path: string, spath: string, digest: string) {
+    le: Logs.LogEntry;
+    le.seq = seq;
+    le.action = act;
+    le.path = Util.CopyText(path);
+    le.serverpath = Util.CopyText(spath);
+    le.mode = d.mode;
+    le.qtype = d.qtype;
+    Util.CopyTextInto(*le.uid, *d.owner);
+    Util.CopyTextInto(*le.gid, *d.group);
+    le.mtime = d.mtime;
+    le.length = d.length;
+    if digest.count > 0 { VecPush(le.contents, Util.CopyText(digest)) }
+    Logs.DbUpdateAt(*state, idx, *le);
+    Logs.AppendLogText(*out, *le);
+    VecPush(out, 10);
+    if out.count >= 16384 { FlushOut() }
+}
+
+ReplayLine :: (log: *Logs.LogEntry) {
+    path := TextView(log.path);
+    idx := Logs.DbLook(*state, path);
+    indb := idx >= 0 && Logs.DbEntryAction(*state, idx) != 100;
+    if log.action == 97 {
+        if indb { Note(path, "duplicate create"); return }
+    } else if log.action == 99 {
+        if !indb { Note(path, "contents but no entry"); return }
+    } else if log.action == 100 {
+        if !indb { Note(path, "deleted but no entry"); return }
+        if Logs.DbEntryMtime(*state, idx) > log.mtime { Note(path, "deleted but it's newer"); return }
+    } else if log.action == 109 {
+        if !indb { Note(path, "metadata but no entry"); return }
+    }
+    if idx < 0 { idx = Logs.DbAdd(*state, log) }
+    Logs.DbUpdateAt(*state, idx, log);
+}
+
+main :: () -> s32 {
+    protofile: string = "/lib/proto/all";
+    scan: Arg.Scan;
+    while true {
+        o := Arg.Option(*scan);
+        if o == 0 { break }
+        if o == 68 { debug = true }
+        else if o == 112 { v, ok := Arg.Value(*scan); if !ok { return Usage() }; protofile = v }
+        else if o == 114 { v, ok := Arg.Value(*scan); if !ok { return Usage() }; rootdir = v }
+        else if o == 99 { changesonly = true }
+        else if o == 117 { v, ok := Arg.Value(*scan); if !ok { return Usage() }; opt_uid = v }
+        else if o == 103 { v, ok := Arg.Value(*scan); if !ok { return Usage() }; opt_gid = v }
+        else if o == 115 { sums = true }
+        else if o == 116 {
+            v1, ok1 := Arg.Value(*scan);
+            v2, ok2 := Arg.Value(*scan);
+            if !ok1 || !ok2 { return Usage() }
+            n1, _ := Util.ParseIntBase(v1, 10);
+            n2, _ := Util.ParseIntBase(v2, 10);
+            now_sec = n1;
+            gen = n2;
+        } else if o == 120 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Usage() }
+            VecPush(exclude, Util.CopyText(TrimPath(v)));
+        } else {
+            return Usage();
+        }
+    }
+    argc := Args.OperandCount();
+    if scan.next >= argc { return Usage() }
+
+    logfile := Args.Operand(scan.next);
+    for i: scan.next + 1..argc - 1 {
+        VecPush(scanonly, Util.CopyText(TrimPath(Args.Operand(cast(s32)i))));
+    }
+
+    rd: Util.DirEntry;
+    if !Util.StatEntry(rootdir, *rd) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't stat replica root %: %", rootdir, IO.Error());
+        return Fail(TextView(msg[:]));
+    }
+    if (rd.mode & Stat.Directory) == 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "replica root %: not a directory", rootdir);
+        return Fail(TextView(msg[:]));
+    }
+
+    logbuf: Vec(u8);
+    if !Util.ReadAllFile(logfile, *logbuf) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", logfile, IO.Error());
+        return Fail(TextView(msg[:]));
+    }
+    lstr := TextView(logbuf[:]);
+    pos: s64 = 0;
+    while pos < lstr.count {
+        end := pos;
+        while end < lstr.count && lstr[end] != 10 { end += 1 }
+        line := lstr[pos:end];
+        if end < lstr.count { end += 1 }
+        pos = end;
+        if line.count == 0 { continue }
+        e: Logs.LogEntry;
+        ok, err := Logs.ParseLogLine(line, *e);
+        if !ok { return Fail(err) }
+        ReplayLine(*e);
+    }
+
+    if now_sec == 0 { now_sec = Clock.UnixMillis() / 1000 }
+
+    res: Proto.ProtoResult;
+    if !Proto.RdProto(protofile, rootdir, *res) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't read %", protofile);
+        return Fail(TextView(msg[:]));
+    }
+    dc := Proto.DiagCount(*res);
+    for di: 0..dc - 1 {
+        dmsg_t := Proto.DiagMsg(*res, di);
+        err: Vec(u8);
+        BuilderPrint(*err, "updatelog: warning: %\n", TextView(dmsg_t));
+        Util.WriteErr(TextView(err[:]));
+    }
+
+    ic := Proto.ItemCount(*res);
+    for ii: 0..ic - 1 {
+        newp_t := Proto.ItemNewPath(*res, ii);
+        oldp_t := Proto.ItemOldPath(*res, ii);
+        newp := TextView(newp_t);
+        oldp := TextView(oldp_t);
+        while newp.count > 0 && newp[0] == 47 { newp = newp[1:] }
+        if !Considered(newp) { continue }
+
+        d: Util.DirEntry;
+        Proto.ItemDir(*res, ii, *d);
+        dig_buf: Vec(u8);
+        if sums && (d.mode & Stat.Directory) == 0 {
+            if !Md5File(oldp, *dig_buf) {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "can't open %: %", oldp, IO.Error());
+                return Fail(TextView(msg[:]));
+            }
+        }
+        if opt_uid.count > 0 {
+            VecClear(d.owner.bytes);
+            unused BuilderAppend(d.owner.bytes, opt_uid);
+        }
+        if opt_gid.count > 0 {
+            VecClear(d.group.bytes);
+            unused BuilderAppend(d.group.bytes, opt_gid);
+        }
+        rel_old := Relative(oldp, rootdir);
+        idx := Logs.DbLook(*state, newp);
+        if idx < 0 {
+            if !changesonly {
+                seq := NextSeq();
+                ne: Logs.LogEntry;
+                ne.seq = seq;
+                ne.path = Util.CopyText(newp);
+                ne.serverpath = Util.CopyText(rel_old);
+                ne.mode = d.mode;
+                ne.qtype = d.qtype;
+                Util.CopyTextInto(*ne.uid, *d.owner);
+                Util.CopyTextInto(*ne.gid, *d.group);
+                ne.mtime = d.mtime;
+                ne.length = d.length;
+                idx = Logs.DbAdd(*state, *ne);
+                EmitChange(97, idx, seq, *d, newp, rel_old, TextView(dig_buf[:]));
+            }
+        } else {
+            cur: Logs.LogEntry;
+            Logs.DbGetEntry(*state, idx, *cur);
+            if !SameStat(*cur, *d) {
+                EmitChange(99, idx, NextSeq(), *d, newp, rel_old, TextView(dig_buf[:]));
+            }
+            if !SameMeta(*cur, *d) {
+                EmitChange(109, idx, NextSeq(), *d, newp, rel_old, "");
+            }
+        }
+        if idx >= 0 {
+            Logs.DbSetX(*state, idx, Logs.DbEntryX(*state, idx) | SEEN_BIT);
+        }
+    }
+
+    if changesonly {
+        FlushOut();
+        return 0;
+    }
+
+    Logs.DbSort(*state, Logs.Byname);
+    i := Logs.DbEntryCount(*state) - 1;
+    while i >= 0 {
+        if (Logs.DbEntryX(*state, i) & SEEN_BIT) == 0 {
+            cur: Logs.LogEntry;
+            Logs.DbGetEntry(*state, i, *cur);
+            p := TextView(cur.path);
+            if cur.action != 100 && Considered(p) {
+                d: Util.DirEntry;
+                d.mode = cur.mode;
+                d.qtype = cur.qtype;
+                Util.CopyTextInto(*d.owner, *cur.uid);
+                Util.CopyTextInto(*d.group, *cur.gid);
+                d.mtime = cur.mtime;
+                d.length = cur.length;
+                EmitChange(100, i, cur.seq, *d, p, TextView(cur.serverpath), "");
+            }
+        }
+        i -= 1;
+    }
+    FlushOut();
+    return 0;
+}
