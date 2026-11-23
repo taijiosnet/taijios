@@ -15,18 +15,15 @@ ENGINES=\
 
 CLIENTS=\
 	clients/cards.dis \
-	clients/lobby.dis \
 
 LIB=\
 	lib/allow.dis \
 	lib/cardlib.dis \
-	lib/commandline.dis \
 	lib/objstore.dis \
 	lib/tricks.dis \
 
 MAIN=\
 	archives.dis \
-	join.dis \
 	spree.dis \
 
 MODULES=\
@@ -45,9 +42,18 @@ ALL= ${ENGINES:%=$DEST/%} \
 	${MAIN:%=$DEST/%} \
 	$DEST/joinsession.zx \
 	$DEST/clients/othello.zx \
-	$DEST/clients/gather.zx
+	$DEST/clients/gather.zx \
+	$DEST/clients/lobby.zx
 
-all:V: $ENGINES $CLIENTS $LIB $MAIN joinsession.zx clients/othello.zx clients/gather.zx
+all:V: $ENGINES $CLIENTS $LIB $MAIN joinsession.zx clients/othello.zx clients/gather.zx clients/lobby.zx
+
+clients/lobby.zx: clients/lobby.zi clients/lobby_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi mkfile
+	(cd clients && ziran bundle --project --root . --define TK_MENU --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_io --bind-host taijios_process --entry lobby:main -o lobby.zx lobby.zi)
+
+$DEST/clients/lobby.zx: clients/lobby.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 clients/lobby.zx "$staged" && mv "$staged" "$target"
 
 clients/gather.zx: clients/gather.zi clients/gather_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi mkfile
 	(cd clients && ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry gather:main -o gather.zx gather.zi)

@@ -1,0 +1,365 @@
+// Pure object-graph state, update protocol parser, and UI script for
+// spree/clients/lobby, ported from appl/spree/clients/lobby.b.
+#import "std/vec"
+#import "std/number_text"
+
+MAX_OBJECTS :: 128;
+MAX_LIST :: 16;
+
+ObjKind :: enum s32 {
+    Empty :: 0;
+    Session :: 1;
+    Sessiontype :: 2;
+    Invite :: 3;
+    Member :: 4;
+    Archive :: 5;
+    Other :: 6;
+}
+
+LobbyObj :: struct {
+    kind: ObjKind;
+    id: s32;
+    parent_id: s32;
+    // Session / Sessiontype / Archive / Member / Invite fields
+    name: Text;       // Member.name, Invite.name, Archive.name, Sessiontype.name
+    title: Text;      // Session.title, Sessiontype.title
+    filename: Text;   // Session.filename
+    owner: Text;      // Session.owner
+    start_cmd: Text;  // Sessiontype.start
+    clienttype: Text; // Sessiontype.clienttype
+    members_str: Text;// Archive.members
+    members: [MAX_LIST]Text;
+    member_count: s32;
+    invites: [MAX_LIST]Text;
+    invite_count: s32;
+    invited: bool;
+}
+
+LobbyState :: struct {
+    objs: [MAX_OBJECTS]LobbyObj;
+    myname: Text;
+    chat_out: Text;
+    title_changed: bool;
+    new_sessiontype_id: s32; // >= 0 when a sessiontype title was just set
+    dirty: bool;
+}
+
+InitState :: (st: *LobbyState) {
+    for i: 0..MAX_OBJECTS-1 {
+        st.objs[i].kind = .Empty;
+        st.objs[i].id = cast(s32)i;
+        st.objs[i].parent_id = -1;
+        st.objs[i].member_count = 0;
+        st.objs[i].invite_count = 0;
+        st.objs[i].invited = false;
+    }
+    unused VecResize(st.myname.bytes, 0);
+    unused VecResize(st.chat_out.bytes, 0);
+    st.title_changed = false;
+    st.new_sessiontype_id = -1;
+    st.dirty = true;
+}
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    neg := false;
+    i: s64 = 0;
+    if s.count > 0 && s[0] == 45 { neg = true; i = 1 }
+    while i < s.count {
+        c := s[i];
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        else { break }
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+SplitFirst :: (s: string) -> (head: string, rest: string) {
+    i: s64 = 0;
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 13) { i += 1 }
+    start := i;
+    while i < s.count && s[i] != 32 && s[i] != 9 && s[i] != 13 { i += 1 }
+    head := s[start:i];
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 13) { i += 1 }
+    return head, s[i:];
+}
+
+SetText :: (dst: *Text, src: string) {
+    unused VecResize(dst.bytes, 0);
+    unused BuilderAppend(dst.bytes, src);
+}
+
+EscapeTk :: (s: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    for c: s {
+        if c == 123 || c == 125 || c == 92 { unused VecPush(out.bytes, 92) }
+        unused VecPush(out.bytes, c);
+    }
+}
+
+SessionHasInvite :: (s: *LobbyObj, name: string) -> bool {
+    for i: 0..cast(s64)s.invite_count-1 {
+        if TextView(s.invites[i]) == name { return true }
+    }
+    return false;
+}
+
+RemoveMemberFromSession :: (s: *LobbyObj, name: string) {
+    for i: 0..cast(s64)s.member_count-1 {
+        if TextView(s.members[i]) == name {
+            for j: i..cast(s64)s.member_count-2 {
+                tmp: Text;
+                unused BuilderAppend(tmp.bytes, TextView(s.members[j + 1]));
+                SetText(*s.members[j], TextView(tmp));
+            }
+            s.member_count -= 1;
+            return;
+        }
+    }
+}
+
+RemoveInviteFromSession :: (s: *LobbyObj, name: string, myname: string) {
+    for i: 0..cast(s64)s.invite_count-1 {
+        if TextView(s.invites[i]) == name {
+            for j: i..cast(s64)s.invite_count-2 {
+                tmp: Text;
+                unused BuilderAppend(tmp.bytes, TextView(s.invites[j + 1]));
+                SetText(*s.invites[j], TextView(tmp));
+            }
+            s.invite_count -= 1;
+            break;
+        }
+    }
+    s.invited = false;
+    for i: 0..cast(s64)s.invite_count-1 {
+        v := TextView(s.invites[i]);
+        if v == "all" || (myname.count > 0 && v == myname) {
+            s.invited = true;
+            break;
+        }
+    }
+}
+
+FormatSessionRow :: (s: *LobbyObj, myname: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if s.title.bytes.count > 0 { unused BuilderAppend(out.bytes, TextView(s.title)) }
+    else { unused BuilderAppend(out.bytes, "(session)") }
+    unused BuilderAppend(out.bytes, " [");
+    for i: 0..cast(s64)s.member_count-1 {
+        if i > 0 { unused BuilderAppend(out.bytes, " ") }
+        unused BuilderAppend(out.bytes, TextView(s.members[i]));
+    }
+    unused BuilderAppend(out.bytes, "]");
+    if s.invited { unused BuilderAppend(out.bytes, " (Invited)") }
+    if myname.count > 0 && TextView(s.owner) == myname { unused BuilderAppend(out.bytes, " (Owner)") }
+}
+
+FormatArchiveRow :: (a: *LobbyObj, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if a.name.bytes.count > 0 { unused BuilderAppend(out.bytes, TextView(a.name)) }
+    else { unused BuilderAppend(out.bytes, "(archive)") }
+    if a.members_str.bytes.count > 0 {
+        unused BuilderAppend(out.bytes, " — ");
+        unused BuilderAppend(out.bytes, TextView(a.members_str));
+    }
+}
+
+ApplyUpdate :: (st: *LobbyState, line: string) -> bool {
+    verb, rest := SplitFirst(line);
+    if verb.count == 0 { return false }
+
+    if verb == "chat" {
+        who, msg := SplitFirst(rest);
+        unused BuilderAppend(st.chat_out.bytes, who);
+        unused BuilderAppend(st.chat_out.bytes, ": ");
+        unused BuilderAppend(st.chat_out.bytes, msg);
+        unused BuilderAppend(st.chat_out.bytes, "\n");
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "name" {
+        nm, _ := SplitFirst(rest);
+        SetText(*st.myname, nm);
+        st.title_changed = true;
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "create" {
+        // create id parentid vis type
+        id_s, r1 := SplitFirst(rest);
+        pid_s, r2 := SplitFirst(r1);
+        _, r3 := SplitFirst(r2);
+        otype, _ := SplitFirst(r3);
+        id := ParseInt(id_s);
+        pid := ParseInt(pid_s);
+        if id < 0 || id >= MAX_OBJECTS { return false }
+        o := *st.objs[id];
+        o.id = id;
+        o.parent_id = pid;
+        SetText(*o.name, "");
+        SetText(*o.title, "");
+        SetText(*o.filename, "");
+        SetText(*o.owner, "");
+        SetText(*o.start_cmd, "");
+        SetText(*o.clienttype, "");
+        SetText(*o.members_str, "");
+        o.member_count = 0;
+        o.invite_count = 0;
+        o.invited = false;
+        if otype == "sessiontype" { o.kind = .Sessiontype }
+        else if otype == "session" { o.kind = .Session }
+        else if otype == "member" { o.kind = .Member }
+        else if otype == "invite" { o.kind = .Invite }
+        else if otype == "archive" { o.kind = .Archive }
+        else { o.kind = .Other }
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "del" {
+        // del parent start end objs...
+        _, r1 := SplitFirst(rest);
+        _, r2 := SplitFirst(r1);
+        _, cur := SplitFirst(r2);
+        while cur.count > 0 {
+            id_s, next := SplitFirst(cur);
+            cur = next;
+            if id_s.count == 0 { break }
+            id := ParseInt(id_s);
+            if id < 0 || id >= MAX_OBJECTS { continue }
+            o := *st.objs[id];
+            if o.kind == .Member {
+                if o.parent_id >= 0 && o.parent_id < MAX_OBJECTS && st.objs[o.parent_id].kind == .Session {
+                    RemoveMemberFromSession(*st.objs[o.parent_id], TextView(o.name));
+                } else if o.name.bytes.count > 0 {
+                    unused BuilderAppend(st.chat_out.bytes, TextView(o.name));
+                    unused BuilderAppend(st.chat_out.bytes, " has left\n");
+                }
+            } else if o.kind == .Invite {
+                if o.parent_id >= 0 && o.parent_id < MAX_OBJECTS && st.objs[o.parent_id].kind == .Session {
+                    RemoveInviteFromSession(*st.objs[o.parent_id], TextView(o.name), TextView(st.myname));
+                }
+            }
+            o.kind = .Empty;
+        }
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "set" {
+        // set id attr val...
+        id_s, r1 := SplitFirst(rest);
+        attr, val := SplitFirst(r1);
+        id := ParseInt(id_s);
+        if id < 0 || id >= MAX_OBJECTS { return false }
+        o := *st.objs[id];
+        if o.kind == .Session {
+            if attr == "filename" {
+                fnm, _ := SplitFirst(val);
+                SetText(*o.filename, fnm);
+            } else if attr == "owner" {
+                own, _ := SplitFirst(val);
+                SetText(*o.owner, own);
+            } else if attr == "title" {
+                SetText(*o.title, val);
+            }
+        } else if o.kind == .Archive {
+            if attr == "name" { SetText(*o.name, val) }
+            else if attr == "members" { SetText(*o.members_str, val) }
+        } else if o.kind == .Sessiontype {
+            if attr == "start" { SetText(*o.start_cmd, val) }
+            else if attr == "clienttype" {
+                ct, _ := SplitFirst(val);
+                SetText(*o.clienttype, ct);
+            } else if attr == "title" {
+                SetText(*o.title, val);
+                st.new_sessiontype_id = id;
+            } else if attr == "name" {
+                nm, _ := SplitFirst(val);
+                SetText(*o.name, nm);
+            }
+        } else if o.kind == .Member {
+            if attr == "name" {
+                nm, _ := SplitFirst(val);
+                SetText(*o.name, nm);
+                if o.parent_id >= 0 && o.parent_id < MAX_OBJECTS && st.objs[o.parent_id].kind == .Session {
+                    ps := *st.objs[o.parent_id];
+                    if ps.member_count < MAX_LIST {
+                        SetText(*ps.members[ps.member_count], nm);
+                        ps.member_count += 1;
+                    }
+                } else {
+                    unused BuilderAppend(st.chat_out.bytes, nm);
+                    unused BuilderAppend(st.chat_out.bytes, " has arrived\n");
+                }
+            }
+        } else if o.kind == .Invite {
+            if attr == "name" {
+                nm, _ := SplitFirst(val);
+                SetText(*o.name, nm);
+                if o.parent_id >= 0 && o.parent_id < MAX_OBJECTS && st.objs[o.parent_id].kind == .Session {
+                    ps := *st.objs[o.parent_id];
+                    if ps.invite_count < MAX_LIST {
+                        SetText(*ps.invites[ps.invite_count], nm);
+                        ps.invite_count += 1;
+                    }
+                    if nm == "all" || (st.myname.bytes.count > 0 && nm == TextView(st.myname)) {
+                        ps.invited = true;
+                    }
+                }
+            }
+        }
+        st.dirty = true;
+        return true;
+    }
+
+    return false;
+}
+
+LOBBY_UI :: #string END_UI
+frame .buts
+menubutton .buts.start -text {New} -menu .buts.start.m
+menu .buts.start.m
+button .buts.kick -text {Kick} -command {lobby_act kick}
+button .buts.watch -text {Watch} -command {lobby_act watch} -state disabled
+button .buts.join -text {Join} -command {lobby_act join} -state disabled
+button .buts.inv -text {Invite All} -command {lobby_act inviteall} -state disabled
+button .buts.unarch -text {Unarchive} -command {lobby_act unarchive} -state disabled
+pack .buts.start .buts.kick .buts.watch .buts.join .buts.inv .buts.unarch -side left -padx 2
+label .lsess -text {Sessions}
+frame .fsess
+scrollbar .fsess.sb -command {.fsess.c yview}
+canvas .fsess.c -relief sunken -borderwidth 2 -bg #ffffff -width 500 -height 110 -yscrollcommand {.fsess.sb set}
+.fsess.c bind all <Button-1> {lobby_selsess}
+.fsess.c bind all <Double-Button-1> {lobby_act join}
+pack .fsess.sb -side left -fill y
+pack .fsess.c -fill both -expand 1
+label .larch -text {Archives}
+frame .farch
+scrollbar .farch.sb -command {.farch.c yview}
+canvas .farch.c -relief sunken -borderwidth 2 -bg #ffffff -width 500 -height 80 -yscrollcommand {.farch.sb set}
+.farch.c bind all <Button-1> {lobby_selarch}
+pack .farch.sb -side left -fill y
+pack .farch.c -fill both -expand 1
+frame .d2
+scrollbar .d2.sb -command {.d2.t yview}
+text .d2.t -yscrollcommand {.d2.sb set} -height 130
+pack .d2.sb -side left -fill y
+pack .d2.t -fill both -expand 1
+frame .in
+entry .in.e
+button .in.send -text {Send} -command {lobby_act send}
+pack .in.e -side left -fill x -expand 1 -padx 2
+pack .in.send -side left -padx 2
+pack .buts -side top -fill x -pady 2
+pack .lsess -side top -fill x
+pack .fsess -side top -fill both -expand 1
+pack .larch -side top -fill x
+pack .farch -side top -fill both -expand 1
+pack .d2 -side top -fill both -expand 1
+pack .in -side top -fill x -pady 2
+bind .in.e <Key-\n> {lobby_act send}
+lobby_draw
+END_UI;

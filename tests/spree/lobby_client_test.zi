@@ -1,0 +1,74 @@
+// Table-driven unit + Tk UI tests for appl/spree/clients/lobby_model.zi.
+#import "std/vec"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Model :: #import "lobby_model"
+
+failures: s32;
+st: Model.LobbyState;
+
+NoopCmd :: (_: s64, args: []Text, result: *T.Result) {}
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    Model.InitState(*st);
+
+    Expect(Model.ApplyUpdate(*st, "name Alice"), "name Alice");
+    Expect(TextView(st.myname) == "Alice" && st.title_changed, "myname set");
+
+    Expect(Model.ApplyUpdate(*st, "create 1 0 1 sessiontype"), "create sessiontype");
+    Expect(Model.ApplyUpdate(*st, "set 1 start othello"), "set start");
+    Expect(Model.ApplyUpdate(*st, "set 1 title Othello"), "set title");
+    Expect(st.new_sessiontype_id == 1 && TextView(st.objs[1].title) == "Othello", "sessiontype ready");
+
+    Expect(Model.ApplyUpdate(*st, "create 2 0 1 session"), "create session");
+    Expect(Model.ApplyUpdate(*st, "set 2 filename 42"), "set filename");
+    Expect(Model.ApplyUpdate(*st, "set 2 owner Alice"), "set owner");
+    Expect(Model.ApplyUpdate(*st, "set 2 title Room 1"), "set session title");
+
+    Expect(Model.ApplyUpdate(*st, "create 3 2 1 member"), "create session member");
+    Expect(Model.ApplyUpdate(*st, "set 3 name Bob"), "set member name");
+    Expect(st.objs[2].member_count == 1 && TextView(st.objs[2].members[0]) == "Bob", "Bob in session");
+
+    Expect(Model.ApplyUpdate(*st, "create 4 2 1 invite"), "create invite");
+    Expect(Model.ApplyUpdate(*st, "set 4 name all"), "invite all");
+    Expect(st.objs[2].invited, "Alice invited via all");
+
+    row: Text;
+    Model.FormatSessionRow(*st.objs[2], "Alice", *row);
+    Expect(TextView(row) == "Room 1 [Bob] (Invited) (Owner)", "FormatSessionRow");
+
+    Expect(Model.ApplyUpdate(*st, "del 2 0 1 4"), "del invite");
+    Expect(!st.objs[2].invited, "uninvited after del");
+
+    Expect(Model.ApplyUpdate(*st, "create 5 0 1 archive"), "create archive");
+    Expect(Model.ApplyUpdate(*st, "set 5 name Saved Game"), "archive name");
+    Expect(Model.ApplyUpdate(*st, "set 5 members Alice Bob"), "archive members");
+    arow: Text;
+    Model.FormatArchiveRow(*st.objs[5], *arow);
+    Expect(TextView(arow) == "Saved Game — Alice Bob", "FormatArchiveRow");
+
+    Expect(Model.ApplyUpdate(*st, "chat Bob hello"), "chat line");
+    Expect(TextView(st.chat_out) == "Bob: hello\n", "chat_out");
+
+    tcl: Tcl.Interpreter;
+    Expect(Tk.Attach(*tcl), "Tk.Attach");
+    Expect(Tcl.RegisterCommand(*tcl, "lobby_act", NoopCmd), "reg act");
+    Expect(Tcl.RegisterCommand(*tcl, "lobby_selsess", NoopCmd), "reg selsess");
+    Expect(Tcl.RegisterCommand(*tcl, "lobby_selarch", NoopCmd), "reg selarch");
+    Expect(Tcl.RegisterCommand(*tcl, "lobby_draw", NoopCmd), "reg draw");
+    res := Tcl.Eval(*tcl, Model.LOBBY_UI);
+    Expect(res.code == .OK, TextView(res.value));
+    Tk.Layout(540, 480);
+    Expect(Tk.Find(".fsess.c") >= 0 && Tk.Find(".farch.c") >= 0 && Tk.Find(".d2.t") >= 0, "widgets exist");
+
+    if failures == 0 { print("lobby_client_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

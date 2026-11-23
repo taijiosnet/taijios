@@ -37,7 +37,8 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 - Sections 13 (math) and 14 (legacy misc): `agy-taijios-dis-legacy-math`.
 - Sections 9 (spree), 10 (grid), 11 (demo) and 12 (ebook): `agy-taijios-dis-app-families`.
 - Section 2 (dis/lib), section 4 (services) and the mash command with its library: `claude-taijios-taijios-dis-commands-libs`.
-- The shell (sh, dis/sh, dis/tiny) is its own milestone. Acme, charon and alphabet are not assigned yet.
+- The shell (sh, dis/sh, dis/tiny) is its own milestone. Acme and charon are not assigned yet.
+- Alphabet (section 8, dis/fs.dis aside, and dis/sh/alphabet.dis): `claude-taijios-zx-alphabet-port`. Its rows go in one commit once the ZX shell runs `load alphabet` from the Ziran library in appl/alphabet; until then the Dis builtin needs every row. /filter, /fs/exec, /fs/run, /fs/pipe and the grid rexec modules also need /dis/sh.zx; /auth needs a ZX Inferno Auth client.
 - One family per tested commit. Several tasks edit this file: commit only your own rows and counts.
 
 ## Next ready order (independent, boot-ordered)
@@ -662,13 +663,12 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/alphabet/reports.dis | appl/alphabet/reports.b | module/alphabet/reports.m | - |  |
 | dis/alphabet/rexecsrv.dis | appl/alphabet/auxi/rexecsrv.b |  | - |  |
 
-### 9. Spree - multiuser engine family - 21 rows
+### 9. Spree - multiuser engine family - 18 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 | dis/spree/archives.dis | appl/spree/archives.b |  | - |  |
 | dis/spree/clients/cards.dis | appl/spree/clients/cards.b |  | - |  |
-| dis/spree/clients/lobby.dis | appl/spree/clients/lobby.b |  | - |  |
 | dis/spree/engines/afghan.dis | appl/spree/engines/afghan.b |  | - |  |
 | dis/spree/engines/bounce.dis | appl/spree/engines/bounce.b |  | - |  |
 | dis/spree/engines/canfield.dis | appl/spree/engines/canfield.b |  | - |  |
@@ -680,10 +680,8 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/spree/engines/spider.dis | appl/spree/engines/spider.b |  | - |  |
 | dis/spree/engines/spit.dis | appl/spree/engines/spit.b |  | - |  |
 | dis/spree/engines/whist.dis | appl/spree/engines/whist.b |  | - |  |
-| dis/spree/join.dis | appl/spree/join.b |  | - |  |
 | dis/spree/lib/allow.dis | appl/spree/lib/allow.b |  | - |  |
 | dis/spree/lib/cardlib.dis | appl/spree/lib/cardlib.b |  | - |  |
-| dis/spree/lib/commandline.dis | appl/spree/lib/commandline.b |  | - |  |
 | dis/spree/lib/objstore.dis | appl/spree/lib/objstore.b |  | - |  |
 | dis/spree/lib/tricks.dis | appl/spree/lib/tricks.b |  | - |  |
 | dis/spree/spree.dis | appl/spree/spree.b |  | - |  |

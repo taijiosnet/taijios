@@ -1,0 +1,332 @@
+// Spree Lobby Tk client, ported from appl/spree/clients/lobby.b.
+#import "std/vec"
+#import "std/number_text"
+using IO :: #import "taijios_io"
+using Proc :: #import "taijios_process"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Model :: #import "lobby_model"
+
+SELECTED_COLOR :: 0x0000cc;
+
+state: Model.LobbyState;
+session_ids: [Model.MAX_OBJECTS]s32;
+session_count: s32 = 0;
+selected_session: s32 = -1;
+archive_ids: [Model.MAX_OBJECTS]s32;
+archive_count: s32 = 0;
+selected_archive: s32 = -1;
+line_buf: Text;
+pending_act: s32 = 0; // 1=kick, 2=watch, 3=join, 4=inviteall, 5=unarchive, 6=send, 7=start, 8=refresh_btns
+pending_arg: s32 = -1;
+
+AppendChat :: (tcl: *Tcl.Interpreter, msg: string) {
+    if msg.count == 0 { return }
+    esc: Text;
+    Model.EscapeTk(msg, *esc);
+    cmd: Text;
+    unused BuilderAppend(cmd.bytes, ".d2.t insert end {");
+    unused BuilderAppend(cmd.bytes, TextView(esc));
+    unused BuilderAppend(cmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(cmd));
+}
+
+CliqueCmd :: (tcl: *Tcl.Interpreter, s: string, err_prefix: string) {
+    if IO.Write(0, s) < 0 {
+        AppendChat(tcl, err_prefix);
+        AppendChat(tcl, "\n");
+    }
+}
+
+RenderLists :: () {
+    // Sessions canvas
+    session_count = 0;
+    for i: 0..Model.MAX_OBJECTS-1 {
+        if state.objs[i].kind == .Session {
+            session_ids[session_count] = cast(s32)i;
+            session_count += 1;
+        }
+    }
+    if selected_session >= session_count { selected_session = session_count - 1 }
+    if selected_session < 0 && session_count > 0 { selected_session = 0 }
+
+    scid := Tk.Find(".fsess.c");
+    if scid >= 0 {
+        c := *Tk.widgets[scid].canvas;
+        Canvas.DeleteAll(c);
+        y: s32 = 12;
+        for i: 0..cast(s64)session_count-1 {
+            row: Text;
+            Model.FormatSessionRow(*state.objs[session_ids[i]], TextView(state.myname), *row);
+            fill := ifx cast(s32)i == selected_session then SELECTED_COLOR else Canvas.BLACK;
+            unused Canvas.AddText(c, 8, y, .West, TextView(row), cast(s32)fill);
+            y += 18;
+        }
+        w := ifx c.viewport.width > 0 then c.viewport.width else 500;
+        c.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)(y + 8) * Canvas.FRACTION};
+        c.viewport.y = 0;
+        Canvas.ClampViewport(*c.viewport);
+        c.viewport.resized = true;
+    }
+
+    // Archives canvas
+    archive_count = 0;
+    for i: 0..Model.MAX_OBJECTS-1 {
+        if state.objs[i].kind == .Archive {
+            archive_ids[archive_count] = cast(s32)i;
+            archive_count += 1;
+        }
+    }
+    if selected_archive >= archive_count { selected_archive = archive_count - 1 }
+    if selected_archive < 0 && archive_count > 0 { selected_archive = 0 }
+
+    acid := Tk.Find(".farch.c");
+    if acid >= 0 {
+        c := *Tk.widgets[acid].canvas;
+        Canvas.DeleteAll(c);
+        y: s32 = 12;
+        for i: 0..cast(s64)archive_count-1 {
+            row: Text;
+            Model.FormatArchiveRow(*state.objs[archive_ids[i]], *row);
+            fill := ifx cast(s32)i == selected_archive then SELECTED_COLOR else Canvas.BLACK;
+            unused Canvas.AddText(c, 8, y, .West, TextView(row), cast(s32)fill);
+            y += 18;
+        }
+        w := ifx c.viewport.width > 0 then c.viewport.width else 500;
+        c.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)(y + 8) * Canvas.FRACTION};
+        c.viewport.y = 0;
+        Canvas.ClampViewport(*c.viewport);
+        c.viewport.resized = true;
+    }
+}
+
+UpdateButtons :: (tcl: *Tcl.Interpreter) {
+    has_sess := selected_session >= 0 && selected_session < session_count;
+    can_join := false;
+    can_inv := false;
+    if has_sess {
+        so := *state.objs[session_ids[selected_session]];
+        can_join = so.invited;
+        can_inv = state.myname.bytes.count > 0 && TextView(so.owner) == TextView(state.myname);
+    }
+    has_arch := selected_archive >= 0 && selected_archive < archive_count;
+
+    c1: Text;
+    unused BuilderAppend(c1.bytes, ".buts.watch configure -state ");
+    unused BuilderAppend(c1.bytes, ifx has_sess then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c1));
+
+    c2: Text;
+    unused BuilderAppend(c2.bytes, ".buts.join configure -state ");
+    unused BuilderAppend(c2.bytes, ifx can_join then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c2));
+
+    c3: Text;
+    unused BuilderAppend(c3.bytes, ".buts.inv configure -state ");
+    unused BuilderAppend(c3.bytes, ifx can_inv then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c3));
+
+    c4: Text;
+    unused BuilderAppend(c4.bytes, ".buts.unarch configure -state ");
+    unused BuilderAppend(c4.bytes, ifx has_arch then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c4));
+}
+
+JoinSelected :: (tcl: *Tcl.Interpreter, how: string) {
+    if selected_session < 0 || selected_session >= session_count { return }
+    so := *state.objs[session_ids[selected_session]];
+    if so.filename.bytes.count == 0 {
+        AppendChat(tcl, "couldn't join clique: no filename\n");
+        return;
+    }
+    ops: [5]string = .["-d", "/n/remote", "-j", how, TextView(so.filename)];
+    launch := Proc.Start("/dis/spree/joinsession.zx", ops[:]);
+    if launch.id <= 0 {
+        AppendChat(tcl, "couldn't join clique\n");
+    } else {
+        AppendChat(tcl, "joined clique ok\n");
+    }
+}
+
+LobbyDraw :: (_: s64, args: []Text, result: *T.Result) {
+    RenderLists();
+}
+
+LobbySelSess :: (_: s64, args: []Text, result: *T.Result) {
+    c := *Tk.widgets[Tk.Find(".fsess.c")].canvas;
+    row := cast(s32)(c.current - 1);
+    if row >= 0 && row < session_count {
+        selected_session = row;
+        RenderLists();
+        pending_act = 8;
+    }
+}
+
+LobbySelArch :: (_: s64, args: []Text, result: *T.Result) {
+    c := *Tk.widgets[Tk.Find(".farch.c")].canvas;
+    row := cast(s32)(c.current - 1);
+    if row >= 0 && row < archive_count {
+        selected_archive = row;
+        RenderLists();
+        pending_act = 8;
+    }
+}
+
+LobbyCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 { result.code = .Error; return }
+    v := TextView(args[0]);
+    if v == "kick" { pending_act = 1 }
+    else if v == "watch" { pending_act = 2 }
+    else if v == "join" { pending_act = 3 }
+    else if v == "inviteall" { pending_act = 4 }
+    else if v == "unarchive" { pending_act = 5 }
+    else if v == "send" { pending_act = 6 }
+    else if v == "start" && args.count >= 2 {
+        pending_act = 7;
+        pending_arg = Model.ParseInt(TextView(args[1]));
+    }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    changed := false;
+    if pending_act != 0 {
+        act := pending_act;
+        arg := pending_arg;
+        pending_act = 0;
+        pending_arg = -1;
+        if act == 1 {
+            CliqueCmd(tcl, "kick", "kick failed");
+            changed = true;
+        } else if act == 2 {
+            JoinSelected(tcl, "watch");
+            changed = true;
+        } else if act == 3 {
+            JoinSelected(tcl, "join");
+            changed = true;
+        } else if act == 4 && selected_session >= 0 && selected_session < session_count {
+            sid := session_ids[selected_session];
+            so := *state.objs[sid];
+            is_inv := Model.SessionHasInvite(so, "all");
+            cmd: Text;
+            buf: [24]u8;
+            unused BuilderAppend(cmd.bytes, ifx is_inv then "uninvite " else "invite ");
+            unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)sid, buf[:]));
+            unused BuilderAppend(cmd.bytes, " all");
+            CliqueCmd(tcl, TextView(cmd), "invite failed");
+            changed = true;
+        } else if act == 5 && selected_archive >= 0 && selected_archive < archive_count {
+            aid := archive_ids[selected_archive];
+            cmd: Text;
+            buf: [24]u8;
+            unused BuilderAppend(cmd.bytes, "unarchive ");
+            unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)aid, buf[:]));
+            CliqueCmd(tcl, TextView(cmd), "failed to unarchive");
+            changed = true;
+        } else if act == 6 {
+            res := Tcl.Eval(tcl, ".in.e get");
+            if res.code == .OK && res.value.bytes.count > 0 {
+                msg: Text;
+                unused BuilderAppend(msg.bytes, "chat ");
+                unused BuilderAppend(msg.bytes, TextView(res.value));
+                CliqueCmd(tcl, TextView(msg), "chat failed");
+                unused Window.Execute(tcl, ".in.e delete 0 end");
+                changed = true;
+            }
+        } else if act == 7 && arg >= 0 && arg < Model.MAX_OBJECTS && state.objs[arg].kind == .Sessiontype {
+            cmd: Text;
+            unused BuilderAppend(cmd.bytes, "start ");
+            unused BuilderAppend(cmd.bytes, TextView(state.objs[arg].start_cmd));
+            CliqueCmd(tcl, TextView(cmd), "failed to start clique");
+            changed = true;
+        } else if act == 8 {
+            UpdateButtons(tcl);
+            changed = true;
+        }
+    }
+
+    // Poll clique updates on stdin (fd 0).
+    buf: [4096]u8;
+    n := IO.PollRead(0, buf[:]);
+    if n > 0 {
+        unused BuilderAppend(line_buf.bytes, TextView(buf[:n]));
+        rem: Text;
+        consumed := false;
+        {
+            s := TextView(line_buf);
+            pos: s64 = 0;
+            while pos < s.count {
+                nl := pos;
+                while nl < s.count && s[nl] != 10 { nl += 1 }
+                if nl >= s.count { break }
+                line := s[pos:nl];
+                pos = nl + 1;
+                if line.count == 0 { continue }
+                if Model.ApplyUpdate(*state, line) {
+                    if state.new_sessiontype_id >= 0 {
+                        stid := state.new_sessiontype_id;
+                        state.new_sessiontype_id = -1;
+                        mcmd: Text;
+                        nb: [24]u8;
+                        esc_t: Text;
+                        Model.EscapeTk(TextView(state.objs[stid].title), *esc_t);
+                        unused BuilderAppend(mcmd.bytes, ".buts.start.m add command -text {");
+                        unused BuilderAppend(mcmd.bytes, TextView(esc_t));
+                        unused BuilderAppend(mcmd.bytes, "} -command {lobby_act start ");
+                        unused BuilderAppend(mcmd.bytes, FormatInteger(cast(s64)stid, nb[:]));
+                        unused BuilderAppend(mcmd.bytes, "}");
+                        unused Window.Execute(tcl, TextView(mcmd));
+                    }
+                    changed = true;
+                }
+            }
+            if pos > 0 {
+                consumed = true;
+                if pos < s.count { unused BuilderAppend(rem.bytes, s[pos:]) }
+            }
+        }
+        if consumed {
+            unused VecResize(line_buf.bytes, 0);
+            unused BuilderAppend(line_buf.bytes, TextView(rem));
+        }
+    }
+
+    if state.title_changed {
+        state.title_changed = false;
+        t: Text;
+        unused BuilderAppend(t.bytes, "Lobby (");
+        unused BuilderAppend(t.bytes, TextView(state.myname));
+        unused BuilderAppend(t.bytes, ")");
+        unused Surface.SetWindowTitle(TextView(t));
+        changed = true;
+    }
+
+    if state.chat_out.bytes.count > 0 {
+        AppendChat(tcl, TextView(state.chat_out));
+        unused VecResize(state.chat_out.bytes, 0);
+        changed = true;
+    }
+
+    if changed || state.dirty {
+        state.dirty = false;
+        RenderLists();
+        UpdateButtons(tcl);
+        return .Changed;
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    Model.InitState(*state);
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "lobby_act", LobbyCmd) ||
+       !Tcl.RegisterCommand(*tcl, "lobby_selsess", LobbySelSess) ||
+       !Tcl.RegisterCommand(*tcl, "lobby_selarch", LobbySelArch) ||
+       !Tcl.RegisterCommand(*tcl, "lobby_draw", LobbyDraw) { return 1 }
+    return Window.RunPolled(*tcl, Model.LOBBY_UI, "Lobby", 540, 480, Start, Tick, 50);
+}
