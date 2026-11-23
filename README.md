@@ -422,13 +422,17 @@ recorded game with `wm/snake seed.log`. Mine Sweeper uncovers a square on a
 click, marks it on a right click and starts again from Options; `wm/sweeper
 seed` chooses the board. Tetris keeps its keys, clicks, levels, Game over
 label and high score table in `/lib/scores/tetris`, and seeds its pieces from
-`/dev/random`. Each test compares the rules and the window with games recorded
-from the Dis version.
+`/dev/random`. Polyhedra keeps prev and next through `/lib/polyhedra.all`, dual,
+edges, faces, clear, slow, fast, axis and the solid menu, draws the original
+thirteen greys lit from above with z-buffered concave faces, and turns at about
+1 to 2 frames a second under the ZX engine. Each test compares the rules and the
+window with games recorded from the Dis version.
 
 ```sh
 python3 -u appl/wm/snake_zx_test.py
 python3 -u appl/wm/sweeper_zx_test.py
 python3 -u appl/wm/tetris_zx_test.py
+python3 -u appl/wm/polyhedra_zx_test.py
 ```
 
 ### Build and run ZX Task Manager

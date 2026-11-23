@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Polyhedra only as ZX and remove its Dis version. It keeps the solids, the thirteen greys, the z-buffered concave faces and the controls, and turns at about 1 to 2 frames a second under the ZX engine.
+
 - Add emu -x, which ends the emulator when its boot program ends, even while servers it started keep running.
 
 - Give ZX programs pctl's FORKENV, NEWNS, NODEVS and NEWPGRP and the process id, so ZX shells keep their variables apart.

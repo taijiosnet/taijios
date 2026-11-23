@@ -1,0 +1,583 @@
+// The drawing of Inferno's Polyhedra (appl/wm/polyhedra.b): each frame turns
+// the solid by the rotation matrix, as the Dis loop did, and fills its faces
+// in one of 13 greys lit from above. Convex solids are filled like libdraw's
+// fillpoly; concave ones through the z-buffered fill of appl/math/polyfill.b.
+// See ../../NOTICE.
+Math :: #import "std/math";
+using Poly :: #import "polyhedra";
+Box :: #import "kryon/box";
+#import "kryon/session"
+#import "kryon/drawing_props"
+#import "std/vec"
+
+Shades :: 13
+Epsilon :: 0.001
+ZScale :: 1048576.0
+Limit :: 2048.0
+Forever :: 1073741824
+Unset :: 2147483647
+
+Point :: struct {
+    x: s32
+    y: s32
+}
+
+// Limbo's real-to-int conversion rounds to the nearest integer.
+Round :: (value: float64) -> s32 {
+    if value < 0.0 { return cast(s32)(value - 0.5) }
+    return cast(s32)(value + 0.5)
+}
+
+Dot :: (a: Vector, b: Vector) -> float64 { return a.x * b.x + a.y * b.y + a.z * b.z }
+
+Normalize :: (v: Vector) -> Vector {
+    length := Math.Sqrt(Dot(v, v))
+    return .{v.x / length, v.y / length, v.z / length}
+}
+
+// The panel: each row a list of colour runs, the square drawing area and a
+// z-buffer over that area whose entries count only when stamped this frame.
+Run :: struct {
+    start: s32
+    end: s32
+    color: u32
+}
+
+Row :: struct {
+    runs: Vec(Run)
+}
+
+Canvas :: struct {
+    width: s32
+    height: s32
+    rows: Vec(Row)
+    left: s32
+    top: s32
+    size: s32
+    sx: float64
+    sy: float64
+    tx: s32
+    ty: s32
+    zbuf0: Vec(s32)
+    zbuf1: Vec(s32)
+    stamps: Vec(s32)
+    stamp: s32
+}
+
+ClearRow :: (canvas: *Canvas, y: s32) {
+    VecClear(canvas.rows[y].runs)
+    VecPush(canvas.rows[y].runs, Run.{0, canvas.width, cast(u32)0})
+}
+
+// setimage: the largest centred square, scaled to 3/8 of its side.
+Resize :: (canvas: *Canvas, width: s32, height: s32) -> bool {
+    if width < 3 { width = 3 }
+    if height < 3 { height = 3 }
+    canvas.width = width
+    canvas.height = height
+    if !VecResize(canvas.rows, cast(s64)height) { return false }
+    for y: cast(s32)0..height-1 { ClearRow(canvas, y) }
+    side := ifx width > height then height else width
+    canvas.size = side
+    canvas.left = (width - side) / 2
+    canvas.top = (height - side) / 2
+    canvas.sx = cast(float64)((3 * side) / 8)
+    canvas.sy = -cast(float64)((3 * side) / 8)
+    canvas.tx = side / 2 + canvas.left
+    canvas.ty = side / 2 + canvas.top
+    area := cast(s64)side * cast(s64)side
+    canvas.stamp = 1
+    if !VecResize(canvas.stamps, area) { return false }
+    for i: 0..area-1 { canvas.stamps[i] = 0 }
+    return VecResize(canvas.zbuf0, area) && VecResize(canvas.zbuf1, area)
+}
+
+Clear :: (canvas: *Canvas) {
+    for y: canvas.top..canvas.top+canvas.size-1 { ClearRow(canvas, y) }
+}
+
+// clearzbuf: a new stamp makes every entry unset.
+ClearDepth :: (canvas: *Canvas) {
+    canvas.stamp += 1
+}
+
+// 32 to 224 in 13 steps.
+Shade :: (index: s32) -> u32 {
+    v := cast(u32)((192 * index) / (Shades - 1) + 32)
+    return (v << cast(u32)16) | (v << cast(u32)8) | v
+}
+
+// Paint [left, right) of row y, merging with runs of the same colour.
+Span :: (canvas: *Canvas, left: s32, right: s32, y: s32, color: u32) {
+    if y < 0 || y >= canvas.height { return }
+    if left < 0 { left = 0 }
+    if right > canvas.width { right = canvas.width }
+    if left >= right { return }
+    fresh: Vec(Run)
+    placed := false
+    for i: 0..canvas.rows[y].runs.count-1 {
+        run := canvas.rows[y].runs[i]
+        if run.end <= left || run.start >= right {
+            if run.start >= right && !placed { VecPush(fresh, Run.{left, right, color}); placed = true }
+            VecPush(fresh, run)
+            continue
+        }
+        if run.start < left { VecPush(fresh, Run.{run.start, left, run.color}) }
+        if !placed { VecPush(fresh, Run.{left, right, color}); placed = true }
+        if run.end > right { VecPush(fresh, Run.{right, run.end, run.color}) }
+    }
+    if !placed { VecPush(fresh, Run.{left, right, color}) }
+    VecClear(canvas.rows[y].runs)
+    for i: 0..fresh.count-1 {
+        run := fresh[i]
+        count := canvas.rows[y].runs.count
+        if count > 0 && canvas.rows[y].runs[count - 1].color == run.color && canvas.rows[y].runs[count - 1].end == run.start {
+            canvas.rows[y].runs[count - 1].end = run.end
+        } else {
+            VecPush(canvas.rows[y].runs, run)
+        }
+    }
+    VecFree(fresh)
+}
+
+Segment :: struct {
+    p0: Point
+    p1: Point
+    num: s32
+    den: s32
+    dz: s32
+    dzrem: s32
+    z: s32
+    zerr: s32
+    d: s32
+}
+
+Mod :: (x: s32, y: s32) -> s32 {
+    z := x % y
+    if (z ^ y) > 0 || z == 0 { return z }
+    return z + y
+}
+
+Sdiv :: (x: s32, y: s32) -> s32 {
+    if (x ^ y) >= 0 || x == 0 { return x / y }
+    return (x + ((y >> 30) | 1)) / y - 1
+}
+
+Smuldivmod :: (x: s32, y: s32, z: s32) -> (quotient: s32, remainder: s32) {
+    if x == 0 || y == 0 { return 0, 0 }
+    vx := cast(s64)x * cast(s64)y
+    remainder := vx % cast(s64)z
+    if remainder < 0 { remainder += cast(s64)z }
+    if (vx < 0) == (z < 0) { return cast(s32)(vx / cast(s64)z), cast(s32)remainder }
+    return cast(s32)(-((-vx) / cast(s64)z)), cast(s32)remainder
+}
+
+// The z-buffered span of polyfill.b's filllinez; its runs are inclusive lines.
+DepthSpan :: (canvas: *Canvas, left: s32, right: s32, y: s32, z_start: s32, e: s32, dx: s32, k_start: s32, color: u32) {
+    previous: s32 = Unset
+    z := z_start
+    k := cast(s64)k_start
+    for x: left..right {
+        // Limbo stopped the drawing on an index outside the square; skip it here.
+        if k < 0 || k >= canvas.zbuf0.count { z += dx; k += 1; continue }
+        if canvas.stamps[k] != canvas.stamp {
+            canvas.stamps[k] = canvas.stamp
+            canvas.zbuf0[k] = Unset
+            canvas.zbuf1[k] = Unset
+        }
+        if z + e < canvas.zbuf0[k] || (z - e <= canvas.zbuf1[k] && x != right && previous != Unset) {
+            canvas.zbuf0[k] = z - e
+            canvas.zbuf1[k] = z + e
+            if previous == Unset { previous = x }
+        } else if previous != Unset {
+            Span(canvas, previous, x, y, color)
+            previous = Unset
+        }
+        z += dx
+        k += 1
+    }
+    if previous != Unset { Span(canvas, previous, right + 1, y, color) }
+}
+
+// xscan of libmemdraw fillpoly.c (depth false: spans exclude their right end)
+// and of polyfill.b (depth true), with the winding mask ~0.
+Fill :: (canvas: *Canvas, vertices: []Point, color: u32, depth: bool, dc: s32, dx: s32, dy: s32) {
+    count := vertices.count
+    if count == 0 { return }
+    segments: Vec(Segment)
+    defer VecFree(segments)
+    p0 := vertices[count - 1]
+    p0.x = p0.x << 1
+    p0.y = p0.y << 1
+    for i: 0..count-1 {
+        p1 := vertices[i]
+        p1.x = p1.x << 1
+        p1.y = p1.y << 1
+        segment: Segment = .{.p0 = p0, .p1 = p1, .d = 1}
+        p0 = p1
+        if segment.p0.y == segment.p1.y { continue }
+        if segment.p0.y > segment.p1.y {
+            swap := segment.p0
+            segment.p0 = segment.p1
+            segment.p1 = swap
+            segment.d = -segment.d
+        }
+        segment.num = segment.p1.x - segment.p0.x
+        segment.den = segment.p1.y - segment.p0.y
+        segment.dz = Sdiv(segment.num, segment.den) << 1
+        segment.dzrem = Mod(segment.num, segment.den) << 1
+        segment.dz += Sdiv(segment.dzrem, segment.den)
+        segment.dzrem = Mod(segment.dzrem, segment.den)
+        VecPush(segments, segment)
+    }
+    if segments.count == 0 { return }
+    // Order by the top end, keeping equal ones in order.
+    for i: 1..segments.count-1 {
+        j := i
+        while j > 0 && segments[j - 1].p0.y > segments[j].p0.y {
+            swap := segments[j]; segments[j] = segments[j - 1]; segments[j - 1] = swap
+            j -= 1
+        }
+    }
+    er := (ifx dx < 0 then -dx else dx) + (ifx dy < 0 then -dy else dy)
+    er = (er + 1) / 2
+    min_x: s32 = 0
+    max_x := canvas.width
+    y := segments[0].p0.y
+    if y < 0 { y = 0 }
+    iy := (y + 1) >> 1
+    y = (iy << 1) + 1
+    max_y := canvas.height << 1
+    k := (iy - canvas.top) * canvas.size
+    zv := dc + iy * dy
+    active: Vec(Segment)
+    defer VecFree(active)
+    next: s64 = 0
+    while y < max_y {
+        kept: s64 = 0
+        for p: 0..active.count-1 {
+            s := active[p]
+            if s.p1.y < y { continue }
+            s.z += s.dz
+            s.zerr += s.dzrem
+            if s.zerr >= s.den { s.z += 1; s.zerr -= s.den }
+            active[kept] = s
+            kept += 1
+        }
+        unused VecResize(active, kept)
+        while next < segments.count {
+            s := segments[next]
+            if s.p0.y >= y { break }
+            next += 1
+            if s.p1.y < y { continue }
+            s.z = s.p0.x
+            zinc, zerr := Smuldivmod(y - s.p0.y, s.num, s.den)
+            s.z += zinc
+            s.zerr = zerr
+            VecPush(active, s)
+        }
+        if active.count == 0 {
+            if next >= segments.count { break }
+            iy = (segments[next].p0.y + 1) >> 1
+            y = (iy << 1) + 1
+            k = (iy - canvas.top) * canvas.size
+            zv = dc + iy * dy
+            continue
+        }
+        for i: 1..active.count-1 {
+            j := i
+            while j > 0 && active[j - 1].z > active[j].z {
+                swap := active[j]; active[j] = active[j - 1]; active[j - 1] = swap
+                j -= 1
+            }
+        }
+        p: s64 = 0
+        while p < active.count {
+            winding := active[p].d
+            ix := (active[p].z + 1) >> 1
+            if ix >= max_x { break }
+            if ix < min_x { ix = min_x }
+            p += 1
+            while true {
+                if p >= active.count { return }
+                winding += active[p].d
+                if winding == 0 { break }
+                p += 1
+            }
+            ix2 := (active[p].z + 1) >> 1
+            p += 1
+            if ix2 <= min_x { continue }
+            if ix2 > max_x { ix2 = max_x }
+            if depth {
+                DepthSpan(canvas, ix, ix2, iy, zv + ix * dx, er, dx, k + ix - canvas.left, color)
+            } else {
+                Span(canvas, ix, ix2, iy, color)
+            }
+        }
+        y += 2
+        iy += 1
+        k += canvas.size
+        zv += dy
+    }
+}
+
+Plot :: (canvas: *Canvas, x: s32, y: s32, color: u32) {
+    Span(canvas, x, x + 1, y, color)
+}
+
+// A one-pixel line including both ends.
+Line :: (canvas: *Canvas, a: Point, b: Point, color: u32) {
+    dx := ifx b.x > a.x then b.x - a.x else a.x - b.x
+    dy := ifx b.y > a.y then b.y - a.y else a.y - b.y
+    sx: s32 = ifx a.x < b.x then 1 else -1
+    sy: s32 = ifx a.y < b.y then 1 else -1
+    error := dx - dy
+    x := a.x
+    y := a.y
+    while true {
+        Plot(canvas, x, y, color)
+        if x == b.x && y == b.y { break }
+        twice := 2 * error
+        if twice > -dy { error -= dy; x += sx }
+        if twice < dx { error += dx; y += sy }
+    }
+}
+
+// How a solid is drawn. Its vertices, face normals and the vertex lists of
+// faces (each list its length, the vertex indices and a flag) come with each frame.
+Solid :: struct {
+    concave: bool
+    all_faces: bool
+    inc: float64
+}
+
+Motion :: struct {
+    theta: float64
+    tm: [9]float64
+    axis: [3]s32
+    view: Vector
+    light: Vector
+}
+
+Rotate :: (m: *Motion, v: Vector) -> Vector {
+    return .{m.tm[0] * v.x + m.tm[1] * v.y + m.tm[2] * v.z,
+             m.tm[3] * v.x + m.tm[4] * v.y + m.tm[5] * v.z,
+             m.tm[6] * v.x + m.tm[7] * v.y + m.tm[8] * v.z}
+}
+
+RotateBack :: (m: *Motion, v: Vector) -> Vector {
+    return .{m.tm[0] * v.x + m.tm[3] * v.y + m.tm[6] * v.z,
+             m.tm[1] * v.x + m.tm[4] * v.y + m.tm[7] * v.z,
+             m.tm[2] * v.x + m.tm[5] * v.y + m.tm[8] * v.z}
+}
+
+// initmatrix: rotation by theta degrees about the axis.
+SetMatrix :: (m: *Motion) {
+    phi := m.theta * 3.14159265358979323846 / 180.0
+    s := Math.Sin(phi)
+    c := Math.Cos(phi)
+    axis := Normalize(.{cast(float64)m.axis[0], cast(float64)m.axis[1], cast(float64)m.axis[2]})
+    l := axis.x
+    n := axis.z
+    mm := axis.y
+    f := 1.0 - c
+    m.tm = float64.[(1.0 - l * l) * c + l * l, l * mm * f - n * s, l * n * f + mm * s,
+             l * mm * f + n * s, (1.0 - mm * mm) * c + mm * mm, mm * n * f - l * s,
+             l * n * f - mm * s, mm * n * f + l * s, (1.0 - n * n) * c + n * n]
+}
+
+ResetView :: (m: *Motion) {
+    m.view = .{0.0, 0.0, 1.0}
+    m.light = .{0.0, -1.0, 0.0}
+}
+
+Map :: (canvas: *Canvas, v: Vector) -> Point {
+    return .{Round(canvas.sx * v.x) + canvas.tx, Round(canvas.sy * v.y) + canvas.ty}
+}
+
+Options :: struct {
+    edges: bool
+    faces: bool
+    clear: bool
+}
+
+// polyfilla: one face in the grey its lighting selects.
+Face :: (canvas: *Canvas, faces: []IntArray, index: s64, vertices: []Vector, normal: Vector, light: float64,
+         solid: Solid, options: Options) {
+    n := faces[index].elems[0]
+    points: Vec(Point)
+    defer VecFree(points)
+    d := 0.0
+    for j: 0..n-1 {
+        v := vertices[faces[index].elems[j + 1]]
+        VecPush(points, Map(canvas, v))
+        d += Dot(normal, v)
+    }
+    d /= cast(float64)n
+    color := Shade(Round(cast(float64)((Shades - 1) / 2) * (1.0 - light)))
+    if solid.concave {
+        if faces[index].elems[n + 1] != 1 { d += solid.inc }
+        if normal.z > -Epsilon && normal.z < Epsilon { return }
+        c := normal.z
+        a := -normal.x / (c * canvas.sx)
+        if a <= -Limit || a >= Limit { return }
+        b := -normal.y / (c * canvas.sy)
+        if b <= -Limit || b >= Limit { return }
+        d = d / c - cast(float64)canvas.tx * a - cast(float64)canvas.ty * b
+        if d <= -Limit || d >= Limit { return }
+        if !options.faces { color = 0 }
+        Fill(canvas, points[:], color, true, Round(d * ZScale), Round(a * ZScale), Round(b * ZScale))
+        return
+    }
+    if options.faces { Fill(canvas, points[:], color, false, 0, 0, 0) }
+    if options.edges {
+        for j: 0..n-1 {
+            Line(canvas, points[j], points[(j + 1) % n], cast(u32)16777215)
+        }
+    }
+}
+
+// The state of drawpolyhedron0 between frames.
+Animation :: struct {
+    current: Vec(Vector)
+    previous: Vec(Vector)
+    normals: Vec(Vector)
+    old_normals: Vec(Vector)
+    frame: s32
+    period: s32
+    turns: s32
+    total: float64
+}
+
+Periods :: (theta: float64) -> s32 {
+    if theta == 0.0 { return Forever }
+    return Round((360.0 + theta / 2.0) / theta)
+}
+
+// Start drawing a solid: the next frame shows it unturned.
+Begin :: (animation: *Animation, vertices: s64, normals: s64, motion: *Motion, canvas: *Canvas) {
+    unused VecResize(animation.current, vertices)
+    unused VecResize(animation.previous, vertices)
+    unused VecResize(animation.normals, normals)
+    unused VecResize(animation.old_normals, normals)
+    animation.turns = Periods(motion.theta)
+    animation.period = animation.turns
+    animation.frame = 0
+    animation.total = 0.0
+    Clear(canvas)
+}
+
+// slow and fast: a new angle keeps the turn or ends it.
+SetSpeed :: (animation: *Animation, motion: *Motion, theta: float64) {
+    motion.theta = theta
+    SetMatrix(motion)
+    if theta != 0.0 {
+        animation.turns = Periods(theta)
+        animation.period = Round((360.0 - animation.total + theta / 2.0) / theta)
+    } else {
+        animation.turns = Forever
+        animation.period = Forever
+    }
+    animation.frame = ifx animation.period == 0 then 0 else 1
+}
+
+// One pass of the drawing loop.
+Frame :: (animation: *Animation, vertices: []Vector, normals: []Vector, faces: []IntArray, solid: Solid,
+          motion: *Motion, canvas: *Canvas, options: Options) {
+    if solid.concave { ClearDepth(canvas) }
+    // The last frame becomes the one this frame turns.
+    for j: 0..animation.current.count-1 { animation.previous[j] = animation.current[j] }
+    for j: 0..animation.normals.count-1 { animation.old_normals[j] = animation.normals[j] }
+    if animation.frame == 0 {
+        for j: 0..vertices.count-1 { animation.current[j] = vertices[j] }
+        if solid.concave {
+            for j: 0..normals.count-1 { animation.normals[j] = normals[j] }
+        }
+        ResetView(motion)
+        animation.total = 0.0
+        animation.period = animation.turns
+    } else {
+        for j: 0..vertices.count-1 { animation.current[j] = Rotate(motion, animation.previous[j]) }
+        if solid.concave {
+            for j: 0..normals.count-1 { animation.normals[j] = Rotate(motion, animation.old_normals[j]) }
+        } else {
+            motion.view = RotateBack(motion, motion.view)
+            motion.light = RotateBack(motion, motion.light)
+        }
+        animation.total += motion.theta
+    }
+    if options.clear { Clear(canvas) }
+    for j: 0..faces.count-1 {
+        if solid.concave {
+            normal := animation.normals[j]
+            if solid.all_faces || Dot(motion.view, normal) < 0.0 {
+                Face(canvas, faces, j, animation.current[:], normal, Dot(motion.light, normal), solid, options)
+            }
+        } else {
+            normal := normals[j]
+            if Dot(motion.view, normal) < 0.0 {
+                Face(canvas, faces, j, animation.current[:], normal, Dot(motion.light, normal), solid, options)
+            }
+        }
+    }
+    animation.frame = (animation.frame + 1) % animation.period
+}
+
+// The database. The app reaches it only through these calls, which keep the
+// records' types inside this module.
+list: PolyhedraList;
+
+Load :: (path: string) -> s32 { return ScanPolyhedra(path, *list) }
+Count :: () -> s32 { return cast(s32)list.items.count }
+
+Index :: (position: s64) -> s32 {
+    p: *Polyhedron = *list.items[position]
+    return p.indx
+}
+
+// "index name", or the dual's name.
+Name :: (position: s64, dual: bool, out: *Vec(u8)) {
+    p: *Polyhedron = *list.items[position]
+    if dual { unused BuilderAppend(out.*, TextView(p.dname)) } else { unused BuilderAppend(out.*, TextView(p.name)) }
+}
+
+// Load a solid and start drawing it; the dual of an antiprism is itself.
+Choose :: (position: s64, dual: bool, solid: *Solid, animation: *Animation, motion: *Motion, canvas: *Canvas) -> bool {
+    GetPolyhedron(*list, position)
+    p: *Polyhedron = *list.items[position]
+    use_dual := dual && p.anti == 0
+    solid.concave = p.concave != 0
+    solid.all_faces = ifx use_dual then p.anti != 0 else p.allf != 0 || p.anti != 0
+    solid.inc = ifx use_dual then 0.0 else p.inc
+    vertices := ifx use_dual then p.F else p.V
+    normals := ifx use_dual then p.V else p.F
+    Begin(animation, cast(s64)vertices, cast(s64)normals, motion, canvas)
+    return use_dual
+}
+
+Draw :: (position: s64, use_dual: bool, solid: Solid, animation: *Animation, motion: *Motion, canvas: *Canvas,
+         options: Options) {
+    p: *Polyhedron = *list.items[position]
+    if use_dual {
+        Frame(animation, p.f[:], p.v[:], p.vf[:], solid, motion, canvas, options)
+    } else {
+        Frame(animation, p.v[:], p.f[:], p.fv[:], solid, motion, canvas, options)
+    }
+}
+
+// The panel at (left, top): black, then each coloured run of each row.
+Show :: (session: Session, canvas: *Canvas, left: s32, top: s32) {
+    Box.Draw(session, .{.key = 3, .bounds = .{cast(float32)left, cast(float32)top,
+        cast(float32)canvas.width, cast(float32)canvas.height}, .fill = .{0, 0, 0, 255}})
+    key: u64 = 10000
+    for y: cast(s64)0..cast(s64)canvas.height-1 {
+        for i: 0..canvas.rows[y].runs.count-1 {
+            run := canvas.rows[y].runs[i]
+            if run.color == cast(u32)0 { continue }
+            Box.Draw(session, .{.key = key, .bounds = .{cast(float32)(left + run.start), cast(float32)(top + cast(s32)y),
+                cast(float32)(run.end - run.start), 1.0},
+                .fill = .{cast(u8)(run.color >> cast(u32)16), cast(u8)(run.color >> cast(u32)8), cast(u8)run.color, 255}})
+            key += 1
+        }
+    }
+}

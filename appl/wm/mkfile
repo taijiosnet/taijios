@@ -159,7 +159,10 @@ sweeper.zx: sweeper.zi sweeper_model.zi inferno_rand.zi ../cmd/taijios_args.zi .
 tetris.zx: tetris.zi tetris_model.zi score_table.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry tetris:main -o $target tetris.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx
+polyhedra.zx: polyhedra_app.zi polyhedra_render.zi ../math/polyhedra.zi ../math/math_util.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --module-path ../math --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry polyhedra_app:main -o $target polyhedra_app.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

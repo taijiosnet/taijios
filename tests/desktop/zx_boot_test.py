@@ -729,6 +729,8 @@ def check_catalog_apps(emulator, root, env):
     for name in ('fonts', 'icons', 'lib/rill'):
         if (ROOT / name).exists():
             (root / name).symlink_to(ROOT / name, target_is_directory=True)
+    # Polyhedra reads its solid database from /lib, so the minimal guest root ships it too.
+    shutil.copy2(ROOT / 'lib/polyhedra.all', root / 'lib/polyhedra.all')
     (root / 'appl/cmd/tcltk').mkdir(parents=True)
     for script in (ROOT / 'appl/cmd/tcltk').glob('*.tcl'):
         shutil.copy2(script, root / 'appl/cmd/tcltk' / script.name)
