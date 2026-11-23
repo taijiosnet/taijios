@@ -91,7 +91,6 @@ TARG=\
 	mdb.dis\
 	memfs.dis\
 	metamorph.dis\
-	mntgen.dis\
 	mount.dis\
 	mouse.dis\
 	mprof.dis\
@@ -200,9 +199,10 @@ SYSMODULES=\
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
 ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh
-ZXCOMMANDS=$ZXCOMMANDS export
+ZXCOMMANDS=$ZXCOMMANDS export mntgen
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
+NINEPZX=$ZXLIB/ninep.zi
 RUNESZX=zx_runes.zi
 NAMEZX=$ZXLIB/taijios_names.zi
 TCLZX=$ROOT/build/tcl/ziran-package-inputs
@@ -214,6 +214,9 @@ COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} $
 
 export.zx: export.zi $UTILZX $SERVICEZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --entry export:main -o $target export.zi
+
+mntgen.zx: mntgen.zi taijios_io.zi $NINEPZX
+	zi2zx --root . --module-path $ZXLIB --bind-host taijios_io --entry mntgen:main -o $target mntgen.zi
 <$ROOT/mkfiles/mksubdirs
 
 auhdr.dis: auplay.dis

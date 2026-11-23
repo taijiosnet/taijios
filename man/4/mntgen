@@ -23,7 +23,7 @@ or
 .BR /mnt ,
 to generate mount points on demand for file systems or services.
 .SH SOURCE
-.B /appl/cmd/mntgen.b
+.B /appl/cmd/mntgen.zi
 .SH SEE ALSO
 .IR intro (1),
 .IR bind (1),

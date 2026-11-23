@@ -629,7 +629,7 @@ appl
 			mkfile
 			mksubdirs
 		mkfile
-		mntgen.b
+		mntgen.zi
 		mount.b
 		mouse.b
 		mpc
@@ -1665,7 +1665,7 @@ dis
 	metamorph.dis
 	mk.dis
 	mkdir.zx
-	mntgen.dis
+	mntgen.zx
 	mount.dis
 	mouse.dis
 	mpc

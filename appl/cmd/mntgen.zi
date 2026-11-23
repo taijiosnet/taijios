@@ -1,0 +1,446 @@
+// mntgen: serves 9P on its standard input, a directory in which a name
+// appears as an empty directory when it is first walked to and goes away
+// when nothing refers to it any more, so that file systems can be mounted
+// on demand: mount {mntgen} /n.
+//
+// It answers as the Limbo mntgen did on Styxservers and Nametree, down to
+// its reference counting: a name's reference is taken by each walk to it
+// and given back by clunk, a remove refuses and keeps the reference, and a
+// walk that fails part of the way keeps the one on the directory it
+// started from. A name's qid path is its slot in the reference table and,
+// above 32 bits, how many names had been made before it.
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Ninep :: #import "ninep";
+
+ROOT :: 0xfffffff; // the root directory's qid path
+QTDIR :: 0x80;
+DMDIR :: 0x80000000;
+MAXRPC :: 8216;
+
+Ebadfid :: "bad fid";
+Einuse :: "fid already in use";
+Eopen :: "fid already opened";
+Enotfound :: "file does not exist";
+Eperm :: "permission denied";
+Ebadarg :: "bad argument";
+Ecount :: "read/write -- count negative or exceeds msgsize";
+Enotopen :: "read/write -- on non open fid";
+Eaccess :: "read/write -- not open in suitable mode";
+Eoffset :: "read/write -- bad offset";
+
+// A name in the root, newest first as Nametree kept them.
+Child :: struct {
+    name: Text;
+    path: u64;
+}
+
+Slot :: struct {
+    refcount: s64;
+    path: u64;
+}
+
+Fid :: struct {
+    fid: s64;
+    path: u64;
+    qtype: s64;
+    open: bool;
+    mode: s64;
+    offset: s64; // where the next directory read continues
+    index: s64;
+    uname: Text;
+}
+
+Server :: struct {
+    msize: s64;
+    children: Vec(Child);
+    slots: Vec(Slot);
+    made: u64; // names made so far
+    fids: Vec(Fid);
+}
+
+FindFid :: (server: *Server, fid: s64) -> s64 {
+    for i: 0..server.fids.count - 1 { if server.fids[i].fid == fid { return i } }
+    return -1;
+}
+
+NewFid :: (server: *Server, fid: s64) -> s64 {
+    if FindFid(server, fid) >= 0 { return -1 }
+    entry: Fid;
+    entry.fid = fid;
+    entry.path = 0xFFFFFFFFFFFFFFFF;
+    VecPush(server.fids, entry);
+    return server.fids.count - 1;
+}
+
+DeleteFid :: (server: *Server, index: s64) {
+    last := server.fids.count - 1;
+    if index != last {
+        server.fids[index].fid = server.fids[last].fid;
+        server.fids[index].path = server.fids[last].path;
+        server.fids[index].qtype = server.fids[last].qtype;
+        server.fids[index].open = server.fids[last].open;
+        server.fids[index].mode = server.fids[last].mode;
+        server.fids[index].offset = server.fids[last].offset;
+        server.fids[index].index = server.fids[last].index;
+        VecSwap(server.fids[index].uname.bytes, server.fids[last].uname.bytes);
+    }
+    unused VecResize(server.fids, last);
+}
+
+FindChild :: (server: *Server, path: u64) -> s64 {
+    for i: 0..server.children.count - 1 { if server.children[i].path == path { return i } }
+    return -1;
+}
+
+// The stat of a path, or false when it is gone.
+Stat :: (server: *Server, path: u64, dir: *Ninep.Dir) -> bool {
+    none: Ninep.Dir;
+    <<dir = none;
+    dir.uid = "me";
+    dir.gid = "me";
+    dir.mode = DMDIR | 365; // r-xr-xr-x
+    dir.qid.qtype = QTDIR;
+    dir.qid.path = path;
+    if path == ROOT {
+        dir.name = ".";
+        return true;
+    }
+    child := FindChild(server, path);
+    if child < 0 { return false }
+    dir.name = TextView(server.children[child].name);
+    return true;
+}
+
+// The reference table is indexed by the low 32 bits of a path, as an int.
+SlotOf :: (path: u64) -> s64 {
+    low := cast(s64)(path & 0xFFFFFFFF);
+    return ifx low >= 0x80000000 then low - 0x100000000 else low;
+}
+
+Incref :: (server: *Server, path: u64) {
+    slot := SlotOf(path);
+    if slot >= 0 && slot < server.slots.count { server.slots[slot].refcount += 1 }
+}
+
+Decref :: (server: *Server, path: u64) {
+    slot := SlotOf(path);
+    if slot < 0 || slot >= server.slots.count { return }
+    server.slots[slot].refcount -= 1;
+    if server.slots[slot].refcount != 0 { return }
+    child := FindChild(server, server.slots[slot].path);
+    if child < 0 { return }
+    for i: child..server.children.count - 2 {
+        server.children[i].path = server.children[i + 1].path;
+        VecSwap(server.children[i].name.bytes, server.children[i + 1].name.bytes);
+    }
+    unused VecResize(server.children, server.children.count - 1);
+}
+
+// Makes a name in the root, with a reference held, and gives its path.
+AddEntry :: (server: *Server, name: string) -> u64 {
+    slot: s64 = 0;
+    while slot < server.slots.count && server.slots[slot].refcount != 0 { slot += 1 }
+    if slot == server.slots.count {
+        grown := ifx server.slots.count == 0 then 10 else server.slots.count * 2;
+        while server.slots.count < grown {
+            empty: Slot;
+            VecPush(server.slots, empty);
+        }
+    }
+    path := cast(u64)slot | (server.made << 32);
+    server.made += 1;
+    child: Child;
+    BuilderAppend(child.name.bytes, name);
+    child.path = path;
+    VecPush(server.children, child);
+    // Newest first.
+    i := server.children.count - 1;
+    while i > 0 {
+        other := server.children[i - 1].path;
+        server.children[i - 1].path = server.children[i].path;
+        server.children[i].path = other;
+        VecSwap(server.children[i - 1].name.bytes, server.children[i].name.bytes);
+        i -= 1;
+    }
+    server.slots[slot].refcount = 1;
+    server.slots[slot].path = path;
+    return path;
+}
+
+// Walks one fid one name; the error, or "".
+Walk1 :: (server: *Server, fid: s64, name: string) -> string {
+    path := server.fids[fid].path;
+    if name == ".." {
+        if path != ROOT { Decref(server, path) }
+        server.fids[fid].path = ROOT;
+        server.fids[fid].qtype = QTDIR;
+        return "";
+    }
+    if path != ROOT { return Enotfound }
+    found: u64 = 0;
+    exists := false;
+    for i: 0..server.children.count - 1 {
+        if TextView(server.children[i].name) == name {
+            found = server.children[i].path;
+            exists = true;
+            break;
+        }
+    }
+    if exists {
+        Incref(server, found);
+    } else {
+        found = AddEntry(server, name);
+    }
+    server.fids[fid].path = found;
+    server.fids[fid].qtype = QTDIR;
+    return "";
+}
+
+Error :: (reply: *Ninep.Message, message: string) -> string {
+    reply.kind = Ninep.Rerror;
+    reply.ename = message;
+    return "";
+}
+
+DoWalk :: (server: *Server, m: *Ninep.Message, reply: *Ninep.Message) {
+    fid := FindFid(server, m.fid);
+    if fid < 0 { unused Error(reply, Ebadfid); return }
+    if server.fids[fid].open { unused Error(reply, Eopen); return }
+    if m.newfid != m.fid {
+        clone := NewFid(server, m.newfid);
+        if clone < 0 { unused Error(reply, Einuse); return }
+        server.fids[clone].path = server.fids[fid].path;
+        server.fids[clone].qtype = server.fids[fid].qtype;
+        server.fids[clone].open = server.fids[fid].open;
+        server.fids[clone].mode = server.fids[fid].mode;
+        server.fids[clone].offset = server.fids[fid].offset;
+        server.fids[clone].index = server.fids[fid].index;
+        uname: Vec(u8);
+        BuilderAppend(uname, TextView(server.fids[fid].uname));
+        VecSwap(server.fids[clone].uname.bytes, uname);
+        fid = clone;
+        Incref(server, server.fids[fid].path);
+    }
+    old_path := server.fids[fid].path;
+    old_qtype := server.fids[fid].qtype;
+    Incref(server, old_path);
+    reply.kind = Ninep.Rwalk;
+    for i: 0..m.names.count - 1 {
+        error := Walk1(server, fid, m.names[i]);
+        if error.count > 0 {
+            VecClear(reply.qids);
+            if m.newfid != m.fid {
+                Decref(server, server.fids[fid].path);
+                DeleteFid(server, fid);
+            } else {
+                server.fids[fid].path = old_path;
+                server.fids[fid].qtype = old_qtype;
+            }
+            if i == 0 { unused Error(reply, error) }
+            for j: 0..i - 1 {
+                qid: Ninep.Qid;
+                qid.path = done[j];
+                qid.qtype = QTDIR;
+                VecPush(reply.qids, qid);
+            }
+            return;
+        }
+        done[i] = server.fids[fid].path;
+        qid: Ninep.Qid;
+        qid.path = server.fids[fid].path;
+        qid.qtype = server.fids[fid].qtype;
+        VecPush(reply.qids, qid);
+    }
+    Decref(server, old_path);
+}
+
+// The paths a walk has reached, for a reply cut short.
+done: [16]u64;
+
+OpenOk :: (uname: string, mode: s64, perm: s64) -> bool {
+    access := s64.[256, 128, 384, 64]; // r, w, rw and x for the owner
+    t := access[mode & 3];
+    if (mode & 16) != 0 {
+        if (perm & DMDIR) != 0 { return false }
+        t |= 128;
+    }
+    if uname == "me" && (t & perm) == t { return true }
+    if uname == "me" && (t & (perm << 3)) == t { return true }
+    return (t & (perm << 6)) == t;
+}
+
+DoOpen :: (server: *Server, m: *Ninep.Message, reply: *Ninep.Message) {
+    fid := FindFid(server, m.fid);
+    if fid < 0 { unused Error(reply, Ebadfid); return }
+    if server.fids[fid].open { unused Error(reply, Eopen); return }
+    dir: Ninep.Dir;
+    if !Stat(server, server.fids[fid].path, *dir) { unused Error(reply, Enotfound); return }
+    mode := m.mode & ~(16 | 64);
+    if mode > 2 { unused Error(reply, Ebadarg); return }
+    if mode != 0 { unused Error(reply, Eperm); return } // a directory is only read
+    if !OpenOk(TextView(server.fids[fid].uname), m.mode, dir.mode) { unused Error(reply, Eperm); return }
+    // Remove on close needs write permission in the parent, which is
+    // read-only, or is the root itself.
+    if (m.mode & 64) != 0 { unused Error(reply, Eperm); return }
+    server.fids[fid].open = true;
+    server.fids[fid].mode = mode;
+    server.fids[fid].path = dir.qid.path;
+    server.fids[fid].qtype = dir.qid.qtype;
+    reply.kind = Ninep.Ropen;
+    reply.qid = dir.qid;
+    reply.iounit = ifx server.msize - Ninep.IOHDRSZ > 0 then server.msize - Ninep.IOHDRSZ else 0;
+}
+
+DoRead :: (server: *Server, m: *Ninep.Message, reply: *Ninep.Message, data: *Vec(u8)) {
+    fid := FindFid(server, m.fid);
+    if fid < 0 { unused Error(reply, Ebadfid); return }
+    if !server.fids[fid].open { unused Error(reply, Enotopen); return }
+    mode := server.fids[fid].mode & 3;
+    if mode != 0 && mode != 2 { unused Error(reply, Eaccess); return }
+    count := Signed(m.count);
+    if count < 0 || count > server.msize - Ninep.IOHDRSZ { unused Error(reply, Ecount); return }
+    if m.offset < 0 { unused Error(reply, Eoffset); return }
+    reply.kind = Ninep.Rread;
+    if count <= 0 { return }
+    offset := server.fids[fid].offset;
+    index := server.fids[fid].index;
+    if Signed(m.offset) != offset {
+        offset = 0;
+        index = 0;
+    }
+    left := count;
+    // Only the root has entries.
+    if server.fids[fid].path == ROOT {
+        while index < server.children.count {
+            dir: Ninep.Dir;
+            unused Stat(server, server.children[index].path, *dir);
+            size := Ninep.DirSize(*dir);
+            offset += size;
+            index += 1;
+            if offset < Signed(m.offset) { continue }
+            left -= size;
+            if left < 0 {
+                offset -= size;
+                index -= 1;
+                break;
+            }
+            Ninep.PackDir(data, *dir);
+        }
+    }
+    server.fids[fid].offset = offset;
+    server.fids[fid].index = index;
+}
+
+// A 32-bit field as Limbo's int saw it.
+Signed :: (value: s64) -> s64 {
+    low := value & 0xFFFFFFFF;
+    return ifx low >= 0x80000000 then low - 0x100000000 else low;
+}
+
+// Answers one request into reply; the data of a read goes into data.
+Handle :: (server: *Server, m: *Ninep.Message, reply: *Ninep.Message, data: *Vec(u8)) {
+    reply.tag = m.tag;
+    kind := m.kind;
+    if kind == Ninep.Tversion {
+        size, version := Ninep.Compatible(Signed(m.msize), m.version, ifx server.msize <= 0 then MAXRPC else server.msize, Ninep.VERSION);
+        if size < 256 { unused Error(reply, "message size too small"); return }
+        server.msize = size;
+        reply.kind = Ninep.Rversion;
+        reply.msize = size;
+        reply.version = version;
+    } else if kind == Ninep.Tauth {
+        unused Error(reply, "authentication not required");
+    } else if kind == Ninep.Tflush {
+        reply.kind = Ninep.Rflush;
+    } else if kind == Ninep.Tattach {
+        fid := NewFid(server, m.fid);
+        if fid < 0 { unused Error(reply, Einuse); return }
+        BuilderAppend(server.fids[fid].uname.bytes, m.uname);
+        server.fids[fid].path = ROOT;
+        server.fids[fid].qtype = QTDIR;
+        reply.kind = Ninep.Rattach;
+        reply.qid.path = ROOT;
+        reply.qid.qtype = QTDIR;
+    } else if kind == Ninep.Twalk {
+        DoWalk(server, m, reply);
+    } else if kind == Ninep.Topen {
+        DoOpen(server, m, reply);
+    } else if kind == Ninep.Tread {
+        DoRead(server, m, reply, data);
+    } else if kind == Ninep.Tclunk {
+        fid := FindFid(server, m.fid);
+        if fid < 0 { unused Error(reply, Ebadfid); return }
+        path := server.fids[fid].path;
+        DeleteFid(server, fid);
+        reply.kind = Ninep.Rclunk;
+        if path != ROOT { Decref(server, path) }
+    } else if kind == Ninep.Tstat {
+        fid := FindFid(server, m.fid);
+        if fid < 0 { unused Error(reply, Ebadfid); return }
+        if !Stat(server, server.fids[fid].path, *reply.stat) { unused Error(reply, Enotfound); return }
+        reply.kind = Ninep.Rstat;
+    } else if kind == Ninep.Tremove {
+        fid := FindFid(server, m.fid);
+        if fid < 0 { unused Error(reply, Ebadfid); return }
+        DeleteFid(server, fid); // the reference stays
+        unused Error(reply, Eperm);
+    } else {
+        unused Error(reply, Eperm); // create, write and wstat
+    }
+}
+
+ReadFull :: (buffer: []u8) -> bool {
+    at: s64 = 0;
+    while at < buffer.count {
+        n := Io.Read(0, buffer[at:]);
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+Send :: (server: *Server, reply: *Ninep.Message) -> bool {
+    out: Vec(u8);
+    if server.msize == 0 {
+        reply.kind = Ninep.Rerror;
+        reply.ename = "Tversion not seen";
+    }
+    unused Ninep.Pack(reply, *out);
+    if server.msize != 0 && out.count > server.msize {
+        reply.kind = Ninep.Rerror;
+        reply.ename = "Styx reply didn't fit";
+        VecClear(out);
+        unused Ninep.Pack(reply, *out);
+    }
+    at: s64 = 0;
+    while at < out.count {
+        n := Io.Write(0, TextView(out[at:]));
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    server: Server;
+    frame: Vec(u8);
+    while true {
+        header: [4]u8;
+        if !ReadFull(header[:]) { break }
+        size, error := Ninep.MessageSize(TextView(header[:]), server.msize);
+        if error.count > 0 { break }
+        VecClear(frame);
+        BuilderAppend(frame, TextView(header[:]));
+        unused VecResize(frame, size);
+        if !ReadFull(frame[4:]) { break }
+        m: Ninep.Message;
+        if Ninep.Unpack(TextView(frame[:]), true, *m) <= 0 { break }
+        reply: Ninep.Message;
+        data: Vec(u8);
+        Handle(*server, *m, *reply, *data);
+        if reply.kind == Ninep.Rread { reply.data = TextView(data[:]) }
+        if !Send(*server, *reply) { break }
+    }
+    return 0;
+}
