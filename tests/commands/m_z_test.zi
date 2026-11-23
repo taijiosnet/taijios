@@ -29,7 +29,7 @@ ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 
-cases: [194]Case = Case.[
+cases: [201]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -261,6 +261,16 @@ fakenet/2/status
     .{tool = "runas", args = "user", status = "usage", err = "usage: runas user cmd [args...]\n"},
     .{args = "runas nobody cat /dev/user", out = "nobody"},
     .{args = "runas user echo hello", out = "hello\n"},
+    // p: page size parsing, a missing file and the short input that fits one
+    // page. Paging itself waits on /dev/cons, so it is left out here.
+    .{tool = "p", args = "short", out = "short\n"},
+    .{tool = "p", args = "-200 short", out = "short\n"},
+    .{tool = "p", args = "-0 short", status = "usage", err = "Usage: p [-number] [file...]\n"},
+    .{tool = "p", args = "-x short", status = "usage", err = "Usage: p [-number] [file...]\n"},
+    .{tool = "p", args = "-novalue short", status = "usage", err = "Usage: p [-number] [file...]\n"},
+    .{tool = "p", args = "nosuch", err = "p: nosuch: can't open nosuch: 'nosuch' file does not exist\n"},
+    // A missing file is reported and the rest still prints.
+    .{tool = "p", args = "nosuch short", out = "short\n", err = "p: nosuch: can't open nosuch: 'nosuch' file does not exist\n"},
 ];
 
 failures: s32;
@@ -324,6 +334,13 @@ TOOLONG :: () -> string {
     return BuilderFinish(data)
 }
 
+// Fifty numbered lines: two full pages of twenty-two and a part page.
+Lines :: () -> string {
+    data: Vec(u8)
+    for 1..50 { BuilderPrint(*data, "line %\n", it) }
+    return BuilderFinish(data)
+}
+
 Prepare :: (binary: string) -> bool {
     unused RemoveTree(WORK)
     unused CreateDirectory("build")
@@ -343,6 +360,7 @@ Prepare :: (binary: string) -> bool {
     return Write("a.txt", ALPHA) && Write("words", WORDS) && Write("empty", "") && Write("bin", binary) &&
         Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
+        Write("lines.txt", Lines()) &&
         Write("fakeprog/1/status", "proc1 one") && Write("fakeprog/2/status", "proc2 two") &&
         Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long)) &&
         Write("fakenet/1/status", "listen 0 0\n") && Write("fakenet/1/local", "tcp!1.2.3.4!80\n") &&

@@ -1,0 +1,145 @@
+// Page standard input or named files, replacing the Limbo p.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Proc :: #import "taijios_process";
+using Cli :: #import "zx_cli";
+
+Usage :: "Usage: p [-number] [file...]\n";
+
+// One line at a time from a block buffer, the way bufio gets did.
+Reader :: struct {
+    handle: s32;
+    buffer: [4096]u8;
+    start: s64;
+    end: s64;
+    done: bool;
+}
+
+// The next line with its newline, or false at the end of the input.
+Line :: (reader: *Reader) -> (text: string, ok: bool) {
+    line: Vec(u8);
+    while true {
+        if reader.start >= reader.end {
+            if reader.done { break }
+            count := Io.ReadBytes(reader.handle, reader.buffer[:]);
+            if count <= 0 {
+                reader.done = true;
+                break;
+            }
+            reader.start = 0;
+            reader.end = count;
+        }
+        byte := reader.buffer[reader.start];
+        reader.start += 1;
+        unused VecPush(line, byte);
+        if byte == cast(u8)10 { break }
+    }
+    if line.count == 0 { return "", false }
+    return TextDetach(BuilderFinish(line)), true;
+}
+
+// Read one line from the console, without its newline.
+Console :: () -> (text: string, ok: bool) {
+    handle := Io.OpenFile("/dev/cons", 0);
+    if handle < 0 { return "", false }
+    reader: Reader;
+    reader.handle = handle;
+    line, got := Line(*reader);
+    unused Io.CloseFile(handle);
+    if !got { return "", false }
+    if line.count > 0 && line[line.count-1] == cast(u8)10 { return line[:line.count-1], true }
+    return line, true;
+}
+
+// A leading digit run as Dis int would read it; a sign or anything else
+// after it leaves the rest unconverted.
+Number :: (text: string) -> (value: s32, whole: bool) {
+    value: s64;
+    at: s64 = 0;
+    while at < text.count && text[at] >= 48 && text[at] <= 57 {
+        value = 10*value + cast(s64)(text[at] - 48);
+        at += 1;
+        if value > 2147483647 { value = 2147483647 }
+    }
+    return cast(s32)value, at == text.count && at > 0;
+}
+
+// Show the input, stopping every nlines lines until a key arrives.
+Page :: (handle: s32, nlines: s32) {
+    reader: Reader;
+    reader.handle = handle;
+    left := nlines;
+    while true {
+        line, ok := Line(*reader);
+        if !ok { return }
+        unused Cli.WriteAll(1, line);
+        left -= 1;
+        if left == 0 {
+            left = nlines;
+            if !Prompt() { return }
+        }
+    }
+}
+
+// Wait for a key: q or end of file exits, !cmd runs a command first.
+Prompt :: () -> bool {
+    while true {
+        command, ok := Console();
+        if !ok { return false }
+        if command.count == 0 { return true }
+        if command[0] == #char "q" { return false }
+        if command[0] != #char "!" { return true }
+        operands: Vec(string);
+        unused VecPush(operands, "-c");
+        unused VecPush(operands, TextDetach(TextCopy(command[1:])));
+        unused Proc.Run("/dis/sh.zx", operands[:]);
+    }
+    return true;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    nlines: s32 = 22;
+    firstOperand: s32 = 0;
+    if count > 0 {
+        argument := Args.Operand(0);
+        if argument.count > 1 && argument[0] == #char "-" {
+            value, whole := Number(argument[1:]);
+            if !whole || value <= 0 {
+                unused Cli.WriteAll(2, Usage);
+                unused Args.SetFailure("usage");
+                return 1;
+            }
+            nlines = value;
+            firstOperand = 1;
+        }
+    }
+    if firstOperand == count {
+        Page(0, nlines);
+        return 0;
+    }
+    for i: firstOperand..count-1 {
+        name := Args.Operand(i);
+        handle: s32 = 0;
+        shown := "stdin";
+        if name != "-" {
+            handle = Io.OpenFile(name, 0);
+            shown = name;
+            if handle < 0 {
+                unused Cli.WriteAll(2, "p: ");
+                unused Cli.WriteAll(2, shown);
+                unused Cli.WriteAll(2, ": can't open ");
+                unused Cli.WriteAll(2, shown);
+                unused Cli.WriteAll(2, ": ");
+                unused Cli.WriteAll(2, Io.LastError());
+                unused Cli.WriteAll(2, "\n");
+                continue;
+            }
+        }
+        Page(handle, nlines);
+        if handle != 0 { unused Io.CloseFile(handle) }
+    }
+    return 0;
+}

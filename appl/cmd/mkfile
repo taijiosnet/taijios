@@ -93,7 +93,6 @@ TARG=\
 	ns.dis\
 	nsbuild.dis\
 	os.dis\
-	p.dis\
 	plumb.dis\
 	plumber.dis\
 	prof.dis\
@@ -198,6 +197,7 @@ ZXCOMMANDS=$ZXCOMMANDS uudecode
 ZXCOMMANDS=$ZXCOMMANDS sleep
 ZXCOMMANDS=$ZXCOMMANDS pause
 ZXCOMMANDS=$ZXCOMMANDS runas
+ZXCOMMANDS=$ZXCOMMANDS p
 ZXCOMMANDS=$ZXCOMMANDS fs
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -323,6 +323,9 @@ pause.zx: pause.zi
 runas.zx: runas.zi taijios_process.zi $ZXLIB/taijios_quote.zi $UTILZX
 	zi2zx --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry runas:main -o $target runas.zi
 
+p.zx: p.zi taijios_process.zi $UTILZX
+	zi2zx --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry p:main -o $target p.zi
+
 # Only package-aware ZX targets resolve the Tcl/Tk dependencies.
 $TCLZX:Ppython3 ziran_package_inputs.py check tcl: ziran_package_inputs.py
 	python3 ziran_package_inputs.py write tcl "$target"
@@ -437,6 +440,7 @@ $DISBIN/uudecode.zx: uudecode.zx mkfile
 $DISBIN/sleep.zx: sleep.zx mkfile
 $DISBIN/pause.zx: pause.zx mkfile
 $DISBIN/runas.zx: runas.zx mkfile
+$DISBIN/p.zx: p.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
 
 $DISBIN/%.zx: %.zx
