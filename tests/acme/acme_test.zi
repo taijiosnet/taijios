@@ -17,7 +17,7 @@ Case :: struct {
 
 WORK :: "build/tests/acme/main";
 
-cases: [24]Case = Case.[
+cases: [25]Case = Case.[
     .{
         name = "edit-usage",
         script = "/acme/edit/e.zx\n/acme/edit/a.zx\n/acme/edit/c.zx\n/acme/edit/d.zx extra\n/acme/edit/g.zx\n/acme/edit/i.zx\n/acme/edit/p.zx bad\n/acme/edit/pipe.zx\n/acme/edit/x.zx\n",
@@ -160,6 +160,12 @@ cases: [24]Case = Case.[
         name = "acid-launch",
         script = "/acme/dis/cd.zx /acme\n/acme/acid/Acid.zx 42\ncat /mnt/acme/3/tag\n",
         out = " Send Delete",
+        err = "",
+    },
+    .{
+        name = "mail-mkbox",
+        script = "/acme/mail/mkbox.zx /build/tests/acme/main/box1 /build/tests/acme/main/f1.txt\ncat /build/tests/acme/main/box1\ncat /build/tests/acme/main/f1.txt\n",
+        out = "same\nold\n",
         err = "",
     },
 ];

@@ -1,5 +1,6 @@
 <../../../../mkconfig
 
+ZXCMD=$ROOT/appl/cmd
 BIN=$ROOT/acme/mail
 
 DIRS=\
@@ -8,21 +9,29 @@ DIRS=\
 TARG=\
 	guide\
 	readme\
-	mkbox.dis\
-
-MODULES=\
-
-SYSMODULES=\
-	sys.m\
-	draw.m\
+	mkbox.zx\
 
 BINTARG=${TARG:%=$BIN/%}
-
-DISBIN=$ROOT/acme/mail
 
 all:V:		$TARG
 
 install:V:	$BINTARG
+
+install-zx:V:	$BIN/mkbox.zx
+
+clean:V:
+	rm -f mkbox.zx
+
+nuke:V:	clean
+	rm -f $BIN/mkbox.zx
+
+mkbox.zx:	mkbox.zi $ZXCMD/taijios_args.zi $ZXCMD/taijios_io.zi mkfile
+	zi2zx --root . --module-path $ZXCMD --bind-host taijios_args --bind-host taijios_io --entry mkbox:main -o $target mkbox.zi
+
+$BIN/mkbox.zx:	mkbox.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 mkbox.zx "$staged" && mv "$staged" "$target"
 
 $BIN/guide : guide
 	rm -f $BIN/guide && cp guide $BIN/guide
@@ -30,5 +39,4 @@ $BIN/guide : guide
 $BIN/readme : readme
 	rm -f $BIN/readme && cp readme $BIN/readme
 
-<$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs

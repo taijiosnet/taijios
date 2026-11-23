@@ -1,4 +1,4 @@
-# 15. Acme helper binaries outside dis/ - 3 rows
+# 15. Acme helper binaries outside dis/ - 2 rows
 
 Owner: Acme helpers outside dis/ (acme lane)
 
@@ -8,7 +8,6 @@ Tracked `.dis` helper binaries installed outside `dis/` by the acme build (mkfil
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| acme/mail/Mail.dis | appl/acme/acme/mail/src/Mail.b |  | - |  |
-| acme/mail/Mailpop3.dis | appl/acme/acme/mail/src/Mailpop3.b |  | - |  |
-| acme/mail/mkbox.dis | appl/acme/acme/mail/mkbox.b |  | - | mkfile source in appl/acme/acme/mail/, not src/ |
+| acme/mail/Mail.dis | appl/acme/acme/mail/src/Mail.b |  | - | blocked: needs `taijios_io.Fwstat` on open fds, ZX `sendmail`, and concurrent multi-window event/timer loop |
+| acme/mail/Mailpop3.dis | appl/acme/acme/mail/src/Mailpop3.b |  | - | blocked: needs Ziran `pop3` library (`dis/lib/pop3.dis`), `taijios_io.Fwstat`, and ZX `sendmail` |
 

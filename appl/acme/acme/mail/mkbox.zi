@@ -1,0 +1,17 @@
+// acme/mail/mkbox: create mailbox files (mode 0600) if they do not already exist.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    meta: [12]u8;
+    for i: 0..count - 1 {
+        nm := Args.Operand(i);
+        if Io.StatFile(nm, meta[:]) < 0 {
+            fd := Io.CreateFile(nm, 0, 0x180); // OREAD, 0600
+            if fd >= 0 { unused Io.CloseFile(fd) }
+        }
+    }
+    return 0;
+}
