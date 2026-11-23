@@ -1,0 +1,260 @@
+// Grid service browser & mount GUI, ported from appl/grid/query.b.
+#import "std/vec"
+#import "std/number_text"
+using IO :: #import "taijios_io"
+using Dial :: #import "taijios_dial"
+using Namespace :: #import "taijios_namespace"
+using Proc :: #import "taijios_process"
+using Quote :: #import "taijios_quote"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Reg :: #import "registry_client"
+using Srv :: #import "srvbrowse"
+
+QUERY_UI :: #string END_UI
+frame .f
+frame .f.ftop
+button .f.ftop.br -text {Refresh} -command {query_act refresh}
+button .f.ftop.bu -text {Up} -command {query_act up}
+button .f.ftop.bm -text {Mount} -command {query_act mount}
+label .f.ftop.sl -text {Filter:}
+entry .f.ftop.se -bg white -width 14
+button .f.ftop.bs -text {Search} -command {query_act search}
+pack .f.ftop.br .f.ftop.bu .f.ftop.bm .f.ftop.sl .f.ftop.se .f.ftop.bs -side left -padx 2
+label .f.path -text {services/}
+frame .f.flb
+scrollbar .f.flb.sb -command {.f.flb.lb yview}
+listbox .f.flb.lb -yscrollcommand {.f.flb.sb set} -selectmode single -bg white
+bind .f.flb.lb <Double-Button-1> {query_act open}
+pack .f.flb.sb -side left -fill y
+pack .f.flb.lb -fill both -expand 1
+label .f.status -text {}
+pack .f.ftop -side top -fill x -pady 2
+pack .f.path -side top -fill x
+pack .f.flb -side top -fill both -expand 1
+pack .f.status -side top -fill x
+pack .f -fill both -expand 1
+END_UI;
+
+store: Srv.ServiceStore;
+cur_path: Text;
+cur_qid: s32 = 0;
+items: [Srv.MAX_SERVICES]Srv.DirItem;
+item_count: s32 = 0;
+pending_act: s32 = 0; // 1=refresh, 2=up, 3=open, 4=mount, 5=search
+filter_text: Text;
+status_text: Text;
+
+FetchServices :: (filter_attr: string) {
+    if !Reg.EnsureRegistry() {
+        unused VecResize(status_text.bytes, 0);
+        unused BuilderAppend(status_text.bytes, "Could not find registry");
+        store.count = 0;
+        return;
+    }
+    fd := IO.Open("/mnt/registry/find", 2);
+    if fd < 0 {
+        unused VecResize(status_text.bytes, 0);
+        unused BuilderAppend(status_text.bytes, "Cannot open /mnt/registry/find");
+        store.count = 0;
+        return;
+    }
+    unused IO.Write(fd, filter_attr);
+    unused IO.Seek(fd, 0, 0);
+    raw: Text;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw.bytes, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    Srv.LoadServicesFromText(*store, TextView(raw));
+    unused VecResize(status_text.bytes, 0);
+}
+
+RefreshListbox :: (tcl: *Tcl.Interpreter) -> bool {
+    count, _ := Srv.ServicePath2Dir(*store, TextView(cur_path), cur_qid, items[:]);
+    item_count = count;
+    unused Window.Execute(tcl, ".f.flb.lb delete 0 end");
+    for i: 0..cast(s64)item_count-1 {
+        cmd: Text;
+        unused BuilderAppend(cmd.bytes, ".f.flb.lb insert end {");
+        if items[i].is_dir { unused BuilderAppend(cmd.bytes, "[+] ") }
+        unused BuilderAppend(cmd.bytes, TextView(items[i].name));
+        unused BuilderAppend(cmd.bytes, "}");
+        unused Window.Execute(tcl, TextView(cmd));
+    }
+    if item_count > 0 { unused Window.Execute(tcl, ".f.flb.lb selection set 0") }
+    pcmd: Text;
+    unused BuilderAppend(pcmd.bytes, ".f.path configure -text {");
+    unused BuilderAppend(pcmd.bytes, TextView(cur_path));
+    unused BuilderAppend(pcmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(pcmd));
+    scmd: Text;
+    unused BuilderAppend(scmd.bytes, ".f.status configure -text {");
+    unused BuilderAppend(scmd.bytes, TextView(status_text));
+    unused BuilderAppend(scmd.bytes, "}");
+    return Window.Execute(tcl, TextView(scmd));
+}
+
+SelectedIndex :: (tcl: *Tcl.Interpreter) -> s32 {
+    res := Tcl.Eval(tcl, ".f.flb.lb curselection");
+    if res.code != .OK || res.value.bytes.count == 0 { return -1 }
+    s := TextView(res.value);
+    v: s32 = 0;
+    for c: s {
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        else { break }
+    }
+    return v;
+}
+
+MountSelected :: (sel_idx: s32) {
+    if sel_idx < 0 || sel_idx >= item_count { return }
+    target_path: Text;
+    unused BuilderAppend(target_path.bytes, TextView(cur_path));
+    unused BuilderAppend(target_path.bytes, TextView(items[sel_idx].name));
+    unused BuilderAppend(target_path.bytes, "/");
+    sidx := Srv.FindServiceByPath(*store, TextView(target_path), items[sel_idx].qid);
+    if sidx < 0 {
+        unused VecResize(status_text.bytes, 0);
+        unused BuilderAppend(status_text.bytes, "Select a service to mount");
+        return;
+    }
+    addr := TextView(store.services[sidx].addr);
+    unused Namespace.Fork();
+    tfd := IO.Create("/tmp/query", 0, cast(s32)0x800001ff);
+    if tfd >= 0 { unused IO.Close(tfd) }
+
+    // Find unused /tmp/query/<id>
+    mdir: Text;
+    buf: [24]u8;
+    id: s64 = 0;
+    while id < 64 {
+        unused VecResize(mdir.bytes, 0);
+        unused BuilderAppend(mdir.bytes, "/tmp/query/");
+        unused BuilderAppend(mdir.bytes, FormatInteger(id, buf[:]));
+        meta: [12]u8;
+        if IO.Stat(TextView(mdir), meta[:]) != 0 {
+            dfd := IO.Create(TextView(mdir), 0, cast(s32)0x800001ff);
+            if dfd >= 0 { unused IO.Close(dfd); break }
+        }
+        id += 1;
+    }
+    handles: [2]s32 = .[-1, -1];
+    dir_buf: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(addr, "", handles[:], dir_buf[:]) != 0 {
+        unused VecResize(status_text.bytes, 0);
+        unused BuilderAppend(status_text.bytes, "Could not connect to service");
+        return;
+    }
+    mounted := false;
+    if handles[0] >= 0 {
+        if Namespace.Mount(handles[0], -1, TextView(mdir), Namespace.Replace, "") == 0 {
+            mounted = true;
+        }
+        unused IO.Close(handles[0]);
+    }
+    if handles[1] >= 0 { unused IO.Close(handles[1]) }
+    if !mounted {
+        unused VecResize(status_text.bytes, 0);
+        unused BuilderAppend(status_text.bytes, "Mount failed");
+        return;
+    }
+    unused VecResize(status_text.bytes, 0);
+    unused BuilderAppend(status_text.bytes, "Mounted at ");
+    unused BuilderAppend(status_text.bytes, TextView(mdir));
+    ops: [1]string = .[TextView(mdir)];
+    unused Proc.Start("/dis/wm/dir.zx", ops[:]);
+}
+
+QueryCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 { result.code = .Error; return }
+    verb := TextView(args[0]);
+    if verb == "refresh" { pending_act = 1 }
+    else if verb == "up" { pending_act = 2 }
+    else if verb == "open" { pending_act = 3 }
+    else if verb == "mount" { pending_act = 4 }
+    else if verb == "search" { pending_act = 5 }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    if pending_act == 0 { return .Idle }
+    act := pending_act;
+    pending_act = 0;
+    if act == 1 {
+        FetchServices(TextView(filter_text));
+        unused RefreshListbox(tcl);
+        return .Changed;
+    }
+    if act == 2 {
+        parent: Text;
+        Srv.PrevPath(TextView(cur_path), *parent);
+        unused VecResize(cur_path.bytes, 0);
+        unused BuilderAppend(cur_path.bytes, TextView(parent));
+        unused RefreshListbox(tcl);
+        return .Changed;
+    }
+    if act == 3 {
+        sel := SelectedIndex(tcl);
+        if sel >= 0 && sel < item_count && items[sel].is_dir {
+            unused BuilderAppend(cur_path.bytes, TextView(items[sel].name));
+            unused BuilderAppend(cur_path.bytes, "/");
+            if items[sel].qid != 0 { cur_qid = items[sel].qid }
+            unused RefreshListbox(tcl);
+            return .Changed;
+        }
+        return .Idle;
+    }
+    if act == 4 {
+        MountSelected(SelectedIndex(tcl));
+        unused RefreshListbox(tcl);
+        return .Changed;
+    }
+    if act == 5 {
+        res := Tcl.Eval(tcl, ".f.ftop.se get");
+        if res.code == .OK {
+            unused VecResize(filter_text.bytes, 0);
+            unused BuilderAppend(filter_text.bytes, TextView(res.value));
+        }
+        FetchServices(TextView(filter_text));
+        unused VecResize(cur_path.bytes, 0);
+        unused BuilderAppend(cur_path.bytes, "services/");
+        unused RefreshListbox(tcl);
+        return .Changed;
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    unused Namespace.Fork();
+    unused BuilderAppend(cur_path.bytes, "services/");
+    FetchServices("");
+
+    script: Text;
+    unused BuilderAppend(script.bytes, QUERY_UI);
+    count, _ := Srv.ServicePath2Dir(*store, TextView(cur_path), cur_qid, items[:]);
+    item_count = count;
+    for i: 0..cast(s64)item_count-1 {
+        unused BuilderAppend(script.bytes, "\n.f.flb.lb insert end {");
+        if items[i].is_dir { unused BuilderAppend(script.bytes, "[+] ") }
+        unused BuilderAppend(script.bytes, TextView(items[i].name));
+        unused BuilderAppend(script.bytes, "}");
+    }
+    if item_count > 0 { unused BuilderAppend(script.bytes, "\n.f.flb.lb selection set 0") }
+    if status_text.bytes.count > 0 {
+        unused BuilderAppend(script.bytes, "\n.f.status configure -text {");
+        unused BuilderAppend(script.bytes, TextView(status_text));
+        unused BuilderAppend(script.bytes, "}");
+    }
+    unused BuilderAppend(script.bytes, "\n");
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "query_act", QueryCmd) { return 1 }
+    return Window.RunPolled(*tcl, TextView(script), "Query", 440, 400, Start, Tick, 50);
+}

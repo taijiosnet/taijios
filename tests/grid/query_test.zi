@@ -1,0 +1,50 @@
+// Table-driven unit tests for appl/grid/lib/srvbrowse.zi.
+#import "std/vec"
+using Srv :: #import "srvbrowse"
+
+failures: s32;
+store: Srv.ServiceStore;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    sample := "tcp!node2!6677 resource 'Cpu Pool' name worker2 memory 64mb\n";
+    full: Text;
+    unused BuilderAppend(full.bytes, sample);
+    unused BuilderAppend(full.bytes, "tcp!node1!6676 resource Filestore name files1 proto styx\n");
+    unused BuilderAppend(full.bytes, "tcp!node3!6678 resource 'Cpu Pool' name worker1 memory 32mb\n");
+
+    Srv.LoadServicesFromText(*store, TextView(full));
+    Expect(store.count == 3, "loaded 3 services");
+
+    items: [16]Srv.DirItem;
+    n1, d1 := Srv.ServicePath2Dir(*store, "services/", 0, items[:]);
+    Expect(n1 == 2 && !d1, "2 resource categories");
+    Expect(TextView(items[0].name) == "Cpu Pool" && TextView(items[1].name) == "Filestore", "sorted categories");
+
+    n2, d2 := Srv.ServicePath2Dir(*store, "services/Cpu Pool/", 0, items[:]);
+    Expect(n2 == 2 && d2, "2 Cpu Pool services");
+    Expect(TextView(items[0].name) == "worker1" && TextView(items[1].name) == "worker2", "sorted workers");
+
+    q := items[0].qid;
+    sidx := Srv.FindServiceByPath(*store, "services/Cpu Pool/worker1/", q);
+    Expect(sidx >= 0 && TextView(store.services[sidx].addr) == "tcp!node3!6678", "FindServiceByPath");
+
+    n3, _ := Srv.ServicePath2Dir(*store, "services/Cpu Pool/worker1/", q, items[:]);
+    Expect(n3 == 2, "service details: address + attributes");
+
+    n4, _ := Srv.ServicePath2Dir(*store, "services/Cpu Pool/worker1/attributes/", q, items[:]);
+    Expect(n4 == 1 && TextView(items[0].name) == "memory: 32mb", "attributes dir");
+
+    p: Text;
+    Srv.PrevPath("services/Cpu Pool/worker1/", *p);
+    Expect(TextView(p) == "services/Cpu Pool/", "PrevPath");
+
+    if failures == 0 { print("query_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

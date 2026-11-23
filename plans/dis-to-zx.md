@@ -698,7 +698,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/spree/lib/tricks.dis | appl/spree/lib/tricks.b |  | - |  |
 | dis/spree/spree.dis | appl/spree/spree.b |  | - |  |
 
-### 10. Grid - computing grid family - 11 rows
+### 10. Grid - computing grid family - 10 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -708,7 +708,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/grid/lib/browser.dis | appl/grid/lib/browser.b | module/grid/browser.m | - |  |
 | dis/grid/lib/fbrowse.dis | appl/grid/lib/fbrowse.b | module/grid/fbrowse.m | - |  |
 | dis/grid/lib/srvbrowse.dis | appl/grid/lib/srvbrowse.b | module/grid/srvbrowse.m | - |  |
-| dis/grid/query.dis | appl/grid/query.b |  | - |  |
 | dis/grid/readjpg.dis | appl/grid/readjpg.b | module/grid/readjpg.m | - |  |
 | dis/grid/reglisten.dis | appl/grid/reglisten.b |  | - |  |
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |

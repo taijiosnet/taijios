@@ -1,0 +1,238 @@
+// Grid service registry browser model (servicepath2Dir, servicepath2Service,
+// QID hashing, sorting, and attribute search), ported from appl/grid/lib/srvbrowse.b.
+#import "std/vec"
+#import "std/number_text"
+using Reg :: #import "registry_client"
+
+MAX_SERVICES :: 64;
+QID_SLOTS :: 511;
+
+Service :: struct {
+    addr: Text;
+    attrs: Reg.AttrList;
+    qid: s32;
+}
+
+DirItem :: struct {
+    name: Text;
+    qid: s32;
+    is_dir: bool;
+}
+
+ServiceStore :: struct {
+    services: [MAX_SERVICES]Service;
+    order: [MAX_SERVICES]s32;
+    count: s32;
+    qids: [QID_SLOTS]Text;
+}
+
+Addr2Qid :: (addr: string) -> s32 {
+    qid: s32 = 0;
+    start: s64 = ifx addr.count > 4 then 4 else 0;
+    for i: start..addr.count-1 {
+        shift := cast(u32)(i % 10);
+        qid = (qid + cast(s32)addr[i] * cast(s32)(1 << shift)) % QID_SLOTS;
+    }
+    if qid < 0 { qid = -qid }
+    return qid;
+}
+
+AddQid :: (store: *ServiceStore, addr: string) -> s32 {
+    qid := Addr2Qid(addr);
+    start := qid;
+    while true {
+        if store.qids[qid].bytes.count == 0 {
+            unused BuilderAppend(store.qids[qid].bytes, addr);
+            return qid;
+        }
+        if TextView(store.qids[qid]) == addr {
+            return qid;
+        }
+        qid += 1;
+        if qid >= QID_SLOTS { qid = 0 }
+        if qid == start { break }
+    }
+    return qid;
+}
+
+GetResName :: (svc: *Service, res_out: *Text, name_out: *Text) {
+    if !Reg.AttrListGet(*svc.attrs, "resource", res_out) || res_out.bytes.count == 0 {
+        unused VecResize(res_out.bytes, 0);
+        unused BuilderAppend(res_out.bytes, "Other");
+    }
+    if !Reg.AttrListGet(*svc.attrs, "name", name_out) || name_out.bytes.count == 0 {
+        unused VecResize(name_out.bytes, 0);
+        unused BuilderAppend(name_out.bytes, "?????");
+    }
+}
+
+CompareText :: (a: string, b: string) -> s32 {
+    n := ifx a.count < b.count then a.count else b.count;
+    for i: 0..n-1 {
+        if a[i] < b[i] { return -1 }
+        if a[i] > b[i] { return 1 }
+    }
+    if a.count < b.count { return -1 }
+    if a.count > b.count { return 1 }
+    return 0;
+}
+
+SortServices :: (store: *ServiceStore) {
+    for i: 0..cast(s64)store.count-1 {
+        store.order[i] = cast(s32)i;
+    }
+    // Insertion sort order[] by (resource, name, addr)
+    for i: 1..cast(s64)store.count-1 {
+        j := i;
+        while j > 0 {
+            a_idx := store.order[j - 1];
+            b_idx := store.order[j];
+            r1: Text; n1: Text;
+            r2: Text; n2: Text;
+            GetResName(*store.services[a_idx], *r1, *n1);
+            GetResName(*store.services[b_idx], *r2, *n2);
+            cmp := CompareText(TextView(r1), TextView(r2));
+            if cmp == 0 { cmp = CompareText(TextView(n1), TextView(n2)) }
+            if cmp == 0 { cmp = CompareText(TextView(store.services[a_idx].addr), TextView(store.services[b_idx].addr)) }
+            if cmp <= 0 { break }
+            store.order[j - 1] = b_idx;
+            store.order[j] = a_idx;
+            j -= 1;
+        }
+    }
+}
+
+LoadServicesFromText :: (store: *ServiceStore, text: string) {
+    store.count = 0;
+    i: s64 = 0;
+    while i < text.count && store.count < MAX_SERVICES {
+        start := i;
+        while i < text.count && text[i] != 10 { i += 1 }
+        line := text[start:i];
+        if i < text.count && text[i] == 10 { i += 1 }
+        if line.count == 0 { continue }
+        idx := store.count;
+        if Reg.ParseFindLine(line, *store.services[idx].addr, *store.services[idx].attrs) {
+            store.services[idx].qid = AddQid(store, TextView(store.services[idx].addr));
+            store.count += 1;
+        }
+    }
+    SortServices(store);
+}
+
+SplitPath :: (path: string, parts: []string) -> s32 {
+    n: s32 = 0;
+    i: s64 = 0;
+    while i < path.count && cast(s64)n < parts.count {
+        while i < path.count && path[i] == 47 { i += 1 }
+        if i >= path.count { break }
+        start := i;
+        while i < path.count && path[i] != 47 { i += 1 }
+        parts[n] = path[start:i];
+        n += 1;
+    }
+    return n;
+}
+
+// Convert a virtual service path ("services/", "services/<res>/", "services/<res>/<name>/",
+// "services/<res>/<name>/attributes/") into directory entries (matching srvbrowse.b servicepath2Dir).
+ServicePath2Dir :: (store: *ServiceStore, path: string, qid: s32, out: []DirItem) -> (count: s32, dups: bool) {
+    parts: [8]string;
+    l := SplitPath(path, parts[:]);
+    count: s32 = 0;
+    for oi: 0..cast(s64)store.count-1 {
+        i := cast(s64)store.order[oi];
+        if cast(s64)count >= out.count { break }
+        res: Text; name: Text;
+        GetResName(*store.services[i], *res, *name);
+        rs := TextView(res);
+        ns := TextView(name);
+        if l == 1 {
+            // Unique resource categories
+            seen := false;
+            for k: 0..cast(s64)count-1 {
+                if TextView(out[k].name) == rs { seen = true; break }
+            }
+            if !seen {
+                unused VecResize(out[count].name.bytes, 0);
+                unused BuilderAppend(out[count].name.bytes, rs);
+                out[count].qid = 0;
+                out[count].is_dir = true;
+                count += 1;
+            }
+        } else if l == 2 {
+            if rs == parts[1] {
+                unused VecResize(out[count].name.bytes, 0);
+                unused BuilderAppend(out[count].name.bytes, ns);
+                out[count].qid = store.services[i].qid;
+                out[count].is_dir = true;
+                count += 1;
+            }
+        } else if l == 3 {
+            if rs == parts[1] && ns == parts[2] && store.services[i].qid == qid {
+                unused VecResize(out[count].name.bytes, 0);
+                unused BuilderAppend(out[count].name.bytes, "address: ");
+                unused BuilderAppend(out[count].name.bytes, TextView(store.services[i].addr));
+                out[count].qid = qid;
+                out[count].is_dir = false;
+                count += 1;
+                if cast(s64)count < out.count {
+                    unused VecResize(out[count].name.bytes, 0);
+                    unused BuilderAppend(out[count].name.bytes, "attributes");
+                    out[count].qid = qid;
+                    out[count].is_dir = true;
+                    count += 1;
+                }
+                break;
+            }
+        } else if l == 4 && parts[3] == "attributes" {
+            if rs == parts[1] && ns == parts[2] && store.services[i].qid == qid {
+                for a: 0..cast(s64)store.services[i].attrs.count-1 {
+                    if cast(s64)count >= out.count { break }
+                    k := TextView(store.services[i].attrs.keys[a]);
+                    if k == "name" || k == "resource" { continue }
+                    unused VecResize(out[count].name.bytes, 0);
+                    unused BuilderAppend(out[count].name.bytes, k);
+                    unused BuilderAppend(out[count].name.bytes, ": ");
+                    unused BuilderAppend(out[count].name.bytes, TextView(store.services[i].attrs.vals[a]));
+                    out[count].qid = qid;
+                    out[count].is_dir = false;
+                    count += 1;
+                }
+                break;
+            }
+        }
+    }
+    return count, l >= 2;
+}
+
+// Find service index matching "services/<resource>/<name>" and qid.
+FindServiceByPath :: (store: *ServiceStore, path: string, qid: s32) -> s32 {
+    parts: [8]string;
+    l := SplitPath(path, parts[:]);
+    if l != 3 { return -1 }
+    for i: 0..cast(s64)store.count-1 {
+        res: Text; name: Text;
+        GetResName(*store.services[i], *res, *name);
+        if TextView(res) == parts[1] && TextView(name) == parts[2] && store.services[i].qid == qid {
+            return cast(s32)i;
+        }
+    }
+    return -1;
+}
+
+// Return parent directory path (matching browser.b prevpath).
+PrevPath :: (path: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    end := path.count;
+    if end > 1 && path[end - 1] == 47 { end -= 1 }
+    last_slash: s64 = -1;
+    for i: 0..end-1 {
+        if path[i] == 47 { last_slash = i }
+    }
+    if last_slash >= 0 {
+        unused BuilderAppend(out.bytes, path[:last_slash + 1]);
+    } else {
+        unused BuilderAppend(out.bytes, "services/");
+    }
+}

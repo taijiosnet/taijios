@@ -7,7 +7,6 @@ DIRS=\
 TARG=\
 		blurdemo.dis\
 		cpupool.dis\
-		query.dis\
 		readjpg.dis\
 		reglisten.dis\
 		regstyxlisten.dis\
@@ -79,5 +78,13 @@ $DISBIN/find.zx: find.zx
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 find.zx "$staged" && mv "$staged" "$target"
 
-install:V: $DISBIN/jpg2bit.zx $DISBIN/usercreatesrv.zx $DISBIN/register.zx $DISBIN/find.zx
+query.zx: query.zi lib/srvbrowse.zi lib/registry_client.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi ../lib/taijios_quote.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path lib --module-path ../cmd/tcltk --module-path ../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry query:main -o $target query.zi
+
+$DISBIN/query.zx: query.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 query.zx "$staged" && mv "$staged" "$target"
+
+install:V: $DISBIN/jpg2bit.zx $DISBIN/usercreatesrv.zx $DISBIN/register.zx $DISBIN/find.zx $DISBIN/query.zx
 
