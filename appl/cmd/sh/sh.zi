@@ -19,9 +19,11 @@ Ns :: #import "taijios_namespace";
 #import "shell_sexprs";
 #import "shell_file2chan";
 #import "shell_mpexpr";
+#import "shell_alphabet";
 
 main :: () -> s32 {
     unused RegisterModule("builtin", InitShellBuiltins, ShellRun, ShellSRun, ShellWhatis);
+    unused RegisterModule("alphabet", AlphabetInit, AlphabetRun, AlphabetSRun, AlphabetWhatis);
     unused RegisterModule("std", StdInit, StdRun, StdSRun, StdWhatis);
     unused RegisterModule("string", StringInit, StringRun, StringSRun, NoWhatis);
     unused RegisterModule("expr", ExprInit, ExprRun, ExprSRun, NoWhatis);

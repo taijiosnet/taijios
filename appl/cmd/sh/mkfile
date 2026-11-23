@@ -70,11 +70,14 @@ $ROOT/dis/sh.dis:	sh.dis
 %.dis: ${SYSMODULES:%=$MODDIR/%}
 
 # The ZX shell: sh.zi and its modules, with the builtin modules compiled in.
-SHZX=sh.zi shell.zi shell_parse.zi shell_util.zi shell_filepat.zi shell_std.zi shell_string.zi shell_expr.zi shell_small.zi shell_regexp.zi shell_regex.zi shell_csv.zi shell_sexpr.zi shell_sexprs.zi shell_file2chan.zi shell_mpexpr.zi
+SHZX=sh.zi shell.zi shell_parse.zi shell_util.zi shell_filepat.zi shell_std.zi shell_string.zi shell_expr.zi shell_small.zi shell_regexp.zi shell_regex.zi shell_csv.zi shell_sexpr.zi shell_sexprs.zi shell_file2chan.zi shell_mpexpr.zi shell_alphabet.zi
 CMDZX=../taijios_args.zi ../taijios_io.zi ../taijios_process.zi ../taijios_namespace.zi ../taijios_clock.zi ../taijios_file2chan.zi ../taijios_keyring.zi
+# The alphabet library `load alphabet` runs: the modules of appl/alphabet.
+ALPHAZX=`{ls ../../alphabet/*.zi ../../alphabet/*/*.zi}
+ALPHACMD=../taijios_files.zi ../taijios_dial.zi ../taijios_stat.zi ../taijios_time.zi ../auth/authinfo.zi ../../lib/taijios_quote.zi
 
-sh.zx:	$SHZX $CMDZX mkfile
-	zi2zx --root . --module-path .. --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --bind-host taijios_clock --bind-host taijios_keyring --entry sh:main -o $target sh.zi
+sh.zx:	$SHZX $CMDZX $ALPHACMD $ALPHAZX mkfile
+	zi2zx --root . --module-path ../../alphabet --module-path main=../../alphabet/main --module-path abc=../../alphabet/abc --module-path fs=../../alphabet/fs --module-path grid=../../alphabet/grid --module-path auth=../auth --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --bind-host taijios_clock --bind-host taijios_keyring --bind-host taijios_files --bind-host taijios_dial --entry sh:main -o $target sh.zi
 	chmod 755 $target
 
 install-zx:V:	$ROOT/dis/sh.zx

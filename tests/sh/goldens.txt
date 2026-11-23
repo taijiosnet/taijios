@@ -352,3 +352,11 @@ err:
 status: \n
 out: sum 30000\n
 err: 
+=== mod-alphabet
+status: \n
+out: load alphabet; declare /echo '[-n] /string -> /fd'\nselector gate entries fs\n$W/g\n$W/g/a1\n$W/g/a2\n$W/g/b1\n$W/g/c d\n$W/g/sub\n$W/g/sub/x\n\nfile $W/g\nfile $W/g/a1\nfile $W/g/a2\nfile $W/g/b1\nfile $W/g/c d\nfile $W/g/sub\nfile $W/g/sub/x\n\n$W/g\n$W/g/a1\n$W/g/a2\n\n$W/g\n$W/g/sub\n\nhello\n\nalpha\nbeta\n\n
+err: 
+=== mod-alphabet-reload
+status: error\n
+out: /echo echo\n\n'./-' file does not exist\n\nload alphabet; declare /echo '[-n] /string -> /fd'\n[-n] /string -> /fd\n\n
+err: sh: -: './-' file does not exist\ncannot declare /echo: 'echo [-n] /string -> /fd' not compatible with '/fd -> /fd' (ff vs fs-n, 0)\n

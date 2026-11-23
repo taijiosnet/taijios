@@ -818,3 +818,42 @@ load std expr
 n = 0
 for i in ${expr 1 30000 seq} {n = ${expr $n 1 +}}
 echo sum $n
+
+=== mod-alphabet
+script:
+load alphabet
+whatis /echo
+typeset /fs
+echo ${types /fs}
+echo alpha > $W/g/a1
+echo beta > $W/g/b1
+- {(/string); /print {/fs/print {/fs/entries {/fs/walk $1}}} 1} $W/g
+echo $status
+- {(/string); /fs/exec {/fs/entries {/fs/walk $1}} "{echo file $file}} $W/g
+echo $status
+- {(/string); /print {/fs/print {/fs/entries {/fs/filter {/fs/walk $1} {/fs/match 'a*'}}}} 1} $W/g
+echo $status
+- {(/string); /print {/fs/print {/fs/select {/fs/entries {/fs/walk $1}} {/fs/query "{test -d $file}}}} 1} $W/g
+echo $status
+- {/print {/echo {/fs/run "{s=hello}}} 1}
+echo $status
+- {(/string); /fs/pipe {/fs/walk $1} "{cat}} $W/g
+echo $status
+
+=== mod-alphabet-reload
+script:
+load alphabet
+declare /echo
+import /echo
+echo ${modules}
+unload alphabet
+echo ${loaded}
+- {/print hi 1}
+echo $status
+load alphabet
+echo ${modules}
+whatis /echo
+echo ${usage /echo}
+echo $status
+declare /echo '/fd -> /fd'
+echo unreached

@@ -1,0 +1,103 @@
+// The builtin module load alphabet names: the builtins of the Ziran
+// alphabet library in appl/alphabet, as the Dis shell module alphabet.shmod
+// gave them: declare, declares, undeclare, define, import, autodeclare, type,
+// typeset, autoconvert, - {expr} [arg...], info and clear; the value
+// builtins rewrite, modules, types and usage; and the whatis text of a
+// declared module. A shell argument that is a block is parsed again into the
+// alphabet command trees, as the Dis shell passed its own tree. The
+// alphabet imports are qualified: it has a Run and a RegisterModule of its
+// own.
+#import "shell";
+#import "shell_parse";
+Al :: #import "alpha_eval";
+Bu :: #import "alpha_builtins";
+Ts :: #import "alpha_typesets";
+Sh :: #import "shcmd";
+
+state: Bu.State;
+ready: bool;
+
+// The shell's arguments as the alphabet's: a word, a block's tree, or both.
+ToArgs :: (args: *Items) -> Vec(Bu.Arg) {
+    out: Vec(Bu.Arg);
+    for i: 0..args.count - 1 {
+        a: Bu.Arg;
+        a.cmd = -1;
+        if args.*[i].cmd >= 0 {
+            text: Text = CmdText(args.*[i].cmd);
+            node, err := Sh.Parse(TextView(text));
+            if err.count > 0 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "alphabet: %\n", err);
+                Diagnostic(TextView(msg[:]));
+                RaiseFail("parse error");
+                return out;
+            }
+            a.cmd = node;
+        }
+        if args.*[i].word.bytes.count != 0 { a.word = TextDetach(TextCopy(TextView(args.*[i].word))) }
+        VecPush(out, a);
+    }
+    return out;
+}
+
+// initbuiltin: a new alphabet that declares modules on demand; the shell
+// variable autodeclares, when set, holds declarations to run first. The
+// typesets register once per shell; each load, as each Dis initbuiltin,
+// starts an alphabet that has let the previous one go.
+AlphabetInit :: (mod: s32, err: *Text) -> bool {
+    if ready { Al.Quit(state.alphabet) } else { Ts.Register() }
+    auto: Items = Get("autodeclares");
+    decls := ToArgs(*auto);
+    if Unwinding() { return false }
+    Bu.Init(*state, decls[:]);
+    ready = true;
+    names := string.["declare", "declares", "undeclare", "define", "import", "autodeclare", "type", "typeset",
+        "autoconvert", "-", "info", "clear"];
+    for names { AddBuiltin(it, mod) }
+    snames := string.["rewrite", "modules", "types", "usage"];
+    for snames { AddSBuiltin(it, mod) }
+    return true;
+}
+
+// runbuiltin: the status a builtin returns is the command's status; a
+// failure is an exception, as ctxt.fail raised it, except that `-` returns
+// the evaluation's own status.
+AlphabetRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    argv := ToArgs(args);
+    if Unwinding() || argv.count == 0 { return true }
+    result := Bu.Run(*state, argv[:]);
+    if result.count > 0 {
+        if argv[0].word != "-" || result == "usage" {
+            RaiseFail(result);
+            return true;
+        }
+    }
+    SetText(status, result);
+    return true;
+}
+
+// runsbuiltin: the value builtins' words.
+AlphabetSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    argv := ToArgs(args);
+    if Unwinding() { return true }
+    words: Vec(Bu.Arg);
+    failed := Bu.RunS(*state, argv[:], *words);
+    if failed.count > 0 { RaiseFail(failed); return true }
+    for i: 0..words.count - 1 { PushWord(out, Bu.Word(words[i])) }
+    return true;
+}
+
+// whatis: the declarations that would make module mod again.
+AlphabetWhatis :: (mod: s32, name: string, wtype: s32, out: *Text) -> bool {
+    if wtype == OTHER { SetText(out, Bu.Whatis(*state, name)) }
+    return true;
+}
+
+#scope_file
+
+RaiseFail :: (status: string) {
+    name: Vec(u8);
+    BuilderPrint(*name, "fail:%", status);
+    Raise(TextView(name[:]));
+}
