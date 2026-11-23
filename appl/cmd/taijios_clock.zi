@@ -2,8 +2,16 @@
 host_api :: #system_library "host_api";
 MonotonicMillis :: () -> s64 #foreign host_api;
 UnixMillis :: () -> s64 #foreign host_api;
+// Ask the host to count this program's work again, for a long computation
+// between host calls. True when a bounded run had a budget to renew.
+Yield :: () -> bool #foreign host_api;
 
 #program_export
 Millis :: () -> s64 {
     return MonotonicMillis()
+}
+
+#program_export
+Renew :: () -> bool {
+    return Yield()
 }

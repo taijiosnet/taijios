@@ -348,3 +348,7 @@ err: expr: invalid radix 99\n
 status: \n
 out: newpgrp ok\nnodevs status errors\ndevices still there\n      1\n
 err: 
+=== std-long-loop
+status: \n
+out: sum 30000\n
+err: 

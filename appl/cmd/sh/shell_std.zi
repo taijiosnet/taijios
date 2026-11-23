@@ -6,6 +6,7 @@
 Io :: #import "taijios_io";
 Ns :: #import "taijios_namespace";
 Process :: #import "taijios_process";
+Clock :: #import "taijios_clock";
 #import "shell_parse";
 #import "shell_util";
 #import "shell";
@@ -13,6 +14,10 @@ Process :: #import "taijios_process";
 #scope_file
 
 stdmod: s32;
+
+// Loop iterations between host yields. A body of builtins and substitution
+// makes no host call of its own, so the shell renews the step budget itself.
+YieldEvery :: 512;
 
 BuiltinNames :: string.["if", "while", "~", "!", "apply", "for", "status", "pctl", "fn", "subfn", "and", "or",
     "raise", "rescue", "flag", "getlines", "no"];
@@ -147,6 +152,7 @@ BuiltinAnd :: (args: *Items) -> Text {
 BuiltinWhile :: (args: *Items) -> Text {
     if args.count != 3 || !IsBlock(args, 1) || !IsBlock(args, 2) { StdUsage("while {condition} {cmd}"); return TextCopy("") }
     status: Text;
+    iterations: s32 = 0;
     while true {
         cond := WithStar(args, 1);
         c: Text = Run(*cond, false);
@@ -166,6 +172,8 @@ BuiltinWhile :: (args: *Items) -> Text {
             if kind == 2 { continue }
             return TextCopy("");
         }
+        iterations += 1;
+        if iterations % YieldEvery == 0 { unused Clock.Renew(); }
         SetStatus(TextView(got));
         Keep(*status, got);
     }
@@ -182,6 +190,7 @@ BuiltinFor :: (args: *Items) -> Text {
     last := args.count - 1;
     if !IsBlock(args, last) { StdUsage(use); return TextCopy("") }
     status: Text;
+    iterations: s32 = 0;
     for i: 3..last - 1 {
         one: Items;
         VecPush(one, CopyItem(args, i));
@@ -196,6 +205,10 @@ BuiltinFor :: (args: *Items) -> Text {
         }
         SetStatus(TextView(got));
         Keep(*status, got);
+        // Count this loop's own work again, so a long body of builtins and
+        // substitution keeps running instead of stopping at the step budget.
+        iterations += 1;
+        if iterations % YieldEvery == 0 { unused Clock.Renew(); }
     }
     return status;
 }

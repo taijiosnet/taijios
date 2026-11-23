@@ -819,6 +819,18 @@ zxclock(void *context, const char *module, const char *function,
 	USED(args);
 	if(n != 0)
 		return 0;
+	if(strcmp(function, "Yield") == 0){
+		/*
+		 * A long computation that calls no other host function asks the
+		 * emulator to count its own work again. The answer says whether a
+		 * bounded run had a budget to renew, so a caller can tell when the
+		 * yield is pointless.
+		 */
+		result->kind = HOST_INTEGER;
+		result->type = "bool";
+		result->integer = BundleHostRenewSteps() != 0;
+		return 1;
+	}
 	result->kind = HOST_INTEGER;
 	result->type = "s64";
 	if(strcmp(function, "UnixMillis") == 0){
@@ -1813,6 +1825,13 @@ zxprocess(void *context, const char *module, const char *function,
 		.length = strlen(outcome->problem)}};
 	*result = (HostValue){.kind = HOST_RECORD, .type = "taijios_process.Outcome", .fields = fields,
 		.field_count = nelem(command->outfields)};
+	/*
+	 * Running and waiting for a child is real progress for a script that
+	 * starts many, so the step budget starts again as it does for a device
+	 * read that returns data.
+	 */
+	if(strcmp(function, "Run") == 0 || strcmp(function, "Wait") == 0 || strcmp(function, "Poll") == 0)
+		BundleHostRenewSteps();
 	return 1;
 }
 #endif
@@ -1866,6 +1885,8 @@ zxioopen(ZxCommand *command, const HostValue *args, int n, int create, int flags
 	if(fd < 0)
 		return zxioerror(command, result, nil);
 	command->fd[slot] = fd;
+	/* An open file is progress for a script that walks a tree. */
+	BundleHostRenewSteps();
 	return zxs32(result, slot + 3);
 }
 
@@ -1923,6 +1944,8 @@ zxiostat(ZxCommand *command, const HostValue *args, int n, uchar *packed, HostVa
 	for(i = 0; i < 4; i++)
 		buffer->elements[8+i].bits = (uchar)((uint32_t)dir->mode >> (8*i));
 	free(dir);
+	/* A stat that finds the file is progress, as a read that returns data is. */
+	BundleHostRenewSteps();
 	return zxs32(result, 0);
 }
 
@@ -2026,7 +2049,10 @@ zxio(void *context, const char *module, const char *function,
 			return 0;
 		if(!zxiopath(args, path) || path[0] == 0)
 			return zxioerror(command, result, "invalid file name");
-		return kchdir(path) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
+		if(kchdir(path) < 0)
+			return zxioerror(command, result, nil);
+		BundleHostRenewSteps();
+		return zxs32(result, 0);
 	}
 	if(strcmp(function, "Cwd") == 0 || strcmp(function, "Home") == 0){
 		if(n != 0)
@@ -2148,6 +2174,9 @@ zxio(void *context, const char *module, const char *function,
 		if(buffer->kind != HOST_STRING || (length != 0 && buffer->data == nil))
 			return 0;
 		count = length == 0 ? 0 : kwrite(fd, (void *)buffer->data, length);
+		/* A write that lands is progress, as a read that returns data is. */
+		if(count > 0)
+			BundleHostRenewSteps();
 	}
 	return count < 0 ? zxioerror(command, result, nil) : zxs32(result, count);
 }
@@ -2419,7 +2448,10 @@ zxnamespace(void *context, const char *module, const char *function,
 			return zxioerror(command, result, nil);
 		status = export(fd, first, args[2].integer == 0);
 		poperror();
-		return status < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
+		if(status < 0)
+			return zxioerror(command, result, nil);
+		BundleHostRenewSteps();
+		return zxs32(result, 0);
 	}
 	binding = strcmp(function, "Bind") == 0;
 	if(!binding && strcmp(function, "Unmount") != 0)
@@ -2431,6 +2463,7 @@ zxnamespace(void *context, const char *module, const char *function,
 		return zxioerror(command, result, "invalid file name");
 	if((binding ? kbind(first, second, args[2].integer) : kunmount(first, second)) < 0)
 		return zxioerror(command, result, nil);
+	BundleHostRenewSteps();
 	return zxs32(result, 0);
 }
 
@@ -3363,7 +3396,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 		if((zxmodule(abi.module, "taijios_clock") &&
-		   (strcmp(abi.function, "MonotonicMillis") == 0 || strcmp(abi.function, "UnixMillis") == 0)) ||
+		   (strcmp(abi.function, "MonotonicMillis") == 0 || strcmp(abi.function, "UnixMillis") == 0 ||
+		    strcmp(abi.function, "Yield") == 0)) ||
 		   (zxmodule(abi.module, "clock") && strcmp(abi.function, "ClockMillisecondsHost") == 0)){
 			bindings[count++] = (HostBinding){abi.module, abi.function, zxclock, nil};
 			continue;

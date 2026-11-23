@@ -811,3 +811,10 @@ echo newpgrp ok
 @{pctl forkns nodevs; ls '#c' >[2] /dev/null; echo nodevs status $status}
 ls -d '#c' > /dev/null && echo devices still there
 echo ${pid} | wc -w
+
+=== std-long-loop
+script:
+load std expr
+n = 0
+for i in ${expr 1 30000 seq} {n = ${expr $n 1 +}}
+echo sum $n
