@@ -30,7 +30,7 @@ WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [210]Case = Case.[
+cases: [217]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -282,6 +282,16 @@ fakenet/2/status
     .{tool = "sort", args = "nosuch", status = "open file", err = "sort: cannot open nosuch: 'nosuch' file does not exist\n"},
     .{tool = "sort", args = "unsorted unsorted", status = "usage", err = "usage: sort [-n] [file]\n"},
     .{tool = "sort", args = "-x unsorted", status = "usage", err = "usage: sort [-n] [file]\n"},
+    // tsort: dependencies first; the last successor named is visited first.
+    .{tool = "tsort", input = "graph", out = "a\nb\nc\nd\n"},
+    .{tool = "tsort", input = "graph2", out = "x\ny\nz\n"},
+    .{tool = "tsort", input = "chain", out = "1\n2\n3\n4\n5\n"},
+    .{tool = "tsort", input = "solo", out = "solo\n"},
+    .{tool = "tsort", input = "blank"},
+    // A self edge is dropped, as Limbo's precede skipped a == b.
+    .{tool = "tsort", input = "selfedge", out = "a\n"},
+    // A real cycle is named, then the items still print and the status stays clean.
+    .{tool = "tsort", input = "cyc", out = "a\nb\nc\n", err = "tsort: cycle in input\ntsort: a\ntsort: b\ntsort: c\n"},
 ];
 
 failures: s32;
@@ -373,6 +383,10 @@ Prepare :: (binary: string) -> bool {
         Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
         Write("lines.txt", Lines()) &&
         Write("unsorted", UNSORTED) &&
+        Write("graph", "a b c\nb d\nc d\nd\n") && Write("graph2", "x y\nx z\ny z\n") &&
+        Write("chain", "1 2\n2 3\n3 4\n4 5\n") && Write("solo", "solo\n") &&
+        Write("blank", "\n  \n\t\n") && Write("selfedge", "a a\n") &&
+        Write("cyc", "a b\nb c\nc a\n") &&
         Write("fakeprog/1/status", "proc1 one") && Write("fakeprog/2/status", "proc2 two") &&
         Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long)) &&
         Write("fakenet/1/status", "listen 0 0\n") && Write("fakenet/1/local", "tcp!1.2.3.4!80\n") &&

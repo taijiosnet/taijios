@@ -120,7 +120,6 @@ TARG=\
 	tkcmd.dis\
 	touchcal.dis\
 	trfs.dis\
-	tsort.dis\
 	unicode.dis\
 	units.dis\
 	vacfs.dis\
@@ -198,6 +197,7 @@ ZXCOMMANDS=$ZXCOMMANDS pause
 ZXCOMMANDS=$ZXCOMMANDS runas
 ZXCOMMANDS=$ZXCOMMANDS p
 ZXCOMMANDS=$ZXCOMMANDS sort
+ZXCOMMANDS=$ZXCOMMANDS tsort
 ZXCOMMANDS=$ZXCOMMANDS fs
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -329,6 +329,9 @@ p.zx: p.zi taijios_process.zi $UTILZX
 sort.zx: sort.zi zx_daytime.zi zx_arg.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry sort:main -o $target sort.zi
 
+tsort.zx: tsort.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry tsort:main -o $target tsort.zi
+
 # Only package-aware ZX targets resolve the Tcl/Tk dependencies.
 $TCLZX:Ppython3 ziran_package_inputs.py check tcl: ziran_package_inputs.py
 	python3 ziran_package_inputs.py write tcl "$target"
@@ -445,6 +448,7 @@ $DISBIN/pause.zx: pause.zx mkfile
 $DISBIN/runas.zx: runas.zx mkfile
 $DISBIN/p.zx: p.zx mkfile
 $DISBIN/sort.zx: sort.zx mkfile
+$DISBIN/tsort.zx: tsort.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
 
 $DISBIN/%.zx: %.zx

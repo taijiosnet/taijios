@@ -1,0 +1,170 @@
+// Topological sort: turn a partial ordering into a linear one, replacing the
+// Limbo tsort.
+#import "std/vec"
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+// One name and its successors, in the order the input first mentioned them.
+Item :: struct {
+    name: string;
+    successors: Vec(s64);
+}
+
+State :: struct {
+    items: Vec(Item);
+    order: Vec(s64); // finished items, each prepended as Limbo did
+    marks: Vec(u8); // 0 unseen, 1 finished, 2 on the current path
+    path: Vec(s64); // the items being visited, outermost first
+}
+
+// An owned copy, so a stored view does not outlive its backing text.
+Copy :: (text: string) -> string { return TextDetach(TextCopy(text)); }
+
+// The index of name, adding it when it is new.
+Find :: (state: *State, name: string) -> s64 {
+    for i: 0..state.items.count-1 {
+        if state.items[i].name == name { return i }
+    }
+    item: Item;
+    item.name = Copy(name);
+    unused VecPush(state.items, item);
+    unused VecPush(state.marks, 0);
+    return state.items.count - 1;
+}
+
+// Split on spaces, tabs and newlines, as sys->tokenize did.
+Words :: (line: string, words: *Vec(string)) {
+    start: s64 = 0;
+    at: s64 = 0;
+    while at <= line.count {
+        blank := at == line.count;
+        if !blank {
+            byte := line[at];
+            blank = byte == cast(u8)32 || byte == cast(u8)9 || byte == cast(u8)10
+        }
+        if blank {
+            if at > start { unused VecPush(words.*, line[start:at]) }
+            start = at + 1
+        }
+        at += 1
+    }
+}
+
+// One line at a time from a block buffer, the way bufio gets did.
+Reader :: struct {
+    handle: s32;
+    buffer: [4096]u8;
+    start: s64;
+    end: s64;
+    done: bool;
+}
+
+Line :: (reader: *Reader) -> (text: string, ok: bool) {
+    line: Vec(u8)
+    while true {
+        if reader.start >= reader.end {
+            if reader.done { break }
+            count := Io.ReadBytes(reader.handle, reader.buffer[:])
+            if count <= 0 {
+                reader.done = true
+                break
+            }
+            reader.start = 0
+            reader.end = count
+        }
+        byte := reader.buffer[reader.start]
+        reader.start += 1
+        unused VecPush(line, byte)
+        if byte == cast(u8)10 { break }
+    }
+    if line.count == 0 { return "", false }
+    return TextDetach(BuilderFinish(line)), true
+}
+
+// Name the items from closing round the current path, nearest first, as the
+// Limbo visit printed the reversed parent list.
+Report :: (state: *State, closing: s64) {
+    at := state.path.count - 1
+    while at >= 0 {
+        if state.path[at] == closing {
+            // The Limbo loop reversed the list from the item up to itself, so
+            // the closing item comes first and each outer item follows.
+            for i: at..state.path.count-1 {
+                unused Cli.WriteAll(2, "tsort: ")
+                unused Cli.WriteAll(2, state.items[state.path[i]].name)
+                unused Cli.WriteAll(2, "\n")
+            }
+            return
+        }
+        at -= 1
+    }
+    unused Cli.WriteAll(2, "tsort: ")
+    unused Cli.WriteAll(2, state.items[closing].name)
+    unused Cli.WriteAll(2, "\n")
+}
+
+// Visit the successors of index depth first, finishing it afterwards.
+Visit :: (state: *State, index: s64) {
+    state.marks[index] = 2
+    unused VecPush(state.path, index)
+    for s: 0..state.items[index].successors.count-1 {
+        next := state.items[index].successors[s]
+        if state.marks[next] == 0 {
+            Visit(state, next)
+        } else if state.marks[next] == 2 {
+            unused Cli.WriteAll(2, "tsort: cycle in input\n")
+            Report(state, next)
+        }
+    }
+    state.marks[index] = 1
+    path: *Vec(s64) = *state.path
+    path.count -= 1
+    unused VecPush(state.order, index)
+}
+
+#program_export
+main :: () -> s32 {
+    state: State
+    reader: Reader
+    reader.handle = 0
+    while true {
+        line, ok := Line(*reader)
+        if !ok { break }
+        words: Vec(string)
+        Words(line, *words)
+        if words.count == 0 { continue }
+        from := Find(*state, words[0])
+        for i: 1..words.count-1 {
+            to := Find(*state, words[i])
+            if to == from { continue }
+            present := false
+            for s: 0..state.items[from].successors.count-1 {
+                if state.items[from].successors[s] == to { present = true; break }
+            }
+            if !present {
+                // Limbo consed each successor onto the front, so the last one
+                // named is visited first.
+                unused VecPush(state.items[from].successors, to)
+                last := state.items[from].successors.count - 1
+                at := last
+                while at > 0 {
+                    state.items[from].successors[at] = state.items[from].successors[at-1]
+                    at -= 1
+                }
+                state.items[from].successors[0] = to
+            }
+        }
+    }
+    for i: 0..state.items.count-1 {
+        if state.marks[i] == 0 { Visit(*state, i) }
+    }
+    // Limbo consed each finished item onto the front of the list and printed
+    // from the front, so the reverse finishing order is the output.
+    at := state.order.count - 1
+    while at >= 0 {
+        unused Cli.WriteAll(1, state.items[state.order[at]].name)
+        unused Cli.WriteAll(1, "\n")
+        at -= 1
+    }
+    return 0
+}

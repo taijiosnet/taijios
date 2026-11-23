@@ -222,7 +222,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 118 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 116 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -331,7 +331,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/time.dis | appl/cmd/time.b |  | - |  |
 | dis/tkcmd.dis | appl/cmd/tkcmd.b |  | - |  |
 | dis/touchcal.dis | appl/cmd/touchcal.b |  | - |  |
-| dis/tsort.dis | appl/cmd/tsort.b |  | - |  |
 | dis/unicode.dis | appl/cmd/unicode.b |  | - |  |
 | dis/units.dis | appl/cmd/units.b |  | - |  |
 | dis/vacget.dis | appl/cmd/vacget.b |  | - |  |
