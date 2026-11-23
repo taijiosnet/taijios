@@ -1,0 +1,217 @@
+// Map between hexadecimal Unicode values and characters, replacing the Limbo
+// unicode.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Cli :: #import "zx_cli";
+
+Usage :: "unicode { [-t] hex hex ... | hexmin-hexmax ... | [-n] char ... }";
+HexDigits :: "0123456789abcdefABCDEF";
+Largest :: 0x10FFFF;
+
+// A hexadecimal number in full: blanks skipped, then digits, nothing left over.
+HexNumber :: (text: string) -> (value: s32, whole: bool) {
+    at: s64 = 0;
+    while at < text.count && (text[at] == cast(u8)32 || text[at] == cast(u8)9) { at += 1 }
+    value: s64 = 0;
+    first := at;
+    while at < text.count {
+        byte := text[at];
+        digit: s64 = -1;
+        if byte >= cast(u8)48 && byte <= cast(u8)57 { digit = cast(s64)(byte - 48) }
+        else if byte >= cast(u8)97 && byte <= cast(u8)102 { digit = cast(s64)(byte - 97) + 10 }
+        else if byte >= cast(u8)65 && byte <= cast(u8)70 { digit = cast(s64)(byte - 65) + 10 }
+        if digit < 0 { break }
+        value = value * 16 + digit;
+        if value > Largest { value = Largest }
+        at += 1;
+    }
+    return cast(s32)value, at == text.count && at > first
+}
+
+// Four lowercase hexadecimal digits, as %4.4x printed them.
+PutHex :: (value: s32) {
+    line: Vec(u8);
+    shift: s32 = 12;
+    while shift >= 0 {
+        digit := (value >> shift) & 15;
+        byte: u8 = cast(u8)48
+        if digit >= 10 { byte = cast(u8)(97 + digit - 10) }
+        if digit < 10 { byte = cast(u8)(48 + digit) }
+        unused VecPush(line, byte);
+        shift -= 4;
+    }
+    unused Cli.WriteAll(1, BuilderFinish(line));
+}
+
+// One code point as UTF-8.
+PutRune :: (value: s32) {
+    line: Vec(u8);
+    rune := cast(u32)value;
+    if rune < 0x80 {
+        unused VecPush(line, cast(u8)rune);
+    } else if rune < 0x800 {
+        unused VecPush(line, cast(u8)(0xC0 | (rune >> 6)));
+        unused VecPush(line, cast(u8)(0x80 | (rune & 0x3F)));
+    } else if rune < 0x10000 {
+        unused VecPush(line, cast(u8)(0xE0 | (rune >> 12)));
+        unused VecPush(line, cast(u8)(0x80 | ((rune >> 6) & 0x3F)));
+        unused VecPush(line, cast(u8)(0x80 | (rune & 0x3F)));
+    } else {
+        unused VecPush(line, cast(u8)(0xF0 | (rune >> 18)));
+        unused VecPush(line, cast(u8)(0x80 | ((rune >> 12) & 0x3F)));
+        unused VecPush(line, cast(u8)(0x80 | ((rune >> 6) & 0x3F)));
+        unused VecPush(line, cast(u8)(0x80 | (rune & 0x3F)));
+    }
+    unused Cli.WriteAll(1, BuilderFinish(line));
+}
+
+// True when the text begins with an accepted hexadecimal digit.
+LooksHex :: (text: string) -> bool {
+    if text.count == 0 { return false }
+    for HexDigits { if it == text[0] { return true } }
+    return false;
+}
+
+PutUsage :: () {
+    unused Cli.WriteAll(2, "usage: ");
+    unused Cli.WriteAll(2, Usage);
+    unused Cli.WriteAll(2, "\n");
+}
+
+BadRange :: (text: string) {
+    unused Cli.WriteAll(2, "unicode: bad range ");
+    unused Cli.WriteAll(2, text);
+    unused Cli.WriteAll(2, "\n");
+}
+
+BadValue :: (text: string) {
+    unused Cli.WriteAll(2, "unicode: bad unicode value ");
+    unused Cli.WriteAll(2, text);
+    unused Cli.WriteAll(2, "\n");
+}
+
+// hexmin-hexmax ranges: four-digit values, eight per line.
+Ranges :: (count: s32, first: s32) -> bool {
+    for i: first..count-1 {
+        text := Args.Operand(i);
+        if !LooksHex(text) {
+            BadRange(text);
+            return false
+        }
+        // The first number ends at the dash that introduces the upper bound.
+        dash: s64 = -1
+        for at: 0..text.count-1 {
+            if text[at] == cast(u8)45 { dash = at; break }
+        }
+        if dash <= 0 {
+            BadRange(text);
+            return false
+        }
+        minimum, whole := HexNumber(text[0:dash]);
+        if !whole || minimum < 0 || minimum > Largest {
+            BadRange(text);
+            return false
+        }
+        if dash + 1 == text.count {
+            // The Limbo original died here dereferencing the empty tail.
+            unused Cli.WriteAll(2, "unicode: bad range ");
+            unused Cli.WriteAll(2, text);
+            unused Cli.WriteAll(2, "\n");
+            return false
+        }
+        maximum, complete := HexNumber(text[dash+1:]);
+        if !complete || maximum < 0 || maximum > Largest || maximum < minimum {
+            BadRange(text);
+            return false
+        }
+        printed := 0;
+        rune := minimum;
+        while rune <= maximum {
+            PutHex(rune);
+            unused Cli.WriteAll(1, " ");
+            PutRune(rune);
+            printed += 1;
+            if rune == maximum || (printed & 7) == 0 {
+                unused Cli.WriteAll(1, "\n");
+            } else {
+                unused Cli.WriteAll(1, "\t");
+            }
+            rune += 1;
+        }
+    }
+    return true
+}
+
+// True when text holds the byte anywhere.
+Contains :: (text: string, byte: u8) -> bool {
+    for text { if it == byte { return true } }
+    return false
+}
+
+// Values: hexadecimal values of every character of each word, as %4.4x.
+Values :: (count: s32, first: s32) {
+    for i: first..count-1 {
+        word := Args.Operand(i);
+        for word {
+            PutHex(cast(s32)it);
+            unused Cli.WriteAll(1, "\n");
+        }
+    }
+}
+
+// Code points: each word is one hexadecimal value, printed as a character.
+Words :: (count: s32, first: s32, text_only: bool) -> bool {
+    for i: first..count-1 {
+        word := Args.Operand(i);
+        if !LooksHex(word) {
+            BadValue(word);
+            return false
+        }
+        value, whole := HexNumber(word);
+        if !whole || value < 0 || value > Largest {
+            BadValue(word);
+            return false
+        }
+        PutRune(value);
+        if !text_only { unused Cli.WriteAll(1, "\n") }
+    }
+    return true
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 {
+        PutUsage();
+        return 0
+    }
+    numeric := false;
+    text_only := false;
+    first: s32 = 0;
+    while first < count {
+        option := Args.Operand(first);
+        if option.count == 0 || option[0] != #char "-" { break }
+        if option == "-n" {
+            numeric = true;
+        } else if option == "-t" {
+            text_only = true;
+        }
+        first += 1
+    }
+    if first == count {
+        PutUsage();
+        return 0
+    }
+    // The Limbo dispatch: a dash anywhere in the first word means ranges,
+    // unless -n was given; a first word that does not start with a hex digit,
+    // or -n, means values; otherwise the words are code points.
+    word := Args.Operand(first);
+    if !numeric && Contains(word, #char "-") {
+        if !Ranges(count, first) { return 0 }
+    } else if numeric || !LooksHex(word) {
+        Values(count, first);
+    } else {
+        if !Words(count, first, text_only) { return 0 }
+    }
+    return 0
+}

@@ -30,7 +30,7 @@ WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [217]Case = Case.[
+cases: [229]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -292,6 +292,19 @@ fakenet/2/status
     .{tool = "tsort", input = "selfedge", out = "a\n"},
     // A real cycle is named, then the items still print and the status stays clean.
     .{tool = "tsort", input = "cyc", out = "a\nb\nc\n", err = "tsort: cycle in input\ntsort: a\ntsort: b\ntsort: c\n"},
+    // unicode: code points, hex values, ranges and the two diagnostics.
+    .{tool = "unicode", args = "0041", out = "A\n"},
+    .{tool = "unicode", args = "-t 0041 0042", out = "AB"},
+    .{tool = "unicode", args = "03b1", out = "α\n"},
+    .{tool = "unicode", args = "1F600", out = "😀\n"},
+    .{tool = "unicode", args = "-n abc", out = "0061\n0062\n0063\n"},
+    .{tool = "unicode", args = "0041-0045", out = "0041 A\t0042 B\t0043 C\t0044 D\t0045 E\n"},
+    .{tool = "unicode", args = "0041-0048", out = "0041 A\t0042 B\t0043 C\t0044 D\t0045 E\t0046 F\t0047 G\t0048 H\n"},
+    .{tool = "unicode", args = "0048-0041", err = "unicode: bad range 0048-0041\n"},
+    .{tool = "unicode", args = "zz", out = "007a\n007a\n"},
+    .{tool = "unicode", args = "0041 zz", out = "A\n", err = "unicode: bad unicode value zz\n"},
+    .{tool = "unicode", err = "usage: unicode { [-t] hex hex ... | hexmin-hexmax ... | [-n] char ... }\n"},
+    .{tool = "unicode", args = "-n", err = "usage: unicode { [-t] hex hex ... | hexmin-hexmax ... | [-n] char ... }\n"},
 ];
 
 failures: s32;
