@@ -1973,6 +1973,15 @@ zxio(void *context, const char *module, const char *function,
 			return zxioerror(command, result, "invalid file name");
 		return kremove(path) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
 	}
+	if(strcmp(function, "Chdir") == 0){
+		char path[ZxGuestPathBytes + 1];
+
+		if(n != 1 || args[0].kind != HOST_STRING)
+			return 0;
+		if(!zxiopath(args, path) || path[0] == 0)
+			return zxioerror(command, result, "invalid file name");
+		return kchdir(path) < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
+	}
 	if(strcmp(function, "Cwd") == 0 || strcmp(function, "Home") == 0){
 		if(n != 0)
 			return 0;
@@ -3221,7 +3230,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		"PresentOpaqueRows", "PresentOpaqueStrip", "PresentRGBStrip", "PointerMillis"};
 	static const char *io[] = {"Open", "Create", "Read", "Write", "Seek", "Stat", "Close", "Error",
 		"StatPacked", "FstatPacked", "WstatPacked", "FdPath", "CreateNew", "Remove", "Cwd", "Home",
-		"Sync", "RenameSameDir", "PollRead"};
+		"Sync", "RenameSameDir", "PollRead", "Chdir"};
 	static const char *desktop[] = {"BindDesktop", "Capture", "LauncherAt", "WindowAt", "Launch", "WindowAction",
 		"DesktopAction", "UnixSeconds", "TimezoneOffsetSeconds", "SetChromeRegions"};
 	BundleCapabilityAbi abi;
@@ -3274,7 +3283,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			continue;
 		}
 #ifdef __linux__
-		if(!usesdis() && zxmodule(abi.module, "taijios_process")){
+		/* ZX commands run by the Dis shell's zxrun start children too. */
+		if(zxmodule(abi.module, "taijios_process")){
 			if(strcmp(abi.function, "Run") == 0 || strcmp(abi.function, "Start") == 0 ||
 			   strcmp(abi.function, "Poll") == 0 || strcmp(abi.function, "Wait") == 0 ||
 			   strcmp(abi.function, "Kill") == 0 || strcmp(abi.function, "StartWith") == 0)

@@ -5,7 +5,8 @@ IO :: #import "taijios_io";
 Namespace :: #import "taijios_namespace";
 Process :: #import "taijios_process";
 
-Self :: "/namespace.zx";
+// The probe's own path; the hosted mode receives it as an operand.
+self_path: string = "/namespace.zx";
 Greeting :: "hello from ZX\n";
 Root :: 0;
 File :: 1;
@@ -247,14 +248,68 @@ Finished :: (id: s32) -> bool {
 
 Child :: (mode: string, input: s32, output: s32) -> s32 {
     operands: [1]string = .{mode};
-    launch := Process.StartWith(Self, operands[:], input, output, -1);
+    launch := Process.StartWith(self_path, operands[:], input, output, -1);
     return launch.id;
+}
+
+// Under the Dis shell's zxrun: a child on chosen streams answers through a pipe,
+// and a child blocked reading its input is killed.
+Hosted :: () -> s32 {
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 { return Fail("hosted pipe") }
+    echo := Child("echo", ends[0], ends[0]);
+    answer: [5]u8;
+    if echo <= 0 || IO.Close(ends[0]) != 0 || IO.Write(ends[1], "ping\n") != 5 || !ReadFull(ends[1], answer[:]) ||
+       !Same(answer[:], "PING\n") || IO.Write(ends[1], "quit\n") != 5 || !Finished(echo) || IO.Close(ends[1]) != 0 {
+        return Fail("hosted echo child");
+    }
+    if Namespace.Pipe(ends[:]) != 0 { return Fail("hosted second pipe") }
+    blocked := Child("block", ends[0], ends[0]);
+    if blocked <= 0 || IO.Close(ends[0]) != 0 || Process.Poll(blocked).status != -2 { return Fail("start a blocked child") }
+    if !Process.Kill(blocked) { return Fail("kill the blocked child") }
+    outcome := Process.Wait(blocked);
+    if outcome.status != -1 || outcome.error != "killed" || Process.Kill(blocked) || IO.Close(ends[1]) != 0 {
+        return Fail("killed child outcome");
+    }
+    print("ZX_HOSTED_PROCESS_OK\n");
+    return 0;
 }
 
 main :: () -> s32 {
     mode := ifx Args.OperandCount() > 0 then Args.Operand(0) else "";
     if mode == "serve" { return Serve() }
     if mode == "echo" { return Echo() }
+    if mode == "block" {
+        byte: [1]u8;
+        while IO.Read(0, byte[:]) > 0 {}
+        return 0;
+    }
+    // Start a server, mount it at the given name, and exit: the server keeps
+    // answering whoever reads the mount until the last mount is gone.
+    if mode == "mountout" {
+        if Args.OperandCount() != 3 { return Fail("mountout needs the probe path and a mount point") }
+        self_path = Args.Operand(1);
+        ends: [2]s32;
+        if Namespace.Pipe(ends[:]) != 0 || Child("serve", ends[0], ends[0]) <= 0 || IO.Close(ends[0]) != 0 ||
+           Namespace.Mount(ends[1], -1, Args.Operand(2), Namespace.Replace, "") != 0 || IO.Close(ends[1]) != 0 {
+            return Fail("mount a server and leave it running");
+        }
+        return 0;
+    }
+    if mode == "cd" {
+        // Relative names resolve against the directory Chdir selects.
+        if Args.OperandCount() != 2 || IO.Chdir(Args.Operand(1)) != 0 || IO.Cwd() != Args.Operand(1) ||
+           IO.Chdir("/no/such/directory") != -1 || IO.Cwd() != Args.Operand(1) || !Greets("hello") {
+            return Fail("change directory");
+        }
+        print("ZX_CHDIR_OK\n");
+        return 0;
+    }
+    if mode == "hosted" {
+        if Args.OperandCount() != 2 { return Fail("hosted mode needs the probe path") }
+        self_path = Args.Operand(1);
+        return Hosted();
+    }
     if mode == "share" { return ifx Namespace.Bind("/n/served", "/n/shared", Namespace.Replace) == 0 then 0 else 7 }
     if mode == "private" {
         if !Namespace.Fork() { return 8 }
@@ -265,7 +320,7 @@ main :: () -> s32 {
     ends: [2]s32;
     if Namespace.Pipe(ends[:]) != 0 || ends[0] < 3 || ends[1] < 3 || ends[0] == ends[1] { return Fail("create a pipe") }
     none: [0]string;
-    if Process.StartWith(Self, none[:], 99, -1, -1).id != 0 { return Fail("start with an unknown handle") }
+    if Process.StartWith(self_path, none[:], 99, -1, -1).id != 0 { return Fail("start with an unknown handle") }
     server := Child("serve", ends[0], ends[0]);
     if server <= 0 || IO.Close(ends[0]) != 0 { return Fail("start the file server on the pipe") }
     if Namespace.Mount(ends[1], -1, "/n/missing", Namespace.Replace, "") != -1 || Namespace.Error() == "" {

@@ -9,6 +9,10 @@ CreateNew :: (path: string, mode: s32, permissions: s32) -> s32 #foreign host_ap
 Remove :: (path: string) -> s32 #foreign host_api;
 // An empty path means unavailable. Home reads the guest's `home` variable.
 Cwd :: () -> string #foreign host_api;
+// Make a directory the current one, so relative names resolve against it.
+// The current directory belongs to the namespace: processes that share it
+// see the change. Returns 0 or -1.
+Chdir :: (path: string) -> s32 #foreign host_api;
 Home :: () -> string #foreign host_api;
 Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 // Read without waiting: the bytes read, 0 at the end of the file, -2 when

@@ -58,8 +58,11 @@ calling process a private copy of its namespace, as `pctl FORKNS` does.
 A file server runs in its own process: start it with `StartWith` on one end
 of a pipe and mount the other end. `taijios_io.PollRead` reads from any
 handle without waiting and returns -2 while nothing has arrived, so one
-process can watch several pipes or connections. These calls also work in ZX
-commands run from the Dis shell; starting processes needs the direct ZX guest.
+process can watch several pipes or connections. These calls, and starting,
+waiting for and killing children, also work in ZX commands run from the Dis
+shell. A child keeps running after its parent exits, so a server can stay
+mounted. `taijios_io.Chdir` changes the current directory that relative names
+resolve against; processes sharing the namespace share it.
 `MountAsync` starts a mount beside its caller, which lets one process serve
 a tree and attach it too, and `Export` serves part of the namespace to a 9P
 client on a handle. `appl/cmd/taijios_file2chan.zi` builds on these to give a

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let ZX commands run from the Dis shell start, wait for and kill children, and let ZX programs change their current directory.
+
 - Ship System Log only as ZX and remove its Dis version.
 
 - Ship Memory Monitor only as ZX and remove its Dis version.

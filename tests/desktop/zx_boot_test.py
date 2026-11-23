@@ -5,6 +5,7 @@ import io
 import os
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -505,8 +506,42 @@ def check_namespace(root, env, boot):
     result = boot('/namespace.zx')
     assert result.returncode == 0 and 'ZX_NAMESPACE_OK' in result.stdout and not result.stderr, result
     assert 'Initial Dis:' not in result.stdout, result
+    (root / 'cdtest').mkdir()
+    (root / 'cdtest/hello').write_text('hello from ZX\n', encoding='ascii')
+    result = boot('/namespace.zx', 'cd', '/cdtest')
+    assert result.returncode == 0 and 'ZX_CHDIR_OK' in result.stdout and not result.stderr, result
     print('Without Dis, a ZX child served a 9P tree on a pipe given as its standard streams; its parent mounted, '
           'read, bound and unmounted the tree, forked a namespace, and polled a pipe')
+
+
+def check_hosted_process(emulator, root, env):
+    """ZX commands run by the Dis shell start, kill and detach children too."""
+    zxrun = ROOT / 'dis/zxrun.dis'
+    assert zxrun.exists(), 'install the Dis zxrun command first: (cd appl/cmd && mk zxrun.install)'
+    probe = '/' + (root / 'namespace.zx').relative_to(ROOT).as_posix()
+    mount = root / 'hosted-mount'
+    mount.mkdir()
+    guest_mount = '/' + mount.relative_to(ROOT).as_posix()
+    script = (f'zxrun -s {probe} hosted {probe}; zxrun -s {probe} mountout {probe} {guest_mount}; '
+              f'cat {guest_mount}/hello; unmount {guest_mount}; echo HOSTED_DONE')
+    # The emulator keeps running after the shell script, so read up to its last line.
+    with subprocess.Popen([emulator, '-r', ROOT, '/dis/sh.dis', '-c', script], env=env, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True) as shell:
+        output = bytearray()
+        deadline = time.monotonic() + 30
+        try:
+            while b'HOSTED_DONE\n' not in output:
+                assert time.monotonic() < deadline, bytes(output)
+                if select.select([shell.stdout], [], [], 0.2)[0]:
+                    data = shell.stdout.read1(4096)
+                    assert data, bytes(output)
+                    output.extend(data)
+        finally:
+            os.killpg(shell.pid, signal.SIGKILL)
+    lines = output.decode().splitlines()
+    assert lines == ['ZX_HOSTED_PROCESS_OK', 'hello from ZX', 'HOSTED_DONE'], bytes(output)
+    print('Under the Dis shell, a ZX command started children on chosen streams, killed a blocked one, and left a '
+          'mounted server running after it exited')
 
 
 def check_services(root, env, boot):
@@ -766,6 +801,7 @@ def main():
         assert tasks.returncode == 0 and 'ZX_TASKS_OK' in tasks.stdout and not tasks.stderr, tasks
         print('Without Dis, the task list showed running ZX processes and terminated one through the kill path')
         check_namespace(root, env, boot)
+        check_hosted_process(emulator, root, env)
         check_services(root, env, boot)
         check_keyring(root, env, boot)
         if args.graphics:
