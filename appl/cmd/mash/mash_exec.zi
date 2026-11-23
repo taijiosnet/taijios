@@ -702,6 +702,14 @@ XeqCmdWait :: (x: *Exec, start: s32, wait: bool) -> Text {
             ReportItem(x, c, "rescue not implemented");
             return NoText()
         }
+        if op == CDEPEND {
+            if dependhook != null { unused dependhook(x, c) }
+            return NoText()
+        }
+        if op == CRULE {
+            if rulehook != null { unused rulehook(x, c) }
+            return NoText()
+        }
         if op == CASYNC {
             return RunAsync(x, c)
         }
@@ -1002,6 +1010,25 @@ DefineFn :: (x: *Exec, c: s32) {
     SetSym(*x.env.global, name, SFUNC, *empty, cmds[c].left, "")
 }
 
+// The make statement and builtin hooks, bound by mash_make through the
+// program, since mash_make imports this module and cannot be imported here.
+DependHook :: #type (x: *Exec, c: s32) -> bool;
+RuleHook :: #type (x: *Exec, c: s32) -> bool;
+MakeBuiltinHook :: #type (x: *Exec, name: string, words: *Vec(Text)) -> Text;
+MakeIsHook :: #type (name: string) -> bool;
+
+dependhook: DependHook;
+rulehook: RuleHook;
+makehook: MakeBuiltinHook;
+makeishook: MakeIsHook;
+
+BindMake :: (depend: DependHook, rule: RuleHook, run: MakeBuiltinHook, is: MakeIsHook) {
+    dependhook = depend;
+    rulehook = rule;
+    makehook = run;
+    makeishook = is
+}
+
 // eval runs its words as mash input; the program binds this to its own
 // source parser so a file and a string share one implementation.
 EvalInput :: (e: *Env, words: *Vec(Text)) -> Text {
@@ -1014,6 +1041,9 @@ EvalInput :: (e: *Env, words: *Vec(Text)) -> Text {
 RunBuiltin :: (x: *Exec, name: string, words: *Vec(Text)) -> Text {
     if Builtins.IsBuiltin(name) {
         return Builtins.RunBuiltin(*x.env, name, words, EvalInput);
+    }
+    if makehook != null && makeishook != null && makeishook(name) {
+        return makehook(x, name, words)
     }
     if name == "true" { return NoText() }
     if name == "exit" { return TextCopy("exit") }

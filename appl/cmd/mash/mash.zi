@@ -19,6 +19,7 @@ Ns :: #import "taijios_namespace";
 #import "mash_parse";
 #import "mash_exec";
 Builtins :: #import "mash_builtins";
+Make :: #import "mash_make";
 
 // What a parse needs: one Exec and one Parser for the whole run.
 context: Exec;
@@ -156,6 +157,8 @@ main :: () -> s32 {
     // The builtins are compiled in; registering them makes the names
     // resolve to this module.
     Builtins.RegisterAll(*context.env.global);
+    Make.RegisterMake(*context.env.global);
+    BindMake(Make.Depend, Make.MashRule, Make.RunMakeBuiltin, Make.IsMakeBuiltin);
     empty: Vec(Text);
     unused empty;
     // The parse actions need the evaluator's entry points.

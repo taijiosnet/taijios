@@ -197,7 +197,8 @@ LoadBuiltin :: (e: *Env, words: *Vec(Text)) -> Text {
         return TextCopy("usage")
     }
     name := TextView(words.*[1]);
-    if IsBuiltin(name) { return NoText() }
+    // The make builtin module is compiled in too.
+    if IsBuiltin(name) || name == "make" { return NoText() }
     msg: Vec(u8);
     BuilderPrint(*msg, "%: cannot load: no ZX builtin module of that name\n", name);
     unused WriteAll(e.fds[2], TextView(msg[:]));

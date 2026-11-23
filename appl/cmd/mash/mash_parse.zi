@@ -365,10 +365,6 @@ Reduce :: (p: *Parser, prod: s32, stack: []Stack, yypt: s32, yyp: s32, out: *SVa
         PoolList(stack[first].val, *slist);
         yyval.cmd = p.act.mksimple(*slist);
         got = true;
-    } else if prod == 16 {
-        // simple: asimple Lcolon list cobrace
-        unused p;
-        got = true;
     }
     if !got {
         // Productions 17 to 74 are written below, in the same order.

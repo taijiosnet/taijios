@@ -1,0 +1,549 @@
+// mash's rules and dependencies, after appl/cmd/mash/depends.b: the ":" and
+// ":~" statements, target matching, the implicit-rule search, and the make
+// builtin with depends, match and rules.
+//
+// mash's trees are pointers; here every node is an index in an arena, so a
+// Rule names its parts and a dependency list is a range in a pool.
+#import "std/vec";
+Io :: #import "taijios_io";
+#import "shell_util";
+#import "mash_ast";
+#import "mash_lex";
+#import "mash_env";
+#import "mash_value";
+Exec :: #import "mash_exec";
+
+#scope_export
+
+// The hash size of the target table, as mash's DHASH.
+DHASH :: 127;
+// The node table's size, as make.b's NSIZE.
+NSIZE :: 127;
+
+// A dependency: targets, what they depend on, and the commands.
+Depend :: struct {
+    targets_at: s32;
+    targets_count: s32;
+    depends_at: s32;
+    depends_count: s32;
+    // The command operator and body, as c.left.
+    op: s32;
+    cmd: s32;
+    mark: bool;
+}
+
+// A rule: the left-hand pattern, its path elements and the right side.
+Rule :: struct {
+    lhs: Text;
+    lhs_at: s32;
+    lhs_count: s32;
+    rhs: s32;
+    op: s32;
+    cmd: s32;
+}
+
+// A target in the dependency table.
+Target :: struct {
+    name: Text;
+    deps_at: s32;
+    deps_count: s32;
+}
+
+// Node states, as make.b.
+SUNKNOWN :: 0;
+SNOEXIST :: 1;
+SEXIST :: 2;
+SSTALE :: 3;
+SMADE :: 4;
+SDIR :: 5;
+SDIRLOAD :: 6;
+
+Node :: struct {
+    name: Text;
+    state: s32;
+    mark: bool;
+    mtime: s32;
+}
+
+// One step of an implicit chain.
+Step :: struct {
+    rule: s32;
+    args_at: s32;
+    args_count: s32;
+    node: s32;
+}
+
+// A candidate chain: the node it would build and the steps to build it.
+Match :: struct {
+    node: s32;
+    steps_at: s32;
+    steps_count: s32;
+}
+
+Rules :: struct {
+    // The dependency table: DHASH buckets of target indices.
+    thash: [DHASH]Vec(s32);
+    deps: Vec(Depend);
+    // Text pools for the dependency names.
+    names: Vec(Text);
+    targets: Vec(Target);
+    // The rules, newest last, as mash's list.
+    rules: Vec(Rule);
+    lhsnames: Vec(Text);
+    // The make node table.
+    nodes: Vec(Node);
+    ntab: [NSIZE]Vec(s32);
+    ready: bool;
+}
+
+#scope_file
+
+// The one rule set for the process, as mash's file-scope tables.
+set: Rules;
+
+#scope_export
+
+// initdep: forget every dependency and rule.
+InitDep :: () {
+    for i: 0..DHASH - 1 { VecClear(set.thash[i]) }
+    VecClear(set.deps);
+    VecClear(set.names);
+    VecClear(set.targets);
+    VecClear(set.rules);
+    VecClear(set.lhsnames);
+    set.ready = true;
+}
+
+// Add a name to the pool and return its index.
+AddName :: (s: string, from: s64) -> (index: s32, next: s64) {
+    VecPush(set.names, TextCopy(s));
+    at := cast(s32)(set.names.count - 1);
+    return at, from + 1
+}
+
+// A target entry, added when asked for.
+TargetAt :: (name: string, insert: bool) -> s32 {
+    b := HashName(name, DHASH);
+    for i: 0..set.thash[b].count - 1 {
+        t := set.thash[b][i];
+        if TextView(set.targets[t].name) == name { return t }
+    }
+    if !insert { return -1 }
+    entry: Target;
+    unused BuilderAppend(entry.name.bytes, name);
+    entry.deps_at = cast(s32)set.deps.count;
+    entry.deps_count = 0;
+    VecPush(set.targets, entry);
+    t := cast(s32)(set.targets.count - 1);
+    VecPush(set.thash[b], t);
+    return t
+}
+
+TargetFind :: (name: string) -> s32 {
+    return TargetAt(name, false)
+}
+
+// Add a dependency to a target's list.
+AddDep :: (name: string, d: s32) {
+    t := TargetAt(name, true);
+    if t < 0 { return }
+    // The list is a contiguous range: append, and widen it.
+    if set.targets[t].deps_count == 0 { set.targets[t].deps_at = cast(s32)set.deps.count }
+    // One entry per dependency reference; the target's range is the run.
+    VecPush(set.deps, set.deps[t]);
+    set.targets[t].deps_count = cast(s32)(set.deps.count - cast(s64)set.targets[t].deps_at);
+}
+
+// Lhs of a rule split at "/", as rulelhs and tokenize.
+SplitPath :: (s: string, out: *Vec(Text)) {
+    VecClear(<<out);
+    parts := Tokenize(s, "/");
+    for i: 0..parts.count - 1 { VecPush(<<out, TextCopy(TextView(parts[i]))) }
+}
+
+// matchelem: "*" matches any run inside one path element. The loop after a
+// star tries the rest of the pattern against successively shorter tails, as
+// mash's do..while with ++i does.
+MatchElem :: (p: string, s: string) -> bool {
+    m := p.count;
+    n := s.count;
+    if m == n && p == s { return true }
+    i: s64;
+    while i < m {
+        if p[i] == #char "*" {
+            j := i + 1;
+            if j == m { return true }
+            rest := p[j:];
+            while true {
+                if MatchElem(rest, s[i:]) { return true }
+                i += 1;
+                if i >= n { break }
+            }
+            return false
+        } else if i >= n || p[i] != s[i] { return false }
+        i += 1
+    }
+    return false
+}
+
+// matches: a path element match that also reports the captured runs.
+Matches :: (p: string, s: string, caps: *Vec(Text)) -> bool {
+    m := p.count;
+    n := s.count;
+    i: s64;
+    while i < m {
+        if p[i] == #char "*" {
+            j := i + 1;
+            if j == m {
+                VecPush(<<caps, TextCopy(s[i:]));
+                return true
+            }
+            rest := p[j:];
+            k := i;
+            while k <= n {
+                sub: Vec(Text);
+                if Matches(rest, s[k:], *sub) {
+                    VecPush(<<caps, TextCopy(s[j - 1:k]));
+                    for q: 0..sub.count - 1 { VecPush(<<caps, TextCopy(TextView(sub[q]))) }
+                    return true
+                }
+                k += 1
+            }
+            return false
+        } else if i >= n || p[i] != s[i] { return false }
+        i += 1
+    }
+    return m == n
+}
+
+// RuleMatch: whether a rule's pattern matches a path.
+RuleMatches :: (r: s32, path: string) -> bool {
+    parts := Tokenize(path, "/");
+    if set.rules[r].lhs_count != parts.count { return false }
+    absolute := path.count > 0 && path[0] == #char "/"
+    lhs_absolute := set.rules[r].lhs.bytes.count > 0 && set.rules[r].lhs.bytes[0] == #char "/"
+    if absolute != lhs_absolute { return false }
+    for i: 0..parts.count - 1 {
+        pat := TextView(set.lhsnames[cast(s64)set.rules[r].lhs_at + i]);
+        if !MatchElem(pat, TextView(parts[i])) { return false }
+    }
+    return true
+}
+
+// Rules that match a path, newest first, as rulematch.
+RuleMatch :: (path: string) -> Vec(s32) {
+    out: Vec(s32);
+    k := set.rules.count - 1;
+    while k >= 0 {
+        if RuleMatches(cast(s32)k, path) { VecPush(out, cast(s32)k) }
+        k -= 1
+    }
+    return out
+}
+
+// When a rule matches, the $n captures its pattern produced.
+RuleCaptures :: (r: s32, path: string, out: *Vec(Text)) -> bool {
+    VecClear(<<out)
+    VecPush(<<out, TextCopy(path))
+    parts := Tokenize(path, "/");
+    if set.rules[r].lhs_count != parts.count { return false }
+    for i: 0..parts.count - 1 {
+        pat := TextView(set.lhsnames[cast(s64)set.rules[r].lhs_at + i]);
+        caps: Vec(Text);
+        if !Matches(pat, TextView(parts[i]), *caps) { return false }
+        // Reversed, as Rule.matches collects them.
+        k := caps.count - 1
+        while k >= 0 { VecPush(<<out, TextCopy(TextView(caps[k]))); k -= 1 }
+    }
+    return true
+}
+
+// The ":" statement, as Cmd.depend: evaluate both sides and record a
+// dependency for every target on the left.
+Depend :: (x: *Exec.Exec, c: s32) -> bool {
+    if (x.env.flags & ETOP) == 0 {
+        Exec.ExecError(x, "dependency not at top level\n");
+        return false
+    }
+    set.ready = true;
+    lhs_items: Vec(s32);
+    for i: 0..cast(s64)cmds[c].words_count - 1 { VecPush(lhs_items, WordAt(c, i)) }
+    left: Vec(Text);
+    if !Exec.EvalWords(x, *lhs_items, *left) { return false }
+    right: Vec(Text);
+    if cmds[c].left >= 0 && cmds[cmds[c].left].words_count > 0 {
+        rhs_items: Vec(s32);
+        for i: 0..cast(s64)cmds[cmds[c].left].words_count - 1 { VecPush(rhs_items, WordAt(cmds[c].left, i)) }
+        if !Exec.EvalWords(x, *rhs_items, *right) { return false }
+    }
+    // The dependency's own names are a range in the shared pool.
+    d: Depend;
+    d.op = cmds[cmds[c].left].op;
+    d.cmd = cmds[cmds[c].left].left;
+    d.mark = false;
+    d.targets_at = cast(s32)set.names.count;
+    for i: 0..left.count - 1 { VecPush(set.names, TextCopy(TextView(left[i]))) }
+    d.targets_count = cast(s32)left.count;
+    d.depends_at = cast(s32)set.names.count;
+    for i: 0..right.count - 1 { VecPush(set.names, TextCopy(TextView(right[i]))) }
+    d.depends_count = cast(s32)right.count;
+    // One Depend per statement, shared by every target it names.
+    VecPush(set.deps, d);
+    dep := cast(s32)(set.deps.count - 1);
+    for i: 0..left.count - 1 {
+        name := TextView(set.names[cast(s64)d.targets_at + i]);
+        t := TargetAt(name, true);
+        if t < 0 { continue }
+        if set.targets[t].deps_count == 0 { set.targets[t].deps_at = dep }
+        set.targets[t].deps_count = cast(s32)(cast(s64)dep - cast(s64)set.targets[t].deps_at + 1);
+    }
+    return true
+}
+
+// A target's dependency indices.
+TargetDeps :: (t: s32, out: *Vec(s32)) {
+    VecClear(<<out);
+    for i: 0..set.targets[t].deps_count - 1 {
+        VecPush(<<out, cast(s32)(cast(s64)set.targets[t].deps_at + i))
+    }
+}
+
+// The dependency's target names.
+DependTargets :: (d: s32, out: *Vec(Text)) {
+    VecClear(<<out);
+    for i: 0..set.deps[d].targets_count - 1 {
+        VecPush(<<out, TextCopy(TextView(set.names[cast(s64)set.deps[d].targets_at + i])))
+    }
+}
+
+DependNames :: (d: s32, out: *Vec(Text)) {
+    VecClear(<<out);
+    for i: 0..set.deps[d].depends_count - 1 {
+        VecPush(<<out, TextCopy(TextView(set.names[cast(s64)set.deps[d].depends_at + i])))
+    }
+}
+
+// The ":" statement's two sides need their counts, which Depend fills in.
+DependCounts :: (d: s32, targets: s32, depends: s32) {
+    set.deps[d].targets_count = targets;
+    set.deps[d].depends_count = depends
+}
+
+// The ":~" statement, as Cmd.rule: record a rule with its left pattern and
+// its unevaluated right side.
+MashRule :: (x: *Exec.Exec, c: s32) -> bool {
+    // Recording a rule starts the tables, as mash's global list does.
+    set.ready = true;
+    if (x.env.flags & ETOP) == 0 {
+        Exec.ExecError(x, "rule not at top level\n");
+        return false
+    }
+    item := cmds[c].item;
+    if item < 0 { return false }
+    first := Exec.FirstPass(x, item);
+    if first < 0 { return false }
+    pattern := Exec.SecondPass(x, first);
+    if pattern.list.count != 0 {
+        Exec.ExecError(x, "rule pattern evaluates to a list\n");
+        return false
+    }
+    if pattern.word.bytes.count == 0 {
+        Exec.ExecError(x, "rule pattern evaluates to nil\n");
+        return false
+    }
+    r: Rule;
+    VecSwap(r.lhs.bytes, pattern.word.bytes);
+    parts := Tokenize(TextView(r.lhs), "/");
+    r.lhs_at = cast(s32)set.lhsnames.count;
+    for i: 0..parts.count - 1 { VecPush(set.lhsnames, TextCopy(TextView(parts[i]))) }
+    r.lhs_count = cast(s32)parts.count;
+    // The rule node's body is the braced command; its item is the pattern
+    // the right side is matched against.
+    body := cmds[c].left;
+    if body < 0 { return false }
+    r.op = cmds[body].op;
+    r.cmd = cmds[body].left;
+    r.rhs = cmds[body].item;
+    if r.rhs < 0 { r.rhs = item }
+    VecPush(set.rules, r);
+    return true
+}
+
+// prcmd: a dependency's command body, or {} when it has none.
+PrCmd :: (out: *Vec(u8), op: s32, c: s32) {
+    if op == CLISTGROUP { VecPush(<<out, #char ":") }
+    if c >= 0 {
+        unused BuilderAppend(<<out, "{ ")
+        CmdTextOut(c, out);
+        unused BuilderAppend(<<out, " }")
+    } else {
+        unused BuilderAppend(<<out, "{}")
+    }
+}
+
+// prwords: the names, quoted, separated as mash writes them.
+PrWords :: (out: *Vec(u8), names: *Vec(Text), pre: bool) {
+    for i: 0..names.count - 1 {
+        if pre { VecPush(<<out, 32) }
+        q: Text = QuoteIfNeeded(TextView(names.*[i]));
+        unused BuilderAppend(<<out, TextView(q));
+        if !pre { VecPush(<<out, 32) }
+    }
+}
+
+// prdep: one dependency.
+PrDep :: (out: *Vec(u8), d: s32) {
+    targets: Vec(Text);
+    DependTargets(d, *targets)
+    PrWords(out, *targets, false)
+    VecPush(<<out, #char ":")
+    depends: Vec(Text);
+    DependNames(d, *depends)
+    PrWords(out, *depends, true)
+    if set.deps[d].op != CNOP {
+        VecPush(<<out, 32)
+        PrCmd(out, set.deps[d].op, set.deps[d].cmd)
+    }
+    unused BuilderAppend(<<out, ";\n")
+}
+
+// prrule: one rule.
+PrRule :: (out: *Vec(u8), r: s32) {
+    unused BuilderAppend(<<out, TextView(set.rules[r].lhs))
+    unused BuilderAppend(<<out, " :~ ")
+    ItemTextOut(set.rules[r].rhs, out)
+    VecPush(<<out, 32)
+    PrCmd(out, set.rules[r].op, set.rules[r].cmd)
+    unused BuilderAppend(<<out, ";\n")
+}
+
+// all deps, each printed once, as alldeps' two passes.
+AllDeps :: (out: *Vec(u8)) {
+    // alldeps walks the target buckets in order and each target's dependency
+    // list newest first, printing every dependency once.
+    for i: 0..set.deps.count - 1 { set.deps[i].mark = false }
+    for b: 0..DHASH - 1 {
+        for i: 0..set.thash[b].count - 1 {
+            t := set.thash[b][i];
+            k := set.targets[t].deps_count - 1;
+            while k >= 0 {
+                d := cast(s32)(cast(s64)set.targets[t].deps_at + k);
+                if !set.deps[d].mark {
+                    PrDep(out, d)
+                    set.deps[d].mark = true
+                }
+                k -= 1
+            }
+        }
+    }
+}
+
+// depends [name ...]: the dependencies of the names, or every one.
+DependsOf :: (out: *Vec(u8), names: *Vec(Text)) {
+    for i: 0..names.count - 1 {
+        name := TextView(names.*[i]);
+        unused BuilderAppend(<<out, name)
+        unused BuilderAppend(<<out, ":\n")
+        t := TargetAt(name, false);
+        if t >= 0 {
+            deps: Vec(s32);
+            TargetDeps(t, *deps)
+            for k: 0..deps.count - 1 { PrDep(out, deps[k]) }
+        }
+    }
+}
+
+// AllRules and RulesMatching print the rules mash prints.
+AllRules :: (out: *Vec(u8)) {
+    // mash keeps rules newest first, as "rules" printed them.
+    k := set.rules.count - 1;
+    while k >= 0 { PrRule(out, cast(s32)k); k -= 1 }
+}
+
+RulesMatching :: (out: *Vec(u8), names: *Vec(Text)) {
+    for i: 0..names.count - 1 {
+        name := TextView(names.*[i]);
+        unused BuilderAppend(<<out, name)
+        unused BuilderAppend(<<out, ":\n")
+        found: Vec(s32) = RuleMatch(name);
+        for k: 0..found.count - 1 { PrRule(out, found[k]) }
+    }
+}
+
+// MatchDetails prints what each rule's pattern captured, for "match".
+MatchDetails :: (x: *Exec.Exec, out: *Vec(u8), names: *Vec(Text)) {
+    for i: 0..names.count - 1 {
+        name := TextView(names.*[i]);
+        BuilderPrint(out, "%:\n", name);
+        found: Vec(s32) = RuleMatch(name);
+        for k: 0..found.count - 1 {
+            r := found[k];
+            BuilderPrint(out, "\tlhs %\n", TextView(set.rules[r].lhs));
+            caps: Vec(Text);
+            if RuleCaptures(r, name, *caps) {
+                for j: 0..caps.count - 1 { BuilderPrint(out, "\t$% '%'\n", j, TextView(caps[j])) }
+                // The rule's right side, evaluated with those captures.
+                body := set.rules[r].rhs;
+                saved: Vec(Text);
+                for k: 0..x.env.args.count - 1 { VecPush(saved, TextCopy(TextView(x.env.args[k]))) }
+                VecClear(x.env.args);
+                for j: 1..caps.count - 1 { VecPush(x.env.args, TextCopy(TextView(caps[j]))) }
+                x.env.hasargs = x.env.args.count > 0;
+                v := Exec.SecondPass(x, body);
+                if v.word.bytes.count != 0 { BuilderPrint(out, "\trhs '%'\n", TextView(v.word)) }
+                else { BuilderPrint(out, "\trhs list %\n", v.list.count) }
+                RestoreArgs(*x.env, *saved)
+                if set.rules[r].cmd >= 0 {
+                    VecPush(<<out, 9);
+                    PrCmd(out, set.rules[r].op, set.rules[r].cmd)
+                    BuilderPrint(out, ";\n");
+                }
+            } else {
+                unused BuilderAppend(<<out, "\tcock up\n")
+            }
+        }
+    }
+}
+
+// The environment's argument list is restored after match's rule ran.
+RestoreArgs :: (e: *Env, saved: *Vec(Text)) {
+    VecSwap(e.args, saved.*);
+}
+
+// IsMakeBuiltin: the names this module defines.
+IsMakeBuiltin :: (name: string) -> bool {
+    return name == "make" || name == "depends" || name == "match" || name == "rules"
+}
+
+// RunMakeBuiltin runs depends, match or rules; make itself needs the node
+// builder and reports that it is not available yet.
+RunMakeBuiltin :: (x: *Exec.Exec, name: string, words: *Vec(Text)) -> Text {
+    // Never re-initialize here: InitDep forgets the rules and dependencies
+    // the script has already recorded.
+    caninit := !set.ready;
+    if caninit { InitDep() }
+    names: Vec(Text);
+    for i: 1..words.count - 1 { VecPush(names, TextCopy(TextView(words.*[i]))) }
+    out: Vec(u8);
+    if name == "depends" {
+        if names.count == 0 { AllDeps(*out) } else { DependsOf(*out, *names) }
+    } else if name == "rules" {
+        if names.count == 0 { AllRules(*out) } else { RulesMatching(*out, *names) }
+    } else if name == "match" {
+        MatchDetails(x, *out, *names)
+    } else {
+        Exec.ExecError(x, "make: the build builtin is not ported yet\n");
+        return TextCopy("failed")
+    }
+    unused WriteAll(x.env.fds[1], TextView(out[:]));
+    return TextCopy("")
+}
+
+// RegisterMake defines the make builtins in a table.
+RegisterMake :: (t: *Stab) {
+    names := string.["make", "depends", "match", "rules"];
+    for names {
+        empty: Vec(Text);
+        SetSym(t, it, SBUILTIN, *empty, -1, "make");
+    }
+}

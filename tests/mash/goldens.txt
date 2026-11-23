@@ -112,3 +112,19 @@ err:
 status: \n
 out: fn hello { quote hi; };\n
 err: 
+=== a dependency prints with depends
+status: \n
+out: bar:\nbar : { quote build bar; };\n
+err: 
+=== dependencies keep their order
+status: \n
+out: all : foo bar { quote building all; };\nbar : { quote build bar; };\nfoo : bar { quote build foo; };\n
+err: 
+=== an implicit rule prints with rules
+status: \n
+out: %.o :~ %.c { quote compile $1; };\n
+err: 
+=== rules and depends together
+status: \n
+out: foo.o : bar.o { quote link $1; };\n
+err: 

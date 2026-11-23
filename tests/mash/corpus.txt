@@ -139,3 +139,29 @@ whatis wq;
 script:
 fn hello { quote hi };
 whatis hello;
+
+=== a dependency prints with depends
+script:
+load make;
+bar : { quote build bar };
+depends bar;
+
+=== dependencies keep their order
+script:
+load make;
+all : foo bar { quote building all };
+foo : bar { quote build foo };
+bar : { quote build bar };
+depends;
+
+=== an implicit rule prints with rules
+script:
+load make;
+%.o :~ %.c { quote compile $1 };
+rules;
+
+=== rules and depends together
+script:
+load make;
+foo.o : bar.o { quote link $1 };
+depends;
