@@ -1,0 +1,237 @@
+// The small builtin modules: echo (appl/cmd/sh/echo.b), test with its
+// report builtin (appl/cmd/sh/test.b and appl/lib/itslib.b) and arg
+// (appl/cmd/sh/arg.b).
+#import "std/vec";
+Io :: #import "taijios_io";
+Clock :: #import "taijios_clock";
+#import "shell_util";
+#import "shell";
+
+#scope_file
+
+EchoText :: (args: *Items) -> Text {
+    i: s64 = 1;
+    nonewline := false;
+    if args.count > 1 {
+        w := TextView(args.*[1].word);
+        if w == "-n" || w == "--" {
+            nonewline = w == "-n";
+            i = 2;
+        }
+    }
+    s: Vec(u8);
+    for k: i..args.count - 1 {
+        if k > i { VecPush(s, 32) }
+        t: Text = ItemText(args, k);
+        unused BuilderAppend(s, TextView(t));
+    }
+    if !nonewline { VecPush(s, 10) }
+    if !Print(TextView(s[:])) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "echo: write error: %\n", Io.Error());
+        unused PrintErr(TextView(msg[:]));
+        return TextCopy("write error");
+    }
+    return TextCopy("");
+}
+
+ReportUsage :: () { Fail("usage", "usage: report INF|WRN|ERR|FTL verbosity message[...]") }
+
+// Tconfig.report: "<severity><verbosity><message>" on $ITS_MFD, else fd 2.
+ReportText :: (args: *Items) -> Text {
+    if args.count < 4 { ReportUsage(); return TextCopy("") }
+    sevs := string.["INF", "WRN", "ERR", "FTL"];
+    sev: s64 = -1;
+    for k: 0..sevs.count - 1 { if TextView(args.*[1].word) == sevs[k] { sev = k } }
+    if sev < 0 { ReportUsage(); return TextCopy("") }
+    verb := LimboInt(TextView(args.*[2].word));
+    line: Vec(u8);
+    BuilderPrint(*line, "%", sev);
+    BuilderPrint(*line, "%", verb);
+    for k: 3..args.count - 1 {
+        if k > 3 { VecPush(line, 32) }
+        unused BuilderAppend(line, TextView(args.*[k].word));
+    }
+    VecPush(line, 10);
+    if reportfd >= 0 { unused Out(reportfd, TextView(line[:])) }
+    return TextCopy("");
+}
+
+// Where report writes: fd 2, or the descriptor that $ITS_MFD names.
+reportfd: s32 = 2;
+
+// itslib's init: with $ITS_VERBOSITY and $ITS_MFD set it reports the start
+// time there, else says the test runs standalone.
+ReportInit :: () {
+    reportfd = 2;
+    verbosity: Text;
+    mfd: Text;
+    if ReadWhole("/env/ITS_VERBOSITY", *verbosity) && ReadWhole("/env/ITS_MFD", *mfd) &&
+        verbosity.bytes.count != 0 && mfd.bytes.count != 0 {
+        reportfd = cast(s32)LimboInt(TextView(mfd));
+        line: Vec(u8);
+        BuilderPrint(*line, "40%\n", Clock.MonotonicMillis());
+        unused Out(reportfd, TextView(line[:]));
+        return;
+    }
+    unused PrintErr("Test is running standalone\n");
+}
+
+// Arg: the option scanner of arg.b.
+OptState :: struct {
+    args: Items;
+    curropt: Text;
+}
+
+NextOpt :: (a: *OptState) -> s32 {
+    if a.curropt.bytes.count != 0 {
+        r, next := RuneAt(TextView(a.curropt), 0);
+        rest: Text = TextCopy(TextView(a.curropt)[next:]);
+        VecSwap(a.curropt.bytes, rest.bytes);
+        return r;
+    }
+    if a.args.count == 0 { return 0 }
+    w: Text = ItemText(*a.args, 0);
+    v := TextView(w);
+    if RuneCount(v) < 2 || v[0] != #char "-" { return 0 }
+    if v == "--" {
+        rest := Tail(*a.args, 1);
+        VecSwap(a.args, rest);
+        return 0;
+    }
+    r, next := RuneAt(v, 1);
+    if next < v.count { SetText(*a.curropt, v[next:]) }
+    rest := Tail(*a.args, 1);
+    VecSwap(a.args, rest);
+    return r;
+}
+
+// The next n option arguments, or none when there are not enough.
+OptArgs :: (a: *OptState, n: s64, got: *bool) -> Items {
+    out: Items;
+    <<got = true;
+    for k: 1..n {
+        if a.curropt.bytes.count != 0 {
+            PushWord(*out, TextView(a.curropt));
+            VecClear(a.curropt.bytes);
+        } else if a.args.count == 0 {
+            <<got = false;
+            return NoItems();
+        } else {
+            VecPush(out, CopyItem(*a.args, 0));
+            rest := Tail(*a.args, 1);
+            VecSwap(a.args, rest);
+        }
+    }
+    return out;
+}
+
+ArgUsage :: () { Fail("usage", "usage: arg [opts {command}]... - args") }
+
+ArgText :: (argv: *Items) -> Text {
+    k: s64 = 1;
+    while k < argv.count {
+        if TextView(argv.*[k].word) == "-" { break }
+        if argv.*[k].cmd >= 0 && argv.*[k].word.bytes.count == 0 { ArgUsage(); return TextCopy("") }
+        if k + 1 >= argv.count { ArgUsage(); return TextCopy("") }
+        if argv.*[k + 1].cmd < 0 { ArgUsage(); return TextCopy("") }
+        k += 2;
+    }
+    state: OptState;
+    if k >= argv.count {
+        star := Get("*");
+        VecSwap(state.args, star);
+    } else {
+        rest := Tail(argv, k + 1);
+        VecSwap(state.args, rest);
+    }
+    laststatus: Text;
+    Push();
+    while true {
+        opt := NextOpt(*state);
+        if opt == 0 { break }
+        matched := false;
+        t: s64 = 1;
+        while t < argv.count && TextView(argv.*[t].word) != "-" {
+            w := TextView(argv.*[t].word);
+            argcount: s64 = 0;
+            e := w.count - 1;
+            while e >= 0 && w[e] == #char "+" { argcount += 1; e -= 1 }
+            spec := Runes(w[:e + 1]);
+            hit := false;
+            for i: 0..spec.count - 1 { if spec[i] == opt || spec[i] == #char "*" { hit = true; break } }
+            if spec.count != 0 && hit {
+                o: Vec(u8);
+                PutRune(*o, opt);
+                SetLocalWord("opt", TextView(o[:]));
+                got: bool;
+                optargs := OptArgs(*state, argcount, *got);
+                if argcount > 0 && !got {
+                    msg: Vec(u8);
+                    BuilderPrint(*msg, "option -% requires % arguments", TextView(o[:]), argcount);
+                    Fail("usage", TextView(msg[:]));
+                    break;
+                }
+                SetLocal("arg", *optargs);
+                cmd: Items;
+                VecPush(cmd, CopyItem(argv, t + 1));
+                status: Text = Run(*cmd, false);
+                VecSwap(laststatus.bytes, status.bytes);
+                matched = true;
+                break;
+            }
+            t += 2;
+        }
+        if Unwinding() { break }
+        if !matched {
+            o: Vec(u8);
+            PutRune(*o, opt);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "unknown option -%", TextView(o[:]));
+            Fail("usage", TextView(msg[:]));
+            break;
+        }
+    }
+    Pop();
+    if raising {
+        if TextView(raised) == "fail:break" { ClearRaise(); return laststatus }
+        return TextCopy("");
+    }
+    if exiting { return TextCopy("") }
+    left := CloneItems(*state.args);
+    Set("args", *left);
+    Set("*", *state.args);
+    return laststatus;
+}
+
+#scope_export
+
+EchoInit :: (mod: s32, err: *Text) -> bool { AddBuiltin("echo", mod); return true }
+
+EchoRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = EchoText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+TestInit :: (mod: s32, err: *Text) -> bool {
+    ReportInit();
+    AddBuiltin("report", mod);
+    return true;
+}
+
+TestRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = ReportText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+ArgInit :: (mod: s32, err: *Text) -> bool { AddBuiltin("arg", mod); return true }
+
+ArgRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = ArgText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+NoSRun :: (mod: s32, args: *Items, out: *Items) -> bool { return true }

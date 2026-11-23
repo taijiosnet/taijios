@@ -1,0 +1,269 @@
+// The string builtin module of appl/cmd/sh/string.b, with the String
+// library calls it used (appl/lib/string.b) on runes.
+#import "std/vec";
+#import "shell_util";
+#import "shell";
+
+#scope_file
+
+stringmod: s32;
+
+// str->in: whether rune c is in the class cl ("a-z", "^..." negates).
+InClass :: (c: s32, cl: *Vec(s32)) -> bool {
+    n := cl.count;
+    if n == 0 { return false }
+    start: s64 = 0;
+    negate := false;
+    if cl.*[0] == #char "^" { negate = true; start = 1 }
+    ans := false;
+    i := start;
+    while i < n {
+        if cl.*[i] == #char "-" && i > start && i < n - 1 {
+            if c >= cl.*[i - 1] && c <= cl.*[i + 1] { ans = true; break }
+            i += 1;
+        } else if c == cl.*[i] {
+            ans = true;
+            break;
+        }
+        i += 1;
+    }
+    if negate { return !ans }
+    return ans;
+}
+
+RunesText :: (r: *Vec(s32), from: s64, to: s64) -> Text {
+    out: Vec(u8);
+    for i: from..to - 1 { PutRune(*out, r.*[i]) }
+    return BuilderFinish(out);
+}
+
+One :: (s: string) -> Items {
+    out: Items;
+    PushWord(*out, s);
+    return out;
+}
+
+Two :: (a: Text, b: Text) -> Items {
+    out: Items;
+    PushWord(*out, TextView(a));
+    PushWord(*out, TextView(b));
+    return out;
+}
+
+Usage2 :: (cmd: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "usage: % arg1 arg2", cmd);
+    Fail("usage", TextView(msg[:]));
+}
+
+Usage1 :: (cmd: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "usage: % arg", cmd);
+    Fail("usage", TextView(msg[:]));
+}
+
+Split :: (name: string, args: *Items) -> Items {
+    if args.count != 3 { Usage2(name); return NoItems() }
+    st: Text = ItemText(args, 1);
+    ct: Text = ItemText(args, 2);
+    s := Runes(TextView(st));
+    cl := Runes(TextView(ct));
+    n := s.count;
+    if name == "splitl" {
+        for j: 0..n - 1 {
+            if InClass(s[j], *cl) { return Two(RunesText(*s, 0, j), RunesText(*s, j, n)) }
+        }
+        return Two(TextCopy(TextView(st)), TextCopy(""));
+    }
+    if name == "splitr" {
+        j := n - 1;
+        while j >= 0 {
+            if InClass(s[j], *cl) { return Two(RunesText(*s, 0, j + 1), RunesText(*s, j + 1, n)) }
+            j -= 1;
+        }
+        return Two(TextCopy(""), TextCopy(TextView(st)));
+    }
+    if name == "drop" {
+        for j: 0..n - 1 {
+            if !InClass(s[j], *cl) { r: Text = RunesText(*s, j, n); return One(TextView(r)) }
+        }
+        return One("");
+    }
+    // take
+    for j: 0..n - 1 {
+        if !InClass(s[j], *cl) { r: Text = RunesText(*s, 0, j); return One(TextView(r)) }
+    }
+    return One(TextView(st));
+}
+
+SplitStr :: (name: string, args: *Items) -> Items {
+    if args.count != 3 { Usage2(name); return NoItems() }
+    st: Text = ItemText(args, 1);
+    tt: Text = ItemText(args, 2);
+    s := Runes(TextView(st));
+    t := Runes(TextView(tt));
+    n := s.count;
+    nt := t.count;
+    left := name == "splitstrl";
+    if nt == 0 {
+        if left { return Two(TextCopy(""), TextCopy(TextView(st))) }
+        return Two(TextCopy(TextView(st)), TextCopy(""));
+    }
+    if left {
+        for j: 0..n - nt {
+            same := true;
+            for k: 0..nt - 1 { if s[j + k] != t[k] { same = false; break } }
+            if same { return Two(RunesText(*s, 0, j), RunesText(*s, j, n)) }
+        }
+        return Two(TextCopy(TextView(st)), TextCopy(""));
+    }
+    j := n - nt;
+    while j >= 0 {
+        same := true;
+        for k: 0..nt - 1 { if s[j + k] != t[k] { same = false; break } }
+        if same { return Two(RunesText(*s, 0, j + nt), RunesText(*s, j + nt, n)) }
+        j -= 1;
+    }
+    return Two(TextCopy(""), TextCopy(TextView(st)));
+}
+
+Case :: (args: *Items, upper: bool) -> Items {
+    if args.count != 2 { Usage1("tolower"); return NoItems() }
+    st: Text = ItemText(args, 1);
+    out: Vec(u8);
+    for TextView(st) {
+        c := it;
+        if upper && c >= #char "a" && c <= #char "z" { c -= 32 }
+        if !upper && c >= #char "A" && c <= #char "Z" { c += 32 }
+        VecPush(out, c);
+    }
+    return One(TextView(out[:]));
+}
+
+Pad :: (args: *Items, dir: s64) -> Items {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    if args.count < 2 || !IsNum(TextView(args.*[1].word)) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "usage: % n [arg...]", TextView(name));
+        Fail("usage", TextView(msg[:]));
+        return NoItems();
+    }
+    n := LimboInt(TextView(args.*[1].word)) * dir;
+    s: Vec(u8);
+    for i: 2..args.count - 1 {
+        w: Text = ItemText(args, i);
+        unused BuilderAppend(s, TextView(w));
+        if i < args.count - 1 { VecPush(s, 32) }
+    }
+    // sprint("%*s"): a negative width pads on the right.
+    width := ifx n < 0 then -n else n;
+    have := RuneCount(TextView(s[:]));
+    out: Vec(u8);
+    if n > 0 { for k: have..width - 1 { VecPush(out, 32) } }
+    unused BuilderAppend(out, TextView(s[:]));
+    if n < 0 { for k: have..width - 1 { VecPush(out, 32) } }
+    return One(TextView(out[:]));
+}
+
+Fields :: (args: *Items) -> Items {
+    if args.count != 3 { Fail("usage", "usage: fields cl s"); return NoItems() }
+    ct: Text = ItemText(args, 1);
+    st: Text = ItemText(args, 2);
+    cl := Runes(TextView(ct));
+    s := Runes(TextView(st));
+    out: Items;
+    n: s64 = 0;
+    for i: 0..s.count - 1 {
+        if InClass(s[i], *cl) {
+            f: Text = RunesText(*s, n, i);
+            PushWord(*out, TextView(f));
+            n = i + 1;
+        }
+    }
+    last: Text = RunesText(*s, n, s.count);
+    PushWord(*out, TextView(last));
+    return out;
+}
+
+Slice :: (args: *Items) -> Items {
+    if args.count != 4 || !IsNum(TextView(args.*[1].word)) ||
+        (TextView(args.*[2].word) != "end" && !IsNum(TextView(args.*[2].word))) {
+        Fail("usage", "usage: slice start end arg");
+        return NoItems();
+    }
+    n1 := LimboInt(TextView(args.*[1].word));
+    st: Text = ItemText(args, 3);
+    s := Runes(TextView(st));
+    n2: s64;
+    if TextView(args.*[2].word) == "end" { n2 = s.count } else { n2 = LimboInt(TextView(args.*[2].word)) }
+    if n2 > s.count { n2 = s.count }
+    if n1 > s.count { n1 = s.count }
+    if n2 > n1 { r: Text = RunesText(*s, n1, n2); return One(TextView(r)) }
+    return One("");
+}
+
+StringSRunList :: (args: *Items) -> Items {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    w := TextView(name);
+    if w == "splitl" || w == "splitr" || w == "drop" || w == "take" { return Split(w, args) }
+    if w == "splitstrl" || w == "splitstrr" { return SplitStr(w, args) }
+    if w == "tolower" { return Case(args, false) }
+    if w == "toupper" { return Case(args, true) }
+    if w == "len" || w == "alen" {
+        if args.count != 2 { Usage1(w); return NoItems() }
+        st: Text = ItemText(args, 1);
+        n := ifx w == "len" then RuneCount(TextView(st)) else st.bytes.count;
+        c: Vec(u8);
+        BuilderPrint(*c, "%", n);
+        return One(TextView(c[:]));
+    }
+    if w == "slice" { return Slice(args) }
+    if w == "fields" { return Fields(args) }
+    if w == "padl" { return Pad(args, -1) }
+    if w == "padr" { return Pad(args, 1) }
+    return NoItems();
+}
+
+StringRunText :: (args: *Items) -> Text {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    w := TextView(name);
+    if args.count != 3 { Usage2(w); return TextCopy("") }
+    a: Text = ItemText(args, 1);
+    b: Text = ItemText(args, 2);
+    if w == "prefix" {
+        if TextView(b).count < TextView(a).count || TextView(b)[:TextView(a).count] != TextView(a) { return TextCopy("false") }
+        return TextCopy("");
+    }
+    // in
+    if a.bytes.count == 0 { return TextCopy("false") }
+    r, _ := RuneAt(TextView(a), 0);
+    cl := Runes(TextView(b));
+    if !InClass(r, *cl) { return TextCopy("false") }
+    return TextCopy("");
+}
+
+#scope_export
+
+StringInit :: (mod: s32, err: *Text) -> bool {
+    stringmod = mod;
+    AddBuiltin("prefix", mod);
+    AddBuiltin("in", mod);
+    names := string.["splitl", "splitr", "drop", "take", "splitstrl", "splitstrr", "tolower", "toupper",
+        "len", "alen", "slice", "fields", "padl", "padr"];
+    for names { AddSBuiltin(it, mod) }
+    return true;
+}
+
+StringRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = StringRunText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+StringSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := StringSRunList(args);
+    VecSwap(<<out, result);
+    return true;
+}
+
+NoWhatis :: (mod: s32, name: string, wtype: s32, out: *Text) -> bool { return true }

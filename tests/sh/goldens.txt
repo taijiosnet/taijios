@@ -1,0 +1,298 @@
+# What /dis/sh.dis printed for each case of corpus.txt, recorded by
+# sh_test --record: escaped status, standard output and standard error.
+=== echo
+status: \n
+out: hello world\nsingle quoted it's\nabc xy\n\n
+err: 
+=== comments-and-blanks
+status: \n
+out: one\ntwo\nthree\nfour\n
+err: 
+=== variables
+status: \n
+out: a b c\n3\na b c\n0\n0\n1\na b c 2\n
+err: 
+=== multiple-assign
+status: \n
+out: 1\n2\n3 4\n1 0\n
+err: 
+=== concatenation
+status: \n
+out: a.c b.c c.c\nprea preb prec\na.c b.c c.c\na1 b2 c3\naz bz cz\nxyz\n
+err: 
+=== concat-errors
+status: bad concatenation\n
+out: 
+err: sh: lists of differing sizes can't be concatenated\n
+=== null-concat
+status: bad concatenation\n
+out: 
+err: sh: null list in concatenation\n
+=== blocks-and-args
+status: \n
+out: {echo $0;echo $*;echo $#*;echo $1 $2}\np q r\n3\np q\nnested {inner} block\nstored block x y\n
+err: 
+=== dollar-forms
+status: \n
+out: 3 4\n2\na 'b c' d\na b c d\n
+err: 
+=== local-scope
+status: \n
+out: inner local\nouter global\ndeep 2\nmid 2\ntop 0\n
+err: 
+=== status-values
+status: \n
+out: \nfailed\nfalse\n\n
+err: 
+=== std-if
+status: \n
+out: first\nelse\n2\n3\nstatus no match\n
+err: 
+=== std-for
+status: \n
+out: item a\nitem b\nitem c d\nx\nz\n1\n2\ndone \n
+err: 
+=== std-while
+status: \n
+out: count 3\ncount 2\ncount 1\ngot 1\ngot 3\nend\n
+err: 
+=== std-apply
+status: \n
+out: arg a\narg b\narg c\na\n
+err: 
+=== std-and-or
+status: \n
+out: one\ntwo\nno\nb\nsecond\nandand\noror\nno match\n
+err: 
+=== std-not-twiddle
+status: \n
+out: negated\nstar\nquestion\nrange\ninverted\nno match\nescaped\n
+err: 
+=== std-fn
+status: \n
+out: hello world\n'./greet' file does not exist\nshared {echo shared $0}\nshared {echo shared $0}\npercent\n
+err: sh: greet: './greet' file does not exist\n
+=== std-subfn
+status: \n
+out: 3 2 1\nx y 2\n
+err: 
+=== std-substitution
+status: \n
+out: a\nb c d\nb\n\na b c\np q r\na-b-c\n\n done\n{echo parsed}\n
+err: 
+=== std-raise-rescue
+status: final\n
+out: caught boom\nno raise\ngot inner\nafter\n
+err: 
+=== std-flag
+status: usage\n
+out: not set\ntraced\nuntraced\nnot set\n
+err: echo traced\nflag x -\nusage: flag [vxei] [+-]\n
+=== std-getlines
+status: \n
+out: line n\nline [two two]\nline []\nline [three]\n
+err: 
+=== std-getlines-seps
+status: \n
+out: got a\ngot b\ngot c\ngot d\n
+err: 
+=== std-no
+status: \n
+out: empty\nnonempty\n\n
+err: 
+=== backquote
+status: \n
+out: 3 a b c\n1\na b\nc\n\n2\n0\n
+err: 
+=== backquote-builtin
+status: \n
+out: n1 n2 n3\n2 l1 l2\n
+err: 
+=== redirection
+status: \n
+out: first\nsecond\nerr\nboth\nto stderr\nrw\n
+err: 
+=== redirection-errors
+status: bad redir\n
+out: 
+err: sh: cannot open $W/nonexistent: '$W/nonexistent' does not exist\n
+=== redirected-block
+status: \n
+out: set inside\nblock output\n
+err: 
+=== pipeline
+status: \n
+out:       2\na b c\n      0\nbad open|\n
+err: cat: cannot open $W/nonexistent: '$W/nonexistent' does not exist\n
+=== pipeline-builtins
+status: \n
+out:       3\nx\ny\nz\nz\ninner\nouter\n
+err: 
+=== pipeline-fds
+status: \n
+out: out\nerr\n      1\n
+err: 
+=== pipeline-status
+status: \n
+out: first|second\nleft|\n|right\na|b|c\n
+err: 
+=== whatis
+status: \n
+out: x=a 'b c'\n/dis/echo.zx\nbuiltin load\n{block}\nnot found\nload std; if\nload std; fn f {echo body}\nload std; ${hd}\nload std; subfn s {result=1}\n
+err: load: not found\nnosuchthing: not found\n
+=== builtin-command
+status: \n
+out: via builtin\n'./nosuch' file does not exist\na b\n
+err: sh: nosuch: './nosuch' file does not exist\n
+=== loaded
+status: \n
+out: @\tbuiltin\nbuiltin\tbuiltin\nexit\tbuiltin\nload\tbuiltin\nloaded\tbuiltin\nrun\tbuiltin\nsyncenv\tbuiltin\nunload\tbuiltin\nwhatis\tbuiltin\n${bquote}\tbuiltin\n${builtin}\tbuiltin\n${loaded}\tbuiltin\n${quote}\tbuiltin\n${unquote}\tbuiltin\n\nstd\n
+err: 
+=== load-unload
+status: bad module\n
+out: have std\n\nnot found\n
+err: sh: module std not found\nsh: load: cannot load /dis/sh/nosuchmodule.dis: '/dis/sh/nosuchmodule.dis' does not exist\n
+=== external-not-found
+status: \n
+out: './nosuchcommand' file does not exist\n'/nonexistent' file does not exist\n'./relative' file does not exist\n
+err: sh: nosuchcommand: './nosuchcommand' file does not exist\nsh: /nonexistent/cmd: '/nonexistent' file does not exist\nsh: ./relative: './relative' file does not exist\n
+=== syntax-error
+status: parse error\n
+out: before\n
+err: sh: $W/case.39:2: syntax error\n
+=== syntax-error-brace
+status: parse error\n
+out: before\n
+err: sh: $W/case.40:3: syntax error\n
+=== syntax-error-quote
+status: parse error\n
+out: 
+err: sh: $W/case.41:1: unterminated string literal\n
+=== syntax-error-redir
+status: parse error\n
+out: 
+err: sh: $W/case.42:2: syntax error in redirection\n
+=== run-script
+status: \n
+out: in script a b\nfrom-script\nbad script path\n
+err: sh: cannot open $W/nonexistent.sh: '$W/nonexistent.sh' does not exist\n
+=== exit-builtin
+status: \n
+out: before\n
+err: 
+=== exit-in-redirected-block
+status: \n
+out: still here\nin block\n
+err: 
+=== subshell
+status: \n
+out: in subshell\nwords\n\n
+err: 
+=== glob
+status: \n
+out: $W/g/a1 $W/g/a2 $W/g/b1 $W/g/c d $W/g/sub\n$W/g/a1 $W/g/a2\n$W/g/a1 $W/g/b1\n$W/g/a1 $W/g/b1\n$W/g/nomatch*\n$W/g/*\n$W/g/sub/x\n
+err: 
+=== status-script-end
+status: last\n
+out: 
+err: 
+=== error-exit-flag
+status: bad\n
+out: one\n
+err: 
+=== exec-print-flag
+status: \n
+out: traced\na\n
+err: load std\necho traced\nfor i in a {echo $i}\necho a\n
+=== dash-c
+status: \n
+out: from -c p q\n{echo from -c $*; echo $0}\n
+err: 
+=== dash-c-status
+status: fromc\n
+out: 
+err: 
+=== dash-c-stdin
+status: \n
+out: piped input\n
+err: 
+=== script-args
+status: \n
+out: $W/case.54 0\n
+err: 
+=== stdin-script
+status: \n
+out: from stdin\n2\n
+err: 
+=== quote-builtins
+status: \n
+out: 'a b' c '{block}' ''\n'a b' c {block}\n2\n'a b' c\n
+err: 
+=== env-export
+status: \n
+out: 'exported value'\nchild sees exported value\n
+err: 
+=== std-fn-env
+status: \n
+out: shared function from child\n
+err: 
+=== std-pctl
+status: usage\n
+out: ok\n
+err: pctl: unknown flag bogus\n
+=== std-pctl-newfd
+status: not found\n
+out: builtin whatis\n
+err: whatis: not found\n
+=== hashpling
+status: \n
+out: hashpling script a b\nbad header\n
+err: sh: bad script header on $W/bad\n
+=== lib-sh-srv
+status: \n
+out: load std; fn srv {if {! ftest -f /net/cs} {srv.cs};srv.styx}\nload std; fn srv.styx {listen tcp!*!styx {export /&}}\n
+err: 
+=== lib-wmsetup
+status: \n
+out: usage\n%  \n
+err: wmsetup must run under wm\n
+=== mod-string
+status: usage\n
+out: abc :def\na/b/ c\nx y\nabc\none --two\na-b- c\nmixed MIXED\n4 5\nbc cdef \na  b c\n[ab     ] [    ab ] [long ]\n
+err: sh: and: './and' file does not exist\nsh: or: './or' file does not exist\nsh: and: './and' file does not exist\nsh: and: './and' file does not exist\nusage: slice start end arg\n
+=== mod-expr
+status: divide by zero\n
+out: 3\n16\n2048 128\n1 2 3 4 5\n10\n16rff 256\n-5 0 -6\n1 1 1\n
+err: sh: or: './or' file does not exist\nsh: and: './and' file does not exist\nexpr: division by zero\n
+=== mod-expr-errors
+status: empty stack\n
+out: 
+err: expr: empty stack on op '+'\n
+=== mod-echo
+status: \n
+out: load echo; echo\nbuiltin echo\nno newline\n-n\n
+err: 
+=== mod-test-report
+status: usage\n
+out: 
+err: Test is running standalone\n13a warning message\nusage: report INF|WRN|ERR|FTL verbosity message[...]\n
+=== mod-arg
+status: usage\n
+out: got a\nb is x\nc is y z\nrest w\ngot a\nb is q\nrest tail\nrest -a\n
+err: unknown option -q\n
+=== mod-regex
+status: bad regex\n
+out: apple avocado\nbanana\nbXd cXt\nbXnXnX\nabab\nfred@example\nfred@example fred example\n1 22 333\n_ord ..rd\néx\n
+err: sh: and: './and' file does not exist\nsh: or: './or' file does not exist\nregex: bad regex "(": invalid regular expression\n
+=== mod-csv
+status: \n
+out: 3 fields: a b c\n3 fields: 'quoted, field' 'say "hi"' plain\n3 fields: '' '' ''\n1 fields: last\na,"b,c","say ""x""",plain\n
+err: 
+=== mod-csv-break
+status: \n
+out: row 1\nrow 2\nstopped\n
+err: 
+=== env-isolation
+status: \n
+out: pipeline sees inner\nchild sees outer\n
+err: 

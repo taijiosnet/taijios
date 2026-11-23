@@ -2132,8 +2132,12 @@ executable(s: (int, Sys->Dir), mode: int): int
 
 commandzx(path: string): string
 {
-	if (len path < 3 || path[len path-3:] != ".zx")
+	if (len path < 3 || path[len path-3:] != ".zx") {
+		# While Dis runs, sh is this shell: sh.zx can start only ZX commands.
+		if (path == "sh" || (len path > 3 && path[len path-3:] == "/sh"))
+			return nil;
 		path += ".zx";
+	}
 	if (executable(sys->stat(path), 8r111) && (load ZX ZX->PATH) != nil)
 		return path;
 	return nil;

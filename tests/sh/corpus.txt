@@ -1,0 +1,663 @@
+# Script corpus for tests/sh/sh_test.zi. Each case starts with "=== name".
+# "args:" puts words before the script path on the shell's command line, and
+# "noscript" leaves the path out. "input:" is the case's standard input, with
+# \n escapes. "gap:" names a known difference and what it waits for; the
+# test fails once such a case matches. The lines after "script:" up to the
+# next case are the script.
+# Scripts see $W, a private work directory holding the fixtures.
+
+=== echo
+script:
+echo hello world
+echo 'single quoted' 'it''s'
+echo a'b'c 'x'y
+echo
+
+=== comments-and-blanks
+script:
+# a comment
+echo one # trailing comment
+
+echo two;echo three ; ; echo four
+
+=== variables
+script:
+x = a b c
+echo $x
+echo $#x
+echo $"x
+y = ()
+echo $#y
+echo $#nosuch
+z = 'one item'
+echo $#z
+echo $x(2)
+
+=== multiple-assign
+script:
+(a b c) = 1 2 3 4
+echo $a
+echo $b
+echo $c
+(p q) = 1
+echo $#p $#q
+
+=== concatenation
+script:
+x = a b c
+echo $x^.c
+echo pre^$x
+echo $x.c
+y = 1 2 3
+echo $x^$y
+one = z
+echo $x^$one
+echo x^y^z
+
+=== concat-errors
+script:
+x = a b
+y = 1 2 3
+echo $x^$y
+echo after
+
+=== null-concat
+script:
+e = ()
+echo a^$e
+
+=== blocks-and-args
+script:
+{echo $0; echo $*; echo $#*; echo $1 $2} p q r
+{echo nested {inner} block}
+b = {echo stored block $*}
+$b x y
+
+=== dollar-forms
+script:
+x = 3 4
+n = x
+echo $$n
+echo $#$n
+echo ${quote a 'b c' d}
+echo ${unquote 'a ''b c'' d'}
+
+=== local-scope
+script:
+x = global
+{x := local; echo inner $x}
+echo outer $x
+{y := 1; {y = 2; echo deep $y}; echo mid $y}
+echo top $#y
+
+=== status-values
+script:
+load std
+status
+echo $status
+status failed
+echo $status
+! status
+echo $status
+! status x
+echo $status
+
+=== std-if
+script:
+load std
+if {~ a a} {echo first}
+if {~ a b} {echo no} {echo else}
+if {~ a b} {echo 1} {~ a a} {echo 2} {echo 3}
+if {~ a b} {echo 1} {~ a c} {echo 2} {echo 3}
+if {~ a b} {echo only}
+echo status $status
+
+=== std-for
+script:
+load std
+for i in a b 'c d' {echo item $i}
+for i in {echo none}
+for i in x y z {
+	if {~ $i y} {raise continue}
+	echo $i
+}
+for i in 1 2 3 4 {if {~ $i 3} {raise break}; echo $i}
+echo done $status
+
+=== std-while
+script:
+load std
+x = a a a
+while {! ~ $#x 0} {
+	echo count $#x
+	(nil x) = $x
+}
+y = 1 2 3 4 5
+while {} {
+	(h y) = $y
+	if {~ $h 2} {raise continue}
+	if {~ $h 4} {raise break}
+	echo got $h
+}
+echo end
+
+=== std-apply
+script:
+load std
+apply {echo arg $1} a b c
+apply {if {~ $1 b} {raise break}; echo $1} a b c
+
+=== std-and-or
+script:
+load std
+and {echo one} {echo two}
+and {status no} {echo unreached}
+echo $status
+or {status a} {status b}
+echo $status
+or {status a} {echo second}
+~ x x && echo andand
+~ x y || echo oror
+~ x y && echo never
+echo $status
+
+=== std-not-twiddle
+script:
+load std
+! ~ a b && echo negated
+~ abc '*c' && echo star
+~ abc 'a?c' && echo question
+~ abc '[a-c]bc' && echo range
+~ abc '[^a]bc' || echo inverted
+~ x && echo none
+echo $status
+~ 'a*' 'a\*' && echo escaped
+
+=== std-fn
+script:
+load std
+fn greet {echo hello $*}
+greet world
+fn greet
+greet again
+echo $status
+fn a b {echo shared $0}
+a
+b
+fn % {$*}
+% echo percent
+
+=== std-subfn
+script:
+load std
+subfn rev {
+	result = ()
+	for i in $* {result = $i $result}
+}
+echo ${rev 1 2 3}
+subfn two {result = x y}
+echo ${two} $#{two}
+
+=== std-substitution
+script:
+load std
+x = a b c d
+echo ${hd $x}
+echo ${tl $x}
+echo ${index 2 $x}
+echo ${index 9 $x}
+echo ${split : a:b::c}
+ifs = ','
+echo ${split 'p,q,r'}
+echo ${join - a b c}
+echo ${join -}
+echo ${join +} done
+echo ${parse '{echo parsed}'}
+
+=== std-raise-rescue
+script:
+load std
+rescue x {echo caught $exception} {raise boom}
+rescue x {echo handler} {echo no raise}
+fn f {raise inner}
+rescue '*' {echo got $exception} {f}
+echo after
+raise final
+echo unreached
+
+=== std-flag
+script:
+load std
+flag x
+echo $status
+flag x +
+echo traced
+flag x -
+echo untraced
+flag e
+echo $status
+flag q
+
+=== std-getlines
+input: one\ntwo two\n\nthree
+script:
+load std
+getlines {echo line [$line]}
+
+=== std-getlines-seps
+input: a:b;c:d
+script:
+load std
+getlines ':;' {echo got $line}
+
+=== std-no
+script:
+load std
+no && echo empty
+no x || echo nonempty
+echo $status
+
+=== backquote
+script:
+x = `{echo a b; echo c}
+echo $#x $x
+y = "{echo a b; echo c}
+echo $#y
+echo $y
+ifs = ' '
+z = `{echo p:q r}
+echo $#z
+e = `{}
+echo $#e
+
+=== backquote-builtin
+script:
+load std
+x = `{for i in 1 2 3 {echo n$i}}
+echo $x
+fn lines {echo l1; echo l2}
+y = `{lines}
+echo $#y $y
+
+=== redirection
+script:
+echo first > $W/r1
+echo second >> $W/r1
+cat < $W/r1
+echo err >[2] $W/r2
+cat $W/r2
+echo both >[2=1] > $W/r3
+cat $W/r3
+{echo to stderr >[1=2]} >[2] $W/r4
+cat $W/r4
+echo rw <> $W/r5
+cat $W/r5
+
+=== redirection-errors
+script:
+cat < $W/nonexistent
+echo $status
+echo x > /nonexistentdir/file
+echo $status
+echo x >[1=9]
+echo $status
+
+=== redirected-block
+script:
+{x = set inside; echo block output} > $W/rb
+echo $x
+cat $W/rb
+
+=== pipeline
+script:
+echo one two | wc -w
+echo a b c | cat | cat
+cat $W/nonexistent | wc -l
+echo $status
+
+=== pipeline-builtins
+script:
+load std
+for i in 3 1 2 {echo $i} | wc -l
+{echo x; echo y} | cat
+fn twice {echo $1; echo $1}
+twice z | cat
+x = outer
+{x = inner; echo $x} | cat
+echo $x
+
+=== pipeline-fds
+script:
+{echo out; echo err >[1=2]} |[2] cat
+{echo err only >[1=2]} |[2] wc -l
+
+=== pipeline-status
+script:
+load std
+{status first} | {status second}
+echo $status
+{status left} | cat
+echo $status
+cat < /dev/null | {status right}
+echo $status
+{status a} | {status b} | {status c}
+echo $status
+
+=== whatis
+script:
+x = a 'b c'
+whatis x
+whatis echo
+whatis load
+whatis {block}
+whatis nosuchthing
+echo $status
+load std
+whatis if
+fn f {echo body}
+whatis f
+whatis hd
+subfn s {result = 1}
+whatis s
+
+=== builtin-command
+script:
+builtin echo via builtin
+builtin load std
+builtin nosuch
+echo $status
+echo ${builtin quote a b}
+
+=== loaded
+script:
+loaded
+echo ${loaded}
+load std
+echo ${loaded}
+
+=== load-unload
+script:
+load std
+~ a a && echo have std
+unload std
+echo ${loaded}
+unload std
+echo $status
+load nosuchmodule
+echo unreached
+
+=== external-not-found
+script:
+nosuchcommand a b
+echo $status
+/nonexistent/cmd
+echo $status
+./relative
+echo $status
+
+=== syntax-error
+script:
+echo before
+echo a=b
+echo after
+
+=== syntax-error-brace
+script:
+echo before
+{echo unclosed
+
+=== syntax-error-quote
+script:
+echo 'unterminated
+
+=== syntax-error-redir
+script:
+echo x >[1=
+echo next
+
+=== run-script
+script:
+echo 'echo in script $*; x = from-script' > $W/sub.sh
+run $W/sub.sh a b
+echo $x
+run $W/nonexistent.sh
+echo $status
+
+=== exit-builtin
+script:
+echo before
+exit
+echo after
+
+=== exit-in-redirected-block
+script:
+{echo in block; exit} > $W/ex
+echo still here
+cat $W/ex
+
+=== subshell
+script:
+x = 1
+@{echo in subshell}
+@ echo words
+echo $status
+
+=== glob
+script:
+echo $W/g/*
+echo $W/g/a*
+echo $W/g/?1
+echo $W/g/[ab]1
+echo $W/g/nomatch*
+echo '$W/g/*'
+echo $W/g/*/x
+
+=== status-script-end
+script:
+load std
+status last
+
+=== error-exit-flag
+args: -e
+script:
+load std
+echo one
+status bad
+echo unreached
+
+=== exec-print-flag
+args: -x
+script:
+load std
+echo traced
+x = 1
+for i in a {echo $i}
+
+=== dash-c
+args: -c 'echo from -c $*; echo $0' p q
+noscript
+
+=== dash-c-status
+args: -c 'load std; status fromc'
+noscript
+
+=== dash-c-stdin
+args: -c 'cat'
+noscript
+input: piped input\n
+
+=== script-args
+args:
+script:
+echo $0 $#*
+
+=== stdin-script
+noscript
+input: echo from stdin\nx = 2\necho $x\n
+
+=== quote-builtins
+script:
+echo ${quote 'a b' c {block} ''}
+echo ${bquote 'a b' c {block}}
+x = ${unquote '''a b'' c'}
+echo $#x
+echo ${quote $x}
+
+=== env-export
+script:
+myvar = 'exported value'
+fn-thing = {echo x}
+cat /env/myvar
+echo
+sh -c 'echo child sees $myvar'
+
+=== std-fn-env
+script:
+load std
+fn shared {echo shared function $*}
+sh -c 'load std; shared from child'
+
+=== std-pctl
+script:
+load std
+pctl forkns
+echo ok
+pctl bogus
+echo $status
+
+=== std-pctl-newfd
+script:
+load std
+pctl newfd 0 1 2
+whatis whatis
+
+=== hashpling
+script:
+echo '#!/dis/sh' > $W/hp
+echo 'echo hashpling script $*' >> $W/hp
+chmod 755 $W/hp
+$W/hp a b
+echo '#!' > $W/bad
+chmod 755 $W/bad
+$W/bad
+echo $status
+
+=== lib-sh-srv
+script:
+run /lib/sh/srv
+whatis srv
+whatis srv.styx
+
+=== lib-wmsetup
+script:
+run /lib/wmsetup
+echo $status
+echo $prompt
+
+=== mod-string
+script:
+load string
+echo ${splitl abc:def :}
+echo ${splitr a/b/c /}
+echo ${drop '  x y' ' '}
+echo ${take abc123 a-z}
+echo ${splitstrl one--two -- }
+echo ${splitstrr a-b-c -}
+echo ${tolower MiXeD} ${toupper MiXeD}
+echo ${len café} ${alen café}
+echo ${slice 1 3 abcdef} ${slice 2 end abcdef} ${slice 9 end abc}
+echo ${fields : a::b:c}
+echo [${padl 6 ab}] [${padr 6 ab}] [${padr 2 long}]
+prefix ab abc && echo is prefix
+prefix x abc || echo not prefix
+in b abc && echo in class
+in z '^a-y' && echo negated class
+echo ${slice x 2 abc}
+
+=== mod-expr
+script:
+load expr
+echo ${expr 1 2 +}
+echo ${expr 7 3 - 4 x}
+echo ${expr 2 10 shl} ${expr 1024 3 shr}
+echo ${expr 1 5 seq}
+echo ${expr 1 2 3 4 + rep}
+echo ${expr -r 16 255} ${expr 16rff 1 +}
+echo ${expr 5 _} ${expr 0 not} ${expr 5 ~}
+echo ${expr 3 3 eq} ${expr 3 4 lt} ${expr 9 2 %}
+ntest 0 || echo zero
+ntest 7 && echo nonzero
+echo ${expr 1 0 /}
+echo after
+
+=== mod-expr-errors
+script:
+load expr
+echo ${expr +}
+echo unreached
+
+=== mod-echo
+script:
+load echo
+whatis echo
+echo builtin echo
+echo -n no newline
+echo
+echo -- -n
+
+=== mod-test-report
+script:
+load test
+report WRN 3 a warning message
+report BAD 1 x
+
+=== mod-arg
+script:
+load std arg
+fn t {
+	arg a {echo got a} b+ {echo b is $arg} c++ {echo c is $arg} - $*
+	echo rest $*
+}
+t -a -b x -c y z w
+t -ab q tail
+t -- -a
+t -q
+
+=== mod-regex
+script:
+load regex
+match '^a.c$' abc && echo matched
+match 'x' abc || echo no x
+echo ${re g '^a' apple banana avocado}
+echo ${re v '^a' apple banana avocado}
+echo ${re s 'a+' X baaad caat}
+echo ${re sg 'a' X banana}
+echo ${re sg '(b)(a)' '\2\1' baba}
+echo ${re m '([a-z]+)@([a-z]+)' 'mail fred@example now'}
+echo ${re M '([a-z]+)@([a-z]+)' 'mail fred@example now'}
+echo ${re mg '[0-9]+' 'a1 b22 c333'}
+echo ${re s '[^aeiou]' _ word} ${re sg 'o|w' . word}
+echo ${re m 'é.' 'caféx'}
+echo ${re g '(' x}
+echo unreached
+
+=== mod-csv
+input: a,b,c\n"quoted, field","say ""hi""",plain\n,,\nlast
+script:
+load std csv
+getcsv {echo $#line fields: ${quote $line}}
+echo ${csv a 'b,c' 'say "x"' plain}
+
+=== mod-csv-break
+input: 1\n2\n3\n4
+script:
+load std csv
+getcsv {if {~ $line 3} {raise break}; echo row $line}
+echo stopped
+
+=== env-isolation
+gap: a ZX shell cannot copy the environment group (pctl FORKENV) until taijios_namespace has a ForkEnv call
+script:
+x = outer
+{x = inner; echo pipeline sees $x} | cat
+sh -c 'echo child sees $x'

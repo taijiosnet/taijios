@@ -51,7 +51,7 @@ all:V:		$TARG
 
 install:V:	$INS sh.install
 
-sh.install:V:	$ROOT/dis/sh.dis $DISBIN/sh.dis
+sh.install:V:	$ROOT/dis/sh.dis $DISBIN/sh.dis $ROOT/dis/sh.zx
 
 nuke:V: clean
 	rm -f $INS
@@ -68,3 +68,18 @@ $ROOT/dis/sh.dis:	sh.dis
 	install -m 0644 sh.dis "$staged" && mv "$staged" "$target"
 
 %.dis: ${SYSMODULES:%=$MODDIR/%}
+
+# The ZX shell: sh.zi and its modules, with the builtin modules compiled in.
+SHZX=sh.zi shell.zi shell_parse.zi shell_util.zi shell_std.zi shell_string.zi shell_expr.zi shell_small.zi shell_regexp.zi shell_regex.zi shell_csv.zi
+CMDZX=../taijios_args.zi ../taijios_io.zi ../taijios_process.zi ../taijios_namespace.zi ../taijios_clock.zi
+
+sh.zx:	$SHZX $CMDZX mkfile
+	zi2zx --root . --module-path .. --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --bind-host taijios_clock --entry sh:main -o $target sh.zi
+	chmod 755 $target
+
+install-zx:V:	$ROOT/dis/sh.zx
+
+$ROOT/dis/sh.zx:	sh.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 sh.zx "$staged" && mv "$staged" "$target"

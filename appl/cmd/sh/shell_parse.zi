@@ -1,0 +1,847 @@
+// The shell grammar of appl/cmd/sh/sh.y: its lexer, with the free caret
+// and the GLOB marks, and a recursive-descent parser for the same grammar.
+// Parsed trees live in one node arena; a node is named by its index and -1
+// stands for nil.
+#import "std/vec";
+Io :: #import "taijios_io";
+
+#scope_export
+
+// Node types, numbered as in module/sh.m.
+N_BLOCK :: 0;
+N_VAR :: 1;
+N_BQ :: 2;
+N_BQ2 :: 3;
+N_REDIR :: 4;
+N_DUP :: 5;
+N_LIST :: 6;
+N_SEQ :: 7;
+N_CONCAT :: 8;
+N_PIPE :: 9;
+N_ADJ :: 10;
+N_WORD :: 11;
+N_NOWAIT :: 12;
+N_SQUASH :: 13;
+N_COUNT :: 14;
+N_ASSIGN :: 15;
+N_LOCAL :: 16;
+
+// The byte that marks an active wildcard in a lexed word.
+GLOB :: 1;
+
+// Redirection types: Sys->OREAD, OWRITE, ORDWR and the shell's OAPPEND bit.
+OREAD :: 0;
+OWRITE :: 1;
+ORDWR :: 2;
+OAPPEND :: 524288;
+
+Node :: struct {
+    kind: s32;
+    left: s32;
+    right: s32;
+    word: Text;
+    // A redirection: rtype is -1 when the node has none.
+    rtype: s32;
+    fd1: s32;
+    fd2: s32;
+}
+
+nodes: Vec(Node);
+
+NewNode :: (kind: s32, left: s32, right: s32) -> s32 {
+    node: Node;
+    node.kind = kind;
+    node.left = left;
+    node.right = right;
+    node.rtype = -1;
+    node.fd1 = -1;
+    node.fd2 = -1;
+    VecPush(nodes, node);
+    return cast(s32)(nodes.count - 1);
+}
+
+WordNode :: (word: string) -> s32 {
+    n := NewNode(N_WORD, -1, -1);
+    unused BuilderAppend(nodes[n].word.bytes, word);
+    return n;
+}
+
+Kind :: (n: s32) -> s32 { return nodes[n].kind }
+Left :: (n: s32) -> s32 { return nodes[n].left }
+Right :: (n: s32) -> s32 { return nodes[n].right }
+
+// Tokens: single characters stand for themselves.
+DUP :: 257;
+REDIR :: 258;
+WORD :: 259;
+OP :: 260;
+END :: 261;
+ERROR :: 262;
+ANDAND :: 263;
+OROR :: 264;
+EOF :: -1;
+
+Lexer :: struct {
+    err: Text;
+    errline: s32;
+    path: Text;
+
+    wasdollar: bool;
+    atendword: bool;
+    eof: bool;
+
+    // Pushback for a file: the last two characters read.
+    cbuf: [2]s32;
+    ncbuf: s32;
+    strpos: s64;
+
+    // A string source, or a file handle read through buf.
+    isfile: bool;
+    fd: s32;
+    s: Text;
+    buf: [8192]u8;
+    bufpos: s32;
+    buflen: s32;
+
+    linenum: s32;
+    prompt: Text;
+    lastnl: bool;
+    // Where the continuation prompt goes: a taijios_io handle.
+    errfd: s32;
+
+    // The value of the last token.
+    word: Text;
+    optype: s32;
+    rtype: s32;
+    fd1: s32;
+    fd2: s32;
+    hasredir: bool;
+}
+
+InitString :: (l: *Lexer, s: string) {
+    VecClear(l.s.bytes);
+    unused BuilderAppend(l.s.bytes, s);
+    VecClear(l.path.bytes);
+    unused BuilderAppend(l.path.bytes, "internal");
+    l.isfile = false;
+    l.strpos = 0;
+    l.errfd = 2;
+}
+
+InitFile :: (l: *Lexer, fd: s32, path: string, errfd: s32) {
+    l.isfile = true;
+    l.fd = fd;
+    VecClear(l.path.bytes);
+    unused BuilderAppend(l.path.bytes, path);
+    l.linenum = 1;
+    l.strpos = 0;
+    l.errfd = errfd;
+}
+
+LexError :: (l: *Lexer, s: string) {
+    if l.err.bytes.count == 0 {
+        unused BuilderAppend(l.err.bytes, s);
+        l.errline = l.linenum;
+    }
+}
+
+Getc :: (l: *Lexer) -> s32 {
+    if l.eof { return EOF }
+    c: s32;
+    if l.isfile {
+        if l.ncbuf > 0 {
+            c = l.cbuf[l.strpos];
+            l.strpos += 1;
+            if l.strpos >= 2 { l.strpos = 0 }
+            l.ncbuf -= 1;
+        } else {
+            if l.lastnl && l.prompt.bytes.count > 0 { unused Io.Write(l.errfd, TextView(l.prompt)) }
+            if l.bufpos >= l.buflen {
+                l.bufpos = 0;
+                l.buflen = Io.Read(l.fd, l.buf[:]);
+                if l.buflen < 0 { l.buflen = 0 }
+            }
+            if l.bufpos >= l.buflen {
+                l.eof = true;
+                c = EOF;
+            } else {
+                c = cast(s32)l.buf[l.bufpos];
+                l.bufpos += 1;
+                if c == 10 { l.linenum += 1 }
+            }
+            l.lastnl = c == 10;
+            l.cbuf[l.strpos] = c;
+            l.strpos += 1;
+            if l.strpos >= 2 { l.strpos = 0 }
+        }
+    } else {
+        if l.strpos >= l.s.bytes.count {
+            l.eof = true;
+            c = EOF;
+        } else {
+            c = cast(s32)l.s.bytes[l.strpos];
+            l.strpos += 1;
+        }
+    }
+    return c;
+}
+
+Ungetc :: (l: *Lexer) {
+    l.strpos -= 1;
+    if l.isfile {
+        l.ncbuf += 1;
+        if l.strpos < 0 { l.strpos = 1 }
+    }
+}
+
+#scope_file
+
+NOTOKEN :: -2;
+
+ReadNum :: (l: *Lexer) -> s32 {
+    sum: s32;
+    nc: s32;
+    c := Getc(l);
+    while c >= #char "0" && c <= #char "9" {
+        sum = sum * 10 + (c - #char "0");
+        nc += 1;
+        c = Getc(l);
+    }
+    Ungetc(l);
+    if nc == 0 { return -1 }
+    return sum;
+}
+
+// After '[': "n]" is a REDIR, "n=m]" a DUP; either number may be absent.
+ReadFdAssign :: (l: *Lexer) -> s32 {
+    n1 := ReadNum(l);
+    c := Getc(l);
+    if c != #char "=" {
+        if c == #char "]" {
+            l.hasredir = true; l.rtype = -1; l.fd1 = n1; l.fd2 = -1;
+            return REDIR;
+        }
+        l.hasredir = false;
+        return ERROR;
+    }
+    n2 := ReadNum(l);
+    if Getc(l) != #char "]" { l.hasredir = false; return ERROR }
+    l.hasredir = true; l.rtype = -1; l.fd1 = n1; l.fd2 = n2;
+    return DUP;
+}
+
+InDollarWord :: (c: s32) -> bool {
+    return (c >= #char "a" && c <= #char "z") || (c >= #char "A" && c <= #char "Z") ||
+        (c >= #char "0" && c <= #char "9") || c == #char "*" || c == #char "_";
+}
+
+InPlainWord :: (c: s32) -> bool {
+    if c == 10 || c == 32 || c == 9 || c == 13 { return false }
+    if c == #char "|" || c == #char "$" || c == 39 || c == #char "#" || c == #char "<" || c == #char ">" { return false }
+    if c == #char ";" || c == #char "^" || c == #char "(" || c == #char ")" || c == #char "{" || c == #char "}" { return false }
+    if c == #char "`" || c == #char "&" || c == #char "=" || c == 34 { return false }
+    return true;
+}
+
+PushByte :: (t: *Text, c: s32) { VecPush(t.bytes, cast(u8)c) }
+
+#scope_export
+
+Lex :: (l: *Lexer) -> s32 {
+    endword := false;
+    wasdollar := false;
+    tok: s32 = NOTOKEN;
+    while tok == NOTOKEN {
+        c := Getc(l);
+        if c == EOF {
+            tok = END;
+        } else if c == 10 {
+            tok = 10;
+        } else if c == 13 || c == 9 || c == 32 {
+        } else if c == #char "#" {
+            c = Getc(l);
+            while c != 10 && c != EOF { c = Getc(l) }
+            Ungetc(l);
+        } else if c == #char ";" {
+            tok = c;
+        } else if c == #char "&" {
+            c = Getc(l);
+            if c == #char "&" {
+                tok = ANDAND;
+            } else {
+                Ungetc(l);
+                tok = #char "&";
+            }
+        } else if c == #char "^" || c == #char "{" || c == #char "}" || c == #char ")" || c == #char "(" {
+            tok = c;
+        } else if c == #char "=" {
+            tok = #char "=";
+            l.optype = N_ASSIGN;
+        } else if c == #char "$" {
+            if l.atendword {
+                Ungetc(l);
+                tok = #char "^";
+            } else {
+                c = Getc(l);
+                if c == #char "#" {
+                    l.optype = N_COUNT;
+                } else if c == 34 {
+                    l.optype = N_SQUASH;
+                } else {
+                    Ungetc(l);
+                    l.optype = N_VAR;
+                }
+                tok = OP;
+                wasdollar = true;
+            }
+        } else if c == 34 || c == #char "`" {
+            if l.atendword {
+                tok = #char "^";
+                Ungetc(l);
+            } else {
+                tok = OP;
+                if c == 34 { l.optype = N_BQ2 } else { l.optype = N_BQ }
+            }
+        } else if c == #char ">" || c == #char "<" {
+            rtype: s32;
+            nc := Getc(l);
+            if nc == #char ">" {
+                if c == #char ">" { rtype = OWRITE | OAPPEND } else { rtype = ORDWR }
+                nc = Getc(l);
+            } else if c == #char ">" {
+                rtype = OWRITE;
+            } else {
+                rtype = OREAD;
+            }
+            tok = REDIR;
+            if nc == #char "[" {
+                tok = ReadFdAssign(l);
+                if tok == ERROR { VecClear(l.err.bytes); unused BuilderAppend(l.err.bytes, "syntax error in redirection"); l.errline = l.linenum }
+            } else {
+                Ungetc(l);
+                l.hasredir = true; l.fd1 = -1; l.fd2 = -1;
+            }
+            if l.hasredir { l.rtype = rtype }
+        } else if c == #char "|" {
+            tok = #char "|";
+            l.hasredir = false;
+            c = Getc(l);
+            if c == #char "[" {
+                tok = ReadFdAssign(l);
+                if tok == ERROR {
+                    VecClear(l.err.bytes);
+                    unused BuilderAppend(l.err.bytes, "syntax error in pipe redirection");
+                    l.errline = l.linenum;
+                    return tok;
+                }
+                tok = #char "|";
+            } else if c == #char "|" {
+                tok = OROR;
+            } else {
+                Ungetc(l);
+            }
+        } else if c == 39 {
+            if l.atendword {
+                Ungetc(l);
+                tok = #char "^";
+            } else {
+                startline := l.linenum;
+                VecClear(l.word.bytes);
+                while true {
+                    nc := Getc(l);
+                    while nc != 39 && nc != EOF {
+                        PushByte(*l.word, nc);
+                        nc = Getc(l);
+                    }
+                    if nc == EOF {
+                        VecClear(l.err.bytes);
+                        unused BuilderAppend(l.err.bytes, "unterminated string literal");
+                        l.errline = startline;
+                        return ERROR;
+                    }
+                    if Getc(l) != 39 {
+                        Ungetc(l);
+                        break;
+                    }
+                    PushByte(*l.word, 39);
+                }
+                tok = WORD;
+                endword = true;
+            }
+        } else {
+            local := false;
+            if c == #char ":" {
+                if Getc(l) == #char "=" {
+                    tok = #char "=";
+                    l.optype = N_LOCAL;
+                    local = true;
+                } else {
+                    Ungetc(l);
+                }
+            }
+            if !local {
+                if l.atendword {
+                    Ungetc(l);
+                    tok = #char "^";
+                } else {
+                    dollar := l.wasdollar;
+                    VecClear(l.word.bytes);
+                    while true {
+                        if c == #char "*" || c == #char "?" || c == #char "[" || c == GLOB {
+                            PushByte(*l.word, GLOB);
+                        } else if c == #char ":" {
+                            nc := Getc(l);
+                            Ungetc(l);
+                            if nc == #char "=" { break }
+                        }
+                        PushByte(*l.word, c);
+                        c = Getc(l);
+                        if c == EOF { break }
+                        if dollar { if !InDollarWord(c) { break } } else { if !InPlainWord(c) { break } }
+                    }
+                    Ungetc(l);
+                    tok = WORD;
+                    endword = true;
+                }
+            }
+        }
+        l.atendword = endword;
+        l.wasdollar = wasdollar;
+    }
+    return tok;
+}
+
+// The parser: one lookahead token over a lexer.
+Parser :: struct {
+    lex: *Lexer;
+    tok: s32;
+    ready: bool;
+    failed: bool;
+}
+
+#scope_file
+
+Peek :: (p: *Parser) -> s32 {
+    if !p.ready {
+        p.tok = Lex(p.lex);
+        p.ready = true;
+    }
+    return p.tok;
+}
+
+Advance :: (p: *Parser) { p.ready = false }
+
+Syntax :: (p: *Parser) -> s32 {
+    if !p.failed {
+        p.failed = true;
+        LexError(p.lex, "syntax error");
+    }
+    return -1;
+}
+
+StartsWord :: (t: s32) -> bool { return t == WORD || t == OP || t == #char "(" || t == #char "{" }
+StartsCmd :: (t: s32) -> bool { return StartsWord(t) || t == DUP || t == REDIR }
+
+SkipNewlines :: (p: *Parser) { while Peek(p) == 10 { Advance(p) } }
+
+Mk :: (kind: s32, left: s32, right: s32) -> s32 { return NewNode(kind, left, right) }
+
+MkSeq :: (left: s32, right: s32) -> s32 {
+    if left != -1 && right != -1 { return Mk(N_SEQ, left, right) }
+    if left == -1 { return right }
+    return left;
+}
+
+// or2 OROR and2 becomes `or {or2} {and2}`, and ANDAND `and {and2} {pipe}`.
+MkLogic :: (name: string, left: s32, right: s32) -> s32 {
+    return Mk(N_ADJ, Mk(N_ADJ, WordNode(name), Mk(N_BLOCK, left, -1)), Mk(N_BLOCK, right, -1));
+}
+
+RedirNode :: (p: *Parser, kind: s32, left: s32) -> s32 {
+    n := Mk(kind, left, -1);
+    nodes[n].rtype = p.lex.rtype;
+    nodes[n].fd1 = p.lex.fd1;
+    nodes[n].fd2 = p.lex.fd2;
+    return n;
+}
+
+ParseComword :: (p: *Parser) -> s32 {
+    t := Peek(p);
+    if t == WORD {
+        n := WordNode(TextView(p.lex.word));
+        Advance(p);
+        return n;
+    }
+    if t == OP {
+        op := p.lex.optype;
+        Advance(p);
+        if !StartsWord(Peek(p)) { return Syntax(p) }
+        inner := ParseComword(p);
+        if p.failed { return -1 }
+        return Mk(op, inner, -1);
+    }
+    if t == #char "(" {
+        Advance(p);
+        list := ParseList(p);
+        if p.failed { return -1 }
+        if Peek(p) != #char ")" { return Syntax(p) }
+        Advance(p);
+        return Mk(N_LIST, list, -1);
+    }
+    if t == #char "{" {
+        Advance(p);
+        body := ParseSequence(p, true);
+        if p.failed { return -1 }
+        if Peek(p) != #char "}" { return Syntax(p) }
+        Advance(p);
+        return Mk(N_BLOCK, body, -1);
+    }
+    return Syntax(p);
+}
+
+ParseWord :: (p: *Parser) -> s32 {
+    word := ParseComword(p);
+    if p.failed { return -1 }
+    while Peek(p) == #char "^" {
+        Advance(p);
+        SkipNewlines(p);
+        if !StartsWord(Peek(p)) { return Syntax(p) }
+        next := ParseComword(p);
+        if p.failed { return -1 }
+        word = Mk(N_CONCAT, word, next);
+    }
+    return word;
+}
+
+ParseRedir :: (p: *Parser) -> s32 {
+    if Peek(p) == DUP {
+        n := RedirNode(p, N_DUP, -1);
+        Advance(p);
+        return n;
+    }
+    rtype := p.lex.rtype;
+    fd1 := p.lex.fd1;
+    fd2 := p.lex.fd2;
+    Advance(p);
+    if !StartsWord(Peek(p)) { return Syntax(p) }
+    word := ParseWord(p);
+    if p.failed { return -1 }
+    n := Mk(N_REDIR, word, -1);
+    nodes[n].rtype = rtype;
+    nodes[n].fd1 = fd1;
+    nodes[n].fd2 = fd2;
+    return n;
+}
+
+// simple: word | simple word | simple redir, continuing from `first`.
+ParseSimple :: (p: *Parser, first: s32) -> s32 {
+    s := first;
+    while true {
+        t := Peek(p);
+        if StartsWord(t) {
+            w := ParseWord(p);
+            if p.failed { return -1 }
+            s = Mk(N_ADJ, s, w);
+        } else if t == DUP || t == REDIR {
+            r := ParseRedir(p);
+            if p.failed { return -1 }
+            s = Mk(N_ADJ, s, r);
+        } else {
+            break;
+        }
+    }
+    return s;
+}
+
+// assign: word '=' assign | word '=' simple | word '='
+ParseAssign :: (p: *Parser, target: s32) -> s32 {
+    op := p.lex.optype;
+    Advance(p);
+    if !StartsWord(Peek(p)) { return Mk(op, target, -1) }
+    w := ParseWord(p);
+    if p.failed { return -1 }
+    if Peek(p) == #char "=" {
+        inner := ParseAssign(p, w);
+        if p.failed { return -1 }
+        return Mk(op, target, inner);
+    }
+    s := ParseSimple(p, w);
+    if p.failed { return -1 }
+    return Mk(op, target, s);
+}
+
+ParseCmd :: (p: *Parser) -> s32 {
+    t := Peek(p);
+    if t == DUP || t == REDIR {
+        r := ParseRedir(p);
+        if p.failed { return -1 }
+        if StartsCmd(Peek(p)) {
+            c := ParseCmd(p);
+            if p.failed { return -1 }
+            return Mk(N_ADJ, r, c);
+        }
+        return r;
+    }
+    w := ParseWord(p);
+    if p.failed { return -1 }
+    if Peek(p) == #char "=" { return ParseAssign(p, w) }
+    return ParseSimple(p, w);
+}
+
+ParsePipe :: (p: *Parser) -> s32 {
+    left: s32 = -1;
+    if StartsCmd(Peek(p)) {
+        left = ParseCmd(p);
+        if p.failed { return -1 }
+    }
+    while Peek(p) == #char "|" {
+        hasredir := p.lex.hasredir;
+        fd1 := p.lex.fd1;
+        fd2 := p.lex.fd2;
+        Advance(p);
+        SkipNewlines(p);
+        if !StartsCmd(Peek(p)) { return Syntax(p) }
+        right := ParseCmd(p);
+        if p.failed { return -1 }
+        left = Mk(N_PIPE, left, right);
+        if hasredir {
+            nodes[left].rtype = 0;
+            nodes[left].fd1 = fd1;
+            nodes[left].fd2 = fd2;
+        }
+    }
+    return left;
+}
+
+ParseAnd :: (p: *Parser) -> s32 {
+    left := ParsePipe(p);
+    if p.failed { return -1 }
+    while Peek(p) == ANDAND {
+        Advance(p);
+        right := ParsePipe(p);
+        if p.failed { return -1 }
+        left = MkLogic("and", left, right);
+    }
+    return left;
+}
+
+ParseOr :: (p: *Parser) -> s32 {
+    left := ParseAnd(p);
+    if p.failed { return -1 }
+    while Peek(p) == OROR {
+        Advance(p);
+        right := ParseAnd(p);
+        if p.failed { return -1 }
+        left = MkLogic("or", left, right);
+    }
+    return left;
+}
+
+// line: or2 | cmdsa line, and inside braces body: or2 | cmdsan body,
+// where a newline also separates commands.
+ParseSequence :: (p: *Parser, body: bool) -> s32 {
+    items: Vec(s32);
+    while true {
+        n := ParseOr(p);
+        if p.failed { return -1 }
+        t := Peek(p);
+        if t == #char ";" || (body && t == 10) {
+            VecPush(items, n);
+            Advance(p);
+        } else if t == #char "&" {
+            VecPush(items, Mk(N_NOWAIT, n, -1));
+            Advance(p);
+        } else {
+            VecPush(items, n);
+            break;
+        }
+    }
+    result := items[items.count - 1];
+    i := items.count - 2;
+    while i >= 0 {
+        result = MkSeq(items[i], result);
+        i -= 1;
+    }
+    return result;
+}
+
+// list: optnl | nlsimple optnl, inside parentheses.
+ParseList :: (p: *Parser) -> s32 {
+    SkipNewlines(p);
+    if !StartsWord(Peek(p)) { return -1 }
+    n := ParseWord(p);
+    if p.failed { return -1 }
+    while true {
+        SkipNewlines(p);
+        t := Peek(p);
+        if StartsWord(t) {
+            w := ParseWord(p);
+            if p.failed { return -1 }
+            n = Mk(N_ADJ, n, w);
+        } else if t == DUP || t == REDIR {
+            r := ParseRedir(p);
+            if p.failed { return -1 }
+            n = Mk(N_ADJ, n, r);
+        } else {
+            break;
+        }
+    }
+    return n;
+}
+
+#scope_export
+
+// shell: line end | error end. After an error the rest of the line is
+// discarded, as yacc's error recovery does.
+ParseShell :: (l: *Lexer) -> s32 {
+    p: Parser;
+    p.lex = l;
+    n := ParseSequence(*p, false);
+    if !p.failed {
+        t := Peek(*p);
+        if t == 10 || t == END { return n }
+        unused Syntax(*p);
+    }
+    while true {
+        t := Peek(*p);
+        Advance(*p);
+        if t == 10 || t == END { break }
+    }
+    return -1;
+}
+
+// Parse one command from the lexer: the node, or -1 with err set.
+DoParse :: (l: *Lexer, prompt: string, showline: bool, err: *Text) -> s32 {
+    VecClear(l.prompt.bytes);
+    unused BuilderAppend(l.prompt.bytes, prompt);
+    VecClear(l.err.bytes);
+    n := ParseShell(l);
+    l.lastnl = false;
+    if l.err.bytes.count != 0 {
+        VecClear(err.bytes);
+        if l.errline > 0 && showline {
+            BuilderPrint(*err.bytes, "%:%: %", TextView(l.path), l.errline, TextView(l.err));
+        } else {
+            BuilderPrint(*err.bytes, "%: parse error: %", TextView(l.path), TextView(l.err));
+        }
+        return -1;
+    }
+    return n;
+}
+
+// Parse a whole string, as Sh->parse does.
+ParseString :: (s: string, err: *Text) -> s32 {
+    l: Lexer;
+    InitString(*l, s);
+    return DoParse(*l, "", false, err);
+}
+
+// Text for reparsing; with glob the GLOB marks are significant.
+Quote :: (out: *Vec(u8), s: string, glob: bool) {
+    needquote := false;
+    t: Vec(u8);
+    i: s64;
+    while i < s.count {
+        c := s[i];
+        if c == #char "{" || c == #char "}" || c == #char "(" || c == #char ")" || c == #char "`" ||
+            c == #char "&" || c == #char ";" || c == #char "=" || c == #char ">" || c == #char "<" ||
+            c == #char "#" || c == #char "|" || c == #char "*" || c == #char "[" || c == #char "?" ||
+            c == #char "$" || c == #char "^" || c == 32 || c == 9 || c == 10 || c == 13 {
+            needquote = true;
+        } else if c == 39 {
+            VecPush(t, 39);
+            needquote = true;
+        } else if c == GLOB {
+            if glob && i < s.count - 1 { i += 1 }
+        }
+        VecPush(t, s[i]);
+        i += 1;
+    }
+    if needquote || t.count == 0 {
+        VecPush(<<out, 39);
+        unused BuilderAppend(<<out, TextView(t[:]));
+        VecPush(<<out, 39);
+    } else {
+        unused BuilderAppend(<<out, TextView(t[:]));
+    }
+}
+
+#scope_file
+
+RedirStr :: (out: *Vec(u8), rtype: s32) {
+    if rtype == OWRITE { unused BuilderAppend(<<out, ">") }
+    else if rtype == (OWRITE | OAPPEND) { unused BuilderAppend(<<out, ">>") }
+    else if rtype == ORDWR { unused BuilderAppend(<<out, "<>") }
+    else { unused BuilderAppend(<<out, "<") }
+}
+
+FdAssignStr :: (out: *Vec(u8), isassign: bool, fd1: s32, fd2: s32) {
+    VecPush(<<out, #char "[");
+    if fd1 >= 0 { BuilderPrint(out, "%", fd1) }
+    if isassign {
+        VecPush(<<out, #char "=");
+        if fd2 >= 0 { BuilderPrint(out, "%", fd2) }
+    }
+    VecPush(<<out, #char "]");
+}
+
+#scope_export
+
+CmdToString :: (out: *Vec(u8), n: s32) {
+    if n < 0 { return }
+    k := nodes[n].kind;
+    left := nodes[n].left;
+    right := nodes[n].right;
+    if k == N_BLOCK {
+        VecPush(<<out, #char "{"); CmdToString(out, left); VecPush(<<out, #char "}");
+    } else if k == N_VAR {
+        VecPush(<<out, #char "$"); CmdToString(out, left);
+        if right >= 0 { VecPush(<<out, #char "("); CmdToString(out, right); VecPush(<<out, #char ")") }
+    } else if k == N_SQUASH {
+        unused BuilderAppend(<<out, "$\""); CmdToString(out, left);
+    } else if k == N_COUNT {
+        unused BuilderAppend(<<out, "$#"); CmdToString(out, left);
+    } else if k == N_BQ {
+        VecPush(<<out, #char "`"); CmdToString(out, left);
+    } else if k == N_BQ2 {
+        VecPush(<<out, 34); CmdToString(out, left);
+    } else if k == N_REDIR {
+        RedirStr(out, nodes[n].rtype);
+        if nodes[n].fd1 != -1 { FdAssignStr(out, false, nodes[n].fd1, nodes[n].fd2) }
+        CmdToString(out, left);
+    } else if k == N_DUP {
+        RedirStr(out, nodes[n].rtype);
+        FdAssignStr(out, true, nodes[n].fd1, nodes[n].fd2);
+    } else if k == N_LIST {
+        VecPush(<<out, #char "("); CmdToString(out, left); VecPush(<<out, #char ")");
+    } else if k == N_SEQ {
+        CmdToString(out, left); VecPush(<<out, #char ";"); CmdToString(out, right);
+    } else if k == N_NOWAIT {
+        CmdToString(out, left); VecPush(<<out, #char "&");
+    } else if k == N_CONCAT {
+        CmdToString(out, left); VecPush(<<out, #char "^"); CmdToString(out, right);
+    } else if k == N_PIPE {
+        CmdToString(out, left); VecPush(<<out, #char "|");
+        if nodes[n].rtype != -1 && (nodes[n].fd1 != -1 || nodes[n].fd2 != -1) {
+            FdAssignStr(out, nodes[n].fd2 != -1, nodes[n].fd1, nodes[n].fd2);
+        }
+        CmdToString(out, right);
+    } else if k == N_ASSIGN {
+        CmdToString(out, left); VecPush(<<out, #char "="); CmdToString(out, right);
+    } else if k == N_LOCAL {
+        CmdToString(out, left); unused BuilderAppend(<<out, ":="); CmdToString(out, right);
+    } else if k == N_ADJ {
+        CmdToString(out, left); VecPush(<<out, 32); CmdToString(out, right);
+    } else if k == N_WORD {
+        w: Text = TextCopy(TextView(nodes[n].word));
+        Quote(out, TextView(w), true);
+    } else {
+        BuilderPrint(out, "unknown%", k);
+    }
+}
+
+CmdText :: (n: s32) -> Text {
+    out: Vec(u8);
+    CmdToString(*out, n);
+    return BuilderFinish(out);
+}

@@ -1,0 +1,245 @@
+// The expr builtin module of appl/cmd/sh/expr.b: ${expr ...}, a reverse
+// Polish calculator on 64-bit integers, and the ntest builtin.
+#import "std/vec";
+#import "std/option";
+#import "shell_util";
+#import "shell";
+
+#scope_file
+
+EQ :: 0; GT :: 1; LT :: 2; GE :: 3; LE :: 4; PLUS :: 5; MINUS :: 6; DIVIDE :: 7; AND :: 8; TIMES :: 9; MOD :: 10;
+OR :: 11; XOR :: 12; UMINUS :: 13; SHL :: 14; SHR :: 15; NOT :: 16; BNOT :: 17; NEQ :: 18; REP :: 19; SEQ :: 20;
+
+// Limbo's big conversion of a string: blanks, a sign and decimal digits.
+BigOf :: (s: string) -> s64 {
+    i: s64;
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 10) { i += 1 }
+    neg := false;
+    if i < s.count && (s[i] == #char "-" || s[i] == #char "+") { neg = s[i] == #char "-"; i += 1 }
+    v: u64;
+    while i < s.count && s[i] >= #char "0" && s[i] <= #char "9" {
+        v = v * 10 + cast(u64)(s[i] - #char "0");
+        i += 1;
+    }
+    if neg { v = 0 - v }
+    return cast(s64)v;
+}
+
+MakeNum :: (s: string) -> s64 {
+    if s.count == 0 || (s[0] != #char "-" && (s[0] < #char "0" || s[0] > #char "9")) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "expr: unknown operator '%'", s);
+        Fail("usage", TextView(msg[:]));
+        return 0;
+    }
+    t := s;
+    neg := s[0] == #char "-";
+    if neg { s = s[1:] }
+    radix: s64 = 10;
+    for i: 0..s.count - 1 {
+        if i >= 3 { break }
+        if s[i] == #char "r" {
+            radix = LimboInt(s);
+            s = s[i + 1:];
+            break;
+        }
+    }
+    if radix == 10 { return BigOf(t) }
+    if radix == 0 || radix > 36 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "expr: bad number %", t);
+        Fail("usage", TextView(msg[:]));
+        return 0;
+    }
+    n: u64;
+    r := cast(u64)radix;
+    for i: 0..s.count - 1 {
+        c := cast(s64)s[i];
+        if c >= #char "0" && c <= #char "9" { n = n * r + cast(u64)(c - #char "0") }
+        else if c >= #char "a" && c < #char "a" + radix - 10 { n = n * r + cast(u64)(c - #char "a" + 10) }
+        else if c >= #char "A" && c < #char "A" + radix - 10 { n = n * r + cast(u64)(c - #char "A" + 10) }
+        else { break }
+    }
+    if neg { n = 0 - n }
+    return cast(s64)n;
+}
+
+BigText :: (value: s64, radix: s64) -> Text {
+    neg := value < 0;
+    n := cast(u64)value;
+    if neg { n = 0 - n }
+    digits: Vec(u8);
+    r := cast(u64)radix;
+    while true {
+        d := cast(s64)(n % r);
+        if d < 10 { VecPush(digits, cast(u8)(#char "0" + d)) } else { VecPush(digits, cast(u8)(#char "a" + d - 10)) }
+        n = n / r;
+        if n == 0 { break }
+    }
+    out: Vec(u8);
+    if neg { VecPush(out, #char "-") }
+    if radix != 10 { BuilderPrint(*out, "%r", radix) }
+    k := digits.count - 1;
+    while k >= 0 { VecPush(out, digits[k]); k -= 1 }
+    return BuilderFinish(out);
+}
+
+OpOf :: (w: string) -> (op: s32, nops: s32) {
+    if w == "+" { return PLUS, 2 }
+    if w == "-" { return MINUS, 2 }
+    if w == "x" || w == "*" || w == "×" { return TIMES, 2 }
+    if w == "/" { return DIVIDE, 2 }
+    if w == "%" { return MOD, 2 }
+    if w == "and" { return AND, 2 }
+    if w == "or" { return OR, 2 }
+    if w == "xor" { return XOR, 2 }
+    if w == "_" { return UMINUS, 1 }
+    if w == "<<" || w == "shl" { return SHL, 2 }
+    if w == ">>" || w == "shr" { return SHR, 2 }
+    if w == "=" || w == "==" || w == "eq" { return EQ, 2 }
+    if w == "!=" || w == "neq" { return NEQ, 2 }
+    if w == ">" || w == "gt" { return GT, 2 }
+    if w == "<" || w == "lt" { return LT, 2 }
+    if w == ">=" || w == "ge" { return GE, 2 }
+    if w == "<=" || w == "le" { return LE, 2 }
+    if w == "!" || w == "not" { return NOT, 1 }
+    if w == "~" { return BNOT, 1 }
+    if w == "rep" { return REP, 0 }
+    if w == "seq" { return SEQ, 2 }
+    return -1, 2;
+}
+
+B :: (c: bool) -> s64 { return ifx c then 1 else 0 }
+
+// Apply op to the stack, whose top is its last element.
+Operator :: (stk: *Vec(s64), op: s32, nops: s32, lastop: s32, lastn: s32, opname: string, lastname: string) {
+    args: [2]s64;
+    for i: 0..nops - 1 {
+        if stk.count == 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "expr: empty stack on op '%'", opname);
+            Fail("empty stack", TextView(msg[:]));
+            return;
+        }
+        top := VecPop(<<stk);
+        args[nops - 1 - i] = top.value;
+    }
+    if op == REP {
+        if lastop == -1 || lastop == SEQ || lastn != 2 { Fail("usage", "expr: bad operator for rep"); return }
+        while stk.count > 1 {
+            Operator(stk, lastop, 2, -1, -1, lastname, "");
+            if Unwinding() { return }
+        }
+        return;
+    }
+    n1 := args[0];
+    n2: s64 = 0;
+    if nops > 1 { n2 = args[1] }
+    r: s64 = 0;
+    if op == EQ { r = B(n1 == n2) }
+    else if op == NEQ { r = B(n1 != n2) }
+    else if op == GT { r = B(n1 > n2) }
+    else if op == LT { r = B(n1 < n2) }
+    else if op == GE { r = B(n1 >= n2) }
+    else if op == LE { r = B(n1 <= n2) }
+    else if op == PLUS { r = cast(s64)(cast(u64)n1 + cast(u64)n2) }
+    else if op == MINUS { r = cast(s64)(cast(u64)n1 - cast(u64)n2) }
+    else if op == NOT { r = B(n1 != 0) }
+    else if op == DIVIDE || op == MOD {
+        if n2 == 0 { Fail("divide by zero", "expr: division by zero"); return }
+        if n2 == -1 {
+            r = ifx op == DIVIDE then cast(s64)(0 - cast(u64)n1) else 0;
+        } else {
+            r = ifx op == DIVIDE then n1 / n2 else n1 % n2;
+        }
+    }
+    else if op == TIMES { r = cast(s64)(cast(u64)n1 * cast(u64)n2) }
+    else if op == AND { r = n1 & n2 }
+    else if op == OR { r = n1 | n2 }
+    else if op == XOR { r = n1 ^ n2 }
+    else if op == UMINUS { r = cast(s64)(0 - cast(u64)n1) }
+    else if op == BNOT { r = ~n1 }
+    else if op == SHL { r = cast(s64)(cast(u64)n1 << cast(u64)(n2 & 63)) }
+    else if op == SHR { r = n1 >> (n2 & 63) }
+    else if op == SEQ {
+        incr: s64 = 1;
+        if n2 < n1 { incr = -1 }
+        while n1 != n2 { VecPush(<<stk, n1); n1 += incr }
+        VecPush(<<stk, n1);
+        return;
+    }
+    VecPush(<<stk, r);
+}
+
+ExprList :: (args: *Items) -> Items {
+    radix: s64 = 10;
+    at: s64 = 1;
+    if args.count > 1 {
+        w: Text = TextCopy(TextView(args.*[1].word));
+        v := TextView(w);
+        if v.count >= 2 && v[0] == #char "-" && !(v[1] >= #char "0" && v[1] <= #char "9") {
+            if v[1] != #char "r" { Fail("usage", "usage: expr [-r radix] [arg...]"); return NoItems() }
+            rtext: Text;
+            if v.count > 2 {
+                SetText(*rtext, v[2:]);
+                at = 2;
+            } else {
+                if args.count < 3 { Fail("usage", "usage: expr [-r radix] [arg...]"); return NoItems() }
+                SetText(*rtext, TextView(args.*[2].word));
+                at = 3;
+            }
+            radix = LimboInt(TextView(rtext));
+            if radix <= 0 || radix > 36 {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "expr: invalid radix %", radix);
+                Fail("usage", TextView(msg[:]));
+                return NoItems();
+            }
+        }
+    }
+    stk: Vec(s64);
+    lastop: s32 = -1;
+    lastn: s32 = -1;
+    lastname: Text;
+    for i: at..args.count - 1 {
+        w: Text = TextCopy(TextView(args.*[i].word));
+        op, nops := OpOf(TextView(w));
+        if op == -1 {
+            v := MakeNum(TextView(w));
+            if Unwinding() { return NoItems() }
+            VecPush(stk, v);
+        } else {
+            Operator(*stk, op, nops, lastop, lastn, TextView(w), TextView(lastname));
+            if Unwinding() { return NoItems() }
+        }
+        lastop = op;
+        lastn = nops;
+        SetText(*lastname, TextView(w));
+    }
+    out: Items;
+    for i: 0..stk.count - 1 {
+        t: Text = BigText(stk[i], radix);
+        PushWord(*out, TextView(t));
+    }
+    return out;
+}
+
+#scope_export
+
+ExprInit :: (mod: s32, err: *Text) -> bool {
+    AddSBuiltin("expr", mod);
+    AddBuiltin("ntest", mod);
+    return true;
+}
+
+ExprRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    if args.count != 2 { Fail("usage", "usage: ntest n"); return true }
+    if BigOf(TextView(args.*[1].word)) == 0 { SetText(status, "false") }
+    return true;
+}
+
+ExprSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := ExprList(args);
+    VecSwap(<<out, result);
+    return true;
+}

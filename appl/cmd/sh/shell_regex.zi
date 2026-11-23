@@ -1,0 +1,197 @@
+// The regex builtin module of appl/cmd/sh/regex.b: match and ${re ...}.
+#import "std/vec";
+#import "shell_util";
+#import "shell";
+#import "shell_regexp";
+
+#scope_file
+
+// Compile or fail with "bad regex", as getregex.
+GetRegex :: (res: string, flag: s32, re: *Re) -> bool {
+    err: Text;
+    if Compile(res, flag, re, *err) { return true }
+    msg: Vec(u8);
+    BuilderPrint(*msg, "regex: bad regex \"%\": %", res, TextView(err));
+    Fail("bad regex", TextView(msg[:]));
+    return false;
+}
+
+RunesText :: (r: *Vec(s32), from: s64, to: s64) -> Text {
+    out: Vec(u8);
+    for i: from..to - 1 { PutRune(*out, r.*[i]) }
+    return BuilderFinish(out);
+}
+
+// Subexpression i of a match, or empty when it did not take part.
+Elem :: (m: *Match, i: s64, w: *Vec(s32)) -> Text {
+    if i < 0 || i >= m.beg.count { return TextCopy("") }
+    if m.beg[i] == -1 { return TextCopy("") }
+    return RunesText(w, m.beg[i], m.end[i]);
+}
+
+UsageRe :: () { Fail("usage", "usage: re (g|v|s|sg|m|mg|M) arg...") }
+
+MatchList :: (args: *Items, aflag: s32) -> Items {
+    if args.count != 4 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "usage: re % arg", TextView(args.*[1].word));
+        Fail("usage", TextView(msg[:]));
+        return NoItems();
+    }
+    pat: Text = ItemText(args, 2);
+    re: Re;
+    if !GetRegex(TextView(pat), aflag, *re) { return NoItems() }
+    wt: Text = ItemText(args, 3);
+    w := Runes(TextView(wt));
+    m: Match;
+    out: Items;
+    if !Execute(*re, *w, *m) { return NoItems() }
+    for i: 0..m.beg.count - 1 {
+        e: Text = Elem(*m, i, *w);
+        PushWord(*out, TextView(e));
+    }
+    return out;
+}
+
+GMatchList :: (args: *Items) -> Items {
+    if args.count != 4 { Fail("usage", "usage: re mg arg"); return NoItems() }
+    pat: Text = ItemText(args, 2);
+    re: Re;
+    if !GetRegex(TextView(pat), 0, *re) { return NoItems() }
+    wt: Text = ItemText(args, 3);
+    w := Runes(TextView(wt));
+    out: Items;
+    beg: s64 = 0;
+    m: Match;
+    while ExecuteRange(*re, *w, beg, w.count, beg == 0, true, *m) {
+        s := m.beg[0];
+        e := m.end[0];
+        piece: Text = RunesText(*w, s, e);
+        PushWord(*out, TextView(piece));
+        if s == e { break }
+        beg = e;
+    }
+    return out;
+}
+
+SelList :: (args: *Items, vflag: bool) -> Items {
+    cmd: Text = TextCopy(TextView(args.*[1].word));
+    if args.count < 3 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "usage: % regex [arg...]", TextView(cmd));
+        Fail("usage", TextView(msg[:]));
+        return NoItems();
+    }
+    pat: Text = ItemText(args, 2);
+    re: Re;
+    if !GetRegex(TextView(pat), 0, *re) { return NoItems() }
+    out: Items;
+    for i: 3..args.count - 1 {
+        wt: Text = ItemText(args, i);
+        w := Runes(TextView(wt));
+        m: Match;
+        if vflag != Execute(*re, *w, *m) { VecPush(out, CopyItem(args, i)) }
+    }
+    return out;
+}
+
+Substitute :: (w: *Vec(s32), re: *Re, subs: *Vec(s32), gflag: bool) -> Text {
+    out: Vec(u8);
+    beg: s64 = 0;
+    while true {
+        m: Match;
+        if !ExecuteRange(re, w, beg, w.count, beg == 0, true, *m) { break }
+        for i: beg..m.beg[0] - 1 { PutRune(*out, w.*[i]) }
+        i: s64 = 0;
+        while i < subs.count {
+            if subs.*[i] != 92 || i == subs.count - 1 {
+                PutRune(*out, subs.*[i]);
+            } else {
+                i += 1;
+                c := subs.*[i];
+                if c < #char "0" || c > #char "9" {
+                    PutRune(*out, c);
+                } else {
+                    e: Text = Elem(*m, cast(s64)(c - #char "0"), w);
+                    unused BuilderAppend(out, TextView(e));
+                }
+            }
+            i += 1;
+        }
+        beg = m.end[0];
+        if m.beg[0] == m.end[0] { break }
+        if !gflag || beg >= w.count { break }
+    }
+    for i: beg..w.count - 1 { PutRune(*out, w.*[i]) }
+    return BuilderFinish(out);
+}
+
+SubList :: (args: *Items, gflag: bool) -> Items {
+    cmd: Text = TextCopy(TextView(args.*[1].word));
+    if args.count < 4 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "usage: % regex subs [arg...]", TextView(cmd));
+        Fail("usage", TextView(msg[:]));
+        return NoItems();
+    }
+    pat: Text = ItemText(args, 2);
+    re: Re;
+    if !GetRegex(TextView(pat), 1, *re) { return NoItems() }
+    st: Text = ItemText(args, 3);
+    subs := Runes(TextView(st));
+    out: Items;
+    for i: 4..args.count - 1 {
+        wt: Text = ItemText(args, i);
+        w := Runes(TextView(wt));
+        r: Text = Substitute(*w, *re, *subs, gflag);
+        PushWord(*out, TextView(r));
+    }
+    return out;
+}
+
+ReList :: (args: *Items) -> Items {
+    if args.count < 2 { UsageRe(); return NoItems() }
+    w: Text = TextCopy(TextView(args.*[1].word));
+    v := TextView(w);
+    if v == "g" || v == "v" { return SelList(args, v == "v") }
+    if v == "s" || v == "sg" { return SubList(args, v == "sg") }
+    if v == "m" { return MatchList(args, 0) }
+    if v == "mg" { return GMatchList(args) }
+    if v == "M" { return MatchList(args, 1) }
+    UsageRe();
+    return NoItems();
+}
+
+MatchText :: (args: *Items) -> Text {
+    if args.count < 2 { Fail("usage", "usage: match regexp [arg...]"); return TextCopy("") }
+    pat: Text = ItemText(args, 1);
+    re: Re;
+    if !GetRegex(TextView(pat), 0, *re) { return TextCopy("") }
+    for i: 2..args.count - 1 {
+        wt: Text = ItemText(args, i);
+        w := Runes(TextView(wt));
+        m: Match;
+        if !Execute(*re, *w, *m) { return TextCopy("no match") }
+    }
+    return TextCopy("");
+}
+
+#scope_export
+
+RegexInit :: (mod: s32, err: *Text) -> bool {
+    AddBuiltin("match", mod);
+    AddSBuiltin("re", mod);
+    return true;
+}
+
+RegexRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = MatchText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+RegexSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := ReList(args);
+    VecSwap(<<out, result);
+    return true;
+}

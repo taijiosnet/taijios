@@ -1,0 +1,323 @@
+// Parity test for the ZX shell, appl/cmd/sh/sh.zi built as sh.zx.
+// tests/sh/corpus.txt holds the scripts; tests/sh/goldens.txt holds what
+// the Limbo shell, /dis/sh.dis, printed for each: standard output, standard
+// error and the status its caller saw. Each case boots its own guest, in
+// which a driver script run by the shell under test starts the case in a
+// fresh shell: the ZX guest boots without Dis. Paths under the private
+// work directory read "$W" before comparing.
+//
+// From the TaijiOS root, after `(cd appl/cmd && mk install)` and
+// `(cd appl/cmd/sh && mk install-zx)`:
+//     ziran run --target=c --root tests/sh tests/sh/sh_test.zi -- [--shell GUEST.zx] [--record] [--dis] [EMU]
+// --shell picks the ZX shell (default /dis/sh.zx). --record runs the Dis
+// shell instead and rewrites goldens.txt; --dis also checks the Dis shell
+// against the goldens. EMU defaults to emu/Linux/o.emu.
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/text_tools"
+#import "std/option"
+
+Case :: struct {
+    name: Text;
+    args: Text;
+    noscript: bool;
+    input: Text;
+    script: Text;
+    // A known difference and what it waits for; such a case must still differ.
+    gap: Text;
+}
+
+Golden :: struct {
+    name: Text;
+    status: Text;
+    out: Text;
+    err: Text;
+}
+
+WORK :: "build/tests/sh";
+GUESTWORK :: "/build/tests/sh";
+
+cases: Vec(Case);
+goldens: Vec(Golden);
+failures: s32;
+
+SetTo :: (t: *Text, s: string) {
+    VecClear(t.bytes);
+    unused BuilderAppend(t.bytes, s);
+}
+
+Unescape :: (s: string, out: *Text) {
+    VecClear(out.bytes);
+    i: s64;
+    while i < s.count {
+        c := s[i];
+        if c == 92 && i + 1 < s.count {
+            d := s[i + 1];
+            if d == #char "n" { VecPush(out.bytes, 10); i += 2; continue }
+            if d == #char "t" { VecPush(out.bytes, 9); i += 2; continue }
+            if d == 92 { VecPush(out.bytes, 92); i += 2; continue }
+            if d == #char "x" && i + 3 < s.count {
+                v: u8;
+                for k: 2..3 {
+                    h := s[i + k];
+                    digit := ifx h >= #char "a" then h - #char "a" + 10 else h - #char "0";
+                    v = v * 16 + digit;
+                }
+                VecPush(out.bytes, v);
+                i += 4;
+                continue;
+            }
+        }
+        VecPush(out.bytes, c);
+        i += 1;
+    }
+}
+
+Escape :: (out: *Vec(u8), s: string) {
+    hex := "0123456789abcdef";
+    for s {
+        if it == 92 { unused BuilderAppend(<<out, "\\\\") }
+        else if it == 10 { unused BuilderAppend(<<out, "\\n") }
+        else if it == 9 { unused BuilderAppend(<<out, "\\t") }
+        else if it < 32 || it == 127 {
+            unused BuilderAppend(<<out, "\\x");
+            VecPush(<<out, hex[cast(s64)(it >> 4)]);
+            VecPush(<<out, hex[cast(s64)(it & 15)]);
+        } else { VecPush(<<out, it) }
+    }
+}
+
+LoadCorpus :: () -> bool {
+    text, ok := ReadEntireFile("tests/sh/corpus.txt");
+    if !ok { return false }
+    lines := TextLines(text);
+    inscript := false;
+    for i: 0..lines.count - 1 {
+        line := lines[i];
+        if TextHasPrefix(line, "=== ") {
+            c: Case;
+            SetTo(*c.name, line[4:]);
+            VecPush(cases, c);
+            inscript = false;
+            continue;
+        }
+        if cases.count == 0 { continue }
+        k := cases.count - 1;
+        if inscript {
+            unused BuilderAppend(cases[k].script.bytes, line);
+            VecPush(cases[k].script.bytes, 10);
+        } else if line == "script:" {
+            inscript = true;
+        } else if line == "noscript" {
+            cases[k].noscript = true;
+        } else if TextHasPrefix(line, "args:") {
+            SetTo(*cases[k].args, TextTrim(line[5:]));
+        } else if TextHasPrefix(line, "input:") {
+            Unescape(TextTrim(line[6:]), *cases[k].input);
+        } else if TextHasPrefix(line, "gap:") {
+            SetTo(*cases[k].gap, TextTrim(line[4:]));
+        }
+    }
+    // The blank lines between cases are not part of the scripts.
+    for k: 0..cases.count - 1 {
+        while cases[k].script.bytes.count >= 2 && cases[k].script.bytes[cases[k].script.bytes.count - 1] == 10 &&
+            cases[k].script.bytes[cases[k].script.bytes.count - 2] == 10 {
+            unused VecPop(cases[k].script.bytes);
+        }
+    }
+    return true;
+}
+
+LoadGoldens :: () -> bool {
+    text, ok := ReadEntireFile("tests/sh/goldens.txt");
+    if !ok { return false }
+    for TextLines(text) {
+        if TextHasPrefix(it, "=== ") {
+            g: Golden;
+            SetTo(*g.name, it[4:]);
+            VecPush(goldens, g);
+            continue;
+        }
+        if goldens.count == 0 { continue }
+        k := goldens.count - 1;
+        if TextHasPrefix(it, "status: ") { Unescape(it[8:], *goldens[k].status) }
+        else if TextHasPrefix(it, "out: ") { Unescape(it[5:], *goldens[k].out) }
+        else if TextHasPrefix(it, "err: ") { Unescape(it[5:], *goldens[k].err) }
+    }
+    return true;
+}
+
+Path :: (kind: string, name: string, index: s64) -> Text {
+    out: Vec(u8);
+    BuilderPrint(*out, "%/%/%.%", WORK, kind, name, index);
+    return BuilderFinish(out);
+}
+
+Fixture :: (kind: string, name: string, text: string) -> bool {
+    out: Vec(u8);
+    BuilderPrint(*out, "%/%/%", WORK, kind, name);
+    return WriteEntireFile(TextView(out[:]), text);
+}
+
+FixtureDir :: (kind: string, name: string) -> bool {
+    out: Vec(u8);
+    BuilderPrint(*out, "%/%/%", WORK, kind, name);
+    return CreateDirectory(TextView(out[:]));
+}
+
+// The work directory for one shell: fixtures, case scripts, inputs and a
+// driver for each case.
+Prepare :: (kind: string, shell: string) -> bool {
+    dir: Vec(u8);
+    BuilderPrint(*dir, "%/%", WORK, kind);
+    unused RemoveTree(TextView(dir[:]));
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/tests");
+    unused CreateDirectory(WORK);
+    if !CreateDirectory(TextView(dir[:])) || !FixtureDir(kind, "result") || !FixtureDir(kind, "g") ||
+        !FixtureDir(kind, "g/sub") { return false }
+    if !Fixture(kind, "g/a1", "") || !Fixture(kind, "g/a2", "") || !Fixture(kind, "g/b1", "") ||
+        !Fixture(kind, "g/c d", "") || !Fixture(kind, "g/sub/x", "") { return false }
+    for i: 0..cases.count - 1 {
+        script: Text = Path(kind, "case", i);
+        input: Text = Path(kind, "in", i);
+        if !WriteEntireFile(TextView(script), TextView(cases[i].script)) { return false }
+        if !WriteEntireFile(TextView(input), TextView(cases[i].input)) { return false }
+        driver: Vec(u8);
+        BuilderPrint(*driver, "W = %/%\n", GUESTWORK, kind);
+        BuilderPrint(*driver, "% %", shell, TextView(cases[i].args));
+        if !cases[i].noscript { BuilderPrint(*driver, " $W/case.%", i) }
+        BuilderPrint(*driver, " < $W/in.% > $W/result/out.% >[2] $W/result/err.%\n", i, i, i);
+        BuilderPrint(*driver, "echo $status > $W/result/status.%\n", i);
+        // A Dis guest whose last command has ended can still fail to exit.
+        if kind == "dis" { unused BuilderAppend(driver, "echo halt > /dev/sysctl\n") }
+        driverpath: Text = Path(kind, "driver", i);
+        if !WriteEntireFile(TextView(driverpath), TextView(driver[:])) { return false }
+    }
+    return true;
+}
+
+Boot :: (emu: string, kind: string, shell: string, index: s64) -> bool {
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "%/%/driver.%", GUESTWORK, kind, index);
+    command: [7]string = .["timeout", "120", emu, "-r", TextView(root), shell, TextView(guest[:])];
+    scrub: [4]string = .["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"];
+    run: ProcessRun;
+    // The Dis console reads the host's standard input until it ends.
+    started := RunProcess(.{arguments = command[:], environment = scrub[:], input_path = "/dev/null", capture_output = true, new_session = true}, *run);
+    if !started { print("cannot start %\n", emu); return false }
+    if run.code == 124 { print("% shell timed out in case %\n", kind, TextView(cases[index].name)) }
+    return true;
+}
+
+BootAll :: (emu: string, kind: string, shell: string) -> bool {
+    for i: 0..cases.count - 1 { if !Boot(emu, kind, shell, i) { return false } }
+    return true;
+}
+
+// A result file with the work directory written as $W.
+Result :: (kind: string, what: string, index: s64) -> Text {
+    out: Vec(u8);
+    BuilderPrint(*out, "%/%/result/%.%", WORK, kind, what, index);
+    text, ok := ReadEntireFile(TextView(out[:]));
+    if !ok { return TextCopy("<missing>") }
+    w: Vec(u8);
+    BuilderPrint(*w, "%/%", GUESTWORK, kind);
+    return TextReplace(text, TextView(w[:]), "$W");
+}
+
+Check :: (kind: string, index: s64, what: string, got: string, want: string) {
+    if got == want { return }
+    if kind == "zx" && cases[index].gap.bytes.count != 0 { gapdiffers = true; return }
+    failures += 1;
+    g: Vec(u8);
+    Escape(*g, got);
+    w: Vec(u8);
+    Escape(*w, want);
+    print("FAIL % %: % %\n  got  [%]\n  want [%]\n", kind, TextView(cases[index].name), what, "", TextView(g[:]), TextView(w[:]));
+}
+
+gapdiffers: bool;
+gaps: s32;
+
+Compare :: (kind: string) {
+    for i: 0..cases.count - 1 {
+        gapdiffers = false;
+        at: s64 = -1;
+        for k: 0..goldens.count - 1 { if TextView(goldens[k].name) == TextView(cases[i].name) { at = k; break } }
+        if at < 0 { failures += 1; print("FAIL % %: no golden\n", kind, TextView(cases[i].name)); continue }
+        status: Text = Result(kind, "status", i);
+        out: Text = Result(kind, "out", i);
+        err: Text = Result(kind, "err", i);
+        Check(kind, i, "status", TextView(status), TextView(goldens[at].status));
+        Check(kind, i, "stdout", TextView(out), TextView(goldens[at].out));
+        Check(kind, i, "stderr", TextView(err), TextView(goldens[at].err));
+        if kind == "zx" && cases[i].gap.bytes.count != 0 {
+            if gapdiffers {
+                gaps += 1;
+                print("GAP %: %\n", TextView(cases[i].name), TextView(cases[i].gap));
+            } else {
+                failures += 1;
+                print("FAIL zx %: matches now; drop its gap line\n", TextView(cases[i].name));
+            }
+        }
+    }
+}
+
+Record :: () -> bool {
+    out: Vec(u8);
+    unused BuilderAppend(out, "# What /dis/sh.dis printed for each case of corpus.txt, recorded by\n# sh_test --record: escaped status, standard output and standard error.\n");
+    for i: 0..cases.count - 1 {
+        status: Text = Result("dis", "status", i);
+        o: Text = Result("dis", "out", i);
+        e: Text = Result("dis", "err", i);
+        BuilderPrint(*out, "=== %\nstatus: ", TextView(cases[i].name));
+        Escape(*out, TextView(status));
+        unused BuilderAppend(out, "\nout: ");
+        Escape(*out, TextView(o));
+        unused BuilderAppend(out, "\nerr: ");
+        Escape(*out, TextView(e));
+        VecPush(out, 10);
+    }
+    return WriteEntireFile("tests/sh/goldens.txt", TextView(out[:]));
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    shell := "/dis/sh.zx";
+    record := false;
+    dis := false;
+    emu := ifx PathExists("emu/Linux/o.emu") then "emu/Linux/o.emu" else "Linux/386/bin/emu";
+    i: s32 = 1;
+    while i < argc {
+        a := TextFromCString(argv[i]);
+        if a == "--record" { record = true }
+        else if a == "--dis" { dis = true }
+        else if a == "--shell" && i + 1 < argc { i += 1; shell = TextFromCString(argv[i]) }
+        else { emu = a }
+        i += 1;
+    }
+    if !LoadCorpus() { print("cannot read tests/sh/corpus.txt\n"); return 1 }
+    if record || dis {
+        if !Prepare("dis", "/dis/sh.dis") || !BootAll(emu, "dis", "/dis/sh.dis") { return 1 }
+        if record {
+            if !Record() { print("cannot write tests/sh/goldens.txt\n"); return 1 }
+            print("sh: recorded % cases from /dis/sh.dis\n", cases.count);
+            return 0;
+        }
+    }
+    if !LoadGoldens() { print("cannot read tests/sh/goldens.txt\n"); return 1 }
+    if dis { Compare("dis") }
+    if !Prepare("zx", shell) || !BootAll(emu, "zx", shell) { return 1 }
+    Compare("zx");
+    if failures != 0 { print("sh: % failures in % cases\n", failures, cases.count); return 1 }
+    if gaps != 0 {
+        print("sh: % cases match the Limbo shell, % known gaps\n", cases.count - gaps, gaps);
+        return 0;
+    }
+    print("sh: all % cases match the Limbo shell\n", cases.count);
+    return 0;
+}

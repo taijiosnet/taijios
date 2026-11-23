@@ -1,0 +1,167 @@
+// The csv builtin module of appl/cmd/sh/csv.b: getcsv reads standard input
+// a record at a time into $line, and ${csv} writes a record.
+#import "std/vec";
+#import "shell_util";
+#import "shell";
+
+#scope_file
+
+EOF :: -1;
+
+// Bytes from standard input with one byte of pushback, as bufio.
+Reader :: struct {
+    buf: [8192]u8;
+    pos: s32;
+    len: s32;
+    eof: bool;
+    last: s32;
+    back: bool;
+}
+
+Getc :: (r: *Reader) -> s32 {
+    if r.back { r.back = false; return r.last }
+    if r.pos >= r.len {
+        if r.eof { r.last = EOF; return EOF }
+        r.pos = 0;
+        r.len = ReadFd(0, r.buf[:]);
+        if r.len <= 0 { r.len = 0; r.eof = true; r.last = EOF; return EOF }
+    }
+    c := cast(s32)r.buf[r.pos];
+    r.pos += 1;
+    r.last = c;
+    return c;
+}
+
+Ungetc :: (r: *Reader) { if r.last != EOF { r.back = true } }
+
+// One field: its text, whether it was absent (nil), and whether input ended.
+ReadWord :: (r: *Reader, s: *Vec(u8), absent: *bool) -> bool {
+    <<absent = false;
+    c := Getc(r);
+    if c == 34 {
+        while true {
+            c = Getc(r);
+            if c == EOF { return true }
+            if c == 34 {
+                c = Getc(r);
+                if c == 34 { VecPush(<<s, 34); continue }
+                if c == 10 || c == #char "," { Ungetc(r); return false }
+                if c == EOF { return true }
+                Ungetc(r);
+                more: bool;
+                return ReadWord(r, s, *more);
+            }
+            VecPush(<<s, cast(u8)c);
+        }
+    }
+    if c == #char "," || c == 10 { Ungetc(r); return false }
+    if c == EOF { <<absent = true; return true }
+    VecPush(<<s, cast(u8)c);
+    while true {
+        c = Getc(r);
+        if c == #char "," || c == 10 { Ungetc(r); return false }
+        if c == 34 {
+            Ungetc(r);
+            more: bool;
+            return ReadWord(r, s, *more);
+        }
+        if c == EOF { return true }
+        VecPush(<<s, cast(u8)c);
+    }
+    return true;
+}
+
+// One record, or false at the end of input.
+ReadLine :: (r: *Reader, fields: *Items) -> bool {
+    VecClear(<<fields);
+    while true {
+        s: Vec(u8);
+        absent: bool;
+        eof := ReadWord(r, *s, *absent);
+        // Limbo's nil string is also the empty one.
+        if fields.count == 0 && s.count == 0 && eof { return false }
+        c := EOF;
+        if !eof { c = Getc(r) }
+        PushWord(fields, TextView(s[:]));
+        if c == 10 || c == EOF { return true }
+    }
+    return true;
+}
+
+GetcsvText :: (args: *Items) -> Text {
+    if args.count != 2 || !IsBlock(args, 1) { Fail("usage", "usage: getcsv {cmd}"); return TextCopy("") }
+    reader: Reader;
+    reader.last = EOF;
+    status: Text;
+    Push();
+    line: Items;
+    while ReadLine(*reader, *line) {
+        val := CloneItems(*line);
+        SetLocal("line", *val);
+        cmd: Items;
+        VecPush(cmd, CopyItem(args, 1));
+        star := Get("*");
+        for k: 0..star.count - 1 { VecPush(cmd, CopyItem(*star, k)) }
+        got: Text = Run(*cmd, false);
+        if raising {
+            if TextView(raised) == "fail:break" { ClearRaise(); Pop(); return status }
+            if TextView(raised) == "fail:continue" { ClearRaise(); Pop(); Push(); continue }
+            Pop();
+            return TextCopy("");
+        }
+        if exiting { Pop(); return TextCopy("") }
+        SetStatus(TextView(got));
+        VecSwap(status.bytes, got.bytes);
+    }
+    Pop();
+    return status;
+}
+
+QuoteField :: (out: *Vec(u8), s: string) {
+    needquote := false;
+    needscan := false;
+    for s {
+        if it == 10 || it == #char "," { needquote = true }
+        else if it == 34 { needquote = true; needscan = true }
+    }
+    if !needquote { unused BuilderAppend(<<out, s); return }
+    VecPush(<<out, 34);
+    for s {
+        if it == 34 { VecPush(<<out, 34) }
+        VecPush(<<out, it);
+    }
+    VecPush(<<out, 34);
+}
+
+CsvList :: (args: *Items) -> Items {
+    out: Items;
+    if args.count < 2 { return NoItems() }
+    s: Vec(u8);
+    for i: 1..args.count - 1 {
+        if i > 1 { VecPush(s, #char ",") }
+        w: Text = ItemText(args, i);
+        QuoteField(*s, TextView(w));
+    }
+    PushWord(*out, TextView(s[:]));
+    return out;
+}
+
+#scope_export
+
+CsvInit :: (mod: s32, err: *Text) -> bool {
+    AddBuiltin("getcsv", mod);
+    AddSBuiltin("csv", mod);
+    return true;
+}
+
+CsvRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = GetcsvText(args);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+CsvSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := CsvList(args);
+    VecSwap(<<out, result);
+    return true;
+}

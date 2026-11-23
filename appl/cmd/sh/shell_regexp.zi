@@ -1,0 +1,413 @@
+// Regular expressions as appl/lib/regex.b: the same syntax (| * + ? ( )
+// [ ] . ^ $ and \ escapes), leftmost-longest matching and subexpression
+// positions. Strings are rune arrays and positions are rune indices, as
+// in Limbo. Parse nodes live in an arena and are named by index.
+#import "std/vec";
+
+#scope_export
+
+NIL :: -1;
+NONE :: -2;
+BAD :: 65536;
+HUGE :: 2147483647;
+
+ALT :: 65536; CAT :: 65537; DOT :: 65538; SET :: 65539; HAT :: 65540; DOL :: 65541;
+NUL :: 65542; PCLO :: 65543; CLO :: 65544; OPT :: 65545; LPN :: 65546; RPN :: 65547;
+
+Rex :: struct {
+    kind: s32;
+    left: s32;
+    right: s32;
+    set: s32;
+    pno: s32;
+}
+
+CharSet :: struct {
+    neg: bool;
+    ascii: [4]u32;
+    lo: Vec(s32);
+    hi: Vec(s32);
+}
+
+Re :: struct {
+    rex: Vec(Rex);
+    sets: Vec(CharSet);
+    start: s32;
+    pno: s32;
+}
+
+#scope_file
+
+ReStr :: struct {
+    s: Vec(s32);
+    i: s64;
+    n: s64;
+}
+
+Peek :: (s: *ReStr) -> s32 {
+    if s.n <= 0 { return BAD }
+    return s.s[s.i];
+}
+
+Next :: (s: *ReStr) -> s32 {
+    if s.n <= 0 { return BAD }
+    s.n -= 1;
+    c := s.s[s.i];
+    s.i += 1;
+    return c;
+}
+
+NewRe :: (re: *Re, kind: s32, left: s32, right: s32, set: s32, pno: s32) -> s32 {
+    VecPush(re.rex, Rex.{kind = kind, left = left, right = right, set = set, pno = pno});
+    return cast(s32)(re.rex.count - 1);
+}
+
+Esc :: (s: *ReStr, c: s32) -> s32 {
+    if c == 92 {
+        c = Next(s);
+        if c == BAD { s.n = -1 }
+        else if c == #char "n" { c = 10 }
+    }
+    return c;
+}
+
+NewSet :: (s: *ReStr, re: *Re) -> s32 {
+    set: CharSet;
+    if Peek(s) == #char "^" {
+        set.neg = true;
+        unused Next(s);
+    }
+    while s.n > 0 {
+        c1 := Next(s);
+        if c1 == #char "]" {
+            VecPush(re.sets, set);
+            return cast(s32)(re.sets.count - 1);
+        }
+        c1 = Esc(s, c1);
+        c2 := c1;
+        if Peek(s) == #char "-" {
+            unused Next(s);
+            c2 = Next(s);
+            if c2 == #char "]" { break }
+            c2 = Esc(s, c2);
+            if c2 < c1 { break }
+        }
+        while c1 <= c2 {
+            if c1 < 128 {
+                set.ascii[c1 / 32] |= cast(u32)1 << cast(u32)(c1 % 32);
+            } else {
+                VecPush(set.lo, c1);
+                VecPush(set.hi, c2);
+                break;
+            }
+            c1 += 1;
+        }
+    }
+    s.n = -1;
+    return -1;
+}
+
+Member :: (re: *Re, c: s32, set: s32) -> bool {
+    if set < 0 { return false }
+    neg := re.sets[set].neg;
+    if c < 128 && c >= 0 {
+        bit := (re.sets[set].ascii[c / 32] >> cast(u32)(c % 32)) & 1;
+        return (bit != 0) != neg;
+    }
+    for i: 0..re.sets[set].lo.count - 1 {
+        if c >= re.sets[set].lo[i] && c <= re.sets[set].hi[i] { return !neg }
+    }
+    return neg;
+}
+
+ParseRe :: (s: *ReStr, re: *Re) -> s32 {
+    left := ParseCat(s, re);
+    if left == NIL || Peek(s) != #char "|" { return left }
+    unused Next(s);
+    right := ParseRe(s, re);
+    if right == NIL { return NIL }
+    return NewRe(re, ALT, left, right, -1, 0);
+}
+
+ParseCat :: (s: *ReStr, re: *Re) -> s32 {
+    left := ParseDup(s, re);
+    if left == NIL { return left }
+    right := ParseCat(s, re);
+    if right == NIL { return left }
+    return NewRe(re, CAT, left, right, -1, 0);
+}
+
+ParseDup :: (s: *ReStr, re: *Re) -> s32 {
+    p := Peek(s);
+    if p == BAD || p == #char ")" || p == #char "]" || p == #char "|" || p == #char "?" || p == #char "*" || p == #char "+" { return NIL }
+    prim: s32;
+    kind := Next(s);
+    if kind == #char "(" {
+        if re.pno < 0 {
+            if Peek(s) == #char ")" {
+                unused Next(s);
+                prim = NewRe(re, NUL, NONE, NONE, -1, 0);
+            } else {
+                prim = ParseRe(s, re);
+                if prim == NIL || Next(s) != #char ")" { s.n = -1 }
+            }
+        } else {
+            re.pno += 1;
+            pno := re.pno;
+            lp := NewRe(re, LPN, NONE, NONE, -1, pno);
+            rp := NewRe(re, RPN, NONE, NONE, -1, pno);
+            if Peek(s) == #char ")" {
+                unused Next(s);
+                prim = NewRe(re, CAT, lp, rp, -1, 0);
+            } else {
+                prim = ParseRe(s, re);
+                if prim == NIL || Next(s) != #char ")" {
+                    s.n = -1;
+                } else {
+                    prim = NewRe(re, CAT, prim, rp, -1, 0);
+                    prim = NewRe(re, CAT, lp, prim, -1, 0);
+                }
+            }
+        }
+    } else if kind == #char "[" {
+        set := NewSet(s, re);
+        prim = NewRe(re, SET, NONE, NONE, set, 0);
+    } else {
+        if kind == #char "." { kind = DOT }
+        else if kind == #char "^" { kind = HAT }
+        else if kind == #char "$" { kind = DOL }
+        prim = NewRe(re, Esc(s, kind), NONE, NONE, -1, 0);
+    }
+    p = Peek(s);
+    k: s32;
+    if p == #char "*" { k = CLO }
+    else if p == #char "+" { k = PCLO }
+    else if p == #char "?" { k = OPT }
+    else { return prim }
+    unused Next(s);
+    return NewRe(re, k, prim, NONE, -1, 0);
+}
+
+// Point each node at the next state of the machine.
+Walk :: (re: *Re, r: s32, succ: s32) {
+    if r == NONE || r < 0 { return }
+    rex := re.rex[r];
+    if rex.kind == ALT {
+        Walk(re, rex.left, succ);
+        Walk(re, rex.right, succ);
+        return;
+    }
+    if rex.kind == CAT {
+        Walk(re, rex.left, rex.right);
+        Walk(re, rex.right, succ);
+        re.rex[r] = re.rex[rex.left];
+        return;
+    }
+    if rex.kind == CLO || rex.kind == PCLO {
+        end := NewRe(re, OPT, r, succ, -1, 0);
+        Walk(re, rex.left, end);
+    } else if rex.kind == OPT {
+        Walk(re, rex.left, succ);
+    }
+    re.rex[r].right = succ;
+}
+
+#scope_export
+
+// Compile a pattern; flag 1 records subexpressions. Empty err on success.
+Compile :: (e: string, flag: s32, re: *Re, err: *Text) -> bool {
+    VecClear(re.rex);
+    VecClear(re.sets);
+    VecClear(err.bytes);
+    if e.count == 0 { unused BuilderAppend(err.bytes, "missing expression"); return false }
+    s: ReStr;
+    i: s64;
+    while i < e.count {
+        r, next := Rune(e, i);
+        VecPush(s.s, r);
+        i = next;
+    }
+    s.n = s.s.count;
+    re.pno = (flag & 1) - 1;
+    re.start = ParseRe(*s, re);
+    if re.start == NIL || s.n != 0 {
+        unused BuilderAppend(err.bytes, "invalid regular expression");
+        return false;
+    }
+    Walk(re, re.start, NIL);
+    if re.pno < 0 { re.pno = 0 }
+    return true;
+}
+
+Rune :: (s: string, i: s64) -> (r: s32, next: s64) {
+    c := cast(s32)s[i];
+    if c < 128 { return c, i + 1 }
+    need: s64;
+    r: s32;
+    if c >= 240 && c < 248 { need = 3; r = c & 7 }
+    else if c >= 224 { need = 2; r = c & 15 }
+    else if c >= 192 { need = 1; r = c & 31 }
+    else { return c, i + 1 }
+    j := i + 1;
+    while j <= i + need {
+        if j >= s.count { return c, i + 1 }
+        b := cast(s32)s[j];
+        if b < 128 || b >= 192 { return c, i + 1 }
+        r = (r << 6) | (b & 63);
+        j += 1;
+    }
+    return r, j;
+}
+
+// A match: positions of the whole match and each subexpression, -1 when
+// one did not take part.
+Match :: struct {
+    beg: Vec(s64);
+    end: Vec(s64);
+}
+
+#scope_file
+
+Gaz :: struct { pno: s32; beg: s64; end: s64; next: s32; }
+Trace :: struct { cre: s32; beg: s64; gaz: s32; }
+
+Better :: (newbeg: s64, newend: s64, oldbeg: s64, oldend: s64) -> bool {
+    return oldbeg == -1 || newbeg < oldbeg || (newbeg == oldbeg && newend > oldend);
+}
+
+Insert :: (next: s32, tbeg: s64, tgaz: s32, todo: *Vec(Trace), ptr: *s64, k: s64) -> s64 {
+    j: s64 = 0;
+    while j < ptr.* {
+        if todo.*[j].cre == next {
+            if todo.*[j].beg <= tbeg { return k }
+            break;
+        }
+        j += 1;
+    }
+    if j < k { k -= 1 }
+    if j < ptr.* { <<ptr = ptr.* - 1 }
+    while j < ptr.* {
+        todo.*[j] = todo.*[j + 1];
+        j += 1;
+    }
+    todo.*[ptr.*] = Trace.{cre = next, beg = tbeg, gaz = tgaz};
+    <<ptr = ptr.* + 1;
+    return k;
+}
+
+#scope_export
+
+// executese over runes w from s0 to s1 (-1 for the ends); false for no match.
+ExecuteRange :: (re: *Re, w: *Vec(s32), s0in: s64, s1in: s64, bol: bool, eol: bool, m: *Match) -> bool {
+    VecClear(m.beg);
+    VecClear(m.end);
+    if re.rex.count == 0 { return false }
+    s0 := s0in;
+    s1 := s1in;
+    if s0 < 0 { s0 = 0 }
+    if s1 < 0 { s1 = w.count }
+    gz: Vec(Gaz);
+    gaz: s32 = -1;
+    beg: s64 = -1;
+    end: s64 = -1;
+    n := re.rex.count + 1;
+    todo1: Vec(Trace);
+    todo2: Vec(Trace);
+    unused VecResize(todo1, n);
+    unused VecResize(todo2, n);
+    ptr1: s64 = 0;
+    ptr2: s64 = 0;
+    i := s0;
+    while i <= s1 {
+        small2: s64 = HUGE;
+        if beg == -1 {
+            todo1[ptr1] = Trace.{cre = re.start, beg = i, gaz = -1};
+            ptr1 += 1;
+        }
+        k: s64 = 0;
+        while k < ptr1 {
+            q := todo1[k];
+            rex := re.rex[q.cre];
+            next1: s32 = NONE;
+            next2: s32 = NONE;
+            c: s32 = -1;
+            if i < w.count { c = w.*[i] }
+            kind := rex.kind;
+            if kind == NUL {
+                next1 = rex.right;
+            } else if kind == DOT {
+                if i < w.count && c != 10 { next2 = rex.right }
+            } else if kind == HAT {
+                if i == s0 && bol { next1 = rex.right }
+            } else if kind == DOL {
+                if i == s1 && eol { next1 = rex.right }
+            } else if kind == SET {
+                if i < w.count && Member(re, c, rex.set) { next2 = rex.right }
+            } else if kind == CAT || kind == PCLO {
+                next1 = rex.left;
+            } else if kind == ALT || kind == CLO || kind == OPT {
+                next1 = rex.right;
+                k = Insert(rex.left, q.beg, q.gaz, *todo1, *ptr1, k);
+            } else if kind == LPN {
+                next1 = rex.right;
+                VecPush(gz, Gaz.{pno = rex.pno, beg = i, end = -1, next = q.gaz});
+                q.gaz = cast(s32)(gz.count - 1);
+            } else if kind == RPN {
+                next1 = rex.right;
+                r := q.gaz;
+                while r >= 0 {
+                    if gz[r].pno == rex.pno && gz[r].end == -1 {
+                        VecPush(gz, Gaz.{pno = gz[r].pno, beg = gz[r].beg, end = i, next = q.gaz});
+                        q.gaz = cast(s32)(gz.count - 1);
+                        break;
+                    }
+                    r = gz[r].next;
+                }
+            } else {
+                if i < w.count && kind == c { next2 = rex.right }
+            }
+            if next1 != NONE {
+                if next1 != NIL {
+                    k = Insert(next1, q.beg, q.gaz, *todo1, *ptr1, k);
+                } else if Better(q.beg, i, beg, end) {
+                    gaz = q.gaz; beg = q.beg; end = i;
+                }
+            }
+            if next2 != NONE {
+                if next2 != NIL {
+                    if q.beg < small2 { small2 = q.beg }
+                    unused Insert(next2, q.beg, q.gaz, *todo2, *ptr2, 0);
+                } else if Better(q.beg, i + 1, beg, end) {
+                    gaz = q.gaz; beg = q.beg; end = i + 1;
+                }
+            }
+            k += 1;
+        }
+        if beg != -1 && beg < small2 { break }
+        VecSwap(todo1, todo2);
+        ptr1 = ptr2;
+        ptr2 = 0;
+        i += 1;
+    }
+    if beg == -1 { return false }
+    for p: 0..re.pno {
+        VecPush(m.beg, -1);
+        VecPush(m.end, -1);
+    }
+    m.beg[0] = beg;
+    m.end[0] = end;
+    g := gaz;
+    while g >= 0 {
+        p := gz[g].pno;
+        if p >= 0 && p <= re.pno && m.beg[p] == -1 && (gz[g].beg | gz[g].end) != -1 {
+            m.beg[p] = gz[g].beg;
+            m.end[p] = gz[g].end;
+        }
+        g = gz[g].next;
+    }
+    return true;
+}
+
+Execute :: (re: *Re, w: *Vec(s32), m: *Match) -> bool {
+    return ExecuteRange(re, w, -1, -1, true, true, m);
+}

@@ -1,0 +1,676 @@
+// The std builtin module of appl/cmd/sh/std.b: if, while, for, fn, ~,
+// raise and rescue, getlines and the substitution builtins hd, tl, index,
+// split, join, parse, env and pipe.
+#import "std/vec";
+#import "std/option";
+Io :: #import "taijios_io";
+Ns :: #import "taijios_namespace";
+#import "shell_parse";
+#import "shell_util";
+#import "shell";
+
+#scope_file
+
+stdmod: s32;
+
+BuiltinNames :: string.["if", "while", "~", "!", "apply", "for", "status", "pctl", "fn", "subfn", "and", "or",
+    "raise", "rescue", "flag", "getlines", "no"];
+SBuiltinNames :: string.["hd", "tl", "index", "split", "join", "pid", "parse", "env", "pipe"];
+
+StdUsage :: (s: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "usage: %", s);
+    Fail("usage", TextView(msg[:]));
+}
+
+Prefixed :: (prefix: string, name: string) -> Text {
+    out: Vec(u8);
+    unused BuilderAppend(out, prefix);
+    unused BuilderAppend(out, name);
+    return BuilderFinish(out);
+}
+
+FnDef :: (name: string, cmd: *Items, issub: bool) {
+    if cmd.count == 0 { return }
+    value := CloneItems(cmd);
+    if issub {
+        v: Text = Prefixed("sfn-", name);
+        Set(TextView(v), *value);
+        AddSBuiltin(name, stdmod);
+    } else {
+        v: Text = Prefixed("fn-", name);
+        Set(TextView(v), *value);
+        AddBuiltin(name, stdmod);
+    }
+}
+
+FnUndef :: (name: string, issub: bool) {
+    none: Items;
+    if issub {
+        v: Text = Prefixed("sfn-", name);
+        Set(TextView(v), *none);
+        RemoveSBuiltin(name, stdmod);
+    } else {
+        v: Text = Prefixed("fn-", name);
+        Set(TextView(v), *none);
+        RemoveBuiltin(name, stdmod);
+    }
+}
+
+// The list `cmd :: $*` that the control builtins run.
+WithStar :: (args: *Items, i: s64) -> Items {
+    out: Items;
+    VecPush(out, CopyItem(args, i));
+    star := Get("*");
+    for k: 0..star.count - 1 { VecPush(out, CopyItem(*star, k)) }
+    return out;
+}
+
+RaisedIs :: (name: string) -> bool { return raising && TextView(raised) == name }
+
+// After a loop body raised: 1 for break, 2 for continue, 0 to pass it on.
+LoopExcept :: () -> s32 {
+    if !raising { return 0 }
+    if RaisedIs("fail:break") { ClearRaise(); return 1 }
+    if RaisedIs("fail:continue") { ClearRaise(); return 2 }
+    return 0;
+}
+
+IsFail :: () -> bool { return raising && TextView(raised).count >= 5 && TextView(raised)[:5] == "fail:" }
+
+Keep :: (status: *Text, value: Text) {
+    VecClear(status.bytes);
+    unused BuilderAppend(status.bytes, TextView(value));
+}
+
+BuiltinIf :: (args: *Items) -> Text {
+    if args.count < 3 { StdUsage("if {cond} {action} [{cond} {action}]... [{elseaction}]"); return TextCopy("") }
+    status: Text;
+    i: s64 = 1;
+    while i < args.count {
+        cmd: s64 = -1;
+        if i == args.count - 1 {
+            cmd = i;
+            i += 1;
+        } else {
+            if !IsBlock(args, i) { StdUsage("if [{cond} {action}]... [{elseaction}]"); return TextCopy("") }
+            cond := WithStar(args, i);
+            got: Text = Run(*cond, false);
+            if Unwinding() { return TextCopy("") }
+            if got.bytes.count == 0 {
+                cmd = i + 1;
+                i = args.count;
+            } else {
+                i += 2;
+            }
+            SetStatus(TextView(got));
+            Keep(*status, got);
+        }
+        if cmd >= 0 {
+            if !IsBlock(args, cmd) { StdUsage("if [{cond} {action}]... [{elseaction}]"); return TextCopy("") }
+            action := WithStar(args, cmd);
+            done: Text = Run(*action, false);
+            if Unwinding() { return TextCopy("") }
+            Keep(*status, done);
+        }
+    }
+    return status;
+}
+
+BuiltinOr :: (args: *Items) -> Text {
+    s: Text;
+    for i: 1..args.count - 1 {
+        if !IsBlock(args, i) { StdUsage("or [{cmd} ...]"); return TextCopy("") }
+        cmd := WithStar(args, i);
+        got: Text = Run(*cmd, false);
+        if Unwinding() { return TextCopy("") }
+        if got.bytes.count == 0 { return TextCopy("") }
+        SetStatus(TextView(got));
+        Keep(*s, got);
+    }
+    return s;
+}
+
+BuiltinAnd :: (args: *Items) -> Text {
+    for i: 1..args.count - 1 {
+        if !IsBlock(args, i) { StdUsage("and [{cmd} ...]"); return TextCopy("") }
+        cmd := WithStar(args, i);
+        got: Text = Run(*cmd, false);
+        if Unwinding() { return TextCopy("") }
+        if got.bytes.count != 0 { return TextCopy(TextView(got)) }
+        SetStatus("");
+    }
+    return TextCopy("");
+}
+
+BuiltinWhile :: (args: *Items) -> Text {
+    if args.count != 3 || !IsBlock(args, 1) || !IsBlock(args, 2) { StdUsage("while {condition} {cmd}"); return TextCopy("") }
+    status: Text;
+    while true {
+        cond := WithStar(args, 1);
+        c: Text = Run(*cond, false);
+        if Unwinding() {
+            // break stops; continue tests the condition again.
+            kind := LoopExcept();
+            if kind == 1 { return TextCopy(TextView(status)) }
+            if kind == 2 { continue }
+            return TextCopy("");
+        }
+        if c.bytes.count != 0 { break }
+        action := WithStar(args, 2);
+        got: Text = Run(*action, false);
+        if Unwinding() {
+            kind := LoopExcept();
+            if kind == 1 { return TextCopy(TextView(status)) }
+            if kind == 2 { continue }
+            return TextCopy("");
+        }
+        SetStatus(TextView(got));
+        Keep(*status, got);
+    }
+    return status;
+}
+
+BuiltinFor :: (args: *Items) -> Text {
+    use := "for var in [item...] {cmd}";
+    if args.count < 2 { StdUsage(use); return TextCopy("") }
+    var: Text = TextCopy(TextView(args.*[1].word));
+    if var.bytes.count == 0 { Fail("bad assign", "for: bad variable name"); return TextCopy("") }
+    if args.count < 3 || TextView(args.*[2].word) != "in" { StdUsage(use); return TextCopy("") }
+    if args.count < 4 { StdUsage(use); return TextCopy("") }
+    last := args.count - 1;
+    if !IsBlock(args, last) { StdUsage(use); return TextCopy("") }
+    status: Text;
+    for i: 3..last - 1 {
+        one: Items;
+        VecPush(one, CopyItem(args, i));
+        SetLocal(TextView(var), *one);
+        cmd := WithStar(args, last);
+        got: Text = Run(*cmd, false);
+        if Unwinding() {
+            kind := LoopExcept();
+            if kind == 1 { return TextCopy(TextView(status)) }
+            if kind == 2 { continue }
+            return TextCopy("");
+        }
+        SetStatus(TextView(got));
+        Keep(*status, got);
+    }
+    return status;
+}
+
+BuiltinApply :: (args: *Items) -> Text {
+    if args.count < 2 || !IsBlock(args, 1) { StdUsage("apply {cmd} [val...]"); return TextCopy("") }
+    status: Text;
+    for i: 2..args.count - 1 {
+        cmd: Items;
+        VecPush(cmd, CopyItem(args, 1));
+        VecPush(cmd, CopyItem(args, i));
+        got: Text = Run(*cmd, false);
+        if Unwinding() {
+            kind := LoopExcept();
+            if kind == 1 { return TextCopy(TextView(status)) }
+            if kind == 2 { continue }
+            return TextCopy("");
+        }
+        SetStatus(TextView(got));
+        Keep(*status, got);
+    }
+    return status;
+}
+
+BuiltinNot :: (args: *Items, last: bool) -> Text {
+    if args.count < 2 { return TextCopy("false") }
+    rest := Tail(args, 1);
+    got: Text = Run(*rest, last);
+    if Unwinding() { return TextCopy("") }
+    if got.bytes.count == 0 { return TextCopy("false") }
+    return TextCopy("");
+}
+
+BuiltinTwiddle :: (args: *Items) -> Text {
+    if args.count < 2 { StdUsage("~ word [pattern...]"); return TextCopy("") }
+    if args.count < 3 { return TextCopy("no match") }
+    w: Text = ItemText(args, 1);
+    for i: 2..args.count - 1 {
+        pat: Text = ItemText(args, i);
+        if Match(TextView(pat), TextView(w)) { return TextCopy("") }
+    }
+    return TextCopy("no match");
+}
+
+BuiltinFn :: (args: *Items, issub: bool) -> Text {
+    title: Text = TextCopy(TextView(args.*[0].word));
+    msg: Vec(u8);
+    BuilderPrint(*msg, "% [name...] [{body}]", TextView(title));
+    if args.count < 2 { StdUsage(TextView(msg[:])); return TextCopy("") }
+    for i: 1..args.count - 2 {
+        if args.*[i].cmd >= 0 { StdUsage(TextView(msg[:])); return TextCopy("") }
+    }
+    last := args.count - 1;
+    if args.*[last].cmd >= 0 {
+        body: Items;
+        VecPush(body, CopyItem(args, last));
+        for i: 1..last - 1 {
+            name: Text = TextCopy(TextView(args.*[i].word));
+            FnDef(TextView(name), *body, issub);
+        }
+    } else {
+        for i: 1..last {
+            name: Text = TextCopy(TextView(args.*[i].word));
+            FnUndef(TextView(name), issub);
+        }
+    }
+    return TextCopy("");
+}
+
+BuiltinFlag :: (args: *Items) -> Text {
+    use := "flag [vxei] [+-]";
+    if args.count < 2 || args.count > 3 || RuneCount(TextView(args.*[1].word)) != 1 { StdUsage(use); return TextCopy("") }
+    flag := args.*[1].word.bytes[0];
+    p: Text;
+    if args.count == 3 { SetText(*p, TextView(args.*[2].word)) }
+    mask: s32;
+    if flag == #char "v" { mask = VERBOSE }
+    else if flag == #char "x" { mask = EXECPRINT }
+    else if flag == #char "e" { mask = ERROREXIT }
+    else if flag == #char "i" { mask = INTERACTIVE }
+    else { StdUsage(use); return TextCopy("") }
+    if TextView(p) == "" {
+        if (Options() & mask) != 0 { return TextCopy("") }
+        return TextCopy("not set");
+    }
+    if TextView(p) == "-" { unused SetOptions(mask, false); return TextCopy("") }
+    if TextView(p) == "+" { unused SetOptions(mask, true); return TextCopy("") }
+    StdUsage(use);
+    return TextCopy("");
+}
+
+BuiltinRaise :: (args: *Items) -> Text {
+    name: Text;
+    if args.count < 2 {
+        e := Get("exception");
+        if e.count == 0 { Fail("bad raise context", "raise: no exception found"); return TextCopy("") }
+        if e[0].word.bytes.count == 0 && e[0].cmd >= 0 { Fail("bad raise context", "raise: bad exception name"); return TextCopy("") }
+        SetText(*name, TextView(e[0].word));
+    } else {
+        if args.*[1].word.bytes.count == 0 && args.*[1].cmd >= 0 { Fail("bad raise context", "raise: bad exception name"); return TextCopy("") }
+        SetText(*name, TextView(args.*[1].word));
+    }
+    full: Text = Prefixed("fail:", TextView(name));
+    Raise(TextView(full));
+    return TextCopy("");
+}
+
+BuiltinRescue :: (args: *Items, last: bool) -> Text {
+    if args.count != 4 || !IsBlock(args, 2) || !IsBlock(args, 3) { StdUsage("rescue pattern {rescuecmd} {cmd}"); return TextCopy("") }
+    if args.*[1].word.bytes.count == 0 && args.*[1].cmd >= 0 { Fail("usage", "rescue: bad pattern"); return TextCopy("") }
+    code := WithStar(args, 3);
+    got: Text = Run(*code, false);
+    if !IsFail() { return got }
+    e: Text = TextCopy(TextView(raised));
+    ClearRaise();
+    Push();
+    val: Items;
+    PushWord(*val, TextView(e)[5:]);
+    Set("exception", *val);
+    handler := WithStar(args, 2);
+    status: Text = Run(*handler, last);
+    if IsFail() {
+        Pop();
+        Raise(TextView(e));
+        return TextCopy("");
+    }
+    Pop();
+    return status;
+}
+
+BuiltinPctl :: (args: *Items) -> Text {
+    if args.count < 2 { StdUsage("pctl option... [fdnum...]"); return TextCopy("") }
+    newfd := false;
+    forkns := false;
+    keep: Vec(s32);
+    for i: 1..args.count - 1 {
+        w: Text = TextCopy(TextView(args.*[i].word));
+        v := TextView(w);
+        if IsNum(v) { VecPush(keep, cast(s32)LimboInt(v)); continue }
+        if v == "newfd" { newfd = true }
+        else if v == "forkfd" { }
+        else if v == "forkns" { forkns = true }
+        else if v == "newns" || v == "newpgrp" || v == "nodevs" {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "pctl: % has no ZX host call", v);
+            Fail("usage", TextView(msg[:]));
+            return TextCopy("");
+        } else {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "pctl: unknown flag %", v);
+            Fail("usage", TextView(msg[:]));
+            return TextCopy("");
+        }
+    }
+    if forkns { unused Ns.Fork() }
+    if newfd {
+        for fd: 0..FDMAX - 1 {
+            kept := false;
+            for keep { if it == cast(s32)fd { kept = true } }
+            if !kept { fds[fd] = -1 }
+        }
+    }
+    return TextCopy("");
+}
+
+// Lines from standard input split at any rune of seps, as bufio gets/gett.
+LineReader :: struct {
+    buf: [8192]u8;
+    pos: s32;
+    len: s32;
+    eof: bool;
+}
+
+NextLine :: (r: *LineReader, seps: *Vec(s32), line: *Text) -> bool {
+    VecClear(line.bytes);
+    got := false;
+    while true {
+        if r.pos >= r.len {
+            if r.eof { break }
+            r.pos = 0;
+            r.len = ReadFd(0, r.buf[:]);
+            if r.len <= 0 { r.len = 0; r.eof = true; break }
+        }
+        c := r.buf[r.pos];
+        r.pos += 1;
+        VecPush(line.bytes, c);
+        got = true;
+        // A separator ends the line once its last byte has arrived.
+        text := TextView(line.bytes[:]);
+        rune: s32 = cast(s32)c;
+        if c >= 128 {
+            k := text.count - 1;
+            while k > 0 && text[k] >= 128 && text[k] < 192 { k -= 1 }
+            r2, next := RuneAt(text, k);
+            if next != text.count { continue }
+            rune = r2;
+        }
+        if HasRuneIn(seps, rune) { break }
+    }
+    return got;
+}
+
+BuiltinGetlines :: (args: *Items) -> Text {
+    use := "getlines [separators] {cmd}";
+    if args.count < 2 || args.count > 3 { StdUsage(use); return TextCopy("") }
+    at: s64 = 1;
+    seps: Text = TextCopy("\n");
+    if args.count == 3 {
+        given: Text = ItemText(args, 1);
+        VecSwap(seps.bytes, given.bytes);
+        at = 2;
+    }
+    if seps.bytes.count == 0 { StdUsage(use); return TextCopy("") }
+    if !IsBlock(args, at) { StdUsage(use); return TextCopy("") }
+    sepr := Runes(TextView(seps));
+    reader: LineReader;
+    status: Text;
+    Push();
+    line: Text;
+    while NextLine(*reader, *sepr, *line) {
+        // Drop the separator that ended the line.
+        text := TextView(line);
+        k := text.count - 1;
+        while k > 0 && text[k] >= 128 && text[k] < 192 { k -= 1 }
+        lastr, _ := RuneAt(text, k);
+        end := text.count;
+        if HasRune(sepr[:], lastr) { end = k }
+        val: Items;
+        PushWord(*val, text[:end]);
+        SetLocal("line", *val);
+        cmd := WithStar(args, at);
+        got: Text = Run(*cmd, false);
+        if Unwinding() {
+            kind := LoopExcept();
+            if kind == 1 { Pop(); return TextCopy(TextView(status)) }
+            if kind == 2 { Pop(); Push(); continue }
+            Pop();
+            return TextCopy("");
+        }
+        SetStatus(TextView(got));
+        Keep(*status, got);
+    }
+    Pop();
+    return status;
+}
+
+BuiltinStatus :: (args: *Items) -> Text {
+    if args.count > 1 { return TextCopy(TextView(args.*[1].word)) }
+    return TextCopy("");
+}
+
+BuiltinNo :: (args: *Items) -> Text {
+    if args.count > 1 { return TextCopy("yes") }
+    return TextCopy("");
+}
+
+StdRunText :: (args: *Items, last: bool) -> Text {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    fname: Text = Prefixed("fn-", TextView(name));
+    val := Get(TextView(fname));
+    if val.count != 0 {
+        cmd: Items;
+        VecPush(cmd, CopyItem(*val, 0));
+        for i: 1..args.count - 1 { VecPush(cmd, CopyItem(args, i)) }
+        return Run(*cmd, last);
+    }
+    w := TextView(name);
+    if w == "if" { return BuiltinIf(args) }
+    if w == "while" { return BuiltinWhile(args) }
+    if w == "and" { return BuiltinAnd(args) }
+    if w == "apply" { return BuiltinApply(args) }
+    if w == "for" { return BuiltinFor(args) }
+    if w == "or" { return BuiltinOr(args) }
+    if w == "!" { return BuiltinNot(args, last) }
+    if w == "fn" { return BuiltinFn(args, false) }
+    if w == "subfn" { return BuiltinFn(args, true) }
+    if w == "~" { return BuiltinTwiddle(args) }
+    if w == "status" { return BuiltinStatus(args) }
+    if w == "pctl" { return BuiltinPctl(args) }
+    if w == "raise" { return BuiltinRaise(args) }
+    if w == "rescue" { return BuiltinRescue(args, last) }
+    if w == "flag" { return BuiltinFlag(args) }
+    if w == "getlines" { return BuiltinGetlines(args) }
+    if w == "no" { return BuiltinNo(args) }
+    return TextCopy("");
+}
+
+RunSubfn :: (body: *Items, args: *Items) -> Items {
+    out: Items;
+    if body.count == 0 { return NoItems() }
+    Push();
+    none: Items;
+    SetLocal("result", *none);
+    cmd: Items;
+    VecPush(cmd, CopyItem(body, 0));
+    for i: 1..args.count - 1 { VecPush(cmd, CopyItem(args, i)) }
+    ignored: Text = Run(*cmd, false);
+    if !Unwinding() {
+        result := Get("result");
+        VecSwap(out, result);
+    }
+    Pop();
+    return out;
+}
+
+SplitList :: (args: *Items) -> Items {
+    out: Items;
+    n := args.count;
+    if n < 2 || n > 3 { StdUsage("split [separators] value"); return NoItems() }
+    seps: Text;
+    if n == 2 {
+        ifs := Get("ifs");
+        if ifs.count == 0 { Fail("usage", "split: $ifs not set"); return NoItems() }
+        first: Text = ItemText(*ifs, 0);
+        VecSwap(seps.bytes, first.bytes);
+    } else {
+        given: Text = ItemText(args, 1);
+        VecSwap(seps.bytes, given.bytes);
+    }
+    value: Text = ItemText(args, n - 1);
+    words := Tokenize(TextView(value), TextView(seps));
+    result := StringsToList(*words);
+    VecSwap(out, result);
+    return out;
+}
+
+JoinList :: (args: *Items) -> Items {
+    out: Items;
+    if args.count < 2 { StdUsage("join separator [arg...]"); return NoItems() }
+    sep: Text = ItemText(args, 1);
+    joined: Vec(u8);
+    for i: 2..args.count - 1 {
+        if i > 2 { unused BuilderAppend(joined, TextView(sep)) }
+        w: Text = ItemText(args, i);
+        unused BuilderAppend(joined, TextView(w));
+    }
+    PushWord(*out, TextView(joined[:]));
+    return out;
+}
+
+IndexList :: (args: *Items) -> Items {
+    out: Items;
+    if args.count < 2 || args.*[1].word.bytes.count == 0 { StdUsage("index num list"); return NoItems() }
+    k := LimboInt(TextView(args.*[1].word)) - 1;
+    i: s64 = 2;
+    while k > 0 && i < args.count { k -= 1; i += 1 }
+    if i < args.count { VecPush(out, CopyItem(args, i)) }
+    return out;
+}
+
+ParseList :: (args: *Items) -> Items {
+    out: Items;
+    if args.count != 2 { StdUsage("parse arg"); return NoItems() }
+    if args.*[1].cmd >= 0 { block: Items; VecPush(block, CmdItem(args.*[1].cmd)); return block }
+    w: Text = TextCopy(TextView(args.*[1].word));
+    if w.bytes.count == 0 || w.bytes[0] != #char "{" { Fail("parse error", "parse: argument must be a braced block"); return NoItems() }
+    err: Text;
+    n := ParseString(TextView(w), *err);
+    if n < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "parse: %", TextView(err));
+        Fail("parse error", TextView(msg[:]));
+        return NoItems();
+    }
+    VecPush(out, CmdItem(n));
+    return out;
+}
+
+EnvNames :: () -> Items {
+    out: Items;
+    env := EnvList();
+    for i: 0..env.count - 1 {
+        if env[i].val.count != 0 { PushWord(*out, TextView(env[i].name)) }
+    }
+    return out;
+}
+
+PipeList :: (args: *Items) -> Items {
+    out: Items;
+    use := "pipe (from|to|fdnum) {cmd}";
+    if args.count != 3 || !IsBlock(args, 2) { StdUsage(use); return NoItems() }
+    s: Text = TextCopy(TextView(args.*[1].word));
+    fd: s32;
+    if TextView(s) == "from" { fd = 1 }
+    else if TextView(s) == "to" { fd = 0 }
+    else if IsNum(TextView(s)) && s.bytes.count != 0 { fd = cast(s32)LimboInt(TextView(s)) }
+    else { StdUsage(use); return NoItems() }
+    pipeid := Get("pipeid");
+    seq: s64 = 0;
+    if pipeid.count != 0 { seq = LimboInt(TextView(pipeid[0].word)) }
+    next: Vec(u8);
+    BuilderPrint(*next, "%", seq + 1);
+    SetWord("pipeid", TextView(next[:]));
+    cmd := WithStar(args, 2);
+    path: Text = PipeBeside(*cmd, fd);
+    if Unwinding() { return NoItems() }
+    PushWord(*out, TextView(path));
+    return out;
+}
+
+StdSRunList :: (args: *Items) -> Items {
+    out: Items;
+    name: Text = TextCopy(TextView(args.*[0].word));
+    sname: Text = Prefixed("sfn-", TextView(name));
+    val := Get(TextView(sname));
+    if val.count != 0 { return RunSubfn(*val, args) }
+    w := TextView(name);
+    if w == "pid" {
+        Fail("pid", "pid: the guest has no ZX host call for a process id");
+        return NoItems();
+    }
+    if w == "hd" {
+        first: Items;
+        if args.count > 1 { VecPush(first, CopyItem(args, 1)) }
+        return first;
+    }
+    if w == "tl" {
+        if args.count > 1 { return Tail(args, 2) }
+        return NoItems();
+    }
+    if w == "index" { return IndexList(args) }
+    if w == "split" { return SplitList(args) }
+    if w == "join" { return JoinList(args) }
+    if w == "parse" { return ParseList(args) }
+    if w == "env" { return EnvNames() }
+    if w == "pipe" { return PipeList(args) }
+    return out;
+}
+
+#scope_export
+
+StdInit :: (mod: s32, err: *Text) -> bool {
+    stdmod = mod;
+    for BuiltinNames { AddBuiltin(it, mod) }
+    for SBuiltinNames { AddSBuiltin(it, mod) }
+    env := EnvList();
+    for i: 0..env.count - 1 {
+        name := TextView(env[i].name);
+        if name.count > 3 && name[:3] == "fn-" {
+            n: Text = TextCopy(name[3:]);
+            FnDef(TextView(n), *env[i].val, false);
+        }
+        if name.count > 4 && name[:4] == "sfn-" {
+            n: Text = TextCopy(name[4:]);
+            FnDef(TextView(n), *env[i].val, true);
+        }
+    }
+    return true;
+}
+
+StdWhatis :: (mod: s32, name: string, wtype: s32, out: *Text) -> bool {
+    ename: string;
+    fname: string;
+    if wtype == BUILTIN { ename = "fn-"; fname = "fn " }
+    else if wtype == SBUILTIN { ename = "sfn-"; fname = "subfn " }
+    else { return true }
+    v: Text = Prefixed(ename, name);
+    val := Get(TextView(v));
+    if val.count != 0 {
+        first: Items;
+        VecPush(first, CopyItem(*val, 0));
+        q: Text = Quoted(*first, false);
+        unused BuilderAppend(out.bytes, fname);
+        BuilderPrint(*out.bytes, "% %", name, TextView(q));
+    }
+    return true;
+}
+
+StdRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = StdRunText(args, last);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+StdSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := StdSRunList(args);
+    VecSwap(<<out, result);
+    return true;
+}

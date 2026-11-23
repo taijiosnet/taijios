@@ -226,7 +226,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 |  |
+| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh parity 73/74, gap: env isolation needs taijios_namespace ForkEnv; also open: ${pid} (Pid), pctl newns/newpgrp/nodevs. A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, tiny/sh, sh/mload |
 | dis/9win.dis | appl/cmd/9win.b |  | - |  |
 | dis/B.dis | appl/cmd/B.b |  | - |  |
 | dis/acme.dis | appl/acme/acme.b |  | - |  |
@@ -311,20 +311,20 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/sed.dis | appl/cmd/sed.b |  | - |  |
 | dis/sendmail.dis | appl/cmd/sendmail.b |  | - |  |
 | dis/sh/alphabet.dis | appl/alphabet/alphabet.b | module/alphabet.m | - |  |
-| dis/sh/arg.dis | appl/cmd/sh/arg.b | module/arg.m | - |  |
-| dis/sh/csv.dis | appl/cmd/sh/csv.b | module/csv.m | - |  |
-| dis/sh/echo.dis | appl/cmd/sh/echo.b |  | - |  |
-| dis/sh/expr.dis | appl/cmd/sh/expr.b |  | - |  |
+| dis/sh/arg.dis | appl/cmd/sh/arg.b | module/arg.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
+| dis/sh/csv.dis | appl/cmd/sh/csv.b | module/csv.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_csv.zi); loaded only by sh.dis |
+| dis/sh/echo.dis | appl/cmd/sh/echo.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
+| dis/sh/expr.dis | appl/cmd/sh/expr.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_expr.zi); loaded only by sh.dis |
 | dis/sh/file2chan.dis | appl/cmd/sh/file2chan.b |  | - |  |
 | dis/sh/mk.dis | appl/cmd/mk/mk.b |  | - |  |
 | dis/sh/mload.dis | appl/cmd/sh/mload.b |  | - |  |
 | dis/sh/mpexpr.dis | appl/cmd/sh/mpexpr.b |  | - |  |
-| dis/sh/regex.dis | appl/cmd/sh/regex.b | module/regex.m | - |  |
+| dis/sh/regex.dis | appl/cmd/sh/regex.b | module/regex.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_regex.zi); loaded only by sh.dis |
 | dis/sh/sexprs.dis | appl/cmd/sh/sexprs.b | module/sexprs.m | - |  |
 | dis/sh/sh.dis | appl/cmd/sh/sh.b | module/sh.m | - |  |
-| dis/sh/std.dis | appl/cmd/sh/std.b |  | - |  |
-| dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - |  |
-| dis/sh/test.dis | appl/cmd/sh/test.b |  | - |  |
+| dis/sh/std.dis | appl/cmd/sh/std.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_std.zi); loaded only by sh.dis |
+| dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_string.zi); loaded only by sh.dis |
+| dis/sh/test.dis | appl/cmd/sh/test.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
 | dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - |  |
 | dis/sha1sum.dis | appl/cmd/sha1sum.b |  | - |  |
 | dis/sleep.dis | appl/cmd/sleep.b |  | - |  |

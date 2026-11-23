@@ -1,0 +1,2325 @@
+// The shell's evaluator: values, variables and their scopes, the guest
+// environment, redirections, pipelines, ZX commands and the builtins of the
+// shell itself (load, run, whatis, @ and the rest), after appl/cmd/sh/sh.y.
+//
+// Limbo exceptions become a pending raise that every caller passes up:
+// after any call that can raise, Unwinding() is true and the caller returns.
+// A Limbo thread that ran beside the shell becomes a child sh.zx in the
+// internal -% mode when it has to run at the same time (pipeline elements,
+// & jobs, @, pipe and <{}); a thread the shell waited for at once runs in
+// place with its own descriptor table (redirected blocks, backquotes).
+#import "std/vec";
+#import "std/option";
+Io :: #import "taijios_io";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "shell_parse";
+#import "shell_util";
+
+#scope_export
+
+// The program a child shell runs: this one. A guest booted straight into a
+// sh.zx names it in $emuboot; otherwise it is the installed /dis/sh.zx.
+shellpath: Text;
+LIBSHELLRC :: "/lib/sh/profile";
+BUILTINPATH :: "/dis/sh";
+EPERM :: "permission denied";
+
+// Context options, as Sh->Context.
+INTERACTIVE :: 1;
+VERBOSE :: 2;
+EXECPRINT :: 4;
+ERROREXIT :: 8;
+
+// Var flags.
+CHANGED :: 1;
+NOEXPORT :: 2;
+
+ENVHASHSIZE :: 7;
+
+// Whatis kinds, as Shellbuiltin.
+BUILTIN :: 0;
+SBUILTIN :: 1;
+OTHER :: 2;
+
+// A list element: a word, a parsed block (cmd >= 0), or both.
+Item :: struct {
+    cmd: s32;
+    word: Text;
+}
+
+// Lists are always named Items: a procedure in another module taking
+// *Vec(Item) does not match a procedure type declared here, the alias does.
+Items :: Vec(Item)
+
+WordItem :: (s: string) -> Item {
+    item: Item;
+    item.cmd = -1;
+    unused BuilderAppend(item.word.bytes, s);
+    return item;
+}
+
+CmdItem :: (n: s32) -> Item {
+    item: Item;
+    item.cmd = n;
+    return item;
+}
+
+CopyItem :: (src: *Items, i: s64) -> Item {
+    item: Item;
+    item.cmd = src.*[i].cmd;
+    unused BuilderAppend(item.word.bytes, TextView(src.*[i].word));
+    return item;
+}
+
+CloneItems :: (src: *Items) -> Items {
+    out: Items;
+    for i: 0..src.count - 1 { VecPush(out, CopyItem(src, i)) }
+    return out;
+}
+
+// The elements from index `from` on.
+Tail :: (src: *Items, from: s64) -> Items {
+    out: Items;
+    for i: from..src.count - 1 { VecPush(out, CopyItem(src, i)) }
+    return out;
+}
+
+PushWord :: (list: *Items, s: string) { VecPush(<<list, WordItem(s)) }
+
+// The text of an element: its word, or its block printed.
+ItemText :: (src: *Items, i: s64) -> Text {
+    if src.*[i].word.bytes.count != 0 || src.*[i].cmd < 0 { return TextCopy(TextView(src.*[i].word)) }
+    return CmdText(src.*[i].cmd);
+}
+
+HasWord :: (src: *Items, i: s64) -> bool { return src.*[i].word.bytes.count != 0 }
+
+IsBlock :: (src: *Items, i: s64) -> bool {
+    return src.*[i].cmd >= 0 || (src.*[i].word.bytes.count != 0 && src.*[i].word.bytes[0] == #char "{");
+}
+
+Var :: struct {
+    name: Text;
+    val: Items;
+    flags: s32;
+    bucket: s32;
+}
+
+Scope :: struct {
+    vars: Vec(Var);
+    flags: s32;
+}
+
+scopes: Vec(Scope);
+
+// Builtin modules. Module 0 is the shell itself.
+// Procedure values return through their last parameter.
+InitProc :: #type (mod: s32, err: *Text) -> bool;
+RunProc :: #type (mod: s32, args: *Items, last: bool, status: *Text) -> bool;
+SRunProc :: #type (mod: s32, args: *Items, out: *Items) -> bool;
+WhatisProc :: #type (mod: s32, name: string, wtype: s32, out: *Text) -> bool;
+
+ModuleDef :: struct {
+    name: string;
+    init: InitProc;
+    run: RunProc;
+    srun: SRunProc;
+    whatis: WhatisProc;
+}
+
+modules: Vec(ModuleDef);
+
+RegisterModule :: (name: string, init: InitProc, run: RunProc, srun: SRunProc, whatis: WhatisProc) -> s32 {
+    def: ModuleDef;
+    def.name = name;
+    def.init = init;
+    def.run = run;
+    def.srun = srun;
+    def.whatis = whatis;
+    VecPush(modules, def);
+    return cast(s32)(modules.count - 1);
+}
+
+// A builtin name and the modules that define it, the last one active.
+Builtin :: struct {
+    name: Text;
+    mods: Vec(s32);
+}
+
+Table :: struct { entries: Vec(Builtin); }
+
+// tables[0] holds the builtins, tables[1] the substitution builtins.
+tables: Vec(Table);
+
+Loaded :: struct {
+    name: Text;
+    mod: s32;
+}
+
+// Loaded modules, the most recent last.
+bmods: Vec(Loaded);
+
+// A pending exception, such as "fail:usage", and a pending exit.
+raising: bool;
+raised: Text;
+exiting: bool;
+
+Unwinding :: () -> bool { return raising || exiting }
+
+Raise :: (name: string) {
+    // As std's xraise: an exception name fits a wait message.
+    end := name.count;
+    if end > 127 { end = 127 }
+    VecClear(raised.bytes);
+    unused BuilderAppend(raised.bytes, name[:end]);
+    raising = true;
+}
+
+ClearRaise :: () { raising = false; VecClear(raised.bytes) }
+
+// "fail:x" gives "x"; an empty name gives "failed".
+FailureStatus :: (e: string) -> Text {
+    s := e;
+    if s.count >= 5 && s[:5] == "fail:" { s = s[5:] }
+    while s.count > 0 && (s[0] == 32 || s[0] == 9) { s = s[1:] }
+    if s.count > 0 { return TextCopy(s) }
+    return TextCopy("failed");
+}
+
+// The descriptor table: shell fd number to taijios_io handle, -1 when
+// closed, or a capture buffer (CAPBASE - id).
+FDMAX :: 32;
+CAPBASE :: -100;
+fds: [32]s32;
+
+Capture :: struct {
+    id: s32;
+    bytes: Vec(u8);
+}
+
+captures: Vec(Capture);
+nextcapture: s32;
+
+WriteHandle :: (h: s32, s: string) -> bool {
+    if h <= CAPBASE {
+        id := CAPBASE - h;
+        k := captures.count - 1;
+        while k >= 0 {
+            if captures[k].id == id {
+                unused BuilderAppend(captures[k].bytes, s);
+                return true;
+            }
+            k -= 1;
+        }
+        return false;
+    }
+    if h < 0 { return false }
+    offset: s64;
+    while offset < s.count {
+        n := Io.Write(h, s[offset:]);
+        if n <= 0 { return false }
+        offset += n;
+    }
+    return true;
+}
+
+Out :: (fd: s32, s: string) -> bool {
+    if fd < 0 || fd >= FDMAX { return false }
+    return WriteHandle(fds[fd], s);
+}
+
+Print :: (s: string) -> bool { return Out(1, s) }
+PrintErr :: (s: string) -> bool { return Out(2, s) }
+
+ReadFd :: (fd: s32, buffer: []u8) -> s32 {
+    if fd < 0 || fd >= FDMAX || fds[fd] < 0 { return -1 }
+    return Io.Read(fds[fd], buffer);
+}
+
+Options :: () -> s32 { return scopes[scopes.count - 1].flags }
+
+SetOptions :: (flags: s32, on: bool) -> s32 {
+    top := scopes.count - 1;
+    old := scopes[top].flags;
+    if on { scopes[top].flags |= flags } else { scopes[top].flags &= ~flags }
+    return old;
+}
+
+Diagnostic :: (s: string) {
+    if (Options() & VERBOSE) != 0 {
+        line: Vec(u8);
+        BuilderPrint(*line, "sh: %\n", s);
+        unused PrintErr(TextView(line[:]));
+    }
+}
+
+Fail :: (ename: string, msg: string) {
+    if (Options() & VERBOSE) != 0 {
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", msg);
+        unused PrintErr(TextView(line[:]));
+    }
+    name: Vec(u8);
+    BuilderPrint(*name, "fail:%", ename);
+    Raise(TextView(name[:]));
+}
+
+Usage :: (s: string) {
+    msg: Vec(u8);
+    BuilderPrint(*msg, "sh: usage: %", s);
+    Fail("usage", TextView(msg[:]));
+}
+
+SetText :: (t: *Text, s: string) {
+    VecClear(t.bytes);
+    unused BuilderAppend(t.bytes, s);
+}
+
+NoExport :: (name: string) -> bool { return name == "0" || name == "*" || name == "status" }
+
+#scope_file
+
+FindVar :: (scope: s64, name: string, bucket: s32) -> s64 {
+    k := scopes[scope].vars.count - 1;
+    while k >= 0 {
+        if scopes[scope].vars[k].bucket == bucket && TextView(scopes[scope].vars[k].name) == name { return k }
+        k -= 1;
+    }
+    return -1;
+}
+
+AddVar :: (scope: s64, name: string, val: *Items, flags: s32, bucket: s32) {
+    v: Var;
+    unused BuilderAppend(v.name.bytes, name);
+    VecSwap(v.val, <<val);
+    v.flags = flags;
+    v.bucket = bucket;
+    VecPush(scopes[scope].vars, v);
+}
+
+#scope_export
+
+// Set and SetLocal take the value out of *val, leaving it empty.
+Set :: (name: string, val: *Items) {
+    bucket := HashName(name, ENVHASHSIZE);
+    s := scopes.count - 1;
+    while s >= 0 {
+        k := FindVar(s, name, bucket);
+        if k >= 0 {
+            VecSwap(scopes[s].vars[k].val, <<val);
+            scopes[s].vars[k].flags |= CHANGED;
+            return;
+        }
+        if s == 0 {
+            flags: s32 = CHANGED;
+            if NoExport(name) { flags |= NOEXPORT }
+            AddVar(0, name, val, flags, bucket);
+            return;
+        }
+        s -= 1;
+    }
+}
+
+SetLocal :: (name: string, val: *Items) {
+    bucket := HashName(name, ENVHASHSIZE);
+    s := scopes.count - 1;
+    k := FindVar(s, name, bucket);
+    if k >= 0 {
+        VecSwap(scopes[s].vars[k].val, <<val);
+        scopes[s].vars[k].flags |= CHANGED;
+        return;
+    }
+    flags: s32 = CHANGED;
+    if NoExport(name) { flags |= NOEXPORT }
+    AddVar(s, name, val, flags, bucket);
+}
+
+SetWord :: (name: string, word: string) {
+    val: Items;
+    PushWord(*val, word);
+    Set(name, *val);
+}
+
+SetLocalWord :: (name: string, word: string) {
+    val: Items;
+    PushWord(*val, word);
+    SetLocal(name, *val);
+}
+
+SetStatus :: (status: string) { SetLocalWord("status", status) }
+
+// The value of a variable; $1, $2 and so on index $*.
+Get :: (name: string) -> Items {
+    if name.count == 0 { none: Items; return none }
+    idx: s64 = -1;
+    look := name;
+    if name[0] > #char "0" && name[0] <= #char "9" && IsNum(name) {
+        idx = LimboInt(name) - 1;
+        look = "*";
+    }
+    bucket := HashName(look, ENVHASHSIZE);
+    s := scopes.count - 1;
+    while s >= 0 {
+        k := FindVar(s, look, bucket);
+        if k >= 0 {
+            if idx == -1 { return CloneItems(*scopes[s].vars[k].val) }
+            if idx >= 0 && idx < scopes[s].vars[k].val.count {
+                one: Items;
+                VecPush(one, CopyItem(*scopes[s].vars[k].val, idx));
+                return one;
+            }
+            beyond: Items;
+            return beyond;
+        }
+        s -= 1;
+    }
+    unset: Items;
+    return unset;
+}
+
+Push :: () {
+    scope: Scope;
+    scope.flags = scopes[scopes.count - 1].flags;
+    VecPush(scopes, scope);
+}
+
+Pop :: () {
+    if scopes.count < 2 { return }
+    old: Scope;
+    VecSwap(old.vars, scopes[scopes.count - 1].vars);
+    unused VecPop(scopes);
+    for k: 0..old.vars.count - 1 {
+        name: Text = TextCopy(TextView(old.vars[k].name));
+        bucket := old.vars[k].bucket;
+        found := false;
+        s := scopes.count - 1;
+        while s >= 0 {
+            j := FindVar(s, TextView(name), bucket);
+            if j >= 0 { scopes[s].vars[j].flags |= CHANGED; found = true; break }
+            s -= 1;
+        }
+        if !found {
+            none: Items;
+            Set(TextView(name), *none);
+        }
+    }
+}
+
+// Every visible variable once, in the Limbo shell's envlist order.
+EnvEntry :: struct { name: Text; val: Items; }
+
+EnvList :: () -> Vec(EnvEntry) {
+    // Limbo builds a table bucket by bucket, innermost scope first and
+    // newest first, then reads each bucket newest first.
+    order: Vec(EnvEntry);
+    for b: 0..ENVHASHSIZE - 1 {
+        added: Vec(EnvEntry);
+        s := scopes.count - 1;
+        while s >= 0 {
+            k := scopes[s].vars.count - 1;
+            while k >= 0 {
+                if scopes[s].vars[k].bucket == b {
+                    seen := false;
+                    for i: 0..added.count - 1 {
+                        if TextView(added[i].name) == TextView(scopes[s].vars[k].name) { seen = true; break }
+                    }
+                    if !seen {
+                        e: EnvEntry;
+                        unused BuilderAppend(e.name.bytes, TextView(scopes[s].vars[k].name));
+                        e.val = CloneItems(*scopes[s].vars[k].val);
+                        VecPush(added, e);
+                    }
+                }
+                k -= 1;
+            }
+            s -= 1;
+        }
+        j := added.count - 1;
+        while j >= 0 {
+            e: EnvEntry;
+            VecSwap(e.name.bytes, added[j].name.bytes);
+            VecSwap(e.val, added[j].val);
+            VecPush(order, e);
+            j -= 1;
+        }
+    }
+    return order;
+}
+
+// Builtin tables.
+FindBuiltin :: (t: s32, name: string) -> (index: s64, found: bool) {
+    lo: s64 = 0;
+    hi := tables[t].entries.count - 1;
+    while lo <= hi {
+        mid := (lo + hi) / 2;
+        c := Compare(name, TextView(tables[t].entries[mid].name));
+        if c < 0 { hi = mid - 1 }
+        else if c > 0 { lo = mid + 1 }
+        else { return mid, true }
+    }
+    return lo, false;
+}
+
+// The active module for a builtin name, or -1.
+BuiltinMod :: (t: s32, name: string) -> s32 {
+    i, found := FindBuiltin(t, name);
+    if !found { return -1 }
+    m := tables[t].entries[i].mods.count;
+    return tables[t].entries[i].mods[m - 1];
+}
+
+HasModule :: (t: s32, i: s64, mod: s32) -> bool {
+    for k: 0..tables[t].entries[i].mods.count - 1 { if tables[t].entries[i].mods[k] == mod { return true } }
+    return false;
+}
+
+Compare :: (a: string, b: string) -> s32 {
+    n := ifx a.count < b.count then a.count else b.count;
+    for i: 0..n - 1 {
+        if a[i] < b[i] { return -1 }
+        if a[i] > b[i] { return 1 }
+    }
+    if a.count < b.count { return -1 }
+    if a.count > b.count { return 1 }
+    return 0;
+}
+
+// Add a builtin, replacing another module's; the shell's own are covered,
+// never replaced, and only the shell defines "builtin".
+AddBuiltinTo :: (t: s32, name: string, mod: s32) {
+    if name == "builtin" && mod != 0 { return }
+    i, found := FindBuiltin(t, name);
+    if found {
+        if tables[t].entries[i].mods[0] == 0 {
+            VecPush(tables[t].entries[i].mods, mod);
+        } else {
+            VecClear(tables[t].entries[i].mods);
+            VecPush(tables[t].entries[i].mods, mod);
+        }
+        return;
+    }
+    entry: Builtin;
+    unused BuilderAppend(entry.name.bytes, name);
+    VecPush(entry.mods, mod);
+    VecPush(tables[t].entries, entry);
+    k := tables[t].entries.count - 1;
+    while k > i {
+        swap: Builtin;
+        VecSwap(swap.name.bytes, tables[t].entries[k].name.bytes);
+        VecSwap(swap.mods, tables[t].entries[k].mods);
+        VecSwap(tables[t].entries[k].name.bytes, tables[t].entries[k - 1].name.bytes);
+        VecSwap(tables[t].entries[k].mods, tables[t].entries[k - 1].mods);
+        VecSwap(tables[t].entries[k - 1].name.bytes, swap.name.bytes);
+        VecSwap(tables[t].entries[k - 1].mods, swap.mods);
+        k -= 1;
+    }
+}
+
+#scope_file
+
+DeleteEntry :: (t: s32, i: s64) {
+    k := i;
+    while k < tables[t].entries.count - 1 {
+        VecSwap(tables[t].entries[k].name.bytes, tables[t].entries[k + 1].name.bytes);
+        VecSwap(tables[t].entries[k].mods, tables[t].entries[k + 1].mods);
+        k += 1;
+    }
+    unused VecPop(tables[t].entries);
+}
+
+#scope_export
+
+RemoveBuiltinFrom :: (t: s32, name: string, mod: s32) {
+    i, found := FindBuiltin(t, name);
+    if !found { return }
+    m := tables[t].entries[i].mods.count;
+    if tables[t].entries[i].mods[m - 1] == mod {
+        if m > 1 { unused VecPop(tables[t].entries[i].mods) } else { DeleteEntry(t, i) }
+    }
+}
+
+RemoveBuiltinMod :: (t: s32, mod: s32) {
+    i: s64 = 0;
+    while i < tables[t].entries.count {
+        m := tables[t].entries[i].mods.count;
+        if tables[t].entries[i].mods[m - 1] == mod {
+            unused VecPop(tables[t].entries[i].mods);
+        }
+        if tables[t].entries[i].mods.count == 0 { DeleteEntry(t, i) } else { i += 1 }
+    }
+}
+
+AddBuiltin :: (name: string, mod: s32) { AddBuiltinTo(0, name, mod) }
+RemoveBuiltin :: (name: string, mod: s32) { RemoveBuiltinFrom(0, name, mod) }
+AddSBuiltin :: (name: string, mod: s32) { AddBuiltinTo(1, name, mod) }
+RemoveSBuiltin :: (name: string, mod: s32) { RemoveBuiltinFrom(1, name, mod) }
+
+// The name a module was loaded under, or "builtin".
+ModName :: (mod: s32) -> Text {
+    k := bmods.count - 1;
+    while k >= 0 {
+        if bmods[k].mod == mod { return TextCopy(TextView(bmods[k].name)) }
+        k -= 1;
+    }
+    return TextCopy("builtin");
+}
+
+// Quoting of lists.
+QuotedTo :: (out: *Vec(u8), val: *Items, quoteblocks: bool) {
+    for i: 0..val.count - 1 {
+        if val.*[i].cmd < 0 || (quoteblocks && val.*[i].word.bytes.count != 0) {
+            w: Text = TextCopy(TextView(val.*[i].word));
+            Quote(out, TextView(w), false);
+        } else {
+            cmd: Text = CmdText(val.*[i].cmd);
+            if quoteblocks { Quote(out, TextView(cmd), false) } else { unused BuilderAppend(<<out, TextView(cmd)) }
+        }
+        if i < val.count - 1 { VecPush(<<out, 32) }
+    }
+}
+
+Quoted :: (val: *Items, quoteblocks: bool) -> Text {
+    out: Vec(u8);
+    QuotedTo(*out, val, quoteblocks);
+    return BuilderFinish(out);
+}
+
+Squash :: (val: *Items, sep: string) -> Text {
+    out: Vec(u8);
+    for i: 0..val.count - 1 {
+        if i > 0 { unused BuilderAppend(out, sep) }
+        w: Text = ItemText(val, i);
+        unused BuilderAppend(out, TextView(w));
+    }
+    return BuilderFinish(out);
+}
+
+StringsToList :: (words: *Vec(Text)) -> Items {
+    out: Items;
+    for i: 0..words.count - 1 { VecPush(out, WordItem(TextView(words.*[i]))) }
+    return out;
+}
+
+// The guest environment, as appl/lib/env.b with /env.
+ReadWhole :: (path: string, text: *Text) -> bool {
+    h := Io.Open(path, 0);
+    if h < 0 { return false }
+    chunk: [8192]u8;
+    while true {
+        n := Io.Read(h, chunk[:]);
+        if n < 0 { unused Io.Close(h); return false }
+        if n == 0 { break }
+        unused BuilderAppend(text.bytes, TextView(chunk[:n]));
+    }
+    unused Io.Close(h);
+    return true;
+}
+
+SetEnv :: (name: string, value: string) {
+    for name { if it == #char "/" { return } }
+    path: Vec(u8);
+    BuilderPrint(*path, "/env/%", name);
+    if value.count == 0 {
+        unused Io.Remove(TextView(path[:]));
+        return;
+    }
+    h := Io.Create(TextView(path[:]), 1, 384);
+    if h < 0 { return }
+    unused Io.Write(h, value);
+    unused Io.Close(h);
+}
+
+// Write every changed exportable variable to /env, outermost scope first.
+Export :: () {
+    for s: 0..scopes.count - 1 {
+        for b: 0..ENVHASHSIZE - 1 {
+            k := scopes[s].vars.count - 1;
+            while k >= 0 {
+                if scopes[s].vars[k].bucket == b {
+                    flags := scopes[s].vars[k].flags;
+                    if (flags & CHANGED) != 0 && (flags & NOEXPORT) == 0 {
+                        value: Text = Quoted(*scopes[s].vars[k].val, true);
+                        name: Text = TextCopy(TextView(scopes[s].vars[k].name));
+                        SetEnv(TextView(name), TextView(value));
+                        scopes[s].vars[k].flags &= ~CHANGED;
+                    }
+                }
+                k -= 1;
+            }
+        }
+    }
+}
+
+// Directory entries.
+DirEntry :: struct {
+    name: Text;
+    mode: u32;
+}
+
+DMDIR :: 0x80000000;
+
+Uint :: (data: []u8, offset: s64, bytes: s64) -> u64 {
+    value: u64;
+    for i: 0..bytes - 1 { value |= cast(u64)data[offset + i] << cast(u64)(8 * i) }
+    return value;
+}
+
+// The entries of a directory in the order it lists them.
+ReadDir :: (path: string, entries: *Vec(DirEntry)) -> bool {
+    h := Io.Open(path, 0);
+    if h < 0 { return false }
+    buf: [8192]u8;
+    while true {
+        n := Io.Read(h, buf[:]);
+        if n <= 0 { break }
+        offset: s64;
+        while offset + 2 <= n {
+            size := cast(s64)Uint(buf[:], offset, 2) + 2;
+            if size < 49 || offset + size > n { break }
+            namelen := cast(s64)Uint(buf[:], offset + 41, 2);
+            if 43 + namelen > size { break }
+            e: DirEntry;
+            unused BuilderAppend(e.name.bytes, TextView(buf[offset + 43:offset + 43 + namelen]));
+            e.mode = cast(u32)Uint(buf[:], offset + 21, 4);
+            VecPush(<<entries, e);
+            offset += size;
+        }
+    }
+    unused Io.Close(h);
+    return true;
+}
+
+// Stat a path for its mode: false when it does not exist, with the reason
+// left for Io.Error.
+StatMode :: (path: string) -> (mode: u32, ok: bool) {
+    meta: [12]u8;
+    if Io.Stat(path, meta[:]) < 0 { return 0, false }
+    return cast(u32)Uint(meta[:], 8, 4), true;
+}
+
+Executable :: (path: string, mask: u32) -> bool {
+    mode, ok := StatMode(path);
+    return ok && (mode & DMDIR) == 0 && (mode & mask) != 0;
+}
+
+// The outermost scope starts with the guest environment.
+ImportEnv :: () {
+    entries: Vec(DirEntry);
+    if !ReadDir("/env", *entries) { return }
+    for i: 0..entries.count - 1 {
+        name: Text = TextCopy(TextView(entries[i].name));
+        if HasEntryBefore(entries[:], i) { continue }
+        path: Vec(u8);
+        BuilderPrint(*path, "/env/%", TextView(name));
+        value: Text;
+        if !ReadWhole(TextView(path[:]), *value) { continue }
+        words := Unquoted(TextView(value));
+        val := StringsToList(*words);
+        AddVar(0, TextView(name), *val, 0, HashName(TextView(name), ENVHASHSIZE));
+    }
+}
+
+HasEntryBefore :: (entries: []DirEntry, i: s64) -> bool {
+    for j: 0..i - 1 { if TextView(entries[j].name) == TextView(entries[i].name) { return true } }
+    return false;
+}
+
+// Globbing.
+ContainsWild :: (s: string) -> bool {
+    for i: 0..s.count - 2 {
+        if s[i] == GLOB {
+            c := s[i + 1];
+            if c == #char "*" || c == #char "[" || c == #char "?" || c == GLOB { return true }
+        }
+    }
+    return false;
+}
+
+// Drop the GLOB marks and quote the wildcards that were quoted.
+PatQuote :: (word: string) -> Text {
+    out: Vec(u8);
+    i: s64;
+    tilde := false;
+    while i < word.count {
+        c := word[i];
+        if tilde { c = #char "^"; tilde = false }
+        if c == #char "[" || c == #char "*" || c == #char "?" || c == 92 {
+            VecPush(out, 92);
+        } else if c == GLOB {
+            i += 1;
+            if i >= word.count { break }
+            c = word[i];
+            if c == #char "[" && i < word.count - 1 && word[i + 1] == #char "~" { tilde = true }
+        }
+        VecPush(out, c);
+        i += 1;
+    }
+    return BuilderFinish(out);
+}
+
+Deglob :: (s: string) -> Text {
+    out: Vec(u8);
+    for s { if it != GLOB { VecPush(out, it) } }
+    return BuilderFinish(out);
+}
+
+#scope_file
+
+JoinPath :: (dir: string, name: string) -> Text {
+    out: Vec(u8);
+    if dir == "/" || dir == "" {
+        unused BuilderAppend(out, dir);
+        unused BuilderAppend(out, name);
+    } else {
+        BuilderPrint(*out, "%/%", dir, name);
+    }
+    return BuilderFinish(out);
+}
+
+GreaterName :: (a: string, b: string) -> bool { return Compare(a, b) > 0 }
+
+// filepatdir: the names in dir that match, ascending.
+PatDir :: (pat: string, dir: string, mustbedir: bool, files: *Vec(Text)) {
+    if pat == "." || pat == ".." {
+        VecPush(<<files, JoinPath(dir, pat));
+        return;
+    }
+    dirname := ifx dir == "" then "." else dir;
+    entries: Vec(DirEntry);
+    if !ReadDir(dirname, *entries) { return }
+    // Sort by name, dropping duplicates.
+    for i: 1..entries.count - 1 {
+        j := i;
+        while j > 0 && GreaterName(TextView(entries[j - 1].name), TextView(entries[j].name)) {
+            VecSwap(entries[j - 1].name.bytes, entries[j].name.bytes);
+            m := entries[j - 1].mode;
+            entries[j - 1].mode = entries[j].mode;
+            entries[j].mode = m;
+            j -= 1;
+        }
+    }
+    for i: 0..entries.count - 1 {
+        if i > 0 && TextView(entries[i].name) == TextView(entries[i - 1].name) { continue }
+        name: Text = TextCopy(TextView(entries[i].name));
+        if Match(pat, TextView(name)) && (!mustbedir || (entries[i].mode & DMDIR) != 0) {
+            VecPush(<<files, JoinPath(dir, TextView(name)));
+        }
+    }
+}
+
+#scope_export
+
+// filepat->expand.
+Expand :: (pat: string) -> Vec(Text) {
+    elems := Tokenize(pat, "/");
+    files: Vec(Text);
+    if elems.count == 0 {
+        PatDir(pat, "", false, *files);
+        return files;
+    }
+    started := false;
+    if pat[0] == #char "/" { VecPush(files, TextCopy("/")); started = true }
+    for e: 0..elems.count - 1 {
+        next: Vec(Text);
+        more := e < elems.count - 1;
+        if !started {
+            PatDir(TextView(elems[e]), "", more, *next);
+            started = true;
+        } else {
+            for f: 0..files.count - 1 {
+                dir: Text = TextCopy(TextView(files[f]));
+                PatDir(TextView(elems[e]), TextView(dir), more, *next);
+            }
+        }
+        VecSwap(files, next);
+        if files.count == 0 { break }
+    }
+    return files;
+}
+
+Glob :: (list: Items) -> Items {
+    out: Items;
+    for i: 0..list.count - 1 {
+        if list[i].cmd < 0 && ContainsWild(TextView(list[i].word)) {
+            q: Text = PatQuote(TextView(list[i].word));
+            files := Expand(TextView(q));
+            if files.count == 0 {
+                d: Text = Deglob(TextView(list[i].word));
+                VecPush(out, WordItem(TextView(d)));
+            } else {
+                for f: 0..files.count - 1 { VecPush(out, WordItem(TextView(files[f]))) }
+            }
+        } else {
+            moved: Item;
+            moved.cmd = list[i].cmd;
+            VecSwap(moved.word.bytes, list[i].word.bytes);
+            VecPush(out, moved);
+        }
+    }
+    return out;
+}
+
+// Redirections, collected in reverse: the last one pushed applies first.
+RedirWord :: struct {
+    handle: s32; // an open handle, or -1
+    path: Text;
+    rtype: s32;
+    fd1: s32;
+    fd2: s32;
+}
+
+#scope_file
+
+PushRedir :: (redirs: *Vec(RedirWord), handle: s32, path: string, rtype: s32, fd1: s32, fd2: s32) {
+    r: RedirWord;
+    r.handle = handle;
+    unused BuilderAppend(r.path.bytes, path);
+    r.rtype = rtype;
+    r.fd1 = fd1;
+    r.fd2 = fd2;
+    VecPush(<<redirs, r);
+}
+
+// Close the handles that redirections hold.
+DropRedirs :: (redirs: *Vec(RedirWord)) {
+    for i: 0..redirs.count - 1 {
+        if redirs.*[i].handle >= 0 { unused Io.Close(redirs.*[i].handle); redirs.*[i].handle = -1 }
+    }
+}
+
+Nonexistent :: (e: string) -> bool {
+    a := "does not exist";
+    b := "directory entry not found";
+    if e.count >= a.count && e[e.count - a.count:] == a { return true }
+    if e.count >= b.count && e[e.count - b.count:] == b { return true }
+    return false;
+}
+
+#scope_export
+
+// A saved descriptor table and the handles opened for a redirection.
+Saved :: struct {
+    table: [32]s32;
+    opened: Vec(s32);
+}
+
+SaveFds :: (saved: *Saved) {
+    for i: 0..FDMAX - 1 { saved.table[i] = fds[i] }
+}
+
+RestoreFds :: (saved: *Saved) {
+    for i: 0..FDMAX - 1 { fds[i] = saved.table[i] }
+    for i: 0..saved.opened.count - 1 { unused Io.Close(saved.opened[i]) }
+    VecClear(saved.opened);
+}
+
+// Apply redirections to the descriptor table, as doredirs. Handles in the
+// list move to saved.opened, closed when the table is restored.
+DoRedirs :: (redirs: *Vec(RedirWord), saved: *Saved) {
+    k := redirs.count - 1;
+    while k >= 0 {
+        rtype := redirs.*[k].rtype;
+        fd1 := redirs.*[k].fd1;
+        fd2 := redirs.*[k].fd2;
+        handle := redirs.*[k].handle;
+        redirs.*[k].handle = -1;
+        if handle >= 0 { VecPush(saved.opened, handle) }
+        path: Text = TextCopy(TextView(redirs.*[k].path));
+        k -= 1;
+        if handle < 0 && path.bytes.count == 0 {
+            if fd1 == -1 || fd2 == -1 { Fail("bad redir", "sh: invalid dup"); DropRest(redirs, k); return }
+            if fd1 >= FDMAX || fd2 >= FDMAX || fd1 < 0 || fd2 < 0 || fds[fd2] == -1 {
+                Fail("bad redir", "sh: cannot dup: fd out of range or not open");
+                DropRest(redirs, k);
+                return;
+            }
+            fds[fd1] = fds[fd2];
+            continue;
+        }
+        if fd1 == -1 {
+            if (rtype & 7) == OWRITE { fd1 = 1 } else { fd1 = 0 }
+        }
+        if handle < 0 {
+            append := (rtype & OAPPEND) != 0;
+            omode := rtype & ~OAPPEND;
+            err: Text;
+            if rtype == OREAD {
+                handle = Io.Open(TextView(path), omode);
+                if handle < 0 { SetText(*err, Io.Error()) }
+            } else if rtype == (OWRITE | OAPPEND) || rtype == ORDWR {
+                handle = Io.Open(TextView(path), omode);
+                if handle < 0 {
+                    SetText(*err, Io.Error());
+                    if Nonexistent(TextView(err)) {
+                        handle = Io.Create(TextView(path), omode, 438);
+                        VecClear(err.bytes);
+                        if handle < 0 { SetText(*err, Io.Error()) }
+                    }
+                }
+            } else if rtype == OWRITE {
+                handle = Io.Create(TextView(path), omode, 438);
+                if handle < 0 {
+                    SetText(*err, Io.Error());
+                    if TextView(err) == EPERM {
+                        handle = Io.Open(TextView(path), omode);
+                        if handle < 0 {
+                            nerr: Text = TextCopy(Io.Error());
+                            if !Nonexistent(TextView(nerr)) { VecSwap(err.bytes, nerr.bytes) }
+                        }
+                    }
+                }
+            }
+            if handle < 0 {
+                if err.bytes.count == 0 { SetText(*err, Io.Error()) }
+                msg: Vec(u8);
+                BuilderPrint(*msg, "sh: cannot open %: %", TextView(path), TextView(err));
+                Fail("bad redir", TextView(msg[:]));
+                DropRest(redirs, k);
+                return;
+            }
+            if append { unused Io.Seek(handle, 0, 2) }
+            VecPush(saved.opened, handle);
+        }
+        if fd1 < 0 || fd1 >= FDMAX {
+            Fail("bad redir", "sh: bad redirection");
+            DropRest(redirs, k);
+            return;
+        }
+        fds[fd1] = handle;
+    }
+}
+
+#scope_file
+
+DropRest :: (redirs: *Vec(RedirWord), k: s64) {
+    j := k;
+    while j >= 0 {
+        if redirs.*[j].handle >= 0 { unused Io.Close(redirs.*[j].handle); redirs.*[j].handle = -1 }
+        j -= 1;
+    }
+}
+
+#scope_export
+
+// Child processes. A Batch starts several, plumbs capture buffers through
+// pipes, and waits for them.
+Job :: struct {
+    id: s32; // 0 when status is already known
+    path: Text;
+    status: Text;
+}
+
+CapPipe :: struct {
+    capid: s32;
+    rd: s32;
+    wr: s32;
+}
+
+Batch :: struct {
+    jobs: Vec(Job);
+    caps: Vec(CapPipe);
+}
+
+#scope_file
+
+// The handle a child gets for one of the shell's descriptors.
+StreamHandle :: (batch: *Batch, fd: s32) -> s32 {
+    h := fds[fd];
+    if h > CAPBASE { return h }
+    id := CAPBASE - h;
+    for i: 0..batch.caps.count - 1 { if batch.caps[i].capid == id { return batch.caps[i].wr } }
+    ends: [2]s32;
+    if Ns.Pipe(ends[:]) != 0 { return -1 }
+    c: CapPipe;
+    c.capid = id;
+    c.rd = ends[0];
+    c.wr = ends[1];
+    VecPush(batch.caps, c);
+    return ends[1];
+}
+
+AddJob :: (batch: *Batch, id: s32, path: string, status: string) {
+    j: Job;
+    j.id = id;
+    unused BuilderAppend(j.path.bytes, path);
+    unused BuilderAppend(j.status.bytes, status);
+    VecPush(batch.jobs, j);
+}
+
+#scope_export
+
+// Start a ZX program with the shell's descriptors 0, 1 and 2.
+StartZx :: (batch: *Batch, path: string, operands: *Vec(Text)) {
+    views: Vec(string);
+    for i: 0..operands.count - 1 { VecPush(views, TextView(operands.*[i])) }
+    in := StreamHandle(batch, 0);
+    out := StreamHandle(batch, 1);
+    err := StreamHandle(batch, 2);
+    launch := Process.StartWith(path, views[:], in, out, err);
+    if launch.id == 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: %", path, launch.error);
+        Diagnostic(TextView(msg[:]));
+        AddJob(batch, 0, path, launch.error);
+        return;
+    }
+    AddJob(batch, launch.id, path, "");
+}
+
+// Read the capture pipes to their end, so their writers can finish.
+DrainCaptures :: (batch: *Batch) {
+    for i: 0..batch.caps.count - 1 {
+        unused Io.Close(batch.caps[i].wr);
+        batch.caps[i].wr = -1;
+    }
+    buf: [8192]u8;
+    for i: 0..batch.caps.count - 1 {
+        h := CAPBASE - batch.caps[i].capid;
+        while true {
+            n := Io.Read(batch.caps[i].rd, buf[:]);
+            if n <= 0 { break }
+            unused WriteHandle(h, TextView(buf[:n]));
+        }
+        unused Io.Close(batch.caps[i].rd);
+    }
+    VecClear(batch.caps);
+}
+
+// A child's result as a shell status.
+OutcomeStatus :: (path: string, outcome: Process.Outcome) -> Text {
+    if outcome.status < 0 {
+        if outcome.error == "killed" { return TextCopy("killed") }
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sh: %: %\n", path, outcome.error);
+        unused PrintErr(TextView(msg[:]));
+        return TextCopy("zx");
+    }
+    if outcome.status > 0 && outcome.value != 0 {
+        if outcome.error != "" { return FailureStatus(outcome.error) }
+        v: Vec(u8);
+        BuilderPrint(*v, "%", outcome.value);
+        return BuilderFinish(v);
+    }
+    return TextCopy("");
+}
+
+// Wait for every job, as waitfor: empty when all succeeded, else the
+// statuses from left to right joined by "|".
+WaitFor :: (batch: *Batch) -> Text {
+    DrainCaptures(batch);
+    if batch.jobs.count == 0 { return TextCopy("") }
+    onebad := false;
+    for i: 0..batch.jobs.count - 1 {
+        if batch.jobs[i].id != 0 {
+            outcome := Process.Wait(batch.jobs[i].id);
+            path: Text = TextCopy(TextView(batch.jobs[i].path));
+            status: Text = OutcomeStatus(TextView(path), outcome);
+            VecSwap(batch.jobs[i].status.bytes, status.bytes);
+            batch.jobs[i].id = 0;
+        }
+        if batch.jobs[i].status.bytes.count != 0 { onebad = true }
+    }
+    if !onebad { return TextCopy("") }
+    out: Vec(u8);
+    for i: 0..batch.jobs.count - 1 {
+        if i > 0 { VecPush(out, #char "|") }
+        unused BuilderAppend(out, TextView(batch.jobs[i].status));
+    }
+    return BuilderFinish(out);
+}
+
+// Background jobs still to be collected.
+bgjobs: Vec(s32);
+
+ReapBackground :: () {
+    i: s64 = 0;
+    while i < bgjobs.count {
+        outcome := Process.Poll(bgjobs[i]);
+        if outcome.status == -2 { i += 1; continue }
+        bgjobs[i] = bgjobs[bgjobs.count - 1];
+        unused VecPop(bgjobs);
+    }
+}
+
+// The operands that start a child shell running a list, carrying what a
+// Limbo thread shared: loaded modules, $*, $0, $status and the options.
+ChildOperands :: (args: *Items) -> Vec(Text) {
+    ops: Vec(Text);
+    VecPush(ops, TextCopy("-%"));
+    names: Items;
+    for k: 0..bmods.count - 1 { PushWord(*names, TextView(bmods[k].name)) }
+    VecPush(ops, Quoted(*names, true));
+    star := Get("*");
+    VecPush(ops, Quoted(*star, true));
+    zero := Get("0");
+    VecPush(ops, Quoted(*zero, true));
+    status := Get("status");
+    if status.count > 0 { VecPush(ops, ItemText(*status, 0)) } else { VecPush(ops, TextCopy("")) }
+    flags: Vec(u8);
+    BuilderPrint(*flags, "%", Options() & ~INTERACTIVE);
+    VecPush(ops, BuilderFinish(flags));
+    for i: 0..args.count - 1 { VecPush(ops, ItemText(args, i)) }
+    return ops;
+}
+
+// Where a command name runs from: a ZX program, or nothing found here.
+ResolveZx :: (name: string) -> Text {
+    paths := PathList(name);
+    for i: 0..paths.count - 1 {
+        path: Text = CommandPath(TextView(paths[i]), name);
+        zx: Text = ZxFile(TextView(path), name);
+        if zx.bytes.count != 0 { return zx }
+    }
+    return TextCopy("");
+}
+
+// Start one list beside the shell, with the descriptors as they are now:
+// a ZX program directly, anything else in a child shell.
+StartList :: (batch: *Batch, args: *Items) {
+    if args.count == 0 { AddJob(batch, 0, "", ""); return }
+    Export();
+    first: Text = TextCopy(TextView(args.*[0].word));
+    if !IsBlock(args, 0) && BuiltinMod(0, TextView(first)) < 0 {
+        zx: Text = ResolveZx(TextView(first));
+        if zx.bytes.count != 0 {
+            if (Options() & EXECPRINT) != 0 {
+                q: Text = Quoted(args, false);
+                line: Vec(u8);
+                BuilderPrint(*line, "%\n", TextView(q));
+                unused PrintErr(TextView(line[:]));
+            }
+            ops: Vec(Text);
+            for i: 1..args.count - 1 { VecPush(ops, ItemText(args, i)) }
+            StartZx(batch, TextView(zx), *ops);
+            return;
+        }
+    }
+    ops := ChildOperands(args);
+    StartZx(batch, TextView(shellpath), *ops);
+}
+
+// Start a list with its redirections applied, as runasync. A redirection
+// that fails ends that element with its status.
+StartAsync :: (batch: *Batch, args: *Items, redirs: *Vec(RedirWord)) {
+    saved: Saved;
+    SaveFds(*saved);
+    DoRedirs(redirs, *saved);
+    if raising {
+        status: Text = FailureStatus(TextView(raised));
+        ClearRaise();
+        AddJob(batch, 0, "", TextView(status));
+    } else {
+        StartList(batch, args);
+    }
+    RestoreFds(*saved);
+}
+
+#scope_file
+
+PathList :: (name: string) -> Vec(Text) {
+    out: Vec(Text);
+    if Absolute(name) { VecPush(out, TextCopy("")); return out }
+    pl := Get("path");
+    if pl.count == 0 {
+        VecPush(out, TextCopy("/dis"));
+        VecPush(out, TextCopy("."));
+        return out;
+    }
+    for i: 0..pl.count - 1 { VecPush(out, ItemText(*pl, i)) }
+    return out;
+}
+
+CommandPath :: (dir: string, name: string) -> Text {
+    out: Vec(u8);
+    if dir != "" { BuilderPrint(*out, "%/%", dir, name) } else { unused BuilderAppend(out, name) }
+    return BuilderFinish(out);
+}
+
+HasSuffix :: (s: string, suffix: string) -> bool {
+    return s.count >= suffix.count && s[s.count - suffix.count:] == suffix;
+}
+
+// The ZX program for a command path: path.zx (or path when it ends in .zx);
+// for a .dis name, its .zx twin. Empty when there is none.
+ZxFile :: (path: string, name: string) -> Text {
+    out: Vec(u8);
+    if HasSuffix(name, ".dis") {
+        unused BuilderAppend(out, path[:path.count - 4]);
+        unused BuilderAppend(out, ".zx");
+    } else {
+        unused BuilderAppend(out, path);
+        if !HasSuffix(path, ".zx") { unused BuilderAppend(out, ".zx") }
+    }
+    if Executable(TextView(out[:]), 73) { return BuilderFinish(out) }
+    return TextCopy("");
+}
+
+#scope_export
+
+// Paths that start with /, #, ./ or ../ are not searched for.
+Absolute :: (p: string) -> bool {
+    if p.count < 2 { return false }
+    if p[0] == #char "/" || p[0] == #char "#" { return true }
+    if p.count < 3 || p[0] != #char "." { return false }
+    if p[1] == #char "/" { return true }
+    if p[1] == #char "." && p[2] == #char "/" { return true }
+    return false;
+}
+
+// Run a command that is not a builtin, as runexternal.
+RunExternal :: (args: *Items, last: bool) -> Text {
+    progname: Text = ItemText(args, 0);
+    name := TextView(progname);
+    disfile := HasSuffix(name, ".dis");
+    paths := PathList(name);
+    err: Text;
+    for i: 0..paths.count - 1 {
+        path: Text = CommandPath(TextView(paths[i]), name);
+        zx: Text = ZxFile(TextView(path), name);
+        if zx.bytes.count != 0 {
+            Export();
+            batch: Batch;
+            ops: Vec(Text);
+            for k: 1..args.count - 1 { VecPush(ops, ItemText(args, k)) }
+            StartZx(*batch, TextView(zx), *ops);
+            return WaitFor(*batch);
+        }
+        npath: Vec(u8);
+        unused BuilderAppend(npath, TextView(path));
+        if !disfile { unused BuilderAppend(npath, ".dis") }
+        _, there := StatMode(TextView(npath[:]));
+        VecClear(err.bytes);
+        if there {
+            BuilderPrint(*err.bytes, "cannot run Dis module %: no Dis runtime in this guest", TextView(npath[:]));
+        } else {
+            unused BuilderAppend(err.bytes, Io.Error());
+        }
+        if Nonexistent(TextView(err)) {
+            if !disfile {
+                h := Io.Open(TextView(path), 0);
+                if h >= 0 {
+                    mode, ok := StatMode(TextView(path));
+                    if ok && (mode & DMDIR) == 0 && (mode & 73) != 0 {
+                        rest: Items;
+                        for k: 1..args.count - 1 { VecPush(rest, CopyItem(args, k)) }
+                        return RunHashPling(h, TextView(path), *rest, last);
+                    }
+                    unused Io.Close(h);
+                } else {
+                    VecClear(err.bytes);
+                    unused BuilderAppend(err.bytes, Io.Error());
+                }
+            }
+        }
+        if !Nonexistent(TextView(err)) { break }
+    }
+    msg: Vec(u8);
+    BuilderPrint(*msg, "%: %", name, TextView(err));
+    Diagnostic(TextView(msg[:]));
+    return err;
+}
+
+#scope_file
+
+RunHashPling :: (h: s32, path: string, argv: *Items, last: bool) -> Text {
+    header: [1024]u8;
+    n := Io.Read(h, header[:]);
+    unused Io.Close(h);
+    i: s32 = 0;
+    while i < n && header[i] != 10 { i += 1 }
+    if i == n || i < 3 || header[0] != #char "#" || header[1] != #char "!" {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "bad script header on %", path);
+        Diagnostic(TextView(msg[:]));
+        return TextCopy("bad header");
+    }
+    words := Tokenize(TextView(header[2:i]), " \t");
+    if words.count == 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "empty header on %", path);
+        Diagnostic(TextView(msg[:]));
+        return TextCopy("bad header");
+    }
+    nargs: Items;
+    for k: 0..words.count - 1 { PushWord(*nargs, TextView(words[k])) }
+    PushWord(*nargs, path);
+    for k: 0..argv.count - 1 { VecPush(nargs, CopyItem(argv, k)) }
+    return RunExternal(*nargs, last);
+}
+
+#scope_export
+
+// Run a list, as Context.run.
+Run :: (args: *Items, last: bool) -> Text {
+    if args.count == 0 || (args.*[0].cmd < 0 && args.*[0].word.bytes.count == 0) { return TextCopy("") }
+    if IsBlock(args, 0) { return RunBlock(args, last) }
+    ReapBackground();
+    if (Options() & EXECPRINT) != 0 {
+        q: Text = Quoted(args, false);
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", TextView(q));
+        unused PrintErr(TextView(line[:]));
+    }
+    name: Text = TextCopy(TextView(args.*[0].word));
+    mod := BuiltinMod(0, TextView(name));
+    if mod >= 0 {
+        status: Text;
+        unused modules[mod].run(mod, args, last, *status);
+        return status;
+    }
+    return RunExternal(args, last);
+}
+
+// Recently parsed block text, so a function from the environment is not
+// parsed again at every call.
+Parsed :: struct { text: Text; node: s32; }
+parsecache: Vec(Parsed);
+
+ParseBlock :: (text: string, err: *Text) -> s32 {
+    for i: 0..parsecache.count - 1 {
+        if TextView(parsecache[i].text) == text { return parsecache[i].node }
+    }
+    n := ParseString(text, err);
+    if n >= 0 {
+        p: Parsed;
+        unused BuilderAppend(p.text.bytes, text);
+        p.node = n;
+        if parsecache.count >= 64 {
+            for i: 1..parsecache.count - 1 {
+                VecSwap(parsecache[i - 1].text.bytes, parsecache[i].text.bytes);
+                parsecache[i - 1].node = parsecache[i].node;
+            }
+            unused VecPop(parsecache);
+        }
+        VecPush(parsecache, p);
+    }
+    return n;
+}
+
+RunBlock :: (args: *Items, last: bool) -> Text {
+    cmd := args.*[0].cmd;
+    if cmd < 0 {
+        err: Text;
+        word: Text = TextCopy(TextView(args.*[0].word));
+        cmd = ParseBlock(TextView(word), *err);
+        if cmd < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "sh: %", TextView(err));
+            Fail("parse error", TextView(msg[:]));
+            return TextCopy("");
+        }
+    }
+    Push();
+    zero: Items;
+    VecPush(zero, CopyItem(args, 0));
+    SetLocal("0", *zero);
+    rest := Tail(args, 1);
+    SetLocal("*", *rest);
+    if cmd >= 0 && Kind(cmd) == N_BLOCK { cmd = Left(cmd) }
+    status: Text = Walk(cmd, last);
+    Pop();
+    return status;
+}
+
+// {a|b}$* for a backgrounded pipeline.
+Pipe2Cmd :: (n: s32) -> s32 {
+    if n < 0 || Kind(n) != N_PIPE { return n }
+    return NewNode(N_ADJ, NewNode(N_BLOCK, n, -1), NewNode(N_VAR, WordNode("*"), -1));
+}
+
+Walk :: (start: s32, last: bool) -> Text {
+    n := start;
+    while n >= 0 && Kind(n) == N_SEQ {
+        status: Text = Walk(Left(n), false);
+        if Unwinding() { return TextCopy(TextView(status)) }
+        if (Options() & ERROREXIT) != 0 && status.bytes.count != 0 {
+            name: Vec(u8);
+            BuilderPrint(*name, "fail:%", TextView(status));
+            Raise(TextView(name[:]));
+            return TextCopy(TextView(status));
+        }
+        SetStatus(TextView(status));
+        n = Right(n);
+    }
+    if n < 0 { return TextCopy("") }
+    k := Kind(n);
+    if k == N_PIPE {
+        batch: Batch;
+        WalkPipeline(n, -1, -1, *batch);
+        if Unwinding() {
+            DrainCaptures(*batch);
+            return TextCopy("");
+        }
+        return WaitFor(*batch);
+    }
+    if k == N_ASSIGN || k == N_LOCAL {
+        unused Assign(n);
+        return TextCopy("");
+    }
+    bg := false;
+    if k == N_NOWAIT {
+        bg = true;
+        n = Pipe2Cmd(Left(n));
+    }
+    redirs: Vec(RedirWord);
+    line := Glob(Glom(n, *redirs));
+    if Unwinding() { DropRedirs(*redirs); return TextCopy("") }
+    if bg {
+        batch: Batch;
+        StartAsync(*batch, *line, *redirs);
+        DrainCaptures(*batch);
+        id: s32 = 0;
+        if batch.jobs.count > 0 { id = batch.jobs[0].id }
+        if id != 0 { VecPush(bgjobs, id) }
+        idtext: Vec(u8);
+        BuilderPrint(*idtext, "%", id);
+        SetWord("apid", TextView(idtext[:]));
+        return TextCopy("");
+    }
+    return RunSync(*line, *redirs, last);
+}
+
+// Run in place; redirections apply to a copy of the descriptor table.
+RunSync :: (args: *Items, redirs: *Vec(RedirWord), last: bool) -> Text {
+    if redirs.count == 0 { return Run(args, last) }
+    saved: Saved;
+    SaveFds(*saved);
+    DoRedirs(redirs, *saved);
+    status: Text;
+    if !Unwinding() {
+        result: Text = Run(args, last);
+        VecSwap(status.bytes, result.bytes);
+        // A Limbo shell ran this in its own process: exit ends only that.
+        if exiting && !last { exiting = false; VecClear(status.bytes) }
+    }
+    RestoreFds(*saved);
+    return status;
+}
+
+Assign :: (n: s32) -> Items {
+    redirs: Vec(RedirWord);
+    val: Items;
+    right := Right(n);
+    if right >= 0 && (Kind(right) == N_ASSIGN || Kind(right) == N_LOCAL) {
+        inner := Assign(right);
+        VecSwap(val, inner);
+    } else {
+        expanded := Glob(Glom(right, *redirs));
+        VecSwap(val, expanded);
+    }
+    if Unwinding() { DropRedirs(*redirs); return val }
+    vars := Glom(Left(n), *redirs);
+    if Unwinding() { DropRedirs(*redirs); return val }
+    if vars.count == 0 { DropRedirs(*redirs); Fail("bad assign", "sh: nil variable name"); return val }
+    if redirs.count != 0 { DropRedirs(*redirs); Fail("bad assign", "sh: redirections not allowed in assignment"); return val }
+    t: s64 = 0;
+    for i: 0..vars.count - 1 {
+        vname: Text = Deglob(TextView(vars[i].word));
+        if vname.bytes.count == 0 { Fail("bad assign", "sh: bad variable name"); return val }
+        v: Items;
+        if i == vars.count - 1 {
+            for j: t..val.count - 1 { VecPush(v, CopyItem(*val, j)) }
+        } else if t < val.count {
+            VecPush(v, CopyItem(*val, t));
+        }
+        if Kind(n) == N_ASSIGN { Set(TextView(vname), *v) } else { SetLocal(TextView(vname), *v) }
+        if t < val.count { t += 1 }
+    }
+    return val;
+}
+
+// wrpipe, when it is not -1, belongs to this call: it is handed to the
+// element started or closed.
+WalkPipeline :: (start: s32, wrpipe: s32, wfdno: s32, batch: *Batch) {
+    if start < 0 {
+        if wrpipe >= 0 { unused Io.Close(wrpipe) }
+        return;
+    }
+    n := start;
+    rd: s32 = -1;
+    rfdno: s32 = -1;
+    if Kind(n) == N_PIPE {
+        ends: [2]s32;
+        if Ns.Pipe(ends[:]) != 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "sh: cannot make pipe: %", Ns.Error());
+            Fail("no pipe", TextView(msg[:]));
+            if wrpipe >= 0 { unused Io.Close(wrpipe) }
+            return;
+        }
+        nwfdno: s32 = -1;
+        if nodes[n].rtype != -1 {
+            fd1 := nodes[n].fd2;
+            fd2 := nodes[n].fd1;
+            if fd2 == -1 { fd2 = fd1; fd1 = -1 }
+            nwfdno = fd2;
+            rfdno = fd1;
+        }
+        // The left side owns the write end and the right side the read end.
+        WalkPipeline(Left(n), ends[1], nwfdno, batch);
+        rd = ends[0];
+        if Unwinding() {
+            unused Io.Close(rd);
+            if wrpipe >= 0 { unused Io.Close(wrpipe) }
+            return;
+        }
+        n = Right(n);
+    }
+    redirs: Vec(RedirWord);
+    rlist := Glob(Glom(n, *redirs));
+    if Unwinding() {
+        DropRedirs(*redirs);
+        if rd >= 0 { unused Io.Close(rd) }
+        if wrpipe >= 0 { unused Io.Close(wrpipe) }
+        return;
+    }
+    if rd >= 0 {
+        if rfdno == -1 { rfdno = 0 }
+        PushRedir(*redirs, rd, "", OREAD, rfdno, -1);
+    }
+    if wrpipe >= 0 {
+        if wfdno == -1 { wfdno = 1 }
+        PushRedir(*redirs, wrpipe, "", OWRITE, wfdno, -1);
+    }
+    StartAsync(batch, *rlist, *redirs);
+}
+
+// Expand a node into a list, as glom: an ADJ's right side is expanded
+// before its left, and redirections are collected.
+Glom :: (n: s32, redirs: *Vec(RedirWord)) -> Items {
+    rev: Items;
+    GlomRev(n, redirs, *rev);
+    out: Items;
+    k := rev.count - 1;
+    while k >= 0 {
+        moved: Item;
+        moved.cmd = rev[k].cmd;
+        VecSwap(moved.word.bytes, rev[k].word.bytes);
+        VecPush(out, moved);
+        k -= 1;
+    }
+    return out;
+}
+
+NoItems :: () -> Items {
+    none: Items;
+    return none;
+}
+
+#scope_file
+
+GlomRev :: (n: s32, redirs: *Vec(RedirWord), rev: *Items) {
+    if n < 0 { return }
+    if Kind(n) != N_ADJ {
+        op := GlomOp(n, redirs);
+        k := op.count - 1;
+        while k >= 0 {
+            moved: Item;
+            moved.cmd = op[k].cmd;
+            VecSwap(moved.word.bytes, op[k].word.bytes);
+            VecPush(<<rev, moved);
+            k -= 1;
+        }
+        return;
+    }
+    GlomRev(Right(n), redirs, rev);
+    if Unwinding() { return }
+    GlomRev(Left(n), redirs, rev);
+}
+
+Concat :: (a: Items, b: Items) -> Items {
+    out: Items;
+    if a.count == 0 || b.count == 0 {
+        if a.count == 0 && b.count == 0 { return NoItems() }
+        Fail("bad concatenation", "sh: null list in concatenation");
+        return NoItems();
+    }
+    if a.count == 1 || b.count == 1 {
+        for i: 0..a.count - 1 {
+            for j: 0..b.count - 1 {
+                left: Text = ItemText(*a, i);
+                right: Text = ItemText(*b, j);
+                joined: Vec(u8);
+                unused BuilderAppend(joined, TextView(left));
+                unused BuilderAppend(joined, TextView(right));
+                VecPush(out, WordItem(TextView(joined[:])));
+            }
+        }
+    } else if a.count != b.count {
+        Fail("bad concatenation", "sh: lists of differing sizes can't be concatenated");
+    } else {
+        for i: 0..a.count - 1 {
+            left: Text = ItemText(*a, i);
+            right: Text = ItemText(*b, i);
+            joined: Vec(u8);
+            unused BuilderAppend(joined, TextView(left));
+            unused BuilderAppend(joined, TextView(right));
+            VecPush(out, WordItem(TextView(joined[:])));
+        }
+    }
+    return out;
+}
+
+GlomOp :: (n: s32, redirs: *Vec(RedirWord)) -> Items {
+    out: Items;
+    k := Kind(n);
+    if k == N_WORD {
+        VecPush(out, WordItem(TextView(nodes[n].word)));
+    } else if k == N_REDIR {
+        inner: Vec(RedirWord);
+        wlist := Glob(Glom(Left(n), *inner));
+        DropRedirs(*inner);
+        if Unwinding() { return NoItems() }
+        if wlist.count != 1 { Fail("bad redir", "sh: single redirection operand required"); return NoItems() }
+        if wlist[0].cmd >= 0 {
+            path: Text = PipeCmd(*wlist, nodes[n].rtype, nodes[n].fd1, nodes[n].fd2);
+            if Unwinding() { return NoItems() }
+            VecPush(out, WordItem(TextView(path)));
+        } else {
+            PushRedir(redirs, -1, TextView(wlist[0].word), nodes[n].rtype, nodes[n].fd1, nodes[n].fd2);
+        }
+    } else if k == N_DUP {
+        PushRedir(redirs, -1, "", nodes[n].rtype, nodes[n].fd1, nodes[n].fd2);
+    } else if k == N_LIST {
+        return Glom(Left(n), redirs);
+    } else if k == N_CONCAT {
+        a := Glom(Left(n), redirs);
+        if Unwinding() { return NoItems() }
+        b := Glom(Right(n), redirs);
+        if Unwinding() { return NoItems() }
+        return Concat(a, b);
+    } else if k == N_VAR || k == N_SQUASH || k == N_COUNT {
+        inner: Vec(RedirWord);
+        arg := Glom(Left(n), *inner);
+        DropRedirs(*inner);
+        if Unwinding() { return NoItems() }
+        val: Items;
+        if arg.count == 1 && arg[0].cmd >= 0 {
+            subs := SubsBuiltin(Left(arg[0].cmd));
+            VecSwap(val, subs);
+        } else if arg.count != 1 || arg[0].word.bytes.count == 0 {
+            Fail("bad $ arg", "sh: bad variable name");
+            return NoItems();
+        } else {
+            name: Text = Deglob(TextView(arg[0].word));
+            got := Get(TextView(name));
+            VecSwap(val, got);
+        }
+        if Unwinding() { return NoItems() }
+        if k == N_COUNT {
+            c: Vec(u8);
+            BuilderPrint(*c, "%", val.count);
+            VecPush(out, WordItem(TextView(c[:])));
+        } else if k == N_SQUASH {
+            s: Text = Squash(*val, " ");
+            VecPush(out, WordItem(TextView(s)));
+        } else {
+            VecSwap(out, val);
+        }
+    } else if k == N_BQ || k == N_BQ2 {
+        inner: Vec(RedirWord);
+        arg := Glom(Left(n), *inner);
+        DropRedirs(*inner);
+        if Unwinding() { return NoItems() }
+        seps: Text;
+        if k == N_BQ {
+            ifs := Get("ifs");
+            joined: Text = Squash(*ifs, "");
+            VecSwap(seps.bytes, joined.bytes);
+            if seps.bytes.count == 0 { unused BuilderAppend(seps.bytes, " \t\n\r") }
+        }
+        cmd := Glob(arg);
+        return Bq(*cmd, TextView(seps));
+    } else if k == N_BLOCK {
+        VecPush(out, CmdItem(n));
+    } else if k == N_ASSIGN || k == N_LOCAL {
+        Fail("bad assign", "sh: assignment in invalid context");
+    }
+    return out;
+}
+
+SubsBuiltin :: (n: s32) -> Items {
+    out: Items;
+    if n < 0 || Kind(n) == N_SEQ || Kind(n) == N_PIPE || Kind(n) == N_NOWAIT {
+        Fail("bad $ arg", "sh: invalid argument to ${} operator");
+        return NoItems();
+    }
+    r: Vec(RedirWord);
+    cmd := Glob(Glom(n, *r));
+    if Unwinding() { DropRedirs(*r); return NoItems() }
+    if r.count != 0 { DropRedirs(*r); Fail("bad $ arg", "sh: redirection not allowed in substitution"); return NoItems() }
+    if cmd.count == 0 || cmd[0].word.bytes.count == 0 || cmd[0].cmd >= 0 {
+        Fail("bad $ arg", "sh: bad builtin name");
+        return NoItems();
+    }
+    name: Text = TextCopy(TextView(cmd[0].word));
+    mod := BuiltinMod(1, TextView(name));
+    if mod < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sh: builtin % not found", TextView(name));
+        Fail("builtin not found", TextView(msg[:]));
+        return NoItems();
+    }
+    unused modules[mod].srun(mod, *cmd, *out);
+    return out;
+}
+
+// Backquote: run the list in place with its output gathered, then split it
+// at seps (or keep it whole when seps is empty).
+Bq :: (cmd: *Items, seps: string) -> Items {
+    nextcapture += 1;
+    c: Capture;
+    c.id = nextcapture;
+    VecPush(captures, c);
+    saved: Saved;
+    SaveFds(*saved);
+    fds[1] = CAPBASE - nextcapture;
+    status: Text = Run(cmd, false);
+    if exiting { exiting = false }
+    RestoreFds(*saved);
+    data: Text;
+    VecSwap(data.bytes, captures[captures.count - 1].bytes);
+    unused VecPop(captures);
+    out: Items;
+    if Unwinding() { return NoItems() }
+    if seps.count != 0 {
+        words := Tokenize(TextView(data), seps);
+        return StringsToList(*words);
+    }
+    VecPush(out, WordItem(TextView(data)));
+    return out;
+}
+
+// cmd <{...} and >{...}: the block runs beside the shell on a named pipe,
+// and the path to that pipe takes the place of the block.
+PipeCmd :: (cmd: *Items, rtype: s32, fd1: s32, fd2: s32) -> Text {
+    if fd2 != -1 || (rtype & OAPPEND) != 0 {
+        Fail("bad redir", "sh: bad redirection");
+        return TextCopy("");
+    }
+    // The block writes to (or reads from) the pipe's other end.
+    childfd: s32 = 1;
+    if rtype == OWRITE { childfd = 0 }
+    if fd1 >= 0 && fd1 <= 2 { childfd = fd1 }
+    return PipeBeside(cmd, childfd);
+}
+
+#scope_export
+
+// Start a list beside the shell with descriptor childfd on one end of a
+// fresh named pipe, and return the path of the other end.
+PipeBeside :: (cmd: *Items, childfd: s32) -> Text {
+    if childfd < 0 || childfd > 2 {
+        Fail("bad pipe", "pipe: a ZX child has only descriptors 0, 1 and 2");
+        return TextCopy("");
+    }
+    dir, ok := NamedPipe();
+    if !ok { return TextCopy("") }
+    other: Vec(u8);
+    BuilderPrint(*other, "%/data1", TextView(dir));
+    h := Io.Open(TextView(other[:]), 2);
+    if h < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sh: cannot make pipe: %", Io.Error());
+        Fail("no pipe", TextView(msg[:]));
+        return TextCopy("");
+    }
+    saved: Saved;
+    SaveFds(*saved);
+    fds[childfd] = h;
+    batch: Batch;
+    StartList(*batch, cmd);
+    RestoreFds(*saved);
+    unused Io.Close(h);
+    if batch.jobs.count > 0 && batch.jobs[0].id != 0 { VecPush(bgjobs, batch.jobs[0].id) }
+    path: Vec(u8);
+    BuilderPrint(*path, "%/data", TextView(dir));
+    return BuilderFinish(path);
+}
+
+pipeseq: s32;
+
+// A directory under /tmp/pipes holding a fresh pipe's data and data1.
+NamedPipe :: () -> (dir: Text, ok: bool) {
+    top := Io.Create("/tmp/pipes", 0, cast(s32)0x800001ff);
+    if top >= 0 { unused Io.Close(top) }
+    d: Text;
+    while true {
+        pipeseq += 1;
+        VecClear(d.bytes);
+        BuilderPrint(*d.bytes, "/tmp/pipes/sh.%", pipeseq);
+        h := Io.CreateNew(TextView(d), 0, cast(s32)0x800001ff);
+        if h >= 0 { unused Io.Close(h); break }
+        if pipeseq > 100000 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "sh: cannot make %: %", TextView(d), Io.Error());
+            Fail("no pipe", TextView(msg[:]));
+            return d, false;
+        }
+    }
+    if Ns.Bind("#|", TextView(d), 0) != 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sh: cannot bind pipe onto %: %", TextView(d), Ns.Error());
+        Fail("no pipe", TextView(msg[:]));
+        return d, false;
+    }
+    return d, true;
+}
+
+#scope_export
+
+// Run a script or file, as runscript and runfile.
+RunScript :: (path: string, args: *Items, reporterr: bool) {
+    h := Io.Open(path, 0);
+    if h >= 0 {
+        RunFile(h, path, args);
+        unused Io.Close(h);
+        if !reporterr && raising && TextView(raised).count >= 5 && TextView(raised)[:5] == "fail:" { ClearRaise() }
+        return;
+    }
+    if reporterr {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sh: cannot open %: %", path, Io.Error());
+        Fail("bad script path", TextView(msg[:]));
+    }
+}
+
+RunFile :: (h: s32, path: string, args: *Items) {
+    Push();
+    zero: Items;
+    PushWord(*zero, path);
+    SetLocal("0", *zero);
+    SetLocal("*", args);
+    lex: Lexer;
+    InitFile(*lex, h, path, 2);
+    lex.errfd = fds[2];
+    laststatus: Text;
+    while !lex.eof {
+        interactive := (Options() & INTERACTIVE) != 0;
+        secondary: Text;
+        if interactive {
+            prompt := Get("prompt");
+            if prompt.count == 0 {
+                PushWord(*prompt, "; ");
+                PushWord(*prompt, "");
+            }
+            first: Text = ItemText(*prompt, 0);
+            unused PrintErr(TextView(first));
+            if prompt.count > 1 { second: Text = ItemText(*prompt, 1); VecSwap(secondary.bytes, second.bytes) }
+        }
+        err: Text;
+        n := DoParse(*lex, TextView(secondary), !interactive, *err);
+        if err.bytes.count != 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "sh: %\n", TextView(err));
+            unused PrintErr(TextView(msg[:]));
+            if !interactive { Raise("fail:parse error"); Pop(); return }
+        } else if n >= 0 {
+            walked: Text = Walk(n, false);
+            VecSwap(laststatus.bytes, walked.bytes);
+            if exiting { Pop(); return }
+            if raising {
+                if interactive && TextView(raised).count >= 5 && TextView(raised)[:5] == "fail:" {
+                    failed: Text = FailureStatus(TextView(raised));
+                    VecSwap(laststatus.bytes, failed.bytes);
+                    ClearRaise();
+                } else {
+                    Pop();
+                    return;
+                }
+            }
+            SetStatus(TextView(laststatus));
+            if (Options() & ERROREXIT) != 0 && laststatus.bytes.count != 0 { break }
+        }
+    }
+    if laststatus.bytes.count != 0 {
+        name: Vec(u8);
+        BuilderPrint(*name, "fail:%", TextView(laststatus));
+        Raise(TextView(name[:]));
+    }
+    Pop();
+}
+
+// load a module by name: "std", "/dis/sh/std.dis" or "./std.dis".
+LoadModule :: (name: string) -> Text {
+    for k: 0..bmods.count - 1 { if TextView(bmods[k].name) == name { return TextCopy("") } }
+    path: Vec(u8);
+    unused BuilderAppend(path, name);
+    if !HasSuffix(name, ".dis") { unused BuilderAppend(path, ".dis") }
+    if path[0] != #char "/" && !(path.count >= 2 && path[0] == #char "." && path[1] == #char "/") {
+        full: Vec(u8);
+        BuilderPrint(*full, "%/%", BUILTINPATH, TextView(path[:]));
+        VecSwap(path, full);
+    }
+    // The modules are part of this program; the path names one of them.
+    base := TextView(path[:]);
+    slash := base.count - 1;
+    while slash >= 0 && base[slash] != #char "/" { slash -= 1 }
+    stem: Text = TextCopy(base[slash + 1:base.count - 4]);
+    dir := ifx slash >= 0 then base[:slash] else "";
+    mod: s32 = -1;
+    if dir == BUILTINPATH || dir == "." || dir == "./" || dir == "/dis/sh" {
+        for m: 1..modules.count - 1 { if modules[m].name == TextView(stem) { mod = cast(s32)m; break } }
+    }
+    if mod < 0 {
+        // As the Dis loader: a missing file, or a module with no ZX port.
+        msg: Vec(u8);
+        _, there := StatMode(base);
+        if there {
+            BuilderPrint(*msg, "load: cannot load %: no ZX builtin module of that name", base);
+        } else {
+            BuilderPrint(*msg, "load: cannot load %: '%' does not exist", base, base);
+        }
+        Diagnostic(TextView(msg[:]));
+        return TextCopy("bad module");
+    }
+    s: Text;
+    unused modules[mod].init(mod, *s);
+    if Unwinding() { return TextCopy(TextView(s)) }
+    entry: Loaded;
+    unused BuilderAppend(entry.name.bytes, name);
+    entry.mod = mod;
+    VecPush(bmods, entry);
+    if s.bytes.count != 0 {
+        unused UnloadModule(name);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "load: module init failed: %", TextView(s));
+        Diagnostic(TextView(msg[:]));
+    }
+    return s;
+}
+
+UnloadModule :: (name: string) -> Text {
+    mod: s32 = -1;
+    at: s64 = -1;
+    for k: 0..bmods.count - 1 { if TextView(bmods[k].name) == name { mod = bmods[k].mod; at = k } }
+    if mod < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "module % not found", name);
+        Diagnostic(TextView(msg[:]));
+        return TextCopy("not found");
+    }
+    k := at;
+    while k < bmods.count - 1 {
+        VecSwap(bmods[k].name.bytes, bmods[k + 1].name.bytes);
+        bmods[k].mod = bmods[k + 1].mod;
+        k += 1;
+    }
+    unused VecPop(bmods);
+    RemoveBuiltinMod(0, mod);
+    RemoveBuiltinMod(1, mod);
+    return TextCopy("");
+}
+
+// A new context, as Context.new: the environment, the shell's builtins and
+// the $autoload modules.
+NewContext :: (autoload: bool) {
+    scope: Scope;
+    scope.flags = VERBOSE;
+    VecPush(scopes, scope);
+    t0: Table;
+    t1: Table;
+    VecPush(tables, t0);
+    VecPush(tables, t1);
+    for i: 0..FDMAX - 1 { fds[i] = -1 }
+    fds[0] = 0;
+    fds[1] = 1;
+    fds[2] = 2;
+    ImportEnv();
+    boot := Get("emuboot");
+    VecClear(shellpath.bytes);
+    if boot.count == 1 && TextView(boot[0].word).count >= 6 && TextView(boot[0].word)[TextView(boot[0].word).count - 6:] == "/sh.zx" {
+        unused BuilderAppend(shellpath.bytes, TextView(boot[0].word));
+    } else {
+        unused BuilderAppend(shellpath.bytes, "/dis/sh.zx");
+    }
+    ignored: Text;
+    unused InitShellBuiltins(0, *ignored);
+    if autoload {
+        al := Get("autoload");
+        for i: 0..al.count - 1 {
+            if al[i].cmd < 0 && al[i].word.bytes.count != 0 {
+                name: Text = TextCopy(TextView(al[i].word));
+                unused LoadModule(TextView(name));
+                if Unwinding() { return }
+            }
+        }
+    }
+}
+
+// The shell's own builtins: module 0.
+InitShellBuiltins :: (mod: s32, err: *Text) -> bool {
+    names := string.["load", "unload", "loaded", "builtin", "syncenv", "whatis", "run", "exit", "@"];
+    for names { AddBuiltin(it, 0) }
+    snames := string.["loaded", "quote", "bquote", "unquote", "builtin"];
+    for snames { AddSBuiltin(it, 0) }
+    return true;
+}
+
+ShellWhatis :: (mod: s32, name: string, wtype: s32, out: *Text) -> bool { return true }
+
+ShellRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    result: Text = ShellRunText(args, last);
+    VecSwap(status.bytes, result.bytes);
+    return true;
+}
+
+ShellSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := ShellSRunList(args);
+    VecSwap(<<out, result);
+    return true;
+}
+
+#scope_file
+
+ShellRunText :: (args: *Items, last: bool) -> Text {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    w := TextView(name);
+    if w == "load" { return BuiltinLoad(args) }
+    if w == "loaded" { return BuiltinLoaded() }
+    if w == "unload" { return BuiltinUnload(args) }
+    if w == "builtin" { return BuiltinBuiltin(args, last) }
+    if w == "whatis" { return BuiltinWhatis(args) }
+    if w == "run" { return BuiltinRun(args) }
+    if w == "exit" { exiting = true; return TextCopy("") }
+    if w == "syncenv" { Export(); return TextCopy("") }
+    if w == "@" { return BuiltinSubsh(args) }
+    return TextCopy("");
+}
+
+ShellSRunList :: (args: *Items) -> Items {
+    name: Text = TextCopy(TextView(args.*[0].word));
+    w := TextView(name);
+    out: Items;
+    if w == "loaded" {
+        names: Items;
+        k := bmods.count - 1;
+        while k >= 0 { PushWord(*names, TextView(bmods[k].name)); k -= 1 }
+        return names;
+    }
+    if w == "quote" || w == "bquote" {
+        rest := Tail(args, 1);
+        q: Text = Quoted(*rest, w == "quote");
+        quoted: Items;
+        VecPush(quoted, WordItem(TextView(q)));
+        return quoted;
+    }
+    if w == "unquote" {
+        if args.count != 2 { Usage("unquote arg"); return NoItems() }
+        arg: Text = ItemText(args, 1);
+        words := Unquoted(TextView(arg));
+        return StringsToList(*words);
+    }
+    if w == "builtin" {
+        if args.count < 2 { Usage("builtin command [args ...]"); return NoItems() }
+        bname: Text = TextCopy(TextView(args.*[1].word));
+        i, found := FindBuiltin(1, TextView(bname));
+        if found && HasModule(1, i, 0) {
+            rest: Items;
+            for j: 1..args.count - 1 { VecPush(rest, CopyItem(args, j)) }
+            return ShellSRunList(*rest);
+        }
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sh: builtin % not found", TextView(bname));
+        Fail("builtin not found", TextView(msg[:]));
+        return NoItems();
+    }
+    return out;
+}
+
+#scope_file
+
+BuiltinLoad :: (args: *Items) -> Text {
+    if args.count < 2 || args.*[1].word.bytes.count == 0 { Usage("load path..."); return TextCopy("") }
+    for i: 1..args.count - 1 {
+        name: Text = TextCopy(TextView(args.*[i].word));
+        s: Text = LoadModule(TextView(name));
+        if Unwinding() { return TextCopy("") }
+        if s.bytes.count != 0 {
+            e: Vec(u8);
+            BuilderPrint(*e, "fail:%", TextView(s));
+            Raise(TextView(e[:]));
+            return TextCopy("");
+        }
+    }
+    return TextCopy("");
+}
+
+BuiltinLoaded :: () -> Text {
+    for t: 0..1 {
+        for i: 0..tables[t].entries.count - 1 {
+            m := tables[t].entries[i].mods.count;
+            mname: Text = ModName(tables[t].entries[i].mods[m - 1]);
+            line: Vec(u8);
+            if t == 0 {
+                BuilderPrint(*line, "%\t%\n", TextView(tables[t].entries[i].name), TextView(mname));
+            } else {
+                BuilderPrint(*line, "${%}\t%\n", TextView(tables[t].entries[i].name), TextView(mname));
+            }
+            unused Print(TextView(line[:]));
+        }
+    }
+    return TextCopy("");
+}
+
+BuiltinUnload :: (args: *Items) -> Text {
+    if args.count < 2 { Usage("unload path..."); return TextCopy("") }
+    status: Text;
+    for i: 1..args.count - 1 {
+        name: Text = TextCopy(TextView(args.*[i].word));
+        s: Text = UnloadModule(TextView(name));
+        if s.bytes.count != 0 { VecSwap(status.bytes, s.bytes) }
+    }
+    return status;
+}
+
+BuiltinBuiltin :: (args: *Items, last: bool) -> Text {
+    if args.count < 2 { Usage("builtin command [args ...]"); return TextCopy("") }
+    name: Text = TextCopy(TextView(args.*[1].word));
+    if name.bytes.count == 0 || name.bytes[0] == #char "{" {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "% not found", TextView(name));
+        Diagnostic(TextView(msg[:]));
+        return TextCopy("not found");
+    }
+    rest: Items;
+    for j: 1..args.count - 1 { VecPush(rest, CopyItem(args, j)) }
+    i, found := FindBuiltin(0, TextView(name));
+    if found && HasModule(0, i, 0) { return ShellRunText(*rest, last) }
+    if (Options() & EXECPRINT) != 0 {
+        q: Text = Quoted(*rest, false);
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", TextView(q));
+        unused PrintErr(TextView(line[:]));
+    }
+    return RunExternal(*rest, last);
+}
+
+BuiltinRun :: (args: *Items) -> Text {
+    if args.count < 2 || args.*[1].word.bytes.count == 0 { Usage("run path"); return TextCopy("") }
+    Push();
+    unused SetOptions(INTERACTIVE, false);
+    path: Text = TextCopy(TextView(args.*[1].word));
+    rest: Items;
+    for j: 2..args.count - 1 { VecPush(rest, CopyItem(args, j)) }
+    RunScript(TextView(path), *rest, true);
+    Pop();
+    if raising && TextView(raised).count >= 5 && TextView(raised)[:5] == "fail:" {
+        status: Text = FailureStatus(TextView(raised));
+        ClearRaise();
+        return status;
+    }
+    return TextCopy("");
+}
+
+BuiltinSubsh :: (args: *Items) -> Text {
+    if args.count < 2 { return TextCopy("") }
+    rest: Items;
+    for j: 1..args.count - 1 { VecPush(rest, CopyItem(args, j)) }
+    batch: Batch;
+    ops := ChildOperands(*rest);
+    Export();
+    StartZx(*batch, TextView(shellpath), *ops);
+    return WaitFor(*batch);
+}
+
+BuiltinWhatis :: (args: *Items) -> Text {
+    if args.count < 2 { Usage("whatis name ..."); return TextCopy("") }
+    err: Text;
+    for i: 1..args.count - 1 {
+        e: Text = WhatisIt(args, i);
+        if e.bytes.count != 0 { VecSwap(err.bytes, e.bytes) }
+    }
+    return err;
+}
+
+WhatisIt :: (args: *Items, i: s64) -> Text {
+    if args.*[i].cmd >= 0 && args.*[i].word.bytes.count == 0 {
+        c: Text = CmdText(args.*[i].cmd);
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", TextView(c));
+        unused Print(TextView(line[:]));
+        return TextCopy("");
+    }
+    name: Text = TextCopy(TextView(args.*[i].word));
+    if name.bytes.count != 0 && name.bytes[0] == #char "{" {
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", TextView(name));
+        unused Print(TextView(line[:]));
+        return TextCopy("");
+    }
+    if name.bytes.count == 0 { return TextCopy("") }
+    w: Vec(u8);
+    val := Get(TextView(name));
+    if val.count != 0 {
+        Quote(*w, TextView(name), false);
+        VecPush(w, #char "=");
+        QuotedTo(*w, *val, false);
+        VecPush(w, 10);
+    }
+    smod := BuiltinMod(1, TextView(name));
+    if smod >= 0 {
+        if smod == 0 {
+            BuilderPrint(*w, "${builtin %}\n", TextView(name));
+        } else {
+            mw: Text;
+            unused modules[smod].whatis(smod, TextView(name), SBUILTIN, *mw);
+            if mw.bytes.count == 0 { BuilderPrint(*mw.bytes, "${%}", TextView(name)) }
+            mname: Text = ModName(smod);
+            BuilderPrint(*w, "load %; %\n", TextView(mname), TextView(mw));
+        }
+    }
+    bmod := BuiltinMod(0, TextView(name));
+    if bmod >= 0 {
+        if bmod == 0 {
+            line: Vec(u8);
+            BuilderPrint(*line, "builtin %\n", TextView(name));
+            unused Print(TextView(line[:]));
+        } else {
+            mw: Text;
+            unused modules[bmod].whatis(bmod, TextView(name), BUILTIN, *mw);
+            if mw.bytes.count == 0 { unused BuilderAppend(mw.bytes, TextView(name)) }
+            mname: Text = ModName(bmod);
+            BuilderPrint(*w, "load %; %\n", TextView(mname), TextView(mw));
+        }
+    } else {
+        found: Text = FindCommand(TextView(name));
+        if found.bytes.count != 0 { BuilderPrint(*w, "%\n", TextView(found)) }
+    }
+    k := bmods.count - 1;
+    while k >= 0 {
+        m := bmods[k].mod;
+        mw: Text;
+        unused modules[m].whatis(m, TextView(name), OTHER, *mw);
+        if mw.bytes.count != 0 { BuilderPrint(*w, "load %; %\n", TextView(bmods[k].name), TextView(mw)) }
+        k -= 1;
+    }
+    if w.count == 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: not found\n", TextView(name));
+        unused PrintErr(TextView(msg[:]));
+        return TextCopy("not found");
+    }
+    unused Print(TextView(w[:]));
+    return TextCopy("");
+}
+
+// The file whatis reports for a command name.
+FindCommand :: (name: string) -> Text {
+    disfile := HasSuffix(name, ".dis");
+    paths := PathList(name);
+    for i: 0..paths.count - 1 {
+        path: Text = CommandPath(TextView(paths[i]), name);
+        if !disfile {
+            zx: Text = ZxFile(TextView(path), name);
+            if zx.bytes.count != 0 { return zx }
+            if Executable(TextView(path), 73) { return TextCopy(TextView(path)) }
+        }
+        npath: Vec(u8);
+        unused BuilderAppend(npath, TextView(path));
+        if !disfile { unused BuilderAppend(npath, ".dis") }
+        if Executable(TextView(npath[:]), 292) { return BuilderFinish(npath) }
+    }
+    return TextCopy("");
+}
