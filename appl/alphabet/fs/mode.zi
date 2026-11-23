@@ -24,9 +24,11 @@ Run :: (call: *Al.Call) -> s32 {
     return v;
 }
 
-#scope_file
 
-prod: s32 = -1;
+
+Gate :: (v: s32, e: *EntryItem) -> bool {
+    return ((cast(s64)e.dir.mode & Va.N0(v)) ^ Va.N1(v)) == 0;
+}
 
 USER :: 0x1C0;  // 0700
 GROUP :: 0x38;  // 070
@@ -35,10 +37,6 @@ ALL :: 0x1FF;   // 0777
 READ :: 0x124;  // 0444
 WRITE :: 0x92;  // 0222
 EXEC :: 0x49;   // 0111
-
-Gate :: (v: s32, e: *EntryItem) -> bool {
-    return ((cast(s64)e.dir.mode & Va.N0(v)) ^ Va.N1(v)) == 0;
-}
 
 // chmod's mode parsing: (ok, mask, mode).
 ParseMode :: (spec: string) -> (ok: bool, mask: s64, mode: s64) {
@@ -91,3 +89,7 @@ ParseMode :: (spec: string) -> (ok: bool, mask: s64, mode: s64) {
     // Limbo's int is 32 bits
     return true, mask & 0xFFFFFFFF, mode & 0xFFFFFFFF;
 }
+
+#scope_file
+
+prod: s32 = -1;

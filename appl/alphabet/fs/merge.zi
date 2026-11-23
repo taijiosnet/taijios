@@ -1,0 +1,285 @@
+// /fs/merge [-1] [-c selector] fs fs [fs...] -> fs: trees merged into one,
+// their directories in name order. Where both have an entry of a name the
+// selector (by default both) says which to keep; directories both keep
+// are merged in turn, except at the top with -1. More than two trees merge
+// two at a time, from the left.
+#import "std/vec";
+#import "std/option";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "merge", "xxxx*-1-cm", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = FsProducer("merge", Next1) }
+    recurse := true;
+    cmp: s32 = -1;
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "1" { recurse = false }
+        if Al.OptLetter(call, i) == #char "c" { cmp = Al.OptArg(call, i, 0) }
+    }
+    v := Merge2(call.args[0], call.args[1], recurse, cmp);
+    for call.args[2:] { v = Merge2(v, it, recurse, cmp) }
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+// What the item given last was.
+NONE :: 0;
+ROOT :: 1;
+DIRPAIR :: 2;
+SINGLE :: 3;
+COPYITEM :: 4;
+DIREND :: 5;
+OVER :: 6;
+
+NOREPLY :: -2;
+
+// mergedir's state for one directory level.
+MergeFrame :: struct {
+    has0: bool;
+    has1: bool;
+    head0: FsDir;
+    head1: FsDir;
+    eof0: bool;
+    eof1: bool;
+    recurse: bool;
+}
+
+MergeState :: struct {
+    frames: Vec(MergeFrame);
+    pend0: s32;   // the reply each input gets with its next request
+    pend1: s32;
+    last: s32;
+    w: s32;       // the input a single entry came from
+    other_had: bool;
+    other_eof: bool;
+    indent: s64;  // copying the single entry's contents
+    copy_last: Item;
+    recurse: bool;
+    cmp: s32;
+}
+
+merges: Vec(MergeState);
+
+Merge2 :: (a: s32, b: s32, recurse: bool, cmp: s32) -> s32 {
+    v := Va.NewValue(#char "x", prod);
+    kids := s32.[a, b];
+    Va.SetKids(v, kids[:]);
+    m: MergeState;
+    m.pend0 = Start;
+    m.pend1 = Start;
+    m.recurse = recurse;
+    m.cmp = cmp;
+    VecPush(merges, m);
+    Va.SetN0(v, merges.count - 1);
+    return v;
+}
+
+Input :: (v: s32, side: s32) -> s32 { return Va.Kid(v, side) }
+
+// A request of one input with its pending reply.
+Fetch :: (v: s32, m: s64, side: s32) -> Item {
+    pend := ifx side == 0 then merges[m].pend0 else merges[m].pend1;
+    if side == 0 { merges[m].pend0 = NOREPLY } else { merges[m].pend1 = NOREPLY }
+    return FsNext(Input(v, side), ifx pend == NOREPLY then Next else pend);
+}
+
+SetPend :: (m: s64, side: s32, r: s32) {
+    if side == 0 { merges[m].pend0 = r } else { merges[m].pend1 = r }
+}
+
+// compare: the selector's choice, within what is there.
+Cmp :: (m: s64, d0: FsDir, d1: FsDir, has0: bool, has1: bool) -> s32 {
+    mask: s32 = (ifx has0 then 1 else 0) | (ifx has1 then 2 else 0);
+    if merges[m].cmp < 0 { return mask }
+    a := d0;
+    b := d1;
+    return Compare(merges[m].cmp, *a, *b, has0, has1) & mask;
+}
+
+// The merge is over: each input gets the reply it is owed.
+Over :: (v: s32, m: s64) -> Item {
+    if merges[m].pend0 != NOREPLY { unused Fetch(v, m, 0) }
+    if merges[m].pend1 != NOREPLY { unused Fetch(v, m, 1) }
+    merges[m].last = OVER;
+    return ItemOf(Done);
+}
+
+PushFrame :: (m: s64, recurse: bool) {
+    f: MergeFrame;
+    f.recurse = recurse;
+    VecPush(merges[m].frames, f);
+}
+
+// Returning from the innermost mergedir.
+PopFrame :: (v: s32, m: s64) -> Item {
+    unused VecPop(merges[m].frames);
+    if merges[m].frames.count == 0 { return Over(v, m) }
+    return Loop(v, m);
+}
+
+// mergedir's loop, up to its next item.
+Loop :: (v: s32, m: s64) -> Item {
+    while true {
+        k := merges[m].frames.count - 1;
+        if !merges[m].frames[k].eof0 && !merges[m].frames[k].has0 {
+            it := Fetch(v, m, 0);
+            if it.kind == Entry {
+                merges[m].frames[k].head0 = it.dir;
+                merges[m].frames[k].has0 = true;
+            } else {
+                merges[m].pend0 = Next;
+                merges[m].frames[k].eof0 = true;
+            }
+        }
+        if !merges[m].frames[k].eof1 && !merges[m].frames[k].has1 {
+            it := Fetch(v, m, 1);
+            if it.kind == Entry {
+                merges[m].frames[k].head1 = it.dir;
+                merges[m].frames[k].has1 = true;
+            } else {
+                merges[m].pend1 = Next;
+                merges[m].frames[k].eof1 = true;
+            }
+        }
+        if merges[m].frames[k].eof0 && merges[m].frames[k].eof1 {
+            merges[m].last = DIREND;
+            return ItemOf(End);
+        }
+        d0 := merges[m].frames[k].head0;
+        d1 := merges[m].frames[k].head1;
+        w0 := merges[m].frames[k].has0;
+        w1 := merges[m].frames[k].has1;
+        if w0 && w1 && d0.name != d1.name {
+            if NameLess(d0.name, d1.name) { w1 = false } else { w0 = false }
+        }
+        c := Cmp(m, d0, d1, w0, w1);
+        if w0 && w1 {
+            if c != 0 && merges[m].frames[k].recurse && IsDir(d0) && IsDir(d1) {
+                merges[m].last = DIRPAIR;
+                return EntryOf(d0);
+            }
+            // a clash: the first tree's, unless the selector says otherwise
+            if c == 2 {
+                merges[m].pend0 = Next;
+                merges[m].frames[k].has0 = false;
+            } else {
+                merges[m].pend1 = Next;
+                merges[m].frames[k].has1 = false;
+            }
+        }
+        if (c & 1) != 0 {
+            merges[m].w = 0;
+            merges[m].other_had = merges[m].frames[k].has1;
+            merges[m].other_eof = merges[m].frames[k].eof1;
+            merges[m].frames[k].has0 = false;
+            merges[m].last = SINGLE;
+            return EntryOf(merges[m].frames[k].head0);
+        }
+        if (c & 2) != 0 {
+            merges[m].w = 1;
+            merges[m].other_had = merges[m].frames[k].has0;
+            merges[m].other_eof = merges[m].frames[k].eof0;
+            merges[m].frames[k].has1 = false;
+            merges[m].last = SINGLE;
+            return EntryOf(merges[m].frames[k].head1);
+        }
+        if !w0 {
+            merges[m].pend1 = Next;
+            merges[m].frames[k].has1 = false;
+        } else {
+            merges[m].pend0 = Next;
+            merges[m].frames[k].has0 = false;
+        }
+    }
+    return ItemOf(Done);
+}
+
+// A single entry was answered Skip or Quit: the other input is answered
+// the same, then the directory (or everything) ends.
+StopOther :: (v: s32, m: s64, r: s32) -> Item {
+    other := 1 - merges[m].w;
+    k := merges[m].frames.count - 1;
+    if !merges[m].other_had && !merges[m].other_eof { unused Fetch(v, m, other) }
+    if !merges[m].other_eof {
+        SetPend(m, other, r);
+        if other == 0 { merges[m].frames[k].has0 = false } else { merges[m].frames[k].has1 = false }
+    }
+    if r == Quit { return Over(v, m) }
+    return PopFrame(v, m);
+}
+
+Next1 :: (v: s32, reply: s32) -> Item {
+    m := Va.N0(v);
+    last := merges[m].last;
+    if last == OVER { return ItemOf(Done) }
+    if last == NONE {
+        a := Fetch(v, m, 0);
+        b := Fetch(v, m, 1);
+        merges[m].last = ROOT;
+        if Cmp(m, a.dir, b.dir, a.kind == Entry, b.kind == Entry) == 2 { return EntryOf(b.dir) }
+        return EntryOf(a.dir);
+    }
+    if last == ROOT {
+        merges[m].pend0 = reply;
+        merges[m].pend1 = reply;
+        if reply != Down { return Over(v, m) }
+        PushFrame(m, merges[m].recurse);
+        return Loop(v, m);
+    }
+    k := merges[m].frames.count - 1;
+    if last == DIRPAIR {
+        merges[m].pend0 = reply;
+        merges[m].pend1 = reply;
+        merges[m].frames[k].has0 = false;
+        merges[m].frames[k].has1 = false;
+        if reply == Quit { return Over(v, m) }
+        if reply == Skip { return PopFrame(v, m) }
+        if reply == Down { PushFrame(m, true) }
+        return Loop(v, m);
+    }
+    if last == SINGLE {
+        w := merges[m].w;
+        if reply == Down {
+            SetPend(m, w, Down);
+            merges[m].indent = 1;
+            item := Fetch(v, m, w);
+            merges[m].copy_last = item;
+            merges[m].last = COPYITEM;
+            return item;
+        }
+        SetPend(m, w, reply);
+        if reply == Skip || reply == Quit { return StopOther(v, m, reply) }
+        return Loop(v, m);
+    }
+    if last == COPYITEM {
+        // fs->copy of the single entry's contents
+        w := merges[m].w;
+        if reply == Quit {
+            SetPend(m, w, Quit);
+            return StopOther(v, m, Quit);
+        }
+        cl := merges[m].copy_last;
+        if (reply == Next && cl.kind == End) || reply == Skip {
+            merges[m].indent -= 1;
+            if merges[m].indent == 0 {
+                SetPend(m, w, reply);
+                return Loop(v, m);
+            }
+        } else if reply == Down && cl.kind == Entry {
+            merges[m].indent += 1;
+        }
+        SetPend(m, w, reply);
+        item := Fetch(v, m, w);
+        merges[m].copy_last = item;
+        return item;
+    }
+    // DIREND
+    if reply == Quit { return Over(v, m) }
+    return PopFrame(v, m);
+}

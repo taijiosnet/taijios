@@ -1,0 +1,54 @@
+// /fs/chstat [-c] [-p gate] [-m string] [-u string] [-g string] [-t string]
+// [-a string] fs -> fs: the tree with the entries the gate chooses (all of
+// them without one) given a mode change, owner, group, modification or
+// access time; -c copies the owner's permissions to group and others.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Filter :: #import "fs/filter";
+Mode :: #import "fs/mode";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "chstat", "xx-pp-ms-us-gs-ts-as-c", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    f: Filter.Filter;
+    f.chstat = true;
+    f.gate = -1;
+    f.mtime = -1;
+    f.atime = -1;
+    // the options as the Dis module met them: the last given first
+    for i: 0..Al.OptCount(call) - 1 {
+        opt := Al.OptLetter(call, i);
+        if opt == #char "c" {
+            f.cflag = true;
+            continue;
+        }
+        s := ifx opt == #char "p" then "" else Va.ValueText(Al.OptArg(call, i, 0));
+        if opt == #char "p" {
+            if f.gate >= 0 { Va.Free(f.gate, false) }
+            f.gate = Al.OptArg(call, i, 0);
+        } else if opt == #char "m" {
+            ok, mask, mode := Mode.ParseMode(s);
+            f.mask = mask & ~cast(s64)DMDIR;
+            f.mode = mode;
+            if !ok {
+                out: Vec(u8);
+                BuilderPrint(*out, "fs: chstat: bad mode %\n", Ty.QQ(s));
+                unused Io.WriteBytes(2, BuilderFinish(out));
+                if f.gate >= 0 { Va.Free(f.gate, false) }
+                return -1;
+            }
+        } else if opt == #char "u" {
+            f.uid = s;
+        } else if opt == #char "g" {
+            f.gid = s;
+        } else if opt == #char "t" {
+            f.mtime = Al.LimboInt(s) & 0xFFFFFFFF;
+        } else if opt == #char "a" {
+            f.atime = Al.LimboInt(s) & 0xFFFFFFFF;
+        }
+    }
+    return Filter.New(call.args[0], f);
+}

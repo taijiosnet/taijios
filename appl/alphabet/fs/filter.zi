@@ -9,23 +9,36 @@ using Fs :: #import "fs/fsvalue";
 Register :: (reg: s32) { Al.RegisterModule(reg, "filter", "xxp-d", Run) }
 
 Run :: (call: *Al.Call) -> s32 {
-    if prod < 0 { prod = FsProducer("filter", Next1) }
-    v := Va.NewValue(#char "x", prod);
-    Va.SetKids(v, call.args[0:2]);
     f: Filter;
     f.dflag = Al.OptCount(call) > 0;
+    f.gate = call.args[1];
+    return New(call.args[0], f);
+}
+
+// A filter of fs value src; chstat's filters change entries instead.
+New :: (src: s32, f: Filter) -> s32 {
+    if prod < 0 { prod = FsProducer("filter", Next1) }
+    v := Va.NewValue(#char "x", prod);
+    kids := s32.[src];
+    Va.SetKids(v, kids[:]);
     VecPush(filters, f);
     Va.SetN0(v, filters.count - 1);
     return v;
 }
 
-#scope_file
-
-prod: s32 = -1;
-
-// fsfilter's filter, item by item.
+// fsfilter's filter, item by item. A chstat filter lets every entry
+// through, changing those its gate (if any) chooses.
 Filter :: struct {
     dflag: bool;
+    gate: s32;
+    chstat: bool;
+    mask: s64;
+    mode: s64;
+    uid: string;
+    gid: string;
+    mtime: s64;   // -1: leave it
+    atime: s64;
+    cflag: bool;
     names: Vec(string);
     name: string;
     indent: s64;
@@ -34,6 +47,9 @@ Filter :: struct {
     over: bool;
 }
 
+#scope_file
+
+prod: s32 = -1;
 filters: Vec(Filter);
 
 Pass :: (f: s64, d: FsDir, name: string, depth: s64, gate: s32) -> bool {
@@ -42,10 +58,31 @@ Pass :: (f: s64, d: FsDir, name: string, depth: s64, gate: s32) -> bool {
     return Query(gate, *e);
 }
 
+// chstat's query: the entry changed when the gate says so; always kept.
+Change :: (f: s64, d: *FsDir, name: string, depth: s64) {
+    c := true;
+    if filters[f].gate >= 0 {
+        e := EntryItemOf(<<d, name, depth);
+        c = Query(filters[f].gate, *e);
+    }
+    if !c { return }
+    mode := cast(s64)d.mode;
+    if filters[f].cflag {
+        m := mode & 0x1C0;
+        mode = (mode & ~0x3F) | (m >> 3) | (m >> 6);
+    }
+    mode = (mode & ~filters[f].mask) | (filters[f].mode & filters[f].mask);
+    d.mode = cast(u32)(mode & 0xFFFFFFFF);
+    if filters[f].uid.count > 0 { d.uid = filters[f].uid }
+    if filters[f].gid.count > 0 { d.gid = filters[f].gid }
+    if filters[f].mtime != -1 { d.mtime = cast(u32)filters[f].mtime }
+    if filters[f].atime != -1 { d.atime = cast(u32)filters[f].atime }
+}
+
 Next1 :: (v: s32, reply_in: s32) -> Item {
     f := Va.N0(v);
     src := Va.Kid(v, 0);
-    gate := Va.Kid(v, 1);
+    gate := filters[f].gate;
     if filters[f].over { return ItemOf(Done) }
     reply := reply_in;
     if filters[f].started {
@@ -92,7 +129,9 @@ Next1 :: (v: s32, reply_in: s32) -> Item {
         if item.kind == Entry {
             p := filters[f].name;
             if filters[f].indent > 0 && p.count > 0 && p[p.count - 1] != #char "/" { p = Al.Join(p, "/") }
-            if !Pass(f, item.dir, Al.Join(p, item.dir.name), filters[f].indent, gate) && filters[f].indent > 0 {
+            if filters[f].chstat {
+                Change(f, *item.dir, Al.Join(p, item.dir.name), filters[f].indent);
+            } else if !Pass(f, item.dir, Al.Join(p, item.dir.name), filters[f].indent, gate) && filters[f].indent > 0 {
                 reply = Next;
                 continue;
             }

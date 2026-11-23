@@ -213,7 +213,7 @@ block8: [16]Case = Case.[
     .{name = "fs:unbundle", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/fs/bundle {/fs/walk tree}}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
 ];
 
-block9: [10]Case = Case.[
+block9: [16]Case = Case.[
     .{name = "fs:unbundle-ls", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/unbundle {/fs/bundle {/fs/walk tree/sub}}}}} 1}\n", input = "", status = "", out = "d-rwx------ � -1 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n--rw------- � -1 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n--rw------- � -1 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\nd-rwx------ � -1 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n--rw------- � -1 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
     .{name = "fs:unbundle-garbage", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/echo garbage}}}} 1}\n", input = "", status = "", out = "", err = "alphabet: 1. unbundle: invalid first header garbage\n"},
     .{name = "fs:unbundle-empty", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/echo -n ''}}}} 1}\n", input = "", status = "", out = "", err = ""},
@@ -224,9 +224,29 @@ block9: [10]Case = Case.[
     .{name = "fs:write-v", script = "typeset /fs\n- {/fs/write -v {/fs/walk tree/sub} copy3}\n", input = "", status = "", out = "", err = "alphabet: 2. fswrite: create copy3 20000000700\nalphabet: 2. fswrite: create copy3/c.txt 600\nalphabet: 2. fswrite: create copy3/d.b 600\nalphabet: 2. fswrite: create copy3/deep 20000000700\nalphabet: 2. fswrite: create copy3/deep/e.txt 600\n"},
     .{name = "fs:write-filter", script = "typeset /fs\n- {/fs/write {/fs/filter {/fs/walk tree} {/fs/match '*.b'}} copy4}\n- {/print {/fs/print {/fs/entries {/fs/walk copy4}}} 1}\n", input = "", status = "", out = "copy4\ncopy4/b.b\n", err = ""},
     .{name = "fs:write-bad", script = "typeset /fs\n- {/fs/write {/fs/walk tree} /nodir/x}\n", input = "", status = "", out = "", err = "alphabet: 2. fswrite: cannot create /nodir/x, mode 20000000700: '/nodir' file does not exist\n"},
+    .{name = "fs:merge", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\ntree/sub/z.txt\ntree/x.b\n", err = ""},
+    .{name = "fs:merge-data", script = "typeset /fs\n- {/print {/fs/bundle {/fs/merge {/fs/walk tree} {/fs/walk tree2}}} 1}\n", input = "", status = "", out = "tree 20000000700 @USER@ @USER@ 1577979240 0\na.txt 600 @USER@ @USER@ 1577979240 6\nalpha\nb.b 755 @USER@ @USER@ 1577979240 4\nbee\nsub 20000000700 @USER@ @USER@ 1577979240 0\nc.txt 600 @USER@ @USER@ 1577979240 4\nsea\nd.b 600 @USER@ @USER@ 1577979240 4\ndee\ndeep 20000000700 @USER@ @USER@ 1577979240 0\ne.txt 600 @USER@ @USER@ 1577979240 2\ne\n\nz.txt 600 @USER@ @USER@ 1577979240 4\nzed\n\nx.b 600 @USER@ @USER@ 1577979240 3\nex\n\nend of archive\n", err = ""},
+    .{name = "fs:merge-1", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -1 {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\ntree/x.b\n", err = ""},
+    .{name = "fs:merge-three", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge {/fs/walk tree} {/fs/walk tree2} {/fs/walk tree2/sub}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/c.txt\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\ntree/sub/z.txt\ntree/x.b\ntree/z.txt\n", err = ""},
+    .{name = "fs:merge-newer", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -c {/fs/newer} {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree2\ntree2/a.txt\ntree2/b.b\ntree2/sub\ntree2/sub/c.txt\ntree2/sub/d.b\ntree2/sub/deep\ntree2/sub/deep/e.txt\ntree2/sub/z.txt\ntree2/x.b\n", err = ""},
+    .{name = "fs:merge-newer-d", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -c {/fs/newer -d} {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\ntree/sub/z.txt\ntree/x.b\n", err = ""},
 ];
 
-CASES :: 154;
+block10: [11]Case = Case.[
+    .{name = "fs:merge-AinB", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -c {/fs/compose AinB} {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/sub\ntree/sub/c.txt\n", err = ""},
+    .{name = "fs:merge-AoutB", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -c {/fs/compose AoutB} {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\n", err = ""},
+    .{name = "fs:merge-BoutA-d", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -c {/fs/compose -d BoutA} {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/sub\ntree/sub/z.txt\ntree/x.b\n", err = ""},
+    .{name = "fs:merge-AxorB", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/merge -c {/fs/compose AxorB} {/fs/walk tree} {/fs/walk tree2}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\ntree/x.b\n", err = ""},
+    .{name = "fs:merge-filter", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/filter {/fs/merge {/fs/walk tree} {/fs/walk tree2}} {/fs/match '*.b'}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\ntree/x.b\n", err = ""},
+    .{name = "fs:chstat-mode", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/chstat -m a+r {/fs/walk tree/sub}}}} 1}\n", input = "", status = "", out = "d-rwxr--r-- U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n--rw-r--r-- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n--rw-r--r-- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\nd-rwxr--r-- U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n--rw-r--r-- U 0 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:chstat-owner", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/chstat -u bob -g staff -t 1000000000 {/fs/walk tree/sub}}}} 1}\n", input = "", status = "", out = "d-rwx------ U 0 bob staff 0 Sep 09  2001 tree/sub\n--rw------- U 0 bob staff 4 Sep 09  2001 tree/sub/c.txt\n--rw------- U 0 bob staff 4 Sep 09  2001 tree/sub/d.b\nd-rwx------ U 0 bob staff 0 Sep 09  2001 tree/sub/deep\n--rw------- U 0 bob staff 2 Sep 09  2001 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:chstat-gate", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/chstat -p {/fs/match '*.b'} -m u+x {/fs/walk tree/sub}}}} 1}\n", input = "", status = "", out = "d-rwx------ U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n--rw------- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n--rwx------ U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\nd-rwx------ U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n--rw------- U 0 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:chstat-c", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/chstat -c {/fs/walk tree/sub}}}} 1}\n", input = "", status = "", out = "d-rwxrwxrwx U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n--rw-rw-rw- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n--rw-rw-rw- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\nd-rwxrwxrwx U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n--rw-rw-rw- U 0 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:chstat-bad", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/chstat -m zz {/fs/walk tree/sub}}}} 1}\n", input = "", status = "no value", out = "", err = "fs: chstat: bad mode 'zz'\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:chstat-bundle", script = "typeset /fs\n- {/print {/fs/bundle {/fs/chstat -u x {/fs/walk tree/sub}}} 1}\n", input = "", status = "", out = "tree/sub 20000000700 x wao 1577979240 0\nc.txt 600 x wao 1577979240 4\nsea\nd.b 600 x wao 1577979240 4\ndee\ndeep 20000000700 x wao 1577979240 0\ne.txt 600 x wao 1577979240 2\ne\n\n\nend of archive\n", err = ""},
+];
+
+CASES :: 171;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -248,7 +268,9 @@ CaseAt :: (i: s64) -> Case {
 
     if i < 144 { return block8[i - 128] }
 
-    if i < 154 { return block9[i - 144] }
+    if i < 160 { return block9[i - 144] }
+
+    if i < 171 { return block10[i - 160] }
 
     return block0[0];
 }
@@ -290,23 +312,27 @@ Prepare :: () -> bool {
     return true;
 }
 
-// The fs cases' tree: every file and directory dated 2020-01-02 and
-// private to its owner, b.b executable.
+// The fs cases' trees: every file and directory dated 2020-01-02 and
+// private to its owner, b.b executable; tree2/a.txt is 100 seconds newer.
 Tree :: () -> bool {
-    dirs := string.["tree", "tree/sub", "tree/sub/deep"];
+    dirs := string.["tree", "tree/sub", "tree/sub/deep", "tree2", "tree2/sub"];
     for dirs { if !CreateDirectory(WorkPath(it)) { return false } }
-    names := string.["tree/a.txt", "tree/b.b", "tree/sub/c.txt", "tree/sub/d.b", "tree/sub/deep/e.txt"];
-    texts := string.["alpha\n", "bee\n", "sea\n", "dee\n", "e\n"];
+    names := string.["tree/a.txt", "tree/b.b", "tree/sub/c.txt", "tree/sub/d.b", "tree/sub/deep/e.txt",
+        "tree2/a.txt", "tree2/x.b", "tree2/sub/c.txt", "tree2/sub/z.txt"];
+    texts := string.["alpha\n", "bee\n", "sea\n", "dee\n", "e\n", "other\n", "ex\n", "sea two\n", "zed\n"];
     for names { if !WriteEntireFile(WorkPath(it), texts[it_index]) { return false } }
     for names {
         mode := ifx it == "tree/b.b" then "755" else "600";
         if !Host3("chmod", mode, WorkPath(it)) { return false }
     }
     for dirs { if !Host3("chmod", "700", WorkPath(it)) { return false } }
-    order := string.["tree/a.txt", "tree/b.b", "tree/sub/c.txt", "tree/sub/d.b", "tree/sub/deep/e.txt",
-        "tree/sub/deep", "tree/sub", "tree"];
-    for order { if !Host4("touch", "-d", "@1577979240", WorkPath(it)) { return false } }
-    return true;
+    for names { if !Host4("touch", "-d", "@1577979240", WorkPath(it)) { return false } }
+    i := dirs.count - 1;
+    while i >= 0 {
+        if !Host4("touch", "-d", "@1577979240", WorkPath(dirs[i])) { return false }
+        i -= 1;
+    }
+    return Host4("touch", "-d", "@1577979340", WorkPath("tree2/a.txt"));
 }
 
 WorkPath :: (name: string) -> string {

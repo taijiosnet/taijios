@@ -3,6 +3,8 @@
 Ty :: #import "alpha_types";
 And :: #import "fs/and";
 Bundle :: #import "fs/bundle";
+Chstat :: #import "fs/chstat";
+Merge :: #import "fs/merge";
 Unbundle :: #import "fs/unbundle";
 Write :: #import "fs/write";
 Compose :: #import "fs/compose";
@@ -30,6 +32,8 @@ Register :: () {
     Ty.RegisterType(reg, #char "x", "fs");
     And.Register(reg);
     Bundle.Register(reg);
+    Chstat.Register(reg);
+    Merge.Register(reg);
     Unbundle.Register(reg);
     Write.Register(reg);
     Compose.Register(reg);

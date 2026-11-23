@@ -2,11 +2,11 @@
 
 Owner: `claude-taijios-zx-alphabet-port`. Rows: section 8 of `plans/dis-to-zx.md` and `dis/sh/alphabet.dis`.
 
-Done and pushed: the core, the root typeset `/` (`appl/alphabet/main/`), the abc typeset (`appl/alphabet/abc/`) and 20 fs modules (`appl/alphabet/fs/`), all served by `/dis/alphabet.zx` (`cd appl/alphabet && mk install-zx`). Test: `tests/alphabet/alphabet_test.zi` (guest, against recorded Dis results) and `tests/alphabet/shcmd_test.zi`.
+Done and pushed: the core, the root typeset `/` (`appl/alphabet/main/`), the abc typeset (`appl/alphabet/abc/`) and 22 fs modules (`appl/alphabet/fs/`), all served by `/dis/alphabet.zx` (`cd appl/alphabet && mk install-zx`). Test: `tests/alphabet/alphabet_test.zi` (guest, against recorded Dis results) and `tests/alphabet/shcmd_test.zi`.
 
 ## Remaining
 
-1. fs typeset, the rest: merge, mergewrite, proto, chstat; exec, run, pipe and query run shell commands and wait for `/dis/sh.zx`. `/fs/match -r` needs a regex library. Each module is a pull state machine (`fs/fsvalue.zi`): `FsNext(v, reply)` answers the item before and gives the next.
+1. fs typeset, the rest: mergewrite, proto; exec, run, pipe and query run shell commands and wait for `/dis/sh.zx`. `/fs/match -r` needs a regex library. Each module is a pull state machine (`fs/fsvalue.zi`): `FsNext(v, reply)` answers the item before and gives the next.
 2. grid typeset (`appl/alphabet/grid/*.b`, `typesets/grid*.b`, `auxi/endpoints.b`, `endpointsrv.b`, `rexecsrv.b`): remote, local, rexec, farm, line2rec. rexec and farm run shell commands.
 3. The ZX shell's `load alphabet` builtin (owned by the shell port) runs `alpha_builtins.zi`. Then, in one commit: delete every `dis/alphabet/**` row, `dis/sh/alphabet.dis`, `appl/alphabet/**/*.b`, `module/alphabet*.m`, with the plan rows.
 4. `/auth` needs a ZX Inferno Auth client (dis/lib lane): today it reads the key and reports that the protocol is missing.
