@@ -1,0 +1,68 @@
+// The cases of the UBF(A) test: each object read from each input, written
+// for a person, written back as UBF(A) and compared with itself read
+// again, as the Limbo probe printed it from the UBFa module, for
+// comparison with ubfa.limbo.txt.
+using Ubfa :: #import "ubfa"
+
+Hex :: (out: *Vec(u8), bytes: string) {
+    digits := "0123456789abcdef"
+    for bytes {
+        VecPush(<<out, digits[it >> 4])
+        VecPush(<<out, digits[it & 15])
+    }
+}
+
+Flag :: (value: bool) -> s64 { return ifx value then 1 else 0 }
+
+Lines :: (out: *Vec(u8)) {
+    inputs := string.[
+        "'abc'$", "\"str\"$", "123$", "-45$", "0$", "{'a' 1 \"s\"}$", "{}$", "#$", "# 1 & 2 & 3 &$", "5~hello~$", "0~~$",
+        "1 `tag`$", "'x' >a a$", "{'p' 1} >p {p p}$", "%comment% 1$", "%a\\%b\\\\% 2$", "%a\\x% 3$", "\"a\\\"b\\\\c\"$",
+        "'it\\'s'$", "\"bad\\n\"$", "\"café\"$", "'é'$", "", "1 2$", "$", "&$", "1 &$", "1 2 &$", "# 1 & `t`$",
+        "'a' ~$", "-1 ~$", "5~hi~$", "3~abcd$", "-x$", "99999999999$", "2147483647$", "-2147483648$", "2147483648$",
+        "-2147483649$", "@$", ">$", "1 >1$", "1 >{ 2$", "\"unterminated", "{1 2$", "{1$}", "1 2 }", "}", "'a' , 'b' }",
+        "\n\t 7 , $", "{'a' {'b' # 1 & 2 &} 3~xyz~ `bin`}$", "{1 2} `pair` `outer`$", "`t`$", "1 `unterminated", "1$ 2$ 'three'$",
+        "# {1 2} & # & 'x' &$", "{# #}$", "1 >a 2 >b {a b a}$", "x$", "'a' >x {x} x }", "% unterminated", "{", "#",
+        "\"a`b\" `t\\`u`$", "{'op' 1 2}$", "{\"op\" 1}$", "{1 'op'}$", "007$", "-0$", "1,2,3}", "5 ~hello~$", "5~hello ~$",
+        "'a' >  $", "4~a$b~~ 'next'$",
+    ]
+    for input: inputs {
+        at: s64 = 0
+        input_index := it_index
+        for count: 0..4 {
+            tree: Ubfa.Tree
+            error: Text
+            value, next := Ubfa.Read(*tree, input, at, *error)
+            if value < 0 {
+                BuilderPrint(out, "read % % error <%>\n", input_index, count, TextView(error))
+                break
+            }
+            at = next
+            written: Vec(u8)
+            Ubfa.Write(*tree, value, *written)
+            again: Ubfa.Tree
+            again_error: Text
+            copy, copy_end := Ubfa.Read(*again, TextView(written[:]), 0, *again_error)
+            BuilderPrint(out, "read % % <", input_index, count)
+            Ubfa.Describe(*tree, value, out)
+            BuilderAppend(<<out, "> ")
+            Hex(out, TextView(written[:]))
+            // The operation of a tuple: its first element, an atom or a string.
+            operation := ""
+            if tree.values[value].kind == Ubfa.TupleValue && tree.values[value].items.count > 0 {
+                first := tree.values[value].items[0]
+                if tree.values[first].kind == Ubfa.AtomValue || tree.values[first].kind == Ubfa.StringValue {
+                    operation = TextView(tree.values[first].text)
+                }
+            }
+            BuilderPrint(out, " eq=% op=<%> isop=%", Flag(copy >= 0 && Ubfa.Equal(*tree, value, *again, copy)), operation,
+                Flag(Ubfa.IsOperation(*tree, value, "op", 0)))
+            BuilderPrint(out, "%\n", Flag(Ubfa.IsOperation(*tree, value, "op", 3)))
+        }
+    }
+    // The Limbo module died on an integer cut off by the end of the text.
+    tree: Ubfa.Tree
+    error: Text
+    value, next := Ubfa.Read(*tree, "123", 0, *error)
+    if value >= 0 || TextView(error) != "ubf error: offset 3: unexpected end-of-file" { BuilderAppend(<<out, "FAIL: integer at the end\n") }
+}

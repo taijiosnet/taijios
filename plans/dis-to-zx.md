@@ -43,7 +43,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 ## Next ready order (independent, boot-ordered)
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
-2. Non-boot libraries (163 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+2. Non-boot libraries (162 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (73 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (15), demo (14), ebook (10), math (22).
@@ -61,7 +61,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/zxrun.dis | appl/cmd/zxrun.b | module/zxrun.m | P2 | untracked gitignored local build of tracked appl/cmd/zxrun.b |
 | dis/lib/winplace.dis | unknown |  | - | zx-twin; Limbo source removed; untracked local artifact (not gitignored) |
 
-### 2. Libraries - dis/lib/** (boot-loaded rows first) - 170 rows
+### 2. Libraries - dis/lib/** (boot-loaded rows first) - 169 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -222,7 +222,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/tftp.dis | appl/lib/tftp.b | module/tftp.m | - |  |
 | dis/lib/timers.dis | appl/lib/timers.b | module/timers.m | - |  |
 | dis/lib/translate.dis | appl/lib/translate.b | module/translate.m | - |  |
-| dis/lib/ubfa.dis | appl/lib/ubfa.b | module/ubfa.m | - |  |
 | dis/lib/url.dis | appl/lib/url.b | module/url.m | - |  |
 | dis/lib/usb/usb.dis | appl/lib/usb/usb.b | module/usb.m | - |  |
 | dis/lib/usb/usbmass.dis | appl/lib/usb/usbmass.b |  | - |  |

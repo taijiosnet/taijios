@@ -1,0 +1,118 @@
+read 0 0 <abc> 276162632724 eq=1 op=<> isop=00
+read 0 1 error <ubf error: offset 6: unexpected end-of-file>
+read 1 0 <str> 227374722224 eq=1 op=<> isop=00
+read 1 1 error <ubf error: offset 6: unexpected end-of-file>
+read 2 0 <123> 31323324 eq=1 op=<> isop=00
+read 2 1 error <ubf error: offset 4: unexpected end-of-file>
+read 3 0 <-45> 2d343524 eq=1 op=<> isop=00
+read 3 1 error <ubf error: offset 4: unexpected end-of-file>
+read 4 0 <0> 3024 eq=1 op=<> isop=00
+read 4 1 error <ubf error: offset 2: unexpected end-of-file>
+read 5 0 <{ a 1 s}> 7b2761272031202273227d24 eq=1 op=<a> isop=00
+read 5 1 error <ubf error: offset 12: unexpected end-of-file>
+read 6 0 <{}> 7b7d24 eq=1 op=<> isop=00
+read 6 1 error <ubf error: offset 3: unexpected end-of-file>
+read 7 0 <[]> 2324 eq=1 op=<> isop=00
+read 7 1 error <ubf error: offset 2: unexpected end-of-file>
+read 8 0 <[ 3 2 1]> 2331263226332624 eq=1 op=<> isop=00
+read 8 1 error <ubf error: offset 14: unexpected end-of-file>
+read 9 0 <<< 68 65 6c 6c 6f>>> 357e68656c6c6f7e24 eq=1 op=<> isop=00
+read 9 1 error <ubf error: offset 9: unexpected end-of-file>
+read 10 0 <<<>>> 307e7e24 eq=1 op=<> isop=00
+read 10 1 error <ubf error: offset 4: unexpected end-of-file>
+read 11 0 <{'$TYPE', tag, 1}> 31607461676024 eq=1 op=<> isop=00
+read 11 1 error <ubf error: offset 8: unexpected end-of-file>
+read 12 0 <x> 27782724 eq=1 op=<> isop=00
+read 12 1 error <ubf error: offset 9: unexpected end-of-file>
+read 13 0 <{ { p 1} { p 1}}> 7b7b27702720317d207b27702720317d7d24 eq=1 op=<> isop=00
+read 13 1 error <ubf error: offset 17: unexpected end-of-file>
+read 14 0 <1> 3124 eq=1 op=<> isop=00
+read 14 1 error <ubf error: offset 12: unexpected end-of-file>
+read 15 0 <2> 3224 eq=1 op=<> isop=00
+read 15 1 error <ubf error: offset 11: unexpected end-of-file>
+read 16 0 error <ubf error: offset 4: invalid escape in comment>
+read 17 0 <a"b\c> 22615c22625c5c632224 eq=1 op=<> isop=00
+read 17 1 error <ubf error: offset 10: unexpected end-of-file>
+read 18 0 <it's> 2769745c27732724 eq=1 op=<> isop=00
+read 18 1 error <ubf error: offset 8: unexpected end-of-file>
+read 19 0 error <ubf error: offset 6: invalid escape>
+read 20 0 <café> 22636166c3a92224 eq=1 op=<> isop=00
+read 20 1 error <ubf error: offset 8: unexpected end-of-file>
+read 21 0 <é> 27c3a92724 eq=1 op=<> isop=00
+read 21 1 error <ubf error: offset 5: unexpected end-of-file>
+read 22 0 error <ubf error: offset 0: unexpected end-of-file>
+read 23 0 error <ubf error: offset 4: unbalanced stack: size 2>
+read 24 0 error <ubf error: offset 1: unbalanced stack: size 0>
+read 25 0 error <ubf error: offset 1: parse stack underflow>
+read 26 0 error <ubf error: offset 3: parse stack underflow>
+read 27 0 error <ubf error: offset 5: can't make cons with cdr 1>
+read 28 0 <{'$TYPE', t, [ 1]}> 23312660746024 eq=1 op=<> isop=00
+read 28 1 error <ubf error: offset 10: unexpected end-of-file>
+read 29 0 error <ubf error: offset 5: expected Int before ~>
+read 30 0 error <ubf error: offset 4: negative length for binary>
+read 31 0 error <ubf error: offset 6: cannot read binary data: short read>
+read 32 0 error <ubf error: offset 6: missing closing ~>
+read 33 0 error <ubf error: offset 2: expected integer literal>
+read 34 0 error <ubf error: offset 10: integer overflow>
+read 35 0 <2147483647> 3231343734383336343724 eq=1 op=<> isop=00
+read 35 1 error <ubf error: offset 11: unexpected end-of-file>
+read 36 0 <-2147483648> 2d3231343734383336343824 eq=1 op=<> isop=00
+read 36 1 error <ubf error: offset 12: unexpected end-of-file>
+read 37 0 error <ubf error: offset 10: integer overflow>
+read 38 0 error <ubf error: offset 11: integer overflow>
+read 39 0 error <ubf error: offset 0: invalid start character/undefined register #40>
+read 40 0 error <ubf error: offset 2: invalid register name>
+read 41 0 error <ubf error: offset 4: invalid register name>
+read 42 0 error <ubf error: offset 4: invalid register name>
+read 43 0 error <ubf error: offset 13: unexpected end of file>
+read 44 0 error <ubf error: offset 5: unbalanced stack: size 2>
+read 45 0 error <ubf error: offset 3: expected tuple: obj>
+read 46 0 <{ 1 2}> 7b3120327d24 eq=1 op=<> isop=00
+read 46 1 error <ubf error: offset 5: unexpected end-of-file>
+read 47 0 <{}> 7b7d24 eq=1 op=<> isop=00
+read 47 1 error <ubf error: offset 1: unexpected end-of-file>
+read 48 0 <{ a b}> 7b276127202762277d24 eq=1 op=<a> isop=00
+read 48 1 error <ubf error: offset 11: unexpected end-of-file>
+read 49 0 <7> 3724 eq=1 op=<> isop=00
+read 49 1 error <ubf error: offset 8: unexpected end-of-file>
+read 50 0 <{ a { b [ 2 1]} {'$TYPE', bin, << 78 79 7a>>}}> 7b276127207b2762272023312632267d20337e78797a7e6062696e607d24 eq=1 op=<a> isop=00
+read 50 1 error <ubf error: offset 35: unexpected end-of-file>
+read 51 0 <{'$TYPE', outer, {'$TYPE', pair, { 1 2}}}> 7b3120327d607061697260606f757465726024 eq=1 op=<> isop=00
+read 51 1 error <ubf error: offset 21: unexpected end-of-file>
+read 52 0 error <ubf error: offset 3: parse stack underflow>
+read 53 0 error <ubf error: offset 15: unexpected end of file>
+read 54 0 <1> 3124 eq=1 op=<> isop=00
+read 54 1 <2> 3224 eq=1 op=<> isop=00
+read 54 2 <three> 2774687265652724 eq=1 op=<> isop=00
+read 54 3 error <ubf error: offset 14: unexpected end-of-file>
+read 55 0 <[ x [] { 1 2}]> 237b3120327d2623262778272624 eq=1 op=<> isop=00
+read 55 1 error <ubf error: offset 20: unexpected end-of-file>
+read 56 0 <{ [] []}> 7b2320237d24 eq=1 op=<> isop=00
+read 56 1 error <ubf error: offset 6: unexpected end-of-file>
+read 57 0 <{ 1 2 1}> 7b31203220317d24 eq=1 op=<> isop=00
+read 57 1 error <ubf error: offset 18: unexpected end-of-file>
+read 58 0 error <ubf error: offset 0: invalid start character/undefined register #78>
+read 59 0 <{ { a} a}> 7b7b2761277d202761277d24 eq=1 op=<> isop=00
+read 59 1 error <ubf error: offset 14: unexpected end-of-file>
+read 60 0 error <ubf error: offset 14: unexpected end-of-file>
+read 61 0 error <ubf error: offset 1: unexpected end-of-file>
+read 62 0 error <ubf error: offset 1: unexpected end-of-file>
+read 63 0 <{'$TYPE', t`u, a`b}> 226160622260745c60756024 eq=1 op=<> isop=00
+read 63 1 error <ubf error: offset 13: unexpected end-of-file>
+read 64 0 <{ op 1 2}> 7b276f7027203120327d24 eq=1 op=<op> isop=11
+read 64 1 error <ubf error: offset 11: unexpected end-of-file>
+read 65 0 <{ op 1}> 7b226f702220317d24 eq=1 op=<op> isop=10
+read 65 1 error <ubf error: offset 9: unexpected end-of-file>
+read 66 0 <{ 1 op}> 7b3120276f70277d24 eq=1 op=<> isop=00
+read 66 1 error <ubf error: offset 9: unexpected end-of-file>
+read 67 0 <7> 3724 eq=1 op=<> isop=00
+read 67 1 error <ubf error: offset 4: unexpected end-of-file>
+read 68 0 <0> 3024 eq=1 op=<> isop=00
+read 68 1 error <ubf error: offset 3: unexpected end-of-file>
+read 69 0 <{ 1 2 3}> 7b31203220337d24 eq=1 op=<> isop=00
+read 69 1 error <ubf error: offset 6: unexpected end-of-file>
+read 70 0 <<< 68 65 6c 6c 6f>>> 357e68656c6c6f7e24 eq=1 op=<> isop=00
+read 70 1 error <ubf error: offset 10: unexpected end-of-file>
+read 71 0 error <ubf error: offset 8: missing closing ~>
+read 72 0 error <ubf error: offset 6: invalid register name>
+read 73 0 error <ubf error: offset 15: unbalanced stack: size 2>

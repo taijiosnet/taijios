@@ -1067,7 +1067,7 @@ appl
 		titlebar.b
 		tkclient.b
 		translate.b
-		ubfa.b
+		ubfa.zi
 		uris.zi
 		url.b
 		usb
@@ -1645,7 +1645,6 @@ dis
 		titlebar.dis
 		tkclient.dis
 		translate.dis
-		ubfa.dis
 		url.dis
 		usb
 			usb.dis
@@ -2262,7 +2261,6 @@ module
 	tk.m
 	tkclient.m
 	translate.m
-	ubfa.m
 	unbundle.m
 	url.m
 	usb.m

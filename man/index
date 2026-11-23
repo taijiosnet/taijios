@@ -539,7 +539,6 @@ accessed	/man/2/srv
 accessed	/man/2/styxservers
 accessed	/man/2/sys-0intro
 accessed	/man/2/sys-stat
-accessed	/man/2/ubfa
 accessed	/man/2/wmsrv
 accessed	/man/3/arch
 accessed	/man/3/cmd
@@ -657,7 +656,6 @@ acknowledgement	/man/10/intrenable
 acknowledgement	/man/2/draw-context
 acknowledging	/man/2/wmsrv
 acl	/man/3/fs
-acm	/man/2/ubfa
 acm	/man/6/ubfa
 acme	/man/1/0intro
 acme	/man/1/acme
@@ -1437,7 +1435,6 @@ adt	/man/2/sys-stat
 adt	/man/2/timers
 adt	/man/2/tk
 adt	/man/2/translate
-adt	/man/2/ubfa
 adt	/man/2/venti
 adt	/man/2/w3c-css
 adt	/man/2/wmclient
@@ -2648,7 +2645,6 @@ appl	/man/2/tabs
 appl	/man/2/tftp
 appl	/man/2/tkclient
 appl	/man/2/translate
-appl	/man/2/ubfa
 appl	/man/2/venti
 appl	/man/2/virgil
 appl	/man/2/w3c-css
@@ -2768,7 +2764,6 @@ application	/man/2/sys-read
 application	/man/2/tk
 application	/man/2/tkclient
 application	/man/2/translate
-application	/man/2/ubfa
 application	/man/2/wmclient
 application	/man/2/wmlib
 application	/man/3/draw
@@ -2824,7 +2819,6 @@ applications	/man/2/sys-open
 applications	/man/2/sys-pipe
 applications	/man/2/sys-self
 applications	/man/2/tkclient
-applications	/man/2/ubfa
 applications	/man/2/venti
 applications	/man/2/w3c-css
 applications	/man/2/wmclient
@@ -2874,7 +2868,6 @@ applied	/man/2/security-0intro
 applied	/man/2/sexprs
 applied	/man/2/tk
 applied	/man/2/tkclient
-applied	/man/2/ubfa
 applied	/man/3/logfs
 applied	/man/3/ssl
 applied	/man/4/acme
@@ -3228,7 +3221,6 @@ args	/man/2/spki
 args	/man/2/string
 args	/man/2/styxservers-nametree
 args	/man/2/translate
-args	/man/2/ubfa
 args	/man/2/virgil
 args	/man/2/w3c-css
 args	/man/3/cmd
@@ -3265,7 +3257,6 @@ arithmetic	/man/2/keyring-0intro
 arithmetic	/man/2/math-0intro
 arithmetic	/man/2/math-fp
 arithmetic	/man/8/prep
-arity	/man/2/ubfa
 ark200pv	/man/3/vga
 ark200pvhwgc	/man/3/vga
 arm	/man/10/2c
@@ -3276,9 +3267,7 @@ arm	/man/2/alphabet-intro
 arm	/man/2/dis
 armag	/man/10/ar
 armpit	/man/10/plan9.ini
-armstrong	/man/2/ubfa
 armstrong	/man/6/ubfa
-armstrong's	/man/2/ubfa
 armstrong's	/man/6/ubfa
 arp	/man/3/ip
 arrange	/man/1/acme
@@ -3381,7 +3370,6 @@ array	/man/2/sys-read
 array	/man/2/sys-utfbytes
 array	/man/2/tabs
 array	/man/2/translate
-array	/man/2/ubfa
 array	/man/2/venti
 array	/man/2/wmsrv
 array	/man/3/arch
@@ -3623,7 +3611,6 @@ associates	/man/10/a.out
 associates	/man/2/bufio
 associates	/man/2/spki
 associates	/man/2/spree-cardlib
-associates	/man/2/ubfa
 associates	/man/6/attrdb
 associates	/man/6/ndb
 associates	/man/9/bind
@@ -3769,7 +3756,6 @@ atoi	/man/10/atoi
 atol	/man/10/atoi
 atol.c	/man/10/atoi
 atom	/man/2/sexprs
-atom	/man/2/ubfa
 atom	/man/6/ubfa
 atomic	/man/1/sh-alphabet
 atomic	/man/2/sys-iounit
@@ -3787,7 +3773,6 @@ atomicio	/man/4/dbfs
 atomicity	/man/2/sys-0intro
 atomicity	/man/3/pipe
 atoms	/man/2/sexprs
-atoms	/man/2/ubfa
 atoms	/man/6/ubfa
 atop	/man/1/sh-alphabet
 ats	/man/1/listen
@@ -4944,7 +4929,6 @@ binary	/man/2/palmfile
 binary	/man/2/sexprs
 binary	/man/2/spki
 binary	/man/2/stringinttab
-binary	/man/2/ubfa
 binary	/man/3/cmd
 binary	/man/3/dbg
 binary	/man/3/draw
@@ -6102,7 +6086,6 @@ bufio	/man/2/spki
 bufio	/man/2/sys-read
 bufio	/man/2/sys-seek
 bufio	/man/2/sys-self
-bufio	/man/2/ubfa
 bufio	/man/2/xml
 bufio.b	/man/2/bufio
 bufio.m	/man/1/yacc
@@ -6556,7 +6539,6 @@ byte	/man/2/sys-file2chan
 byte	/man/2/sys-print
 byte	/man/2/sys-read
 byte	/man/2/sys-utfbytes
-byte	/man/2/ubfa
 byte	/man/2/venti
 byte	/man/2/wmsrv
 byte	/man/3/arch
@@ -6697,7 +6679,6 @@ bytes	/man/2/sys-read
 bytes	/man/2/sys-seek
 bytes	/man/2/sys-stat
 bytes	/man/2/sys-utfbytes
-bytes	/man/2/ubfa
 bytes	/man/2/venti
 bytes	/man/3/boot
 bytes	/man/3/cons
@@ -7688,7 +7669,6 @@ character	/man/2/sys-byte2char
 character	/man/2/sys-print
 character	/man/2/sys-tokenize
 character	/man/2/tftp
-character	/man/2/ubfa
 character	/man/2/w3c-css
 character	/man/2/wmsrv
 character	/man/3/0intro
@@ -8818,7 +8798,6 @@ code	/man/2/prefab-compound
 code	/man/2/print
 code	/man/2/prof
 code	/man/2/security-0intro
-code	/man/2/ubfa
 code	/man/3/arch
 code	/man/3/boot
 code	/man/3/cmd
@@ -9166,7 +9145,6 @@ common	/man/2/spki
 common	/man/2/spree-gather
 common	/man/2/styxservers
 common	/man/2/sys-dial
-common	/man/2/ubfa
 common	/man/2/xml
 common	/man/3/cons
 common	/man/3/draw
@@ -9538,7 +9516,6 @@ component	/man/2/spki
 component	/man/2/styxservers-nametree
 component	/man/2/sys-dial
 component	/man/2/sys-fd2path
-component	/man/2/ubfa
 component	/man/3/tv
 component	/man/6/colour
 component	/man/6/ndb
@@ -9571,7 +9548,6 @@ components	/man/2/prefab-0intro
 components	/man/2/prefab-element
 components	/man/2/print
 components	/man/2/spki
-components	/man/2/ubfa
 components	/man/2/w3c-css
 components	/man/5/0intro
 components	/man/6/colour
@@ -9598,7 +9574,6 @@ compound	/man/2/prefab-element
 compound	/man/2/prefab-environ
 compound	/man/2/prefab-style
 compound	/man/2/spki
-compound	/man/2/ubfa
 compound	/man/3/ds
 compound	/man/4/acme
 compound	/man/6/ubfa
@@ -10415,14 +10390,12 @@ constant	/man/2/sexprs
 constant	/man/2/styx
 constant	/man/2/sys-self
 constant	/man/2/sys-stat
-constant	/man/2/ubfa
 constant	/man/3/ether
 constant	/man/5/0intro
 constant	/man/5/error
 constant	/man/5/walk
 constant	/man/6/colour
 constant	/man/6/man
-constant's	/man/2/ubfa
 constants	/man/1/calc
 constants	/man/1/units
 constants	/man/1/yacc
@@ -10446,7 +10419,6 @@ constants	/man/2/styx
 constants	/man/2/styxservers
 constants	/man/2/sys-stat
 constants	/man/2/tkclient
-constants	/man/2/ubfa
 constants	/man/2/venti
 constants	/man/2/wmclient
 constants	/man/3/draw
@@ -10651,7 +10623,6 @@ contains	/man/2/sys-file2chan
 contains	/man/2/sys-print
 contains	/man/2/sys-tokenize
 contains	/man/2/tabs
-contains	/man/2/ubfa
 contains	/man/2/venti
 contains	/man/2/wmclient
 contains	/man/2/wmsrv
@@ -11595,7 +11566,6 @@ correspond	/man/10/2c
 correspond	/man/10/a.out
 correspond	/man/10/newchan
 correspond	/man/2/dis
-correspond	/man/2/ubfa
 correspond	/man/3/draw
 correspond	/man/3/ip
 correspond	/man/3/lpt
@@ -11891,7 +11861,6 @@ create	/man/2/sys-file2chan
 create	/man/2/sys-open
 create	/man/2/sys-pipe
 create	/man/2/tk
-create	/man/2/ubfa
 create	/man/2/wmsrv
 create	/man/3/dbg
 create	/man/3/draw
@@ -12620,7 +12589,6 @@ cyclic	/man/2/prefab-element
 cyclic	/man/2/prof
 cyclic	/man/2/sexprs
 cyclic	/man/2/spki
-cyclic	/man/2/ubfa
 cyclic	/man/2/w3c-css
 cyclic	/man/2/wmsrv
 cyl	/man/2/disks
@@ -12795,7 +12763,6 @@ data	/man/2/sys-read
 data	/man/2/sys-self
 data	/man/2/tftp
 data	/man/2/timers
-data	/man/2/ubfa
 data	/man/2/venti
 data	/man/2/wmsrv
 data	/man/2/xml
@@ -13151,7 +13118,6 @@ debugging	/man/2/alphabet-intro
 debugging	/man/2/debug
 debugging	/man/2/filter-deflate
 debugging	/man/2/styx
-debugging	/man/2/ubfa
 debugging	/man/3/cons
 debugging	/man/3/dbg
 debugging	/man/3/draw
@@ -13328,7 +13294,6 @@ decoding	/man/1/stack
 decoding	/man/1/uuencode
 decoding	/man/2/asn1
 decoding	/man/2/encoding
-decoding	/man/2/ubfa
 decoding	/man/2/w3c-css
 decoding	/man/3/tls
 decompress	/man/10/5cv
@@ -13739,7 +13704,6 @@ defined	/man/2/sys-open
 defined	/man/2/sys-self
 defined	/man/2/sys-stat
 defined	/man/2/translate
-defined	/man/2/ubfa
 defined	/man/3/cons
 defined	/man/3/draw
 defined	/man/3/dynld
@@ -15399,7 +15363,6 @@ diagnostic	/man/2/sys-file2chan
 diagnostic	/man/2/sys-utfbytes
 diagnostic	/man/2/tftp
 diagnostic	/man/2/translate
-diagnostic	/man/2/ubfa
 diagnostic	/man/2/w3c-css
 diagnostic	/man/3/cmd
 diagnostic	/man/3/indir
@@ -15550,7 +15513,6 @@ dictated	/man/3/draw
 dictionaries	/man/2/translate
 dictionary	/man/1/look
 dictionary	/man/2/translate
-dictionary	/man/2/ubfa
 dictionary	/man/6/translate
 died	/man/3/prog
 dies	/man/1/acme
@@ -15573,7 +15535,6 @@ difference	/man/1/sh
 difference	/man/10/print
 difference	/man/2/asn1
 difference	/man/2/daytime
-difference	/man/2/ubfa
 difference	/man/5/walk
 difference	/man/6/keyboard
 difference	/man/6/sexprs
@@ -15872,7 +15833,6 @@ directly	/man/2/sys-0intro
 directly	/man/2/sys-fauth
 directly	/man/2/sys-fversion
 directly	/man/2/sys-read
-directly	/man/2/ubfa
 directly	/man/2/wmsrv
 directly	/man/2/xml
 directly	/man/3/dbg
@@ -16720,7 +16680,6 @@ distinguish	/man/6/translate
 distinguishable	/man/1/acme
 distinguished	/man/1/mk
 distinguished	/man/10/mk
-distinguished	/man/2/ubfa
 distinguished	/man/6/sbl
 distinguished	/man/6/sexprs
 distinguished	/man/8/create
@@ -17545,7 +17504,6 @@ easier	/man/1/alphabet-main
 easier	/man/10/c2l
 easier	/man/2/alphabet-intro
 easiest	/man/10/0intro
-easiest	/man/2/ubfa
 easily	/man/1/tktester
 easily	/man/2/keyring-sha1
 easily	/man/3/logfs
@@ -17791,7 +17749,6 @@ eg	/man/2/sys-self
 eg	/man/2/sys-sleep
 eg	/man/2/sys-stat
 eg	/man/2/translate
-eg	/man/2/ubfa
 eg	/man/2/w3c-css
 eg	/man/3/cap
 eg	/man/3/cmd
@@ -17938,7 +17895,6 @@ elnk3	/man/10/plan9.ini
 elongated	/man/9/canvas
 els	/man/1/sh-sexprs
 els	/man/2/sexprs
-els	/man/2/ubfa
 elseaction	/man/1/sh-std
 elsewhere	/man/1/ar
 elsewhere	/man/1/dmview
@@ -18255,7 +18211,6 @@ encoding	/man/2/secstore
 encoding	/man/2/sexprs
 encoding	/man/2/spki
 encoding	/man/2/sys-print
-encoding	/man/2/ubfa
 encoding	/man/3/cons
 encoding	/man/5/stat
 encoding	/man/6/audio
@@ -18457,7 +18412,6 @@ enotdir	/man/10/newchan
 enotdir	/man/2/styxservers
 enotfound	/man/2/styxservers
 enquiries	/man/10/odbc
-enquiry	/man/2/ubfa
 ens	/man/6/man
 ensure	/man/1/charon
 ensure	/man/1/ebook
@@ -18711,7 +18665,6 @@ enumerated	/man/10/styx
 enumerated	/man/2/asn1
 enumerated	/man/3/pnp
 enumerates	/man/3/pnp
-enumeration	/man/2/ubfa
 enumeration	/man/3/pnp
 env	/man/1/0intro
 env	/man/1/env
@@ -18863,7 +18816,6 @@ eq	/man/2/keyring-ipint
 eq	/man/2/sets
 eq	/man/2/sexprs
 eq	/man/2/spki
-eq	/man/2/ubfa
 eq	/man/2/venti
 eq	/man/6/man
 eqaddr	/man/2/ether
@@ -18894,7 +18846,6 @@ equal	/man/2/spki
 equal	/man/2/stringinttab
 equal	/man/2/styxservers-nametree
 equal	/man/2/sys-pctl
-equal	/man/2/ubfa
 equal	/man/3/dbg
 equal	/man/3/ssl
 equal	/man/5/read
@@ -18997,7 +18948,6 @@ erasing	/man/3/flash
 erf	/man/1/calc
 erf	/man/2/math-elem
 erfc	/man/2/math-elem
-erlang	/man/2/ubfa
 erlang	/man/6/ubfa
 err	/man/1/sh-test
 err	/man/1/yacc
@@ -19017,7 +18967,6 @@ err	/man/2/spki-verifier
 err	/man/2/spree-allow
 err	/man/2/styxpersist
 err	/man/2/styxservers
-err	/man/2/ubfa
 err	/man/2/w3c-css
 err	/man/2/wmlib
 err	/man/2/xml
@@ -19156,7 +19105,6 @@ error	/man/2/sys-utfbytes
 error	/man/2/sys-werrstr
 error	/man/2/tftp
 error	/man/2/translate
-error	/man/2/ubfa
 error	/man/2/venti
 error	/man/2/w3c-css
 error	/man/2/wmsrv
@@ -19372,7 +19320,6 @@ etc	/man/2/spree
 etc	/man/2/styx
 etc	/man/2/styxflush
 etc	/man/2/styxservers
-etc	/man/2/ubfa
 etc	/man/2/w3c-css
 etc	/man/3/ftl
 etc	/man/3/logfs
@@ -22391,7 +22338,6 @@ fixed	/man/2/palmfile
 fixed	/man/2/plumbmsg
 fixed	/man/2/prefab-element
 fixed	/man/2/security-0intro
-fixed	/man/2/ubfa
 fixed	/man/3/cons
 fixed	/man/3/logfs
 fixed	/man/3/mpeg
@@ -22759,7 +22705,6 @@ fn	/man/2/timers
 fn	/man/2/tk
 fn	/man/2/tkclient
 fn	/man/2/translate
-fn	/man/2/ubfa
 fn	/man/2/venti
 fn	/man/2/virgil
 fn	/man/2/w3c-css
@@ -23047,7 +22992,6 @@ format	/man/2/sys-0intro
 format	/man/2/sys-print
 format	/man/2/tk
 format	/man/2/translate
-format	/man/2/ubfa
 format	/man/3/audio
 format	/man/3/cons
 format	/man/3/draw
@@ -23951,7 +23895,6 @@ gettar	/man/1/gettar
 gettar	/man/4/tarfs
 gettar.b	/man/1/gettar
 getting	/man/2/styxflush
-getting	/man/2/ubfa
 getting	/man/6/ubfa
 getting	/man/9/bind
 getuserpassd	/man/2/factotum
@@ -24269,7 +24212,6 @@ groups	/man/2/prefab-0intro
 groups	/man/2/spree-gather
 groups	/man/2/sys-0intro
 groups	/man/2/sys-stat
-groups	/man/2/ubfa
 groups	/man/3/logfs
 groups	/man/3/vid
 groups	/man/5/0intro
@@ -25418,7 +25360,6 @@ identical	/man/2/math-0intro
 identical	/man/2/sets
 identical	/man/2/sexprs
 identical	/man/2/sys-read
-identical	/man/2/ubfa
 identical	/man/3/dup
 identical	/man/4/acme
 identical	/man/5/0intro
@@ -25610,7 +25551,6 @@ ie	/man/2/sys-open
 ie	/man/2/sys-pctl
 ie	/man/2/sys-self
 ie	/man/2/tk
-ie	/man/2/ubfa
 ie	/man/3/fs
 ie	/man/3/ftl
 ie	/man/3/pipe
@@ -25958,7 +25898,6 @@ implementation	/man/7/dbsrv
 implementation	/man/8/collabsrv
 implementation	/man/9/0intro
 implementation	/man/9/canvas
-implementation's	/man/2/ubfa
 implementations	/man/1/limbo
 implementations	/man/1/ps
 implementations	/man/10/devattach
@@ -26334,7 +26273,6 @@ include	/man/2/timers
 include	/man/2/tk
 include	/man/2/tkclient
 include	/man/2/translate
-include	/man/2/ubfa
 include	/man/2/venti
 include	/man/2/virgil
 include	/man/2/w3c-css
@@ -27153,7 +27091,6 @@ init	/man/2/tftp
 init	/man/2/timers
 init	/man/2/tkclient
 init	/man/2/translate
-init	/man/2/ubfa
 init	/man/2/venti
 init	/man/2/w3c-css
 init	/man/2/wmclient
@@ -27466,7 +27403,6 @@ input	/man/2/sys-0intro
 input	/man/2/sys-byte2char
 input	/man/2/sys-dup
 input	/man/2/timers
-input	/man/2/ubfa
 input	/man/2/wmclient
 input	/man/2/wmlib
 input	/man/3/audio
@@ -27612,7 +27548,6 @@ insl	/man/10/inb
 inspect	/man/1/deb
 inspect	/man/10/acid
 inspected	/man/2/sys-utfbytes
-inspected	/man/2/ubfa
 inspecting	/man/2/debug
 inspecting	/man/4/factotum
 inspection	/man/1/0intro
@@ -27727,7 +27662,6 @@ instance	/man/2/sys-pipe
 instance	/man/2/sys-print
 instance	/man/2/sys-self
 instance	/man/2/sys-stat
-instance	/man/2/ubfa
 instance	/man/2/xml
 instance	/man/3/dbg
 instance	/man/3/ether
@@ -27967,7 +27901,6 @@ int	/man/2/tftp
 int	/man/2/timers
 int	/man/2/tk
 int	/man/2/tkclient
-int	/man/2/ubfa
 int	/man/2/venti
 int	/man/2/w3c-css
 int	/man/2/wmclient
@@ -28045,7 +27978,6 @@ integer	/man/2/sys-print
 integer	/man/2/sys-stat
 integer	/man/2/timers
 integer	/man/2/tk
-integer	/man/2/ubfa
 integer	/man/2/w3c-css
 integer	/man/3/audio
 integer	/man/3/dbg
@@ -28140,7 +28072,6 @@ intended	/man/2/security-0intro
 intended	/man/2/sexprs
 intended	/man/2/sys-stat
 intended	/man/2/translate
-intended	/man/2/ubfa
 intended	/man/2/venti
 intended	/man/3/ftl
 intended	/man/3/ip
@@ -28431,7 +28362,6 @@ internal	/man/2/sys-millisec
 internal	/man/2/tabs
 internal	/man/2/tk
 internal	/man/2/tkclient
-internal	/man/2/ubfa
 internal	/man/2/wmclient
 internal	/man/2/wmlib
 internal	/man/3/draw
@@ -28941,7 +28871,6 @@ invoking	/man/2/sexprs
 invoking	/man/2/sh
 invoking	/man/2/spki
 invoking	/man/2/sys-chdir
-invoking	/man/2/ubfa
 invoking	/man/2/workdir
 invoking	/man/8/getauthinfo
 invoking	/man/8/signer
@@ -28980,7 +28909,6 @@ iobuf	/man/2/imagefile
 iobuf	/man/2/pslib
 iobuf	/man/2/rfc822
 iobuf	/man/2/sexprs
-iobuf	/man/2/ubfa
 iobuf	/man/2/xml
 iobuf.gets	/man/6/dis
 ioexclude	/man/10/plan9.ini
@@ -29143,8 +29071,6 @@ isa	/man/10/plan9.ini
 isa	/man/3/pnp
 isa.h	/man/6/dis
 isaconfig	/man/10/inb
-isatom	/man/2/ubfa
-isbinary	/man/2/ubfa
 isclient	/man/3/tls
 iscompressed	/man/2/palmfile
 isdir	/man/10/newchan
@@ -29157,11 +29083,9 @@ isempty	/man/2/spree-cardlib
 iseve	/man/10/eve
 isfile	/man/6/plumbing
 ishash	/man/2/spki
-isint	/man/2/ubfa
 isize	/man/2/dis
 islist	/man/1/sh-sexprs
 islist	/man/2/sexprs
-islist	/man/2/ubfa
 islo	/man/10/splhi
 islocal	/man/2/spki
 ismulticast	/man/2/ip
@@ -29189,7 +29113,6 @@ iso	/man/6/utf
 iso11172	/man/3/mpeg
 iso9660	/man/4/dossrv
 isomorphic	/man/2/sexprs
-isop	/man/2/ubfa
 isopen	/man/2/styxservers
 isprefix	/man/2/spki
 isprincipal	/man/2/spki
@@ -29197,7 +29120,6 @@ isrange	/man/2/spree-cardlib
 isrdonly	/man/2/dbm
 isread	/man/10/dmainit
 isset	/man/2/spree-cardlib
-isstring	/man/2/ubfa
 issue	/man/1/mash-make
 issue	/man/10/styxserver
 issue	/man/3/cmd
@@ -29219,9 +29141,7 @@ issuing	/man/10/dmainit
 issuing	/man/2/security-login
 issuing	/man/5/open
 issuing	/man/6/login
-istag	/man/2/ubfa
 istmsg	/man/2/styx
-istuple	/man/2/ubfa
 isv4	/man/2/ip
 isvalid	/man/2/ip
 isword.p9.gz	/man/8/rdbgsrv
@@ -30554,7 +30474,6 @@ level	/man/2/styxservers
 level	/man/2/sys-fversion
 level	/man/2/tk
 level	/man/2/tkclient
-level	/man/2/ubfa
 level	/man/2/venti
 level	/man/2/w3c-css
 level	/man/2/wmlib
@@ -30733,7 +30652,6 @@ lib	/man/2/tabs
 lib	/man/2/tftp
 lib	/man/2/tkclient
 lib	/man/2/translate
-lib	/man/2/ubfa
 lib	/man/2/venti
 lib	/man/2/virgil
 lib	/man/2/w3c-css
@@ -30970,7 +30888,6 @@ limbo	/man/2/sys-pipe
 limbo	/man/2/sys-print
 limbo	/man/2/sys-self
 limbo	/man/2/tk
-limbo	/man/2/ubfa
 limbo	/man/2/w3c-css
 limbo	/man/3/arch
 limbo	/man/3/dbg
@@ -30998,7 +30915,6 @@ limbo's	/man/1/sh-std
 limbo's	/man/2/draw-0intro
 limbo's	/man/2/math-export
 limbo's	/man/2/plumbmsg
-limbo's	/man/2/ubfa
 limbo's	/man/6/sbl
 limbo.dis	/man/1/uuencode
 lime	/man/9/types
@@ -31334,7 +31250,6 @@ list	/man/2/sys-stat
 list	/man/2/sys-tokenize
 list	/man/2/tkclient
 list	/man/2/translate
-list	/man/2/ubfa
 list	/man/2/virgil
 list	/man/2/w3c-css
 list	/man/2/wmclient
@@ -31553,7 +31468,6 @@ literal	/man/10/mk
 literal	/man/2/dis
 literal	/man/2/math-0intro
 literal	/man/2/prefab-style
-literal	/man/2/ubfa
 literal	/man/3/dbg
 literal	/man/4/acme
 literal	/man/5/0intro
@@ -31764,7 +31678,6 @@ load	/man/2/timers
 load	/man/2/tk
 load	/man/2/tkclient
 load	/man/2/translate
-load	/man/2/ubfa
 load	/man/2/venti
 load	/man/2/virgil
 load	/man/2/w3c-css
@@ -32555,7 +32468,6 @@ mainly	/man/10/ar
 mainly	/man/10/styxserver
 mainly	/man/2/ip
 mainly	/man/2/palmfile
-mainly	/man/2/ubfa
 mainly	/man/3/cons
 mainly	/man/3/dbg
 mainly	/man/3/ftl
@@ -34536,7 +34448,6 @@ module	/man/2/timers
 module	/man/2/tk
 module	/man/2/tkclient
 module	/man/2/translate
-module	/man/2/ubfa
 module	/man/2/venti
 module	/man/2/w3c-css
 module	/man/2/wmclient
@@ -36164,7 +36075,6 @@ nil	/man/2/tftp
 nil	/man/2/tk
 nil	/man/2/tkclient
 nil	/man/2/translate
-nil	/man/2/ubfa
 nil	/man/2/virgil
 nil	/man/2/w3c-css
 nil	/man/2/wmclient
@@ -36323,7 +36233,6 @@ non	/man/2/sys-read
 non	/man/2/sys-tokenize
 non	/man/2/tftp
 non	/man/2/translate
-non	/man/2/ubfa
 non	/man/2/w3c-css
 non	/man/2/wmlib
 non	/man/2/wmsrv
@@ -36867,7 +36776,6 @@ obj	/man/10/mk
 obj	/man/2/spree
 obj	/man/2/spree-allow
 obj	/man/2/spree-cardlib
-obj	/man/2/ubfa
 object	/man/1/ar
 object	/man/1/asm
 object	/man/1/bind
@@ -36932,7 +36840,6 @@ objstore	/man/2/spree-allow
 objstore	/man/2/spree-cardlib
 objstore	/man/2/spree-objstore
 objstore.m	/man/2/spree-objstore
-objtag	/man/2/ubfa
 objtype	/man/10/2a
 objtype	/man/10/2c
 objtype	/man/10/2l
@@ -37132,7 +37039,6 @@ occurs	/man/2/sys-file2chan
 occurs	/man/2/sys-fversion
 occurs	/man/2/sys-iounit
 occurs	/man/2/sys-open
-occurs	/man/2/ubfa
 occurs	/man/2/xml
 occurs	/man/3/ip
 occurs	/man/3/prog
@@ -37438,7 +37344,6 @@ op	/man/2/sexprs
 op	/man/2/spki
 op	/man/2/spree-cardlib
 op	/man/2/translate
-op	/man/2/ubfa
 op	/man/2/w3c-css
 op	/man/3/dbg
 op	/man/6/dis
@@ -37672,7 +37577,6 @@ operation	/man/2/styxservers
 operation	/man/2/sys-0intro
 operation	/man/2/sys-open
 operation	/man/2/sys-stat
-operation	/man/2/ubfa
 operation	/man/2/w3c-css
 operation	/man/3/dbg
 operation	/man/3/dup
@@ -37735,7 +37639,6 @@ operations	/man/2/sys-0intro
 operations	/man/2/sys-bind
 operations	/man/2/sys-export
 operations	/man/2/sys-iounit
-operations	/man/2/ubfa
 operations	/man/2/wmsrv
 operations	/man/3/dbg
 operations	/man/3/draw
@@ -37793,7 +37696,6 @@ operator	/man/2/regex
 operator	/man/2/sets
 operator	/man/2/sh
 operator	/man/2/sys-self
-operator	/man/2/ubfa
 operator	/man/2/w3c-css
 operator	/man/3/dbg
 operator	/man/3/draw
@@ -38651,7 +38553,6 @@ output	/man/2/sexprs
 output	/man/2/sys-0intro
 output	/man/2/sys-dup
 output	/man/2/sys-print
-output	/man/2/ubfa
 output	/man/2/w3c-css
 output	/man/3/audio
 output	/man/3/cmd
@@ -38712,7 +38613,6 @@ outside	/man/2/sexprs
 outside	/man/2/styxflush
 outside	/man/2/sys-0intro
 outside	/man/2/sys-self
-outside	/man/2/ubfa
 outside	/man/2/w3c-css
 outside	/man/3/draw
 outside	/man/3/kprof
@@ -38898,7 +38798,6 @@ p.y	/man/6/font
 p0,p1	/man/2/draw-image
 p9any	/man/4/factotum
 p9sk1	/man/4/factotum
-pa	/man/2/ubfa
 pa	/man/6/ubfa
 pack	/man/1/tktester
 pack	/man/2/palmfile
@@ -39271,7 +39170,6 @@ parameter	/man/2/sys-0intro
 parameter	/man/2/sys-fversion
 parameter	/man/2/sys-read
 parameter	/man/2/sys-self
-parameter	/man/2/ubfa
 parameter	/man/2/w3c-css
 parameter	/man/3/0intro
 parameter	/man/3/dbg
@@ -39307,7 +39205,6 @@ parameters	/man/2/rfc822
 parameters	/man/2/security-0intro
 parameters	/man/2/security-login
 parameters	/man/2/sexprs
-parameters	/man/2/ubfa
 parameters	/man/3/draw
 parameters	/man/3/dynld
 parameters	/man/3/fpga
@@ -39926,7 +39823,6 @@ path	/man/2/timers
 path	/man/2/tk
 path	/man/2/tkclient
 path	/man/2/translate
-path	/man/2/ubfa
 path	/man/2/venti
 path	/man/2/virgil
 path	/man/2/w3c-css
@@ -40468,7 +40364,6 @@ pick	/man/2/styx
 pick	/man/2/styxflush
 pick	/man/2/styxservers
 pick	/man/2/styxservers-nametree
-pick	/man/2/ubfa
 pick	/man/2/w3c-css
 pick	/man/2/xml
 pick	/man/6/colour
@@ -40588,7 +40483,6 @@ pipes	/man/2/sys-pipe
 pipes	/man/2/sys-stat
 pitch	/man/1/acme
 pitfalls	/man/1/sh-std
-pittsburg	/man/2/ubfa
 pittsburg	/man/6/ubfa
 pixel	/man/1/ebook
 pixel	/man/2/draw-0intro
@@ -41953,7 +41847,6 @@ printable	/man/2/print
 printable	/man/2/sexprs
 printable	/man/2/styx
 printable	/man/2/sys-0intro
-printable	/man/2/ubfa
 printable	/man/5/0intro
 printable	/man/6/sexprs
 printable	/man/6/users
@@ -43227,7 +43120,6 @@ provides	/man/2/timers
 provides	/man/2/tk
 provides	/man/2/tkclient
 provides	/man/2/translate
-provides	/man/2/ubfa
 provides	/man/2/venti
 provides	/man/2/virgil
 provides	/man/2/wmclient
@@ -44255,7 +44147,6 @@ read	/man/2/sys-pipe
 read	/man/2/sys-read
 read	/man/2/sys-stat
 read	/man/2/tk
-read	/man/2/ubfa
 read	/man/2/venti
 read	/man/3/arch
 read	/man/3/audio
@@ -44567,7 +44458,6 @@ reads	/man/2/sys-dirread
 reads	/man/2/sys-iounit
 reads	/man/2/sys-pipe
 reads	/man/2/sys-read
-reads	/man/2/ubfa
 reads	/man/3/arch
 reads	/man/3/audio
 reads	/man/3/cmd
@@ -44608,7 +44498,6 @@ reads	/man/8/styxchat
 readstr	/man/10/error
 readstr	/man/10/readnum
 readstr	/man/2/styxservers
-readubf	/man/2/ubfa
 readxbitmap	/man/2/imagefile
 readxbitmap.b	/man/2/imagefile
 readxbmpath	/man/2/imagefile
@@ -45079,7 +44968,6 @@ recursively	/man/10/styxserver
 recursively	/man/2/draw-0intro
 recursively	/man/2/format
 recursively	/man/2/sexprs
-recursively	/man/2/ubfa
 recursively	/man/6/proto
 recursively	/man/8/create
 recv	/man/1/sh-tk
@@ -45270,7 +45158,6 @@ ref	/man/2/timers
 ref	/man/2/tk
 ref	/man/2/tkclient
 ref	/man/2/translate
-ref	/man/2/ubfa
 ref	/man/2/venti
 ref	/man/2/w3c-css
 ref	/man/2/wmclient
@@ -45297,7 +45184,6 @@ refer	/man/2/spree
 refer	/man/2/styxservers
 refer	/man/2/sys-bind
 refer	/man/2/sys-fd2path
-refer	/man/2/ubfa
 refer	/man/3/fs
 refer	/man/3/ip
 refer	/man/5/0intro
@@ -45380,7 +45266,6 @@ referenced	/man/2/daytime
 referenced	/man/2/keyring-sha1
 referenced	/man/2/spree
 referenced	/man/2/styxservers-nametree
-referenced	/man/2/ubfa
 referenced	/man/3/srv9
 referenced	/man/4/mntgen
 referenced	/man/6/sbl
@@ -46479,7 +46364,6 @@ represent	/man/2/sh
 represent	/man/2/styx
 represent	/man/2/styxservers
 represent	/man/2/sys-0intro
-represent	/man/2/ubfa
 represent	/man/2/venti
 represent	/man/2/w3c-css
 represent	/man/4/registry
@@ -46531,7 +46415,6 @@ representation	/man/2/styx
 representation	/man/2/styxservers
 representation	/man/2/sys-0intro
 representation	/man/2/sys-print
-representation	/man/2/ubfa
 representation	/man/2/workdir
 representation	/man/3/cons
 representation	/man/3/prog
@@ -46550,7 +46433,6 @@ representations	/man/10/kbdputc
 representations	/man/10/styx
 representations	/man/2/math-export
 representations	/man/2/plumbmsg
-representations	/man/2/ubfa
 representations	/man/6/sexprs
 representative	/man/10/plan9.ini
 representative	/man/10/print
@@ -46672,7 +46554,6 @@ represents	/man/2/spree-cardlib
 represents	/man/2/styxservers
 represents	/man/2/sys-fversion
 represents	/man/2/translate
-represents	/man/2/ubfa
 represents	/man/2/venti
 represents	/man/2/w3c-css
 represents	/man/2/wmsrv
@@ -47678,7 +47559,6 @@ return	/man/2/sys-sleep
 return	/man/2/sys-stat
 return	/man/2/tk
 return	/man/2/translate
-return	/man/2/ubfa
 return	/man/2/wmsrv
 return	/man/2/xml
 return	/man/3/arch
@@ -48020,7 +47900,6 @@ returns	/man/2/timers
 returns	/man/2/tk
 returns	/man/2/tkclient
 returns	/man/2/translate
-returns	/man/2/ubfa
 returns	/man/2/venti
 returns	/man/2/virgil
 returns	/man/2/w3c-css
@@ -49971,7 +49850,6 @@ self	/man/2/styxservers-nametree
 self	/man/2/sys-self
 self	/man/2/timers
 self	/man/2/translate
-self	/man/2/ubfa
 self	/man/2/venti
 self	/man/2/wmclient
 self	/man/2/wmsrv
@@ -50723,7 +50601,6 @@ setting	/man/2/print
 setting	/man/2/security-ssl
 setting	/man/2/spree-cardlib
 setting	/man/2/sys-stat
-setting	/man/2/ubfa
 setting	/man/3/cmd
 setting	/man/3/flash
 setting	/man/3/ftl
@@ -50796,7 +50673,6 @@ sexprs	/man/2/format
 sexprs	/man/2/sexprs
 sexprs	/man/2/spki
 sexprs	/man/2/spki-verifier
-sexprs	/man/2/ubfa
 sexprs	/man/4/factotum
 sexprs	/man/6/json
 sexprs	/man/6/sexprs
@@ -51438,7 +51314,6 @@ signs	/man/10/acid
 signs	/man/10/atoi
 signs	/man/2/spki
 signs	/man/6/auth
-sigplan	/man/2/ubfa
 sigplan	/man/6/ubfa
 silent	/man/2/math-fp
 silently	/man/1/mv
@@ -51490,7 +51365,6 @@ similar	/man/2/string
 similar	/man/2/sys-0intro
 similar	/man/2/sys-print
 similar	/man/2/translate
-similar	/man/2/ubfa
 similar	/man/2/wmsrv
 similar	/man/3/audio
 similar	/man/3/cmd
@@ -51943,7 +51817,6 @@ smaller	/man/2/math-0intro
 smaller	/man/2/prefab-element
 smaller	/man/2/sys-0intro
 smaller	/man/2/sys-iounit
-smaller	/man/2/ubfa
 smaller	/man/6/sbl
 smaller	/man/6/sexprs
 smaller	/man/9/grid
@@ -52127,7 +52000,6 @@ sortkey	/man/2/readdir
 sorts	/man/1/sort
 sorts	/man/2/readdir
 sorts	/man/2/spree-cardlib
-sorts	/man/2/ubfa
 sorts	/man/6/dis
 sought	/man/1/limbo
 sought	/man/10/2c
@@ -52430,7 +52302,6 @@ source	/man/2/tftp
 source	/man/2/tk
 source	/man/2/tkclient
 source	/man/2/translate
-source	/man/2/ubfa
 source	/man/2/venti
 source	/man/2/virgil
 source	/man/2/w3c-css
@@ -52893,7 +52764,6 @@ specific	/man/2/spree-allow
 specific	/man/2/spree-cardlib
 specific	/man/2/sys-iounit
 specific	/man/2/tabs
-specific	/man/2/ubfa
 specific	/man/3/arch
 specific	/man/3/cons
 specific	/man/3/ether
@@ -53143,8 +53013,6 @@ speed	/man/8/ai2key
 speed	/man/8/rdbgsrv
 speed	/man/9/text
 speeds	/man/1/acme
-spelling	/man/2/ubfa
-spellings	/man/2/ubfa
 spending	/man/1/prof
 spent	/man/1/prof
 spent	/man/10/kprof
@@ -53812,7 +53680,6 @@ statement	/man/10/odbc
 statement	/man/2/debug
 statement	/man/2/popup
 statement	/man/2/spki-verifier
-statement	/man/2/ubfa
 statement	/man/2/w3c-css
 statement	/man/3/prog
 statement	/man/6/sbl
@@ -54114,7 +53981,6 @@ storage	/man/2/spree
 storage	/man/2/spree-objstore
 storage	/man/2/styxservers-nametree
 storage	/man/2/sys-stat
-storage	/man/2/ubfa
 storage	/man/2/venti
 storage	/man/2/xml
 storage	/man/3/draw
@@ -54194,7 +54060,6 @@ stored	/man/2/spree-objstore
 stored	/man/2/styxservers-nametree
 stored	/man/2/sys-0intro
 stored	/man/2/sys-fd2path
-stored	/man/2/ubfa
 stored	/man/2/xml
 stored	/man/3/logfs
 stored	/man/3/pipe
@@ -54310,7 +54175,6 @@ stream	/man/2/rfc822
 stream	/man/2/spree
 stream	/man/2/sys-print
 stream	/man/2/sys-read
-stream	/man/2/ubfa
 stream	/man/3/ip
 stream	/man/3/mpeg
 stream	/man/3/pipe
@@ -54525,7 +54389,6 @@ string	/man/2/tftp
 string	/man/2/tk
 string	/man/2/tkclient
 string	/man/2/translate
-string	/man/2/ubfa
 string	/man/2/venti
 string	/man/2/virgil
 string	/man/2/w3c-css
@@ -54663,7 +54526,6 @@ strings	/man/2/sys-0intro
 strings	/man/2/sys-fversion
 strings	/man/2/sys-print
 strings	/man/2/tk
-strings	/man/2/ubfa
 strings	/man/3/audio
 strings	/man/3/cons
 strings	/man/3/draw
@@ -55089,7 +54951,6 @@ subcommands	/man/1/tktester
 subcomponent	/man/10/conf
 subcomponents	/man/1/webgrab
 subcomponents	/man/2/spki
-subcomponents	/man/2/ubfa
 subcube	/man/6/colour
 subcubes	/man/6/colour
 subdirectories	/man/1/acme
@@ -55346,7 +55207,6 @@ success	/man/2/sys-export
 success	/man/2/sys-pipe
 success	/man/2/sys-stat
 success	/man/2/tftp
-success	/man/2/ubfa
 success	/man/3/boot
 success	/man/3/cmd
 success	/man/3/flash
@@ -55430,7 +55290,6 @@ successive	/man/10/devattach
 successive	/man/10/styx
 successive	/man/2/arg
 successive	/man/2/sys-byte2char
-successive	/man/2/ubfa
 successive	/man/4/registry
 successive	/man/5/walk
 successive	/man/6/font
@@ -55746,7 +55605,6 @@ supports	/man/2/factotum
 supports	/man/2/security-0intro
 supports	/man/2/spki-verifier
 supports	/man/2/sys-open
-supports	/man/2/ubfa
 supports	/man/3/audio
 supports	/man/3/i82365
 supports	/man/3/sd
@@ -55908,7 +55766,6 @@ symbolic	/man/2/format
 symbolic	/man/2/registries
 symbolic	/man/2/sexprs
 symbolic	/man/2/sys-stat
-symbolic	/man/2/ubfa
 symbolic	/man/4/ftpfs
 symbolic	/man/6/dis
 symbolic	/man/6/ndb
@@ -56449,7 +56306,6 @@ tag	/man/2/spki-verifier
 tag	/man/2/spree-allow
 tag	/man/2/styx
 tag	/man/2/styxflush
-tag	/man/2/ubfa
 tag	/man/2/wmlib
 tag	/man/2/wmsrv
 tag	/man/2/xml
@@ -56489,7 +56345,6 @@ tagged	/man/1/sh
 tagged	/man/10/styxserver
 tagged	/man/2/asn1
 tagged	/man/2/spree-allow
-tagged	/man/2/ubfa
 tagged	/man/2/venti
 tagged	/man/2/wmsrv
 tagged	/man/3/tls
@@ -56506,7 +56361,6 @@ tagname	/man/9/text
 tagno	/man/4/factotum
 tagof	/man/2/asn1
 tagof	/man/2/styxflush
-tagof	/man/2/ubfa
 tagorid	/man/9/canvas
 tags	/man/1/acme
 tags	/man/1/brutus
@@ -56618,7 +56472,6 @@ taking	/man/2/sh
 taking	/man/2/styxservers
 taking	/man/3/boot
 talk	/man/1/telnet
-talk	/man/2/ubfa
 talk	/man/6/ubfa
 tall	/man/2/prefab-element
 tall	/man/9/text
@@ -57042,7 +56895,6 @@ text	/man/2/sys-fversion
 text	/man/2/sys-print
 text	/man/2/tk
 text	/man/2/translate
-text	/man/2/ubfa
 text	/man/2/venti
 text	/man/2/w3c-css
 text	/man/2/xml
@@ -57347,7 +57199,6 @@ tickle	/man/4/palmsrv
 ticks	/man/10/delay
 ticks	/man/10/seconds
 ticks	/man/3/kprof
-tidier	/man/2/ubfa
 tidies	/man/1/cleanname
 tied	/man/9/text
 tighter	/man/6/attrdb
@@ -57966,7 +57817,6 @@ traces	/man/3/cons
 traceset	/man/2/styxservers
 tracing	/man/2/dhcpclient
 tracing	/man/2/styx
-tracing	/man/2/ubfa
 tracing	/man/3/ftl
 tracing	/man/3/ip
 tracing	/man/3/logfs
@@ -58162,7 +58012,6 @@ transmitted	/man/2/msgio
 transmitted	/man/2/plumbmsg
 transmitted	/man/2/sys-iounit
 transmitted	/man/2/sys-print
-transmitted	/man/2/ubfa
 transmitted	/man/3/dbg
 transmitted	/man/3/draw
 transmitted	/man/3/ip
@@ -58195,7 +58044,6 @@ transport	/man/2/keyring-getmsg
 transport	/man/2/msgio
 transport	/man/2/sexprs
 transport	/man/2/smtp
-transport	/man/2/ubfa
 transport	/man/3/ip
 transport	/man/3/tls
 transport	/man/4/export
@@ -58269,7 +58117,6 @@ tree	/man/2/styxservers
 tree	/man/2/styxservers-nametree
 tree	/man/2/sys-0intro
 tree	/man/2/sys-bind
-tree	/man/2/ubfa
 tree	/man/2/venti
 tree	/man/2/xml
 tree	/man/3/0intro
@@ -58493,7 +58340,6 @@ tuple	/man/2/sys-stat
 tuple	/man/2/sys-tokenize
 tuple	/man/2/tkclient
 tuple	/man/2/translate
-tuple	/man/2/ubfa
 tuple	/man/2/venti
 tuple	/man/2/w3c-css
 tuple	/man/2/wmlib
@@ -58515,7 +58361,6 @@ tuples	/man/2/rfc822
 tuples	/man/2/sh
 tuples	/man/2/sys-0intro
 tuples	/man/2/sys-file2chan
-tuples	/man/2/ubfa
 tuples	/man/2/w3c-css
 tuples	/man/4/factotum
 tuples	/man/6/ubfa
@@ -58672,7 +58517,6 @@ type	/man/2/sys-file2chan
 type	/man/2/sys-print
 type	/man/2/sys-self
 type	/man/2/sys-stat
-type	/man/2/ubfa
 type	/man/2/venti
 type	/man/2/w3c-css
 type	/man/2/xml
@@ -58968,14 +58812,10 @@ u32int	/man/5/attach
 uart	/man/10/plan9.ini
 uart0	/man/10/intrenable
 uarts	/man/10/plan9.ini
-ubf	/man/2/ubfa
 ubf	/man/6/ubfa
-ubfa	/man/2/ubfa
 ubfa	/man/6/json
 ubfa	/man/6/sexprs
 ubfa	/man/6/ubfa
-ubfa.b	/man/2/ubfa
-ubfa.m	/man/2/ubfa
 ubiquitous	/man/1/wm-misc
 uboot	/man/10/5cv
 uc	/man/3/fs
@@ -59362,7 +59202,6 @@ unions	/man/10/c2l
 uniprocessor	/man/10/lock
 uniq	/man/1/comm
 uniq	/man/1/uniq
-uniq	/man/2/ubfa
 uniq.b	/man/1/uniq
 unique	/man/1/acme
 unique	/man/1/deb
@@ -59884,7 +59723,6 @@ url	/man/2/w3c-css
 urls	/man/1/charon
 us005214703	/man/2/keyring-crypt
 usa	/man/1/miniterm
-usa	/man/2/ubfa
 usa	/man/6/ubfa
 usable	/man/1/collab-clients
 usable	/man/10/allocb
@@ -60266,7 +60104,6 @@ using	/man/2/tftp
 using	/man/2/timers
 using	/man/2/tk
 using	/man/2/translate
-using	/man/2/ubfa
 using	/man/2/wmsrv
 using	/man/3/arch
 using	/man/3/audio
@@ -60503,23 +60340,7 @@ uudecode	/man/1/uuencode
 uudecode.b	/man/1/uuencode
 uuencode	/man/1/uuencode
 uuencode.b	/man/1/uuencode
-uvalue	/man/2/ubfa
-uvalue.atom	/man/2/ubfa
-uvalue.atom.s	/man/2/ubfa
-uvalue.binary	/man/2/ubfa
-uvalue.int	/man/2/ubfa
-uvalue.list	/man/2/ubfa
-uvalue.string	/man/2/ubfa
-uvalue.tag	/man/2/ubfa
-uvalue.tuple	/man/2/ubfa
-uvatom	/man/2/ubfa
-uvbinary	/man/2/ubfa
-uvint	/man/2/ubfa
-uvlist	/man/2/ubfa
 uvlong	/man/10/styxserver
-uvstring	/man/2/ubfa
-uvtag	/man/2/ubfa
-uvtuple	/man/2/ubfa
 ux	/man/10/print
 uy0	/man/3/tv
 v.bytes	/man/2/asn1
@@ -60559,7 +60380,6 @@ val	/man/2/registries
 val	/man/2/rfc822
 val	/man/2/spree
 val	/man/2/stringinttab
-val	/man/2/ubfa
 val	/man/3/dbg
 val	/man/3/gpio
 val	/man/4/factotum
@@ -60789,7 +60609,6 @@ value	/man/2/sys-stat
 value	/man/2/sys-utfbytes
 value	/man/2/sys-werrstr
 value	/man/2/timers
-value	/man/2/ubfa
 value	/man/2/w3c-css
 value	/man/2/wmsrv
 value	/man/2/xml
@@ -60991,7 +60810,6 @@ values	/man/2/sys-0intro
 values	/man/2/sys-fversion
 values	/man/2/sys-open
 values	/man/2/sys-stat
-values	/man/2/ubfa
 values	/man/2/w3c-css
 values	/man/3/audio
 values	/man/3/cons
@@ -61112,7 +60930,6 @@ variable	/man/2/spree-objstore
 variable	/man/2/sys-dial
 variable	/man/2/sys-dirread
 variable	/man/2/sys-self
-variable	/man/2/ubfa
 variable	/man/3/cons
 variable	/man/3/dbg
 variable	/man/3/ds
@@ -61186,7 +61003,6 @@ variant	/man/2/asn1
 variant	/man/2/dis
 variant	/man/2/sexprs
 variant	/man/2/spki
-variant	/man/2/ubfa
 variant	/man/4/dossrv
 variant	/man/6/keyboard
 variant	/man/6/sbl
@@ -61237,7 +61053,6 @@ various	/man/2/msgio
 various	/man/2/prefab-environ
 various	/man/2/styx
 various	/man/2/styxservers
-various	/man/2/ubfa
 various	/man/2/wmsrv
 various	/man/2/xml
 various	/man/3/gpio
@@ -62573,7 +62388,6 @@ works	/man/6/namespace
 works	/man/6/ndb
 works	/man/8/ping
 works	/man/8/prep
-workshop	/man/2/ubfa
 workshop	/man/6/ubfa
 worlds	/man/3/fs
 worrying	/man/1/sh-regex
@@ -62666,7 +62480,6 @@ write	/man/2/sys-pipe
 write	/man/2/sys-read
 write	/man/2/sys-remove
 write	/man/2/sys-stat
-write	/man/2/ubfa
 write	/man/2/venti
 write	/man/3/boot
 write	/man/3/cap
@@ -62806,7 +62619,6 @@ writes	/man/2/sys-pipe
 writes	/man/2/sys-print
 writes	/man/2/sys-read
 writes	/man/2/tftp
-writes	/man/2/ubfa
 writes	/man/2/venti
 writes	/man/3/arch
 writes	/man/3/audio
@@ -62842,7 +62654,6 @@ writes	/man/8/signer
 writes	/man/8/styxchat
 writes	/man/8/styxmon
 writes	/man/8/touchcal
-writeubf	/man/2/ubfa
 writing	/man/1/alphabet-main
 writing	/man/1/charon
 writing	/man/1/crypt

@@ -1,0 +1,371 @@
+// UBF(A), Joe Armstrong's textual data format, read and written as the
+// Limbo UBFa module did. A value is an atom 'a', a string "s", an integer,
+// a binary N~bytes~, a tuple {a b}, a list built from # (empty) with
+// value & (cons), or a tagged value `tag`. Text is read by a small
+// stack machine: values are pushed, >c pops one into register c, a
+// register's name pushes it again, %...% is a comment and $ ends an
+// object.
+//
+// Values live in a Tree and are named by their index there. Unlike the
+// Limbo module, an integer cut off by the end of the text is an error
+// and not an uncaught exception.
+#import "std/vec";
+using Limbo :: #import "limbo_text";
+
+AtomValue :: 0;    // text is its name
+IntegerValue :: 1; // number
+StringValue :: 2;  // text
+BinaryValue :: 3;  // text holds the bytes
+TupleValue :: 4;   // items
+ListValue :: 5;    // items, first element first
+TagValue :: 6;     // text is the tag and items[0] the tagged value
+
+Value :: struct {
+    kind: s64;
+    number: s64;
+    text: Text;
+    items: Vec(s64);
+}
+
+Tree :: struct {
+    values: Vec(Value);
+}
+
+New :: (tree: *Tree, kind: s64) -> s64 {
+    value: Value;
+    value.kind = kind;
+    VecPush(tree.values, value);
+    return tree.values.count - 1;
+}
+
+NewText :: (tree: *Tree, kind: s64, text: string) -> s64 {
+    value := New(tree, kind);
+    BuilderAppend(tree.values[value].text.bytes, text);
+    return value;
+}
+
+NewInteger :: (tree: *Tree, number: s64) -> s64 {
+    value := New(tree, IntegerValue);
+    tree.values[value].number = number;
+    return value;
+}
+
+// A tuple or a list of the values in items.
+NewSequence :: (tree: *Tree, kind: s64, items: []s64) -> s64 {
+    value := New(tree, kind);
+    for items { VecPush(tree.values[value].items, it) }
+    return value;
+}
+
+NewTag :: (tree: *Tree, tag: string, tagged: s64) -> s64 {
+    value := NewText(tree, TagValue, tag);
+    VecPush(tree.values[value].items, tagged);
+    return value;
+}
+
+Parser :: struct {
+    input: string;
+    at: s64;
+    stack: Vec(s64);    // the values of every open tuple, innermost last
+    registers: [256]s64; // value + 1, 0 for an empty register
+    error: Text;        // the first error
+}
+
+Fail :: (p: *Parser, message: string) -> s64 {
+    if p.error.bytes.count == 0 { BuilderAppend(p.error.bytes, message) }
+    return -1;
+}
+
+Failed :: (p: *Parser) -> bool { return p.error.bytes.count > 0 }
+
+// The next byte, or -1 with an error at the end of the text.
+GetByte :: (p: *Parser) -> s64 {
+    if p.at >= p.input.count { return Fail(p, "unexpected end-of-file") }
+    p.at += 1;
+    return cast(s64)p.input[p.at - 1];
+}
+
+// Pops a value of the tuple whose values start at base.
+Pop :: (p: *Parser, base: s64) -> s64 {
+    if p.stack.count <= base { return Fail(p, "parse stack underflow") }
+    value := p.stack[p.stack.count - 1];
+    unused VecResize(p.stack, p.stack.count - 1);
+    return value;
+}
+
+// Bytes that cannot name a register.
+Special :: (c: s64) -> bool {
+    marks := "\n\r\t ,}$>#&\"'{~-%`";
+    for i: 0..marks.count - 1 { if c == cast(s64)marks[i] { return true } }
+    return c >= #char "0" && c <= #char "9";
+}
+
+// Reads text up to delim into out, a backslash keeping a backslash or a
+// delim. False with an error when the text ends first.
+ReadDelimited :: (p: *Parser, delim: s64, out: *Vec(u8)) -> bool {
+    while true {
+        if p.at >= p.input.count { unused Fail(p, "unexpected end of file"); return false }
+        rune, width := Limbo.RuneAt(p.input, p.at);
+        p.at += width;
+        if rune == delim { return true }
+        if rune == #char "\\" {
+            rune = GetByte(p);
+            if rune < 0 { return false }
+            if rune != #char "\\" && rune != delim { unused Fail(p, "invalid escape"); return false }
+        }
+        Limbo.AppendRune(out, rune);
+    }
+    return false;
+}
+
+ReadInteger :: (p: *Parser) -> s64 {
+    sign: s64 = 1;
+    c := GetByte(p);
+    if c == #char "-" {
+        sign = -1;
+        c = GetByte(p);
+        if c >= 0 && (c < #char "0" || c > #char "9") { return Fail(p, "expected integer literal") }
+    }
+    n: s64 = 0;
+    while c >= #char "0" && c <= #char "9" {
+        n = n * 10 + (c - #char "0") * sign;
+        if n > 2147483647 || n < -2147483648 { return Fail(p, "integer overflow") }
+        c = GetByte(p);
+    }
+    if c >= 0 { p.at -= 1 }
+    return n;
+}
+
+// Reads one value that is not built from the stack alone; -1 on error.
+ReadValue :: (p: *Parser, tree: *Tree, base: s64) -> s64 {
+    c := GetByte(p);
+    if c < 0 { return -1 }
+    if c == #char "#" { return New(tree, ListValue) }
+    if c == #char "&" {
+        first := Pop(p, base);
+        rest := Pop(p, base);
+        if Failed(p) { return -1 }
+        if tree.values[rest].kind != ListValue {
+            message: Vec(u8);
+            BuilderAppend(message, "can't make cons with cdr ");
+            Describe(tree, rest, *message);
+            return Fail(p, TextView(message[:]));
+        }
+        // A new list: the old one may be shared through a register.
+        list := New(tree, ListValue);
+        VecPush(tree.values[list].items, first);
+        for i: 0..tree.values[rest].items.count - 1 { VecPush(tree.values[list].items, tree.values[rest].items[i]) }
+        return list;
+    }
+    if c == 34 || c == #char "'" {
+        text: Vec(u8);
+        if !ReadDelimited(p, c, *text) { return -1 }
+        return NewText(tree, ifx c == 34 then StringValue else AtomValue, TextView(text[:]));
+    }
+    if c == #char "{" {
+        object := ReadObject(p, tree, p.stack.count);
+        if object < 0 { return -1 }
+        if tree.values[object].kind != TupleValue { return Fail(p, "expected tuple: obj") }
+        return object;
+    }
+    if c == #char "~" {
+        length := Pop(p, base);
+        if Failed(p) { return -1 }
+        if tree.values[length].kind != IntegerValue { return Fail(p, "expected Int before ~") }
+        n := tree.values[length].number;
+        if n < 0 { return Fail(p, "negative length for binary") }
+        if p.input.count - p.at < n {
+            p.at = p.input.count;
+            return Fail(p, "cannot read binary data: short read");
+        }
+        data := p.input[p.at:p.at + n];
+        p.at += n;
+        closing := GetByte(p);
+        if closing < 0 { return -1 }
+        if closing != #char "~" { return Fail(p, "missing closing ~") }
+        return NewText(tree, BinaryValue, data);
+    }
+    if c == #char "-" || (c >= #char "0" && c <= #char "9") {
+        p.at -= 1;
+        n := ReadInteger(p);
+        if Failed(p) { return -1 }
+        return NewInteger(tree, n);
+    }
+    if p.registers[c] != 0 { return p.registers[c] - 1 }
+    p.at -= 1; // point to the error
+    message: Vec(u8);
+    digits := "0123456789abcdef";
+    BuilderAppend(message, "invalid start character/undefined register #");
+    VecPush(message, digits[c >> 4]);
+    VecPush(message, digits[c & 15]);
+    return Fail(p, TextView(message[:]));
+}
+
+// Reads up to the end of an object: } makes a tuple of the values
+// pushed since base, $ gives the one value there. -1 on error.
+ReadObject :: (p: *Parser, tree: *Tree, base: s64) -> s64 {
+    while !Failed(p) {
+        c := GetByte(p);
+        if c < 0 { break }
+        if c == #char "\n" || c == #char "\r" || c == #char "\t" || c == #char " " || c == #char "," { continue }
+        if c == #char "%" {
+            c = GetByte(p);
+            while c >= 0 && c != #char "%" {
+                if c == #char "\\" {
+                    c = GetByte(p);
+                    if c >= 0 && c != #char "\\" && c != #char "%" { unused Fail(p, "invalid escape in comment") }
+                }
+                if Failed(p) { break }
+                c = GetByte(p);
+            }
+        } else if c == #char "}" {
+            tuple := New(tree, TupleValue);
+            for i: base..p.stack.count - 1 { VecPush(tree.values[tuple].items, p.stack[i]) }
+            unused VecResize(p.stack, base);
+            return tuple;
+        } else if c == #char "$" {
+            if p.stack.count - base != 1 {
+                message: Vec(u8);
+                BuilderPrint(*message, "unbalanced stack: size %", p.stack.count - base);
+                return Fail(p, TextView(message[:]));
+            }
+            return Pop(p, base);
+        } else if c == #char ">" {
+            register := GetByte(p);
+            if register < 0 { break }
+            if Special(register) { return Fail(p, "invalid register name") }
+            value := Pop(p, base);
+            if value >= 0 { p.registers[register] = value + 1 }
+        } else if c == #char "`" {
+            tag: Vec(u8);
+            if !ReadDelimited(p, c, *tag) { break }
+            tagged := Pop(p, base);
+            if tagged >= 0 { VecPush(p.stack, NewTag(tree, TextView(tag[:]), tagged)) }
+        } else {
+            p.at -= 1;
+            value := ReadValue(p, tree, base);
+            if value >= 0 { VecPush(p.stack, value) }
+        }
+    }
+    return -1;
+}
+
+// Reads the object that starts at byte offset at into tree. Returns the
+// value and the offset after its $, or -1 and why in error, as
+// "ubf error: offset N: reason" with the offset the reader had reached.
+Read :: (tree: *Tree, input: string, at: s64, error: *Text) -> (value: s64, next: s64) {
+    VecClear(error.bytes);
+    p: Parser;
+    p.input = input;
+    p.at = at;
+    value := ReadObject(*p, tree, 0);
+    if Failed(*p) {
+        BuilderPrint(*error.bytes, "ubf error: offset %: %", p.at, TextView(p.error));
+        return -1, p.at;
+    }
+    return value, p.at;
+}
+
+Delimited :: (out: *Vec(u8), text: string, delim: u8) {
+    VecPush(<<out, delim);
+    for text {
+        if it == delim || it == #char "\\" { VecPush(<<out, #char "\\") }
+        VecPush(<<out, it);
+    }
+    VecPush(<<out, delim);
+}
+
+// Appends a value in UBF(A), without the $ that ends an object.
+WriteValue :: (tree: *Tree, value: s64, out: *Vec(u8)) {
+    kind := tree.values[value].kind;
+    if kind == AtomValue { Delimited(out, TextView(tree.values[value].text), #char "'") }
+    if kind == StringValue { Delimited(out, TextView(tree.values[value].text), 34) }
+    if kind == IntegerValue { BuilderPrint(out, "%", tree.values[value].number) }
+    if kind == TupleValue {
+        VecPush(<<out, #char "{");
+        for i: 0..tree.values[value].items.count - 1 {
+            if i > 0 { VecPush(<<out, #char " ") }
+            WriteValue(tree, tree.values[value].items[i], out);
+        }
+        VecPush(<<out, #char "}");
+    }
+    if kind == ListValue {
+        VecPush(<<out, #char "#");
+        i := tree.values[value].items.count;
+        while i > 0 {
+            i -= 1;
+            WriteValue(tree, tree.values[value].items[i], out);
+            VecPush(<<out, #char "&");
+        }
+    }
+    if kind == BinaryValue {
+        BuilderPrint(out, "%~", tree.values[value].text.bytes.count);
+        BuilderAppend(<<out, TextView(tree.values[value].text));
+        VecPush(<<out, #char "~");
+    }
+    if kind == TagValue {
+        WriteValue(tree, tree.values[value].items[0], out);
+        Delimited(out, TextView(tree.values[value].text), #char "`");
+    }
+}
+
+// Appends a whole object: the value and its $.
+Write :: (tree: *Tree, value: s64, out: *Vec(u8)) {
+    WriteValue(tree, value, out);
+    VecPush(<<out, #char "$");
+}
+
+// Appends a value for a person to read, as the Limbo text() did.
+Describe :: (tree: *Tree, value: s64, out: *Vec(u8)) {
+    kind := tree.values[value].kind;
+    if kind == AtomValue || kind == StringValue { BuilderAppend(<<out, TextView(tree.values[value].text)) }
+    if kind == IntegerValue { BuilderPrint(out, "%", tree.values[value].number) }
+    if kind == TupleValue || kind == ListValue {
+        VecPush(<<out, ifx kind == TupleValue then #char "{" else #char "[");
+        for i: 0..tree.values[value].items.count - 1 {
+            VecPush(<<out, #char " ");
+            Describe(tree, tree.values[value].items[i], out);
+        }
+        VecPush(<<out, ifx kind == TupleValue then #char "}" else #char "]");
+    }
+    if kind == BinaryValue {
+        digits := "0123456789abcdef";
+        BuilderAppend(<<out, "<<");
+        for i: 0..tree.values[value].text.bytes.count - 1 {
+            byte := tree.values[value].text.bytes[i];
+            VecPush(<<out, #char " ");
+            VecPush(<<out, digits[byte >> 4]);
+            VecPush(<<out, digits[byte & 15]);
+        }
+        BuilderAppend(<<out, ">>");
+    }
+    if kind == TagValue {
+        BuilderPrint(out, "{'$TYPE', %, ", TextView(tree.values[value].text));
+        Describe(tree, tree.values[value].items[0], out);
+        VecPush(<<out, #char "}");
+    }
+}
+
+// Whether two values, each in its tree, are the same kind with the same
+// contents.
+Equal :: (a_tree: *Tree, a: s64, b_tree: *Tree, b: s64) -> bool {
+    if a_tree.values[a].kind != b_tree.values[b].kind { return false }
+    if a_tree.values[a].number != b_tree.values[b].number { return false }
+    if TextView(a_tree.values[a].text) != TextView(b_tree.values[b].text) { return false }
+    if a_tree.values[a].items.count != b_tree.values[b].items.count { return false }
+    for i: 0..a_tree.values[a].items.count - 1 {
+        if !Equal(a_tree, a_tree.values[a].items[i], b_tree, b_tree.values[b].items[i]) { return false }
+    }
+    return true;
+}
+
+// The name of the operation a tuple stands for, its first element when
+// that is an atom or a string, and "" otherwise or when arity is above 0
+// and not the tuple's length. The caller's view lasts while tree does.
+IsOperation :: (tree: *Tree, value: s64, name: string, arity: s64) -> bool {
+    if tree.values[value].kind != TupleValue || tree.values[value].items.count == 0 { return false }
+    if arity > 0 && tree.values[value].items.count != arity { return false }
+    first := tree.values[value].items[0];
+    kind := tree.values[first].kind;
+    return (kind == AtomValue || kind == StringValue) && TextView(tree.values[first].text) == name;
+}
