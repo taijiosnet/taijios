@@ -1,0 +1,95 @@
+// The cases of the URIs test: each one printed as the Limbo probe printed
+// it, for comparison with uris.limbo.txt.
+using Uris :: #import "uris"
+
+Show :: (out: *Vec(u8), u: *Uris.URI) {
+    BuilderPrint(out, "[%|%|%|%|%|%|%]", TextView(u.scheme), TextView(u.userinfo), TextView(u.host),
+        TextView(u.port), TextView(u.path), TextView(u.query), TextView(u.fragment))
+}
+
+Flag :: (value: bool) -> s64 { return ifx value then 1 else 0 }
+
+ParseLine :: (out: *Vec(u8), index: s64, url: string) {
+    u := Uris.Parse(url)
+    text: Text
+    authority: Text
+    Uris.Format(*u, *text)
+    Uris.Authority(*u, *authority)
+    user, password := Uris.UserPassword(TextView(u.userinfo))
+    nodots := Uris.NoDots(*u)
+    pathonly := Uris.PathOnly(*u)
+    BuilderPrint(out, "parse % ", index)
+    Show(out, *u)
+    BuilderPrint(out, " text=<%> auth=<%> hasauth=% abs=% userpw=<%><%> nodots=", TextView(text), TextView(authority),
+        Flag(Uris.HasAuthority(*u)), Flag(Uris.IsAbsolute(*u)), user, password)
+    Show(out, *nodots)
+    BuilderAppend(<<out, " pathonly=")
+    Show(out, *pathonly)
+    BuilderAppend(<<out, "\n")
+}
+
+// reference resolved against base as "label [fields]", then its text if asked.
+Resolve :: (out: *Vec(u8), label: string, reference: string, base: string, with_text: bool) {
+    b := Uris.Parse(base)
+    u := Uris.Parse(reference)
+    r := Uris.AddBase(*u, *b)
+    BuilderAppend(<<out, label)
+    Show(out, *r)
+    if with_text {
+        text: Text
+        Uris.Format(*r, *text)
+        BuilderPrint(out, " text=<%>", TextView(text))
+    }
+    BuilderAppend(<<out, "\n")
+}
+
+// Appends one line for each case, in the form the Limbo probe printed.
+UriLines :: (out: *Vec(u8)) {
+    parses := string.[
+        "http://user:pw@Host.com:8080/a/b?x=1#frag", "HTTP://h", "mailto:a@b", "//h/p", "/a/./b/../c",
+        "a/b", "http://[::1]:80/x", "http://[::1]x/", "foo%20bar", "%00", "%41%4", "http://h/a%2Fb",
+        "café", ":x", "http://h?q", "http://h#f", "", "../a", "./a/b", "http://h/a/.", "http://h/a/..",
+        "/..", ".", "..", "a/../../b", "http://us%40er@h/", "x+y.z-w:rest", "1abc:d", "a b:c", "http://h:/p",
+        "http://@h/p", "file:///tmp/x", "http://h/a%e2%82%ACb", "s://h/p#a%20b", "http://h/p?a%20b#c",
+        "/a/b/", "/a//b", "http:", "http://h/./", "/./.", "/../..", "a/./b/.",
+    ]
+    for parses { ParseLine(out, it_index, it) }
+    // The reference resolution examples of RFC 3986 5.4, and a few more.
+    references := string.[
+        "g:h", "g", "./g", "g/", "/g", "//g", "?y", "g?y", "#s", "g#s", "g?y#s", ";x", "g;x", "g;x?y#s", "", ".", "./",
+        "..", "../", "../g", "../..", "../../", "../../g", "../../../g", "../../../../g", "/./g", "/../g", "g.", ".g",
+        "g..", "..g", "../../.", "./g/.", "g/./h", "g/../h", "g;x=1/./y", "g;x=1/../y", "g?y/./x", "g?y/../x",
+        "g#s/./x", "g#s/../x", "http:g", "//u@h", "#", "?",
+    ]
+    for references {
+        label: Vec(u8)
+        BuilderPrint(*label, "addbase % ", it_index)
+        Resolve(out, TextView(label[:]), it, "http://a/b/c/d;p?q", true)
+    }
+    Resolve(out, "emptybase ", "x/y", "http://h", true)
+    Resolve(out, "relbase ", "x", "rel", false)
+    Resolve(out, "noauth ", "x", "s:/a/b", false)
+    plain := string.["", "abc", "a b", "a/b", "a:b@c", "50%", "café", "[x]", "a?b#c", "!$&'()*+,;=", "\x01x", "~-._"]
+    safes := string.["", "/", "@:", "[]:", "a-z", "^/", "é", "-a"]
+    for text: plain {
+        text_index := it_index
+        for safe: safes {
+            encoded: Text
+            Uris.Encode(text, safe, *encoded)
+            BuilderPrint(out, "enc % % <%>\n", text_index, it_index, TextView(encoded))
+        }
+    }
+    coded := string.["", "abc", "%20", "%2", "%zz", "%00x", "a%41b%42", "%e2%82%ac", "%C3%A9", "x%", "café%21", "%%41",
+        "%C3", "%ff", "%F0%9F%98%80", "%C3%28", "%E2%82x", "%ED%A0%80", "%C0%80", "é%41"]
+    for coded {
+        decoded: Text
+        Uris.Decode(it, *decoded)
+        BuilderPrint(out, "dec % <%>\n", it_index, TextView(decoded))
+    }
+    a := Uris.Parse("http://h/p?q#f")
+    b := Uris.Parse("http://h/p?q#g")
+    c := Uris.Parse("http://h/p?r#f")
+    same := Uris.Copy(*a)
+    BuilderPrint(out, "eq % % % % %\n", Flag(Uris.Equal(*a, *b)), Flag(Uris.EqualWithFragment(*a, *b)),
+        Flag(Uris.Equal(*a, *c)), Flag(Uris.EqualWithFragment(*a, *same)), Flag(Uris.Equal(*a, null)))
+}

@@ -1010,6 +1010,7 @@ appl
 		keyset.b
 		libc.b
 		libc0.b
+		limbo_text.zi
 		lists.b
 		lock.b
 		login.b
@@ -1106,6 +1107,7 @@ appl
 		tkclient.b
 		translate.b
 		ubfa.b
+		uris.zi
 		url.b
 		usb
 			mkfile
@@ -1121,8 +1123,6 @@ appl
 		w3c
 			css.b
 			mkfile
-			uris.b
-			xpointers.b
 		wait.b
 		watchvars.b
 		taijios_wm_call.zi
@@ -1134,6 +1134,9 @@ appl
 		workdir.b
 		writegif.b
 		xml.b
+		xml_names.zi
+		xpath.zi
+		xpointers.zi
 	math
 		ack.b
 		crackerbarrel.b
@@ -2334,7 +2337,6 @@ module
 	translate.m
 	ubfa.m
 	unbundle.m
-	uris.m
 	url.m
 	usb.m
 	vac.m
@@ -2349,7 +2351,6 @@ module
 	workdir.m
 	x509.m
 	xml.m
-	xpointers.m
 n
 	cd
 	client

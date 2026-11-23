@@ -1,0 +1,19 @@
+// Compares what a test printed with the lines a Limbo module printed for
+// the same cases.
+
+// Whether got is want. When it is not, report gets the first line of got
+// that differs.
+Same :: (name: string, got: string, want: string, report: *Vec(u8)) -> bool {
+    if got == want { return true }
+    line: s64 = 1
+    start: s64 = 0
+    at: s64 = 0
+    while at < got.count && at < want.count && got[at] == want[at] {
+        if got[at] == #char "\n" { line += 1; start = at + 1 }
+        at += 1
+    }
+    end := start
+    while end < got.count && got[end] != #char "\n" { end += 1 }
+    BuilderPrint(report, "FAIL: % line % differs from the Limbo module\ngot: %\n", name, line, got[start:end])
+    return false
+}

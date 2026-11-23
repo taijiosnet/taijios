@@ -1,0 +1,207 @@
+parse 0 [http|user:pw|Host.com|8080|/a/b|?x=1|#frag] text=<http://user:pw@Host.com:8080/a/b?x=1#frag> auth=<user:pw@Host.com:8080> hasauth=1 abs=1 userpw=<user><pw> nodots=[http|user:pw|Host.com|8080|/a/b|?x=1|#frag] pathonly=[http||Host.com|8080|/a/b||]
+parse 1 [http||h||/||] text=<http://h/> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/||] pathonly=[http||h||/||]
+parse 2 [mailto||||a@b||] text=<mailto:a@b> auth=<> hasauth=0 abs=1 userpw=<><> nodots=[mailto||||a@b||] pathonly=[mailto||||a@b||]
+parse 3 [||h||/p||] text=<//h/p> auth=<h> hasauth=1 abs=0 userpw=<><> nodots=[||h||/p||] pathonly=[||h||/p||]
+parse 4 [||||/a/./b/../c||] text=</a/./b/../c> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/a/c||] pathonly=[||||/a/./b/../c||]
+parse 5 [||||a/b||] text=<a/b> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||a/b||] pathonly=[||||a/b||]
+parse 6 [http||[::1]|80|/x||] text=<http://[::1]:80/x> auth=<[::1]:80> hasauth=1 abs=1 userpw=<><> nodots=[http||[::1]|80|/x||] pathonly=[http||[::1]|80|/x||]
+parse 7 [http||[::1]x||/||] text=<http://[::1]x/> auth=<[::1]x> hasauth=1 abs=1 userpw=<><> nodots=[http||[::1]x||/||] pathonly=[http||[::1]x||/||]
+parse 8 [||||foo bar||] text=<foo%20bar> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||foo bar||] pathonly=[||||foo bar||]
+parse 9 [||||%00||] text=<%2500> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||%00||] pathonly=[||||%00||]
+parse 10 [||||A%4||] text=<A%254> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||A%4||] pathonly=[||||A%4||]
+parse 11 [http||h||/a/b||] text=<http://h/a/b> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/a/b||] pathonly=[http||h||/a/b||]
+parse 12 [||||café||] text=<caf%C3%A9> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||café||] pathonly=[||||café||]
+parse 13 [||||x||] text=<x> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||x||] pathonly=[||||x||]
+parse 14 [http||h?q||/||] text=<http://h%3Fq/> auth=<h%3Fq> hasauth=1 abs=1 userpw=<><> nodots=[http||h?q||/||] pathonly=[http||h?q||/||]
+parse 15 [http||h#f||/||] text=<http://h%23f/> auth=<h%23f> hasauth=1 abs=1 userpw=<><> nodots=[http||h#f||/||] pathonly=[http||h#f||/||]
+parse 16 [||||||] text=<> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||||] pathonly=[||||||]
+parse 17 [||||../a||] text=<../a> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/a||] pathonly=[||||../a||]
+parse 18 [||||./a/b||] text=<./a/b> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||./a/b||] pathonly=[||||./a/b||]
+parse 19 [http||h||/a/.||] text=<http://h/a/.> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/a/||] pathonly=[http||h||/a/.||]
+parse 20 [http||h||/a/..||] text=<http://h/a/..> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/||] pathonly=[http||h||/a/..||]
+parse 21 [||||/..||] text=</..> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/||] pathonly=[||||/..||]
+parse 22 [||||.||] text=<.> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||||] pathonly=[||||.||]
+parse 23 [||||..||] text=<..> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||||] pathonly=[||||..||]
+parse 24 [||||a/../../b||] text=<a/../../b> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||a/b||] pathonly=[||||a/../../b||]
+parse 25 [http|us@er|h||/||] text=<http://us%40er@h/> auth=<us%40er@h> hasauth=1 abs=1 userpw=<us@er><> nodots=[http|us@er|h||/||] pathonly=[http||h||/||]
+parse 26 [x+y.z-w||||rest||] text=<x+y.z-w:rest> auth=<> hasauth=0 abs=1 userpw=<><> nodots=[x+y.z-w||||rest||] pathonly=[x+y.z-w||||rest||]
+parse 27 [1abc||||d||] text=<1abc:d> auth=<> hasauth=0 abs=1 userpw=<><> nodots=[1abc||||d||] pathonly=[1abc||||d||]
+parse 28 [||||a b:c||] text=<a%20b:c> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||a b:c||] pathonly=[||||a b:c||]
+parse 29 [http||h||/p||] text=<http://h/p> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/p||] pathonly=[http||h||/p||]
+parse 30 [http||h||/p||] text=<http://h/p> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/p||] pathonly=[http||h||/p||]
+parse 31 [file||||/tmp/x||] text=<file:/tmp/x> auth=<> hasauth=0 abs=1 userpw=<><> nodots=[file||||/tmp/x||] pathonly=[file||||/tmp/x||]
+parse 32 [http||h||/a€b||] text=<http://h/a%E2%82%ACb> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/a€b||] pathonly=[http||h||/a€b||]
+parse 33 [s||h||/p||#a b] text=<s://h/p#a%20b> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[s||h||/p||#a b] pathonly=[s||h||/p||]
+parse 34 [http||h||/p|?a%20b|#c] text=<http://h/p?a%20b#c> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/p|?a%20b|#c] pathonly=[http||h||/p||]
+parse 35 [||||/a/b/||] text=</a/b/> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/a/b/||] pathonly=[||||/a/b/||]
+parse 36 [||||/a//b||] text=</a//b> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/a//b||] pathonly=[||||/a//b||]
+parse 37 [http||||||] text=<http:> auth=<> hasauth=0 abs=1 userpw=<><> nodots=[http||||||] pathonly=[http||||||]
+parse 38 [http||h||/./||] text=<http://h/./> auth=<h> hasauth=1 abs=1 userpw=<><> nodots=[http||h||/||] pathonly=[http||h||/./||]
+parse 39 [||||/./.||] text=</./.> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/||] pathonly=[||||/./.||]
+parse 40 [||||/../..||] text=</../..> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||/||] pathonly=[||||/../..||]
+parse 41 [||||a/./b/.||] text=<a/./b/.> auth=<> hasauth=0 abs=0 userpw=<><> nodots=[||||a/./b/||] pathonly=[||||a/./b/.||]
+addbase 0 [g||||h||] text=<g:h>
+addbase 1 [http||a||/b/c/g||] text=<http://a/b/c/g>
+addbase 2 [http||a||/b/c/g||] text=<http://a/b/c/g>
+addbase 3 [http||a||/b/c/g/||] text=<http://a/b/c/g/>
+addbase 4 [http||a||/g||] text=<http://a/g>
+addbase 5 [http||g||/||] text=<http://g/>
+addbase 6 [http||a||/b/c/d;p|?y|] text=<http://a/b/c/d;p?y>
+addbase 7 [http||a||/b/c/g|?y|] text=<http://a/b/c/g?y>
+addbase 8 [http||a||/b/c/d;p|?q|#s] text=<http://a/b/c/d;p?q#s>
+addbase 9 [http||a||/b/c/g||#s] text=<http://a/b/c/g#s>
+addbase 10 [http||a||/b/c/g|?y|#s] text=<http://a/b/c/g?y#s>
+addbase 11 [http||a||/b/c/;x||] text=<http://a/b/c/;x>
+addbase 12 [http||a||/b/c/g;x||] text=<http://a/b/c/g;x>
+addbase 13 [http||a||/b/c/g;x|?y|#s] text=<http://a/b/c/g;x?y#s>
+addbase 14 [http||a||/b/c/d;p|?q|] text=<http://a/b/c/d;p?q>
+addbase 15 [http||a||/b/c/||] text=<http://a/b/c/>
+addbase 16 [http||a||/b/c/||] text=<http://a/b/c/>
+addbase 17 [http||a||/b/||] text=<http://a/b/>
+addbase 18 [http||a||/b/||] text=<http://a/b/>
+addbase 19 [http||a||/b/g||] text=<http://a/b/g>
+addbase 20 [http||a||/||] text=<http://a/>
+addbase 21 [http||a||/||] text=<http://a/>
+addbase 22 [http||a||/g||] text=<http://a/g>
+addbase 23 [http||a||/g||] text=<http://a/g>
+addbase 24 [http||a||/g||] text=<http://a/g>
+addbase 25 [http||a||/g||] text=<http://a/g>
+addbase 26 [http||a||/g||] text=<http://a/g>
+addbase 27 [http||a||/b/c/g.||] text=<http://a/b/c/g.>
+addbase 28 [http||a||/b/c/.g||] text=<http://a/b/c/.g>
+addbase 29 [http||a||/b/c/g..||] text=<http://a/b/c/g..>
+addbase 30 [http||a||/b/c/..g||] text=<http://a/b/c/..g>
+addbase 31 [http||a||/||] text=<http://a/>
+addbase 32 [http||a||/b/c/g/||] text=<http://a/b/c/g/>
+addbase 33 [http||a||/b/c/g/h||] text=<http://a/b/c/g/h>
+addbase 34 [http||a||/b/c/h||] text=<http://a/b/c/h>
+addbase 35 [http||a||/b/c/g;x=1/y||] text=<http://a/b/c/g;x=1/y>
+addbase 36 [http||a||/b/c/y||] text=<http://a/b/c/y>
+addbase 37 [http||a||/b/c/g|?y/./x|] text=<http://a/b/c/g?y/./x>
+addbase 38 [http||a||/b/c/g|?y/../x|] text=<http://a/b/c/g?y/../x>
+addbase 39 [http||a||/b/c/g||#s/./x] text=<http://a/b/c/g#s/./x>
+addbase 40 [http||a||/b/c/g||#s/../x] text=<http://a/b/c/g#s/../x>
+addbase 41 [http||||g||] text=<http:g>
+addbase 42 [http|u|h||/||] text=<http://u@h/>
+addbase 43 [http||a||/b/c/d;p|?q|#] text=<http://a/b/c/d;p?q#>
+addbase 44 [http||a||/b/c/d;p|?|] text=<http://a/b/c/d;p?>
+emptybase [http||h||/x/y||] text=<http://h/x/y>
+relbase [||||x||]
+noauth [s||||/a/x||]
+enc 0 0 <>
+enc 0 1 <>
+enc 0 2 <>
+enc 0 3 <>
+enc 0 4 <>
+enc 0 5 <>
+enc 0 6 <>
+enc 0 7 <>
+enc 1 0 <abc>
+enc 1 1 <abc>
+enc 1 2 <abc>
+enc 1 3 <abc>
+enc 1 4 <abc>
+enc 1 5 <abc>
+enc 1 6 <abc>
+enc 1 7 <abc>
+enc 2 0 <a%20b>
+enc 2 1 <a%20b>
+enc 2 2 <a%20b>
+enc 2 3 <a%20b>
+enc 2 4 <a%20b>
+enc 2 5 <a b>
+enc 2 6 <a%20b>
+enc 2 7 <a%20b>
+enc 3 0 <a%2Fb>
+enc 3 1 <a/b>
+enc 3 2 <a%2Fb>
+enc 3 3 <a%2Fb>
+enc 3 4 <a%2Fb>
+enc 3 5 <a%2Fb>
+enc 3 6 <a%2Fb>
+enc 3 7 <a%2Fb>
+enc 4 0 <a%3Ab%40c>
+enc 4 1 <a%3Ab%40c>
+enc 4 2 <a:b@c>
+enc 4 3 <a:b%40c>
+enc 4 4 <a%3Ab%40c>
+enc 4 5 <a:b@c>
+enc 4 6 <a%3Ab%40c>
+enc 4 7 <a%3Ab%40c>
+enc 5 0 <50%25>
+enc 5 1 <50%25>
+enc 5 2 <50%25>
+enc 5 3 <50%25>
+enc 5 4 <50%25>
+enc 5 5 <50%>
+enc 5 6 <50%25>
+enc 5 7 <50%25>
+enc 6 0 <caf%C3%A9>
+enc 6 1 <caf%C3%A9>
+enc 6 2 <caf%C3%A9>
+enc 6 3 <caf%C3%A9>
+enc 6 4 <caf%C3%A9>
+enc 6 5 <cafÃ©>
+enc 6 6 <caf%C3%A9>
+enc 6 7 <caf%C3%A9>
+enc 7 0 <%5Bx%5D>
+enc 7 1 <%5Bx%5D>
+enc 7 2 <%5Bx%5D>
+enc 7 3 <[x]>
+enc 7 4 <%5Bx%5D>
+enc 7 5 <[x]>
+enc 7 6 <%5Bx%5D>
+enc 7 7 <%5Bx%5D>
+enc 8 0 <a%3Fb%23c>
+enc 8 1 <a%3Fb%23c>
+enc 8 2 <a%3Fb%23c>
+enc 8 3 <a%3Fb%23c>
+enc 8 4 <a%3Fb%23c>
+enc 8 5 <a?b#c>
+enc 8 6 <a%3Fb%23c>
+enc 8 7 <a%3Fb%23c>
+enc 9 0 <!$&'()*+,;=>
+enc 9 1 <!$&'()*+,;=>
+enc 9 2 <!$&'()*+,;=>
+enc 9 3 <!$&'()*+,;=>
+enc 9 4 <!$&'()*+,;=>
+enc 9 5 <!$&'()*+,;=>
+enc 9 6 <!$&'()*+,;=>
+enc 9 7 <!$&'()*+,;=>
+enc 10 0 <%01x>
+enc 10 1 <%01x>
+enc 10 2 <%01x>
+enc 10 3 <%01x>
+enc 10 4 <%01x>
+enc 10 5 <x>
+enc 10 6 <%01x>
+enc 10 7 <%01x>
+enc 11 0 <~-._>
+enc 11 1 <~-._>
+enc 11 2 <~-._>
+enc 11 3 <~-._>
+enc 11 4 <~-._>
+enc 11 5 <~-._>
+enc 11 6 <~-._>
+enc 11 7 <~-._>
+dec 0 <>
+dec 1 <abc>
+dec 2 < >
+dec 3 <%2>
+dec 4 <%zz>
+dec 5 <%00x>
+dec 6 <aAbB>
+dec 7 <€>
+dec 8 <é>
+dec 9 <x%>
+dec 10 <café!>
+dec 11 <%A>
+dec 12 <>
+dec 13 <>
+dec 14 <😀>
+dec 15 <�(>
+dec 16 <��x>
+dec 17 <��>
+dec 18 <�>
+dec 19 <éA>
+eq 1 0 0 1 0

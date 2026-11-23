@@ -1,0 +1,263 @@
+framework 0 name=<intro> err=<>
+framework 1 name=<> err=<shorthand pointer must be unqualified name>
+framework 2 name=<> err=<missing pointer name>
+framework 3 name=<> err=<> (|xpointer|id('a'))
+framework 4 name=<> err=<> (|xmlns|x=http://e.org) (|xpointer|//x:a)
+framework 5 name=<> err=<> (|element|/1/2) (|element|a/3)
+framework 6 name=<> err=<> (x|y|a(b)c^d)
+framework 7 name=<> err=<> (|f|a(b)c)
+framework 8 name=<> err=<unbalanced ( at 1>
+framework 9 name=<> err=<expected name at 4>
+framework 10 name=<> err=<invalid escape ^x at 3>
+framework 11 name=<> err=<unexpected eof after ^>
+framework 12 name=<> err=<expected '(' at 4>
+framework 13 name=<> err=<expected name at 4>
+framework 14 name=<> err=<expected name at 0>
+framework 15 name=<> err=<expected '(' at 1>
+framework 16 name=<> err=<> (|f|a) (|g|b)
+framework 17 name=<> err=<expected '(' at 1>
+framework 18 name=<café> err=<>
+framework 19 name=<> err=<> (|café|é^)
+framework 20 name=<> err=<expected name at 6>
+framework 21 name=<> err=<> (|_a.b-c|1)
+framework 22 name=<> err=<expected '(' at 5>
+framework 23 name=<> err=<expected '(' at 3>
+framework 24 name=<a> err=<>
+framework 25 name=<> err=<expected '(' at 5>
+framework 26 name=<> err=<expected name at 5>
+element 0 name=<> err=<> 1 2
+element 1 name=<a> err=<> 3
+element 2 name=<> err=<illegal child sequence (expected '/')>
+element 3 name=<> err=<illegal child sequence (expected '/')>
+element 4 name=<> err=<illegal child sequence (expected integer)>
+element 5 name=<> err=<> 0
+element 6 name=<> err=<> 12 345
+element 7 name=<> err=<illegal child sequence (expected integer)>
+element 8 name=<> err=<illegal child sequence (expected integer)>
+element 9 name=<> err=<illegal child sequence (expected integer)>
+element 10 name=<> err=<illegal element name>
+element 11 name=<> err=<illegal child sequence (expected integer)>
+element 12 name=<_e> err=<> 7
+element 13 name=<> err=<illegal child sequence (expected integer)>
+element 14 name=<café> err=<> 2
+element 15 name=<> err=<> 1 2 3 4
+xmlns 0 <x> <http://e.org> <>
+xmlns 1 <x> <y> <>
+xmlns 2 <> <> <illegal xmlns declaration>
+xmlns 3 <> <> <illegal namespace name>
+xmlns 4 <x> <> <>
+xmlns 5 <> <> <illegal namespace name>
+xmlns 6 <> <> <illegal xmlns declaration>
+xmlns 7 <x> <y z> <>
+xmlns 8 <> <> <illegal xmlns declaration>
+xmlns 9 <café> <u> <>
+xpointer 0 <child::a> <>
+xpointer 1 </> <>
+xpointer 2 </child::a/child::b> <>
+xpointer 3 </descendant-or-self::node()/child::a> <>
+xpointer 4 <child::a/descendant-or-self::node()/child::b> <>
+xpointer 5 <self::node()> <>
+xpointer 6 <parent::node()> <>
+xpointer 7 <parent::node()/child::a> <>
+xpointer 8 <self::node()/child::a> <>
+xpointer 9 <attribute::id> <>
+xpointer 10 <child::a/attribute::b> <>
+xpointer 11 <child::*> <>
+xpointer 12 <child::a/child::*> <>
+xpointer 13 <child::ns:a> <>
+xpointer 14 <child::ns:*> <>
+xpointer 15 <child::a> <>
+xpointer 16 <descendant::a> <>
+xpointer 17 <self::node()> <>
+xpointer 18 <parent::*> <>
+xpointer 19 <attribute::x> <>
+xpointer 20 <nil> <syntax error: missing operator>
+xpointer 21 <ancestor-or-self::a> <>
+xpointer 22 <following-sibling::a[1]> <>
+xpointer 23 <child::a[1]> <>
+xpointer 24 <child::a[1][2]> <>
+xpointer 25 <child::a[(attribute::x = 'y')]> <>
+xpointer 26 <child::a[child::b/child::c]> <>
+xpointer 27 <child::text()> <>
+xpointer 28 <child::node()> <>
+xpointer 29 <child::comment()> <>
+xpointer 30 <child::processing-instruction()> <>
+xpointer 31 <child::processing-instruction('xml')> <>
+xpointer 32 <child::processing-instruction("it's")> <>
+xpointer 33 <id('a')> <>
+xpointer 34 <id("it's")> <>
+xpointer 35 <f()> <>
+xpointer 36 <f(1,2,3)> <>
+xpointer 37 <ns:f(child::a)> <>
+xpointer 38 <$v> <>
+xpointer 39 <$ns:v> <>
+xpointer 40 <1> <>
+xpointer 41 <12345678901> <>
+xpointer 42 <1.5> <>
+xpointer 43 <5> <>
+xpointer 44 <1> <>
+xpointer 45 <7> <>
+xpointer 46 <0> <>
+xpointer 47 <0> <>
+xpointer 48 <2.5> <>
+xpointer 49 <.5> <>
+xpointer 50 <.25> <>
+xpointer 51 <.125> <>
+xpointer 52 <.0625> <>
+xpointer 53 <.03125> <>
+xpointer 54 <3.0517578125e-05> <>
+xpointer 55 <6.103515625e-05> <>
+xpointer 56 <.0001220703125> <>
+xpointer 57 <1234567.5> <>
+xpointer 58 <100000> <>
+xpointer 59 <1e+06> <>
+xpointer 60 <1e+07> <>
+xpointer 61 <1048576> <>
+xpointer 62 <16777216> <>
+xpointer 63 <123456.5> <>
+xpointer 64 <4096.0625> <>
+xpointer 65 <3> <>
+xpointer 66 <250> <>
+xpointer 67 <.75> <>
+xpointer 68 <(1 + 2)> <>
+xpointer 69 <(1 - 2)> <>
+xpointer 70 <(1 + (2*3))> <>
+xpointer 71 <((1 + 2)*3)> <>
+xpointer 72 <(1 div 2)> <>
+xpointer 73 <(5 mod 2)> <>
+xpointer 74 <(child::a and child::b)> <>
+xpointer 75 <(child::a or child::b)> <>
+xpointer 76 <(child::a = child::b)> <>
+xpointer 77 <(child::a!=child::b)> <>
+xpointer 78 <(child::a < child::b)> <>
+xpointer 79 <(child::a<=child::b)> <>
+xpointer 80 <(child::a > child::b)> <>
+xpointer 81 <(child::a>=child::b)> <>
+xpointer 82 <(child::a | child::b)> <>
+xpointer 83 <(-1)> <>
+xpointer 84 <(-child::a)> <>
+xpointer 85 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 86 <(1 - (-2))> <>
+xpointer 87 <(child::a or (child::b and (child::c = child::d)))> <>
+xpointer 88 <(child::a*child::b)> <>
+xpointer 89 <(child::a*child::b)> <>
+xpointer 90 <child::*> <>
+xpointer 91 <(child::**child::*)> <>
+xpointer 92 <(child::a/child::b | child::c/child::d)> <>
+xpointer 93 <(id('x')/child::a)> <>
+xpointer 94 <(id('x')/descendant-or-self::node()/child::a)> <>
+xpointer 95 <id('x')[1]> <>
+xpointer 96 <(id('x')[1]/child::a)> <>
+xpointer 97 <child::a[1]> <>
+xpointer 98 <((child::a | child::b)/child::c)> <>
+xpointer 99 <($v/child::a)> <>
+xpointer 100 <'s'> <>
+xpointer 101 <'d'> <>
+xpointer 102 <nil> <syntax error: missing string terminator>
+xpointer 103 <child::a> <>
+xpointer 104 <nil> <syntax error: missing operator>
+xpointer 105 <child::a> <>
+xpointer 106 <nil> <syntax error: expected ')'>
+xpointer 107 <nil> <syntax error: expected ']'>
+xpointer 108 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 109 <nil> <syntax error: expected ')'>
+xpointer 110 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 111 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 112 <nil> <syntax error: expected Step in LocationPath>
+xpointer 113 <nil> <syntax error: expected Step in LocationPath>
+xpointer 114 <nil> <syntax error: expected Step in LocationPath>
+xpointer 115 <nil> <syntax error: expected Step in LocationPath>
+xpointer 116 <nil> <syntax error: missing operator>
+xpointer 117 <nil> <syntax error: expected Step in LocationPath>
+xpointer 118 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 119 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 120 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 121 <nil> <syntax error: missing operator>
+xpointer 122 <nil> <syntax error: missing operator>
+xpointer 123 <nil> <syntax error: missing operator>
+xpointer 124 <child::node> <>
+xpointer 125 <child::node()> <>
+xpointer 126 <child::text> <>
+xpointer 127 <child::div> <>
+xpointer 128 <(child::div div child::div)> <>
+xpointer 129 <child::and> <>
+xpointer 130 <(child::or or child::or)> <>
+xpointer 131 <child::mod/child::mod> <>
+xpointer 132 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 133 <child::café> <>
+xpointer 134 <child::café/child::é[é()]> <>
+xpointer 135 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 136 <child::a> <>
+xpointer 137 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 138 <1> <>
+xpointer 139 <1.5> <>
+xpointer 140 <nil> <syntax error: missing operator>
+xpointer 141 <parent::node()> <>
+xpointer 142 <child::a..b> <>
+xpointer 143 <child::a.b> <>
+xpointer 144 <child::a-b> <>
+xpointer 145 <(child::a - child::b)> <>
+xpointer 146 <child::_x> <>
+xpointer 147 <child::x_y.z> <>
+xpointer 148 <attribute::*> <>
+xpointer 149 <attribute::ns:*> <>
+xpointer 150 <child::*> <>
+xpointer 151 <child::a> <>
+xpointer 152 <child::node()/child::text()> <>
+xpointer 153 <child::a[(position() = last())]> <>
+xpointer 154 <child::a[(1 + 1)]> <>
+xpointer 155 <range-to(child::a)> <>
+xpointer 156 <xpointer(child::a)> <>
+xpointer 157 <string-range(/descendant-or-self::node()/child::p,'x',1,2)> <>
+xpointer 158 </child::a[1]/child::b[2]/child::c[3]> <>
+xpointer 159 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 160 <nil> <syntax error: missing operator>
+xpointer 161 <child::a/self::node()> <>
+xpointer 162 <child::a/parent::node()> <>
+xpointer 163 <self::node()/self::node()> <>
+xpointer 164 <child::a[(self::node() = 'x')]> <>
+xpointer 165 <child::a[parent::node()/child::b]> <>
+xpointer 166 <((child::x | child::y) | child::z)> <>
+xpointer 167 <((1 = 2) = 3)> <>
+xpointer 168 <((1 < 2) < 3)> <>
+xpointer 169 <child::a/child::b/child::c/child::d/child::e> <>
+xpointer 170 <f(g(h(1)))> <>
+xpointer 171 <f(child::a)[1][2]> <>
+xpointer 172 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 173 <(-1)> <>
+xpointer 174 <child::a[child::b][child::c]/child::d[child::e]> <>
+xpointer 175 <child::processing-instruction('x')> <>
+xpointer 176 <nil> <syntax error: expected ')'>
+xpointer 177 <nil> <syntax error: expected ')'>
+xpointer 178 <nil> <syntax error: expected ')'>
+xpointer 179 <id('a')> <>
+xpointer 180 <child::a> <>
+xpointer 181 <child::a> <>
+xpointer 182 <child::a/child::b> <>
+xpointer 183 <child::a/child::b> <>
+xpointer 184 <attribute::id> <>
+xpointer 185 <nil> <syntax error: invalid PrimaryExpr>
+xpointer 186 <1> <>
+xpointer 187 <1.5> <>
+xpointer 188 <0> <>
+xpointer 189 <child::a[1]> <>
+xpointer 190 <nil> <syntax error: missing operator>
+xpointer 191 <nil> <syntax error: missing operator>
+xpointer 192 <nil> <syntax error: missing operator>
+xpointer 193 <'a'> <>
+xpointer 194 <'a'> <>
+axis -1 <>
+axis 0 <ancestor>
+axis 1 <ancestor-or-self>
+axis 2 <attribute>
+axis 3 <child>
+axis 4 <descendant>
+axis 5 <descendant-or-self>
+axis 6 <following>
+axis 7 <following-sibling>
+axis 8 <namespace>
+axis 9 <parent>
+axis 10 <preceding>
+axis 11 <preceding-sibling>
+axis 12 <self>
+axis 13 <>

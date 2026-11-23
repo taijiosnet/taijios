@@ -2,8 +2,6 @@
 
 TARG=\
 	css.dis\
-	uris.dis\
-	xpointers.dis\
 
 MODULES=
 
@@ -11,8 +9,6 @@ SYSMODULES= \
 	sys.m\
 	bufio.m\
 	css.m\
-	uris.m\
-	xpointers.m\
 
 DISBIN=$ROOT/dis/lib/w3c
 

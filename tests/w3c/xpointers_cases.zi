@@ -1,0 +1,61 @@
+// The cases of the XPointer test: each one printed as the Limbo probe
+// printed it, for comparison with xpointers.limbo.txt. The real numbers
+// are ones the Dis runtime converted exactly.
+using Pointers :: #import "xpointers"
+using Xpath :: #import "xpath"
+
+// Appends one line for each case, in the form the Limbo probe printed.
+PointerLines :: (out: *Vec(u8)) {
+    frames := string.[
+        "intro", "a:b", "", "xpointer(id('a'))", "xmlns(x=http://e.org) xpointer(//x:a)", "element(/1/2)element(a/3)",
+        "x:y(a^(b^)c^^d)", "f(a(b)c)", "f(a", "f(a))", "f(^x)", "f(^", "f()g", "f() (x)", "9a", "a b", "f(a)  \t g(b)", "x:(a)",
+        "café", "café(é^^)", "f(ééé)(", "_a.b-c(1)", "f(a)x:", "a:b:c(d)", ":a", "f(a)b", "f(a) ",
+    ]
+    for frames {
+        pointer := Pointers.Framework(it)
+        BuilderPrint(out, "framework % name=<%> err=<%>", it_index, pointer.shorthand, TextView(pointer.error))
+        for i: 0..pointer.parts.count - 1 {
+            BuilderPrint(out, " (%|%|%)", pointer.parts[i].prefix, pointer.parts[i].name, TextView(pointer.parts[i].data))
+        }
+        BuilderAppend(<<out, "\n")
+    }
+    elements := string.["/1/2", "a/3", "a", "", "/", "/0", "/12/345", "a/", "/1/", "/x", "1", "a/1x", "_e/7", "a//1", "café/2", "/1/2/3/4"]
+    for elements {
+        element := Pointers.Element(it)
+        BuilderPrint(out, "element % name=<%> err=<%>", it_index, element.name, element.error)
+        for i: 0..element.children.count - 1 { BuilderPrint(out, " %", element.children[i]) }
+        BuilderAppend(<<out, "\n")
+    }
+    namespaces := string.["x=http://e.org", "x = y", "x", "=y", "x  =", "1x=y", "x:y=z", "x=\ty z", "x y", "café=u"]
+    for namespaces {
+        namespace := Pointers.Xmlns(it)
+        BuilderPrint(out, "xmlns % <%> <%> <%>\n", it_index, namespace.prefix, namespace.name, namespace.error)
+    }
+    expressions := string.[
+        "a", "/", "/a/b", "//a", "a//b", ".", "..", "../a", "./a", "@id", "a/@b", "*", "a/*", "ns:a", "ns:*", "child::a",
+        "descendant::a", "self::node()", "parent::*", "attribute::x", "ancestor::a", "ancestor-or-self::a", "following-sibling::a[1]",
+        "a[1]", "a[1][2]", "a[@x='y']", "a[b/c]", "text()", "node()", "comment()", "processing-instruction()",
+        "processing-instruction('xml')", "processing-instruction(\"it's\")", "id('a')", "id(\"it's\")", "f()", "f(1,2,3)",
+        "ns:f(a)", "$v", "$ns:v", "1", "12345678901", "1.5", ".5", "1.", "007", "0", "0.0", "2.50", "0.5", "0.25", "0.125",
+        "0.0625", "0.03125", "0.000030517578125", "0.00006103515625", "0.0001220703125", "1234567.5", "100000", "1000000.0",
+        "10000000.0", "1048576.0", "16777216.0", "123456.5", "4096.0625", "3.0", "250.0", "0.75",
+        "1 + 2", "1 - 2", "1+2*3", "(1+2)*3", "1 div 2", "5 mod 2", "a and b", "a or b", "a = b", "a != b", "a < b",
+        "a <= b", "a > b", "a >= b", "a | b", "-1", "-a", "--1", "1 - -2", "a or b and c = d", "a*b", "a * b", "*", "* * *",
+        "a/b|c/d", "id('x')/a", "id('x')//a", "id('x')[1]", "id('x')[1]/a", "(a)[1]", "(a|b)/c", "$v/a", "'s'", "\"d\"",
+        "'unterminated", "a b", "a,b", "a)", "(a", "a[1", "f(", "f(1", "f(1,", "", "/a/", "//", "a//", "@", "a::b", "child::",
+        "$", "$1", "!", "a ! b", "a:b:c", "a :b", "node", "node ()", "text", "div", "div div div", "and", "or or or", "mod/mod",
+        "a div", "café", "café/é[é()]", "a[", "a]", "a[]", "1 2", "1.5.3", "1..2", "..5", "a..b", "a.b", "a-b", "a - b",
+        "_x", "x_y.z", "@*", "@ns:*", "child::*", "child :: a", "node()/text()", "a[position() = last()]", "a[1 + 1]",
+        "range-to(a)", "xpointer(a)", "string-range(//p, 'x', 1, 2)", "/a[1]/b[2]/c[3]", "#", "a#b", "a/.", "a/..", "./.",
+        "a[.='x']", "a[../b]", "x|y|z", "1 = 2 = 3", "1 < 2 < 3", "a/b/c/d/e", "f(g(h(1)))", "f(a)[1][2]", "- - 1", "-(1)",
+        "a[b][c]/d[e]", "processing-instruction ( 'x' )", "processing-instruction(x)", "comment(1)", "text(", "id( 'a' )", " a ",
+        "\ta\n", "a/ b", "a /b", "@ id", "$ v", "1e5", "1.5e3", "0x10", "a[1]b", "(1)(2)", "f()()", "f()g()", "'a''b'", "\"a\"'b'",
+    ]
+    for expressions {
+        tree := Xpath.Parse(it)
+        text: Vec(u8)
+        Xpath.TreeText(*tree, *text)
+        BuilderPrint(out, "xpointer % <%> <%>\n", it_index, TextView(text[:]), tree.error)
+    }
+    for axis: -1..13 { BuilderPrint(out, "axis % <%>\n", axis, Xpath.AxisName(axis)) }
+}

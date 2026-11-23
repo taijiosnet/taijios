@@ -1,0 +1,200 @@
+// Text operations that give the results Limbo programs relied on: the
+// String module's splits and character classes, and Inferno's conversion
+// of bytes to a string. Libraries ported from Limbo share them so their
+// results stay the same.
+#import "std/vec";
+#import "std/float_text";
+
+BadRune :: 0xFFFD;
+RuneMax :: 0x10FFFF;
+
+// s split before the first t: the part before it and the part from t on.
+// Without t in s the second part is empty; an empty t gives ("", s).
+SplitLeft :: (s: string, t: string) -> (before: string, rest: string) {
+    if t.count == 0 { return "", s }
+    for j: 0..s.count - t.count {
+        if s[j:j + t.count] == t { return s[:j], s[j:] }
+    }
+    return s, "";
+}
+
+// s split after the last t: the part up to and including t and the part
+// after it. Without t in s the first part is empty; an empty t gives (s, "").
+SplitRight :: (s: string, t: string) -> (before: string, rest: string) {
+    if t.count == 0 { return s, "" }
+    j := s.count - t.count;
+    while j >= 0 {
+        if s[j:j + t.count] == t { return s[:j + t.count], s[j + t.count:] }
+        j -= 1;
+    }
+    return "", s;
+}
+
+// The rune at a byte offset and the bytes it takes, as Inferno's chartorune
+// decoded it: a malformed, overlong or surrogate sequence is BadRune and
+// takes one byte.
+RuneAt :: (text: string, at: s64) -> (rune: s64, width: s64) {
+    first := cast(s64)text[at];
+    if first < 0x80 { return first, 1 }
+    limits := s64.[0xE0, 0xF0, 0xF8];
+    masks := s64.[0x7FF, 0xFFFF, 0x1FFFFF];
+    smallest := s64.[0x7F, 0x7FF, 0xFFFF];
+    value := first;
+    for i: 1..3 {
+        if at + i >= text.count { return BadRune, 1 }
+        part := cast(s64)text[at + i];
+        if (part & 0xC0) != 0x80 { return BadRune, 1 }
+        value = (value << 6) | (part & 0x3F);
+        if first >= limits[i - 1] { continue }
+        value &= masks[i - 1];
+        if first < 0xC0 || value <= smallest[i - 1] || value > RuneMax { return BadRune, 1 }
+        if i == 2 && value >= 0xD800 && value <= 0xDFFF { return BadRune, 1 }
+        return value, i + 1;
+    }
+    return BadRune, 1;
+}
+
+// The runes of text, in order.
+Runes :: (text: string) -> Vec(s64) {
+    out: Vec(s64);
+    at: s64 = 0;
+    while at < text.count {
+        rune, width := RuneAt(text, at);
+        VecPush(out, rune);
+        at += width;
+    }
+    return out;
+}
+
+AppendRune :: (out: *Vec(u8), value: s64) {
+    rune := value;
+    if rune < 0 || rune > RuneMax || (rune >= 0xD800 && rune <= 0xDFFF) { rune = BadRune }
+    if rune < 0x80 { VecPush(<<out, cast(u8)rune); return }
+    if rune < 0x800 {
+        VecPush(<<out, cast(u8)(0xC0 | (rune >> 6)));
+    } else {
+        if rune < 0x10000 {
+            VecPush(<<out, cast(u8)(0xE0 | (rune >> 12)));
+        } else {
+            VecPush(<<out, cast(u8)(0xF0 | (rune >> 18)));
+            VecPush(<<out, cast(u8)(0x80 | ((rune >> 12) & 0x3F)));
+        }
+        VecPush(<<out, cast(u8)(0x80 | ((rune >> 6) & 0x3F)));
+    }
+    VecPush(<<out, cast(u8)(0x80 | (rune & 0x3F)));
+}
+
+// Whether the bytes left hold the whole sequence a lead byte announces.
+FullRune :: (lead: u8, left: s64) -> bool {
+    if lead < 0x80 { return left >= 1 }
+    if lead < 0xE0 { return left >= 2 }
+    if lead < 0xF0 { return left >= 3 }
+    return left >= 4;
+}
+
+// Appends bytes as the text Limbo's `string bytes` gave: each malformed
+// byte becomes BadRune, and a sequence cut off by the end is dropped.
+FromBytes :: (bytes: []u8, out: *Vec(u8)) {
+    text := TextView(bytes);
+    at: s64 = 0;
+    while at < text.count {
+        if !FullRune(text[at], text.count - at) { return }
+        rune, width := RuneAt(text, at);
+        AppendRune(out, rune);
+        at += width;
+    }
+}
+
+// Whether rune c is in a String-module character class: the runes of set,
+// with a-b for a range between two of them and a leading ^ for the
+// complement. The empty class holds nothing.
+In :: (c: s64, set: string) -> bool {
+    if set.count == 0 { return false }
+    negate := set[0] == #char "^";
+    runes := Runes(ifx negate then set[1:] else set);
+    found := false;
+    i: s64 = 0;
+    while i < runes.count && !found {
+        if runes[i] == #char "-" && i > 0 && i < runes.count - 1 {
+            found = c >= runes[i - 1] && c <= runes[i + 1];
+            i += 1;
+        } else {
+            found = c == runes[i];
+        }
+        i += 1;
+    }
+    return found != negate;
+}
+
+RuneCount :: (text: string) -> s64 {
+    count: s64 = 0;
+    at: s64 = 0;
+    while at < text.count {
+        rune, width := RuneAt(text, at);
+        at += width;
+        count += 1;
+    }
+    return count;
+}
+
+// Appends a finite real as Limbo's %g wrote it: the shortest digits that
+// read back as the same value, no zero before a leading point, and an
+// exponent of at least two digits when the point would lie more than
+// three places before the digits or more than five after them.
+AppendReal :: (out: *Vec(u8), value: float64) {
+    magnitude := value;
+    if value < 0.0 { VecPush(<<out, #char "-"); magnitude = -value }
+    shortest: Text = Float64Repr(magnitude);
+    repr := TextView(shortest);
+    // The significant digits and the place of the point after the first
+    // nonzero one, read from d.ddd or d.ddde+xx.
+    digits: Vec(u8);
+    point: s64 = 0;
+    seen_point := false;
+    at: s64 = 0;
+    while at < repr.count && repr[at] != #char "e" {
+        c := repr[at];
+        at += 1;
+        if c == #char "." { seen_point = true; continue }
+        if digits.count == 0 && c == #char "0" {
+            if seen_point { point -= 1 }
+            continue;
+        }
+        VecPush(digits, c);
+        if !seen_point { point += 1 }
+    }
+    if at < repr.count {
+        negative := repr[at + 1] == #char "-";
+        exponent: s64 = 0;
+        for i: at + 2..repr.count - 1 { exponent = exponent * 10 + cast(s64)(repr[i] - #char "0") }
+        point += ifx negative then -exponent else exponent;
+    }
+    count := digits.count; // without the zeros at the end
+    while count > 0 && digits[count - 1] == #char "0" { count -= 1 }
+    if count == 0 { VecPush(<<out, #char "0"); return }
+    if point <= -4 || point > count + 5 {
+        VecPush(<<out, digits[0]);
+        if count > 1 {
+            VecPush(<<out, #char ".");
+            BuilderAppend(<<out, TextView(digits[1:count]));
+        }
+        exponent := point - 1;
+        VecPush(<<out, #char "e");
+        VecPush(<<out, ifx exponent < 0 then #char "-" else #char "+");
+        if exponent < 0 { exponent = -exponent }
+        if exponent < 10 { VecPush(<<out, #char "0") }
+        BuilderPrint(out, "%", exponent);
+        return;
+    }
+    if point <= 0 {
+        VecPush(<<out, #char ".");
+        for 1..-point { VecPush(<<out, #char "0") }
+        BuilderAppend(<<out, TextView(digits[:count]));
+        return;
+    }
+    for i: 0..count - 1 {
+        if i == point { VecPush(<<out, #char ".") }
+        VecPush(<<out, digits[i]);
+    }
+    for count..point - 1 { VecPush(<<out, #char "0") }
+}

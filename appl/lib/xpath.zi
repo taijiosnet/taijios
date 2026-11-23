@@ -1,0 +1,628 @@
+// XPath expressions, the data of the xpointer() scheme, parsed into a tree
+// and written back in full form as the Limbo Xpointers module did. The
+// tree views the text it was parsed from.
+//
+//     Expr     ::= OrExpr, then and, = !=, < <= > >=, + -, * div mod,
+//                  unary -, and | in rising order of binding
+//     PathExpr ::= LocationPath | FilterExpr (('/' | '//') RelativeLocationPath)?
+//     Step     ::= AxisSpecifier NodeTest Predicate* | '.' | '..'
+//
+// The lexer keeps the Limbo module's reading of the XPath rules, with its
+// oddities: after a complete operand an unknown name ends the expression
+// without an error, the ancestor axis is not recognised, and a number
+// written as .5 loses its point.
+#import "std/vec";
+#import "std/float_text";
+using Limbo :: #import "limbo_text";
+using Names :: #import "xml_names";
+
+// Operators of an expression node. = < > + - | are their characters.
+NotEqual :: 65;
+LessEqual :: 66;
+GreaterEqual :: 67;
+Multiply :: 68;
+Divide :: 69;
+Modulo :: 70;
+And :: 71;
+Or :: 72;
+Negate :: 73;
+Filter :: 76; // left[right]
+PathOf :: 77; // left/right, right a relative path
+
+// The node test of a step.
+NodeType :: 74; // comment(), node(), processing-instruction() or text()
+NameTest :: 75;
+
+// Axes.
+Ancestor :: 0;
+AncestorOrSelf :: 1;
+Attribute :: 2;
+Child :: 3;
+Descendant :: 4;
+DescendantOrSelf :: 5;
+Following :: 6;
+FollowingSibling :: 7;
+Namespace :: 8;
+Parent :: 9;
+Preceding :: 10;
+PrecedingSibling :: 11;
+Self :: 12;
+
+AXES: [13]string = .["ancestor", "ancestor-or-self", "attribute", "child", "descendant", "descendant-or-self",
+    "following", "following-sibling", "namespace", "parent", "preceding", "preceding-sibling", "self"];
+
+AxisName :: (axis: s64) -> string {
+    if axis < 0 || axis >= AXES.count { return "" }
+    return AXES[axis];
+}
+
+Step :: struct {
+    axis: s64;
+    test: s64;              // NameTest or NodeType
+    prefix: string;
+    name: string;
+    argument: string;       // the literal given to processing-instruction()
+    predicates: Vec(s64);   // nodes
+}
+
+// Kinds of node.
+ExpressionNode :: 0; // op, left and right; right is -1 for unary minus
+CallNode :: 1;       // prefix, name and items, its arguments
+VariableNode :: 2;   // prefix and name
+PathNode :: 3;       // absolute and items, its steps
+IntegerNode :: 4;    // name holds the digits
+RealNode :: 5;       // name holds the digits
+StringNode :: 6;     // name holds the text
+
+Node :: struct {
+    kind: s64;
+    op: s64;
+    left: s64;
+    right: s64;
+    prefix: string;
+    name: string;
+    absolute: bool;
+    items: Vec(s64);
+}
+
+Tree :: struct {
+    nodes: Vec(Node);
+    steps: Vec(Step);
+    root: s64;     // -1 when the text is not an expression
+    error: string;
+}
+
+// Lexical items beside the operators, node tests and single characters.
+Invalid :: 97;
+DoubleSlash :: 98;
+IntegerToken :: 99;
+RealToken :: 100;
+Literal :: 101;
+VariableToken :: 102;
+DotDot :: 103;
+OperatorName :: 104;
+AxisToken :: 105;
+FunctionName :: 106;
+End :: -1;
+
+Token :: struct {
+    kind: s64;
+    a: string; // prefix, axis name, literal or digits
+    b: string; // local name
+}
+
+Parser :: struct {
+    source: string;
+    at: s64;
+    previous: s64;      // the kind of the token before: decides what * and a name mean
+    pushed: Vec(Token);
+    nodes: Vec(Node);
+    steps: Vec(Step);
+    error: string;
+}
+
+Fail :: (p: *Parser, message: string) -> s64 {
+    if p.error.count == 0 { p.error = message }
+    return -1;
+}
+
+Peek :: (p: *Parser) -> s64 {
+    if p.at >= p.source.count { return End }
+    rune, width := Limbo.RuneAt(p.source, p.at);
+    return rune;
+}
+
+Get :: (p: *Parser) -> s64 {
+    if p.at >= p.source.count { return End }
+    rune, width := Limbo.RuneAt(p.source, p.at);
+    p.at += width;
+    return rune;
+}
+
+// Steps back over the rune that ends at the read position.
+Unget :: (p: *Parser) {
+    width: s64 = 4;
+    while width > 1 {
+        if p.at >= width {
+            rune, found := Limbo.RuneAt(p.source, p.at - width);
+            if found == width { break }
+        }
+        width -= 1;
+    }
+    if p.at >= width { p.at -= width }
+}
+
+SkipSpaces :: (p: *Parser) {
+    while Names.IsSpace(Peek(p)) { unused Get(p) }
+}
+
+Keyword :: (name: string) -> s64 {
+    if name == "and" { return And }
+    if name == "div" { return Divide }
+    if name == "mod" { return Modulo }
+    if name == "or" { return Or }
+    if name == "comment" || name == "node" || name == "processing-instruction" || name == "text" { return NodeType }
+    return 0;
+}
+
+AxisNumber :: (name: string) -> s64 {
+    for i: 0..AXES.count - 1 { if AXES[i] == name { return i } }
+    return 0;
+}
+
+// Whether a token of this kind completes an operand, so that a * after it
+// multiplies and a name after it is an operator.
+EndsOperand :: (kind: s64) -> bool {
+    openers := s64.[End, 0, #char "@", #char "(", #char "[", #char ",", OperatorName, Multiply, #char "/", DoubleSlash,
+        #char "|", #char "+", #char "-", #char "=", NotEqual, #char "<", LessEqual, #char ">", GreaterEqual, And, Or,
+        Modulo, Divide, AxisToken];
+    for openers { if it == kind { return false } }
+    return true;
+}
+
+Simple :: (kind: s64) -> Token {
+    t: Token;
+    t.kind = kind;
+    return t;
+}
+
+Named :: (kind: s64, a: string, b: string) -> Token {
+    t: Token;
+    t.kind = kind;
+    t.a = a;
+    t.b = b;
+    return t;
+}
+
+// The two-character token when next follows, else the one-character one.
+Pair :: (p: *Parser, next: s64, both: s64, alone: s64) -> Token {
+    if Peek(p) != next { return Simple(alone) }
+    unused Get(p);
+    return Simple(both);
+}
+
+// Number ::= Digits ('.' Digits?)? | '.' Digits, after its first digit.
+// A point with no digit after it is left unread.
+Number :: (p: *Parser) -> Token {
+    start := p.at - 1;
+    c := Get(p);
+    while Names.IsDigit(c) { c = Get(p) }
+    kind: s64 = IntegerToken;
+    if c == #char "." {
+        c = Get(p);
+        if Names.IsDigit(c) {
+            kind = RealToken;
+            while Names.IsDigit(c) { c = Get(p) }
+        } else {
+            if c >= 0 { Unget(p) }
+            c = #char ".";
+        }
+    }
+    if c >= 0 { Unget(p) }
+    return Named(kind, p.source[start:p.at], "");
+}
+
+NameToken :: (p: *Parser) -> Token {
+    prefix, name, end := Names.QName(p.source, p.at);
+    p.at = end;
+    keyword := ifx prefix.count == 0 then Keyword(name) else 0;
+    if EndsOperand(p.previous) {
+        if prefix.count == 0 && keyword != NodeType { return Simple(keyword) }
+        return Named(OperatorName, prefix, name);
+    }
+    SkipSpaces(p);
+    if Peek(p) == #char "(" {
+        // A name before ( is a node type or a function.
+        if keyword == NodeType { return Named(NodeType, "", name) }
+        return Named(FunctionName, prefix, name);
+    }
+    if Peek(p) == #char ":" {
+        unused Get(p);
+        if prefix.count == 0 {
+            // name:: is an axis and name:* a name test.
+            if Peek(p) == #char ":" && AxisNumber(name) != 0 { unused Get(p); return Named(AxisToken, name, "") }
+            if Peek(p) == #char "*" { unused Get(p); return Named(NameTest, name, "*") }
+        }
+        Unget(p);
+    }
+    return Named(NameTest, prefix, name);
+}
+
+Scan :: (p: *Parser) -> Token {
+    SkipSpaces(p);
+    c := Get(p);
+    singles := "()[]@,+-|=:";
+    if c == End { return Simple(c) }
+    for i: 0..singles.count - 1 { if c == cast(s64)singles[i] { return Simple(c) } }
+    if c == #char "/" { return Pair(p, #char "/", DoubleSlash, #char "/") }
+    if c == #char "!" { return Pair(p, #char "=", NotEqual, #char "!") }
+    if c == #char "<" { return Pair(p, #char "=", LessEqual, #char "<") }
+    if c == #char ">" { return Pair(p, #char "=", GreaterEqual, #char ">") }
+    if c == #char "*" { return Simple(ifx EndsOperand(p.previous) then Multiply else c) }
+    if c == #char "." {
+        if Names.IsDigit(Peek(p)) {
+            unused Get(p);
+            number := Number(p);
+            return Named(RealToken, number.a, "");
+        }
+        return Pair(p, #char ".", DotDot, #char ".");
+    }
+    if c == #char "$" {
+        prefix, name, end := Names.QName(p.source, p.at);
+        if name.count == 0 { return Simple(Invalid) }
+        p.at = end;
+        return Named(VariableToken, prefix, name);
+    }
+    if Names.IsDigit(c) { return Number(p) }
+    if c == 34 || c == #char "'" {
+        start := p.at;
+        next := Get(p);
+        while next != c {
+            if next < 0 { unused Fail(p, "syntax error: missing string terminator"); return Simple(Invalid) }
+            next = Get(p);
+        }
+        return Named(Literal, p.source[start:p.at - 1], "");
+    }
+    if Names.IsAlnum(c) || c == #char "_" {
+        Unget(p);
+        return NameToken(p);
+    }
+    return Simple(Invalid);
+}
+
+Next :: (p: *Parser) -> Token {
+    if p.pushed.count > 0 {
+        t := p.pushed[p.pushed.count - 1];
+        unused VecResize(p.pushed, p.pushed.count - 1);
+        return t;
+    }
+    t := Scan(p);
+    p.previous = t.kind;
+    return t;
+}
+
+Look :: (p: *Parser) -> s64 {
+    t := Next(p);
+    VecPush(p.pushed, t);
+    return t.kind;
+}
+
+Expect :: (p: *Parser, kind: s64) {
+    t := Next(p);
+    if t.kind == kind { return }
+    if kind == #char "(" { unused Fail(p, "syntax error: expected '('") }
+    if kind == #char ")" { unused Fail(p, "syntax error: expected ')'") }
+    if kind == #char "]" { unused Fail(p, "syntax error: expected ']'") }
+}
+
+NewNode :: (p: *Parser, kind: s64) -> s64 {
+    node: Node;
+    node.kind = kind;
+    node.left = -1;
+    node.right = -1;
+    VecPush(p.nodes, node);
+    return p.nodes.count - 1;
+}
+
+NewExpression :: (p: *Parser, op: s64, left: s64, right: s64) -> s64 {
+    node := NewNode(p, ExpressionNode);
+    p.nodes[node].op = op;
+    p.nodes[node].left = left;
+    p.nodes[node].right = right;
+    return node;
+}
+
+NewStep :: (p: *Parser, axis: s64, test: s64, prefix: string, name: string) -> s64 {
+    step: Step;
+    step.axis = axis;
+    step.test = test;
+    step.prefix = prefix;
+    step.name = name;
+    VecPush(p.steps, step);
+    return p.steps.count - 1;
+}
+
+// Whether a token is a binary operator of a binding level; level 6 is
+// unary minus.
+IsOperator :: (kind: s64, level: s64) -> bool {
+    if level == 0 { return kind == Or }
+    if level == 1 { return kind == And }
+    if level == 2 { return kind == #char "=" || kind == NotEqual }
+    if level == 3 { return kind == #char "<" || kind == LessEqual || kind == #char ">" || kind == GreaterEqual }
+    if level == 4 { return kind == #char "+" || kind == #char "-" }
+    if level == 5 { return kind == Multiply || kind == Divide || kind == Modulo }
+    return level == 7 && kind == #char "|";
+}
+
+Expr :: (p: *Parser, from: s64) -> s64 {
+    if p.error.count > 0 { return -1 }
+    level := from;
+    if level > 7 { return PathExpr(p) }
+    if level == 6 {
+        if Look(p) == #char "-" {
+            unused Next(p);
+            operand := Expr(p, 7);
+            return NewExpression(p, Negate, operand, -1);
+        }
+        level = 7;
+    }
+    e := Expr(p, level + 1);
+    while p.error.count == 0 && IsOperator(Look(p), level) {
+        op := Next(p);
+        right := Expr(p, level + 1);
+        e = NewExpression(p, op.kind, e, right);
+    }
+    return e;
+}
+
+// Predicate ::= '[' Expr ']'; -1 when no predicate follows.
+Predicate :: (p: *Parser) -> s64 {
+    t := Next(p);
+    if t.kind != #char "[" { VecPush(p.pushed, t); return -1 }
+    e := Expr(p, 0);
+    Expect(p, #char "]");
+    return e;
+}
+
+// A step, or -1 with the token left unread when none starts here.
+ParseStep :: (p: *Parser) -> s64 {
+    t := Next(p);
+    if t.kind == #char "." { return NewStep(p, Self, NodeType, "", "node") }
+    if t.kind == DotDot { return NewStep(p, Parent, NodeType, "", "node") }
+    axis: s64 = Child;
+    if t.kind == AxisToken {
+        axis = AxisNumber(t.a);
+        t = Next(p);
+    } else if t.kind == #char "@" {
+        axis = Attribute;
+        t = Next(p);
+    }
+    if t.kind == #char "*" { t = Named(NameTest, "", "*") }
+    if t.kind != NameTest && t.kind != NodeType { VecPush(p.pushed, t); return -1 }
+    argument := "";
+    if t.kind == NodeType {
+        Expect(p, #char "(");
+        if t.b == "processing-instruction" && Look(p) == Literal {
+            literal := Next(p);
+            argument = literal.a;
+        }
+        Expect(p, #char ")");
+    }
+    predicates: Vec(s64);
+    while p.error.count == 0 {
+        predicate := Predicate(p);
+        if predicate < 0 { break }
+        VecPush(predicates, predicate);
+    }
+    step := NewStep(p, axis, t.kind, t.a, t.b);
+    p.steps[step].argument = argument;
+    VecSwap(p.steps[step].predicates, predicates);
+    return step;
+}
+
+// LocationPath ::= '/'? (Step (('/' | '//') Step)*)?, where // stands for
+// /descendant-or-self::node()/.
+LocationPath :: (p: *Parser, absolute: bool) -> s64 {
+    steps: Vec(s64);
+    separator := Look(p);
+    if separator != #char "/" && separator != DoubleSlash {
+        step := ParseStep(p);
+        if step < 0 { return Fail(p, "syntax error: expected Step in LocationPath") }
+        VecPush(steps, step);
+    }
+    while p.error.count == 0 {
+        separator = Look(p);
+        if separator != #char "/" && separator != DoubleSlash { break }
+        unused Next(p);
+        if separator == DoubleSlash { VecPush(steps, NewStep(p, DescendantOrSelf, NodeType, "", "node")) }
+        step := ParseStep(p);
+        if step < 0 {
+            if absolute && steps.count == 0 { break } // only the first /
+            return Fail(p, "syntax error: expected Step in LocationPath");
+        }
+        VecPush(steps, step);
+    }
+    node := NewNode(p, PathNode);
+    p.nodes[node].absolute = absolute;
+    VecSwap(p.nodes[node].items, steps);
+    return node;
+}
+
+// PrimaryExpr ::= '$' QName | '(' Expr ')' | Literal | Number | QName '(' (Expr (',' Expr)*)? ')'
+Primary :: (p: *Parser) -> s64 {
+    t := Next(p);
+    if t.kind == #char "(" {
+        e := Expr(p, 0);
+        Expect(p, #char ")");
+        return e;
+    }
+    kind: s64 = -1;
+    if t.kind == VariableToken { kind = VariableNode }
+    if t.kind == Literal { kind = StringNode }
+    if t.kind == IntegerToken { kind = IntegerNode }
+    if t.kind == RealToken { kind = RealNode }
+    if t.kind == FunctionName { kind = CallNode }
+    if kind < 0 { return Fail(p, "syntax error: invalid PrimaryExpr") }
+    arguments: Vec(s64);
+    if kind == CallNode {
+        Expect(p, #char "(");
+        if Look(p) != #char ")" {
+            while p.error.count == 0 {
+                VecPush(arguments, Expr(p, 0));
+                if Look(p) != #char "," { break }
+                unused Next(p);
+            }
+        }
+        Expect(p, #char ")");
+    }
+    node := NewNode(p, kind);
+    if kind == VariableNode || kind == CallNode {
+        p.nodes[node].prefix = t.a;
+        p.nodes[node].name = t.b;
+    } else {
+        p.nodes[node].name = t.a;
+    }
+    VecSwap(p.nodes[node].items, arguments);
+    return node;
+}
+
+PathExpr :: (p: *Parser) -> s64 {
+    first := Look(p);
+    if first == #char "/" || first == DoubleSlash { return LocationPath(p, true) }
+    if first == #char "." || first == DotDot || first == AxisToken || first == #char "@" || first == NameTest ||
+        first == NodeType || first == #char "*" {
+        return LocationPath(p, false);
+    }
+    e := Primary(p);
+    while p.error.count == 0 && Look(p) == #char "[" {
+        predicate := Predicate(p);
+        e = NewExpression(p, Filter, e, predicate);
+    }
+    separator := Look(p);
+    if p.error.count == 0 && (separator == #char "/" || separator == DoubleSlash) {
+        path := LocationPath(p, false);
+        e = NewExpression(p, PathOf, e, path);
+    }
+    return e;
+}
+
+// Parses the data of an xpointer() part. Text left after a complete
+// expression is an error.
+Parse :: (s: string) -> Tree {
+    p: Parser;
+    p.source = s;
+    root := Expr(*p, 0);
+    if p.error.count == 0 && p.at < s.count { unused Fail(*p, "syntax error: missing operator") }
+    tree: Tree;
+    tree.root = -1;
+    tree.error = p.error;
+    if p.error.count == 0 {
+        tree.root = root;
+        VecSwap(tree.nodes, p.nodes);
+        VecSwap(tree.steps, p.steps);
+    }
+    return tree;
+}
+
+Qualified :: (out: *Vec(u8), prefix: string, name: string) {
+    if prefix.count > 0 { BuilderPrint(out, "%:", prefix) }
+    BuilderAppend(<<out, name);
+}
+
+// A literal in single quotes, or in double quotes when it holds a single one.
+Quoted :: (out: *Vec(u8), text: string) {
+    quote: u8 = #char "'";
+    for text { if it == #char "'" { quote = 34 } }
+    VecPush(<<out, quote);
+    BuilderAppend(<<out, text);
+    VecPush(<<out, quote);
+}
+
+OperatorText :: (out: *Vec(u8), op: s64) {
+    if op == NotEqual { BuilderAppend(<<out, "!="); return }
+    if op == LessEqual { BuilderAppend(<<out, "<="); return }
+    if op == GreaterEqual { BuilderAppend(<<out, ">="); return }
+    if op == Multiply { BuilderAppend(<<out, "*"); return }
+    if op == Divide { BuilderAppend(<<out, " div "); return }
+    if op == Modulo { BuilderAppend(<<out, " mod "); return }
+    if op == And { BuilderAppend(<<out, " and "); return }
+    if op == Or { BuilderAppend(<<out, " or "); return }
+    if op == Negate { BuilderAppend(<<out, "-"); return }
+    if op == PathOf { BuilderAppend(<<out, "/"); return }
+    VecPush(<<out, #char " ");
+    VecPush(<<out, cast(u8)op);
+    VecPush(<<out, #char " ");
+}
+
+// Appends a step in full: axis::test and its predicates.
+StepText :: (tree: *Tree, step: s64, out: *Vec(u8)) {
+    BuilderPrint(out, "%::", AxisName(tree.steps[step].axis));
+    if tree.steps[step].test == NodeType {
+        BuilderAppend(<<out, tree.steps[step].name);
+        VecPush(<<out, #char "(");
+        if tree.steps[step].argument.count > 0 { Quoted(out, tree.steps[step].argument) }
+        VecPush(<<out, #char ")");
+    } else {
+        Qualified(out, tree.steps[step].prefix, tree.steps[step].name);
+    }
+    for i: 0..tree.steps[step].predicates.count - 1 {
+        VecPush(<<out, #char "[");
+        NodeText(tree, tree.steps[step].predicates[i], out);
+        VecPush(<<out, #char "]");
+    }
+}
+
+DigitsValue :: (digits: string) -> s64 {
+    value: s64 = 0;
+    for digits { value = value * 10 + cast(s64)(it - #char "0") }
+    return value;
+}
+
+// Appends the expression under a node in full, with every binary
+// expression in parentheses; "nil" for no node.
+NodeText :: (tree: *Tree, node: s64, out: *Vec(u8)) {
+    if node < 0 { BuilderAppend(<<out, "nil"); return }
+    kind := tree.nodes[node].kind;
+    if kind == ExpressionNode {
+        op := tree.nodes[node].op;
+        if op != Filter { VecPush(<<out, #char "(") }
+        if tree.nodes[node].right < 0 {
+            OperatorText(out, op);
+            NodeText(tree, tree.nodes[node].left, out);
+        } else {
+            NodeText(tree, tree.nodes[node].left, out);
+            if op == Filter { VecPush(<<out, #char "[") } else { OperatorText(out, op) }
+            NodeText(tree, tree.nodes[node].right, out);
+        }
+        VecPush(<<out, ifx op == Filter then #char "]" else #char ")");
+    } else if kind == CallNode {
+        Qualified(out, tree.nodes[node].prefix, tree.nodes[node].name);
+        VecPush(<<out, #char "(");
+        for i: 0..tree.nodes[node].items.count - 1 {
+            if i > 0 { VecPush(<<out, #char ",") }
+            NodeText(tree, tree.nodes[node].items[i], out);
+        }
+        VecPush(<<out, #char ")");
+    } else if kind == VariableNode {
+        VecPush(<<out, #char "$");
+        Qualified(out, tree.nodes[node].prefix, tree.nodes[node].name);
+    } else if kind == PathNode {
+        if tree.nodes[node].absolute { VecPush(<<out, #char "/") }
+        for i: 0..tree.nodes[node].items.count - 1 {
+            if i > 0 { VecPush(<<out, #char "/") }
+            StepText(tree, tree.nodes[node].items[i], out);
+        }
+    } else if kind == IntegerNode {
+        BuilderPrint(out, "%", DigitsValue(tree.nodes[node].name));
+    } else if kind == RealNode {
+        value, ok := ParseFloat64(tree.nodes[node].name);
+        Limbo.AppendReal(out, value);
+    } else {
+        Quoted(out, tree.nodes[node].name);
+    }
+}
+
+// Appends the whole expression, or "nil" for a tree that did not parse.
+TreeText :: (tree: *Tree, out: *Vec(u8)) {
+    NodeText(tree, tree.root, out);
+}

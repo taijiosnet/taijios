@@ -1,0 +1,50 @@
+// The W3C library test as a ZX program for the emulator: the same cases
+// as w3c_test.zi, compared with the same Limbo lines read from the guest's
+// /tests/w3c.
+//
+//     zi2zx --root tests/w3c --module-path appl/lib --module-path appl/cmd --bind-host taijios_args \
+//         --bind-host taijios_io --entry w3c_guest:main -o build/tests/w3c/w3c_guest.zx tests/w3c/w3c_guest.zi
+//     emu -r . /dis/sh.dis -c 'zxrun /build/tests/w3c/w3c_guest.zx'
+using Args :: #import "taijios_args"
+using Io :: #import "taijios_io"
+using Cli :: #import "zx_cli"
+using Uris :: #import "uris_cases"
+using Pointers :: #import "xpointers_cases"
+using Golden :: #import "golden"
+
+ReadGuest :: (path: string, text: *Vec(u8)) -> bool {
+    fd := Io.OpenFile(path, 0)
+    if fd < 0 { return false }
+    chunk: [8192]u8
+    count := Io.ReadBytes(fd, chunk[:])
+    while count > 0 {
+        BuilderAppend(<<text, TextView(chunk[:count]))
+        count = Io.ReadBytes(fd, chunk[:])
+    }
+    unused Io.CloseFile(fd)
+    return true
+}
+
+main :: () -> s32 {
+    report: Vec(u8)
+    uris: Vec(u8)
+    Uris.UriLines(*uris)
+    want_uris: Vec(u8)
+    pointers: Vec(u8)
+    Pointers.PointerLines(*pointers)
+    want_pointers: Vec(u8)
+    if !ReadGuest("/tests/w3c/uris.limbo.txt", *want_uris) || !ReadGuest("/tests/w3c/xpointers.limbo.txt", *want_pointers) {
+        unused Cli.WriteAll(2, "FAIL: cannot read /tests/w3c/*.limbo.txt\n")
+        unused Args.SetFailure("fail")
+        return 1
+    }
+    same := Golden.Same("uris", TextView(uris[:]), TextView(want_uris[:]), *report)
+    same = Golden.Same("xpointers", TextView(pointers[:]), TextView(want_pointers[:]), *report) && same
+    if !same {
+        unused Cli.WriteAll(2, TextView(report[:]))
+        unused Args.SetFailure("fail")
+        return 1
+    }
+    unused Cli.WriteAll(1, "w3c: URIs and XPointers match the Limbo modules\n")
+    return 0
+}

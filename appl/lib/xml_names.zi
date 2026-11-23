@@ -1,0 +1,48 @@
+// Names as Namespaces in XML defines them, scanned in UTF-8 text:
+//
+//     QName  ::= (NCName ':')? NCName
+//     NCName ::= (Letter | '_') (Letter | Digit | '.' | '-' | '_')*
+//
+// As in the Limbo Xpointers module, every rune above U+00A0 counts as a
+// letter.
+using Limbo :: #import "limbo_text";
+
+IsSpace :: (c: s64) -> bool {
+    return c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r" || c == 11 || c == 12;
+}
+
+IsDigit :: (c: s64) -> bool { return c >= #char "0" && c <= #char "9" }
+
+IsAlnum :: (c: s64) -> bool {
+    if (c >= #char "a" && c <= #char "z") || (c >= #char "A" && c <= #char "Z") || IsDigit(c) { return true }
+    return c > 0xA0;
+}
+
+IsNameChar :: (c: s64) -> bool {
+    return IsAlnum(c) || c == #char "_" || c == #char "-" || c == #char ".";
+}
+
+// Where the NCName that starts at byte offset from ends; from itself when
+// no name starts there.
+NcName :: (s: string, from: s64) -> s64 {
+    if from >= s.count { return from }
+    first, first_width := Limbo.RuneAt(s, from);
+    if (!IsAlnum(first) && first != #char "_") || IsDigit(first) { return from }
+    end := from + first_width;
+    while end < s.count {
+        c, width := Limbo.RuneAt(s, end);
+        if !IsNameChar(c) { break }
+        end += width;
+    }
+    return end;
+}
+
+// The QName at byte offset from and where it ends. A name followed by a
+// colon and no second name is a local part; the colon is left unread.
+QName :: (s: string, from: s64) -> (prefix: string, local: string, end: s64) {
+    colon := NcName(s, from);
+    if colon >= s.count || s[colon] != #char ":" { return "", s[from:colon], colon }
+    end := NcName(s, colon + 1);
+    if end == colon + 1 { return "", s[from:colon], colon }
+    return s[from:colon], s[colon + 1:end], end;
+}

@@ -1,0 +1,322 @@
+// URIs in the generic syntax of RFC 3986,
+//
+//     scheme://userinfo@host:port/path?query#fragment
+//
+// parsed, resolved against a base and written back as the Limbo URIs
+// module did, including its percent-coding rules.
+#import "std/vec";
+using Limbo :: #import "limbo_text";
+
+URI :: struct {
+    scheme: Text;
+    userinfo: Text; // authority, part 1
+    host: Text;     // authority, part 2
+    port: Text;     // authority, part 3
+    path: Text;     // starts with / after an authority
+    query: Text;    // includes its ? unless empty
+    fragment: Text; // includes its # unless empty
+}
+
+Set :: (field: *Text, value: string) {
+    VecClear(field.bytes);
+    BuilderAppend(field.bytes, value);
+}
+
+// s split at the first mark, which neither part keeps.
+Trimmed :: (s: string, mark: string) -> (before: string, rest: string) {
+    before, from := Limbo.SplitLeft(s, mark);
+    if from.count == 0 { return before, from }
+    return before, from[1:];
+}
+
+RESERVED :: ":/?#[]@%"; // the general delimiters and the escape itself
+HEX :: "0123456789ABCDEF";
+
+SchemeChar :: (c: u8) -> bool {
+    letter := (c >= #char "a" && c <= #char "z") || (c >= #char "A" && c <= #char "Z");
+    return letter || (c >= #char "0" && c <= #char "9") || c == #char "+" || c == #char "-" || c == #char ".";
+}
+
+// Bytes that are written as %XX unless the caller names them safe: the
+// general delimiters, %, controls, space and every non-ASCII byte.
+Escaped :: (c: u8) -> bool {
+    if c <= #char " " || c >= 0x80 { return true }
+    for i: 0..RESERVED.count - 1 { if RESERVED[i] == c { return true } }
+    return false;
+}
+
+// The value of two hexadecimal digits at the start of s, or -1.
+Hex2 :: (s: string) -> s64 {
+    if s.count < 2 { return -1 }
+    n: s64 = 0;
+    for i: 0..1 {
+        c := cast(s64)s[i];
+        digit: s64 = -1;
+        if c >= #char "0" && c <= #char "9" { digit = c - #char "0" }
+        if c >= #char "a" && c <= #char "f" { digit = 10 + c - #char "a" }
+        if c >= #char "A" && c <= #char "F" { digit = 10 + c - #char "A" }
+        if digit < 0 { return -1 }
+        n = n * 16 + digit;
+    }
+    return n;
+}
+
+// Appends s with each %XX replaced by its byte. %00 and incomplete escapes
+// stay as written; decoded bytes that are not UTF-8 become U+FFFD.
+DecodeTo :: (out: *Vec(u8), s: string) {
+    i: s64 = 0;
+    while i < s.count && s[i] != #char "%" && s[i] != 0 { i += 1 }
+    BuilderAppend(<<out, s[:i]);
+    if i >= s.count { return }
+    raw: Vec(u8);
+    while i < s.count {
+        c := s[i];
+        i += 1;
+        if c == #char "%" {
+            value := Hex2(s[i:]);
+            if value > 0 { c = cast(u8)value; i += 2 }
+        } else if c == 0 {
+            c = #char " ";
+        }
+        VecPush(raw, c);
+    }
+    Limbo.FromBytes(raw[:], out);
+}
+
+// Appends s with every Escaped byte outside the safe class written as %XX.
+// From the first byte that needs attention on, a non-ASCII byte kept by
+// the safe class is written as the rune of that value, as the Limbo
+// module wrote it.
+EncodeTo :: (out: *Vec(u8), s: string, safe: string) {
+    i: s64 = 0;
+    while i < s.count && s[i] < 0x80 && !(Escaped(s[i]) && !Limbo.In(cast(s64)s[i], safe)) { i += 1 }
+    BuilderAppend(<<out, s[:i]);
+    while i < s.count {
+        c := s[i];
+        i += 1;
+        if Escaped(c) && !Limbo.In(cast(s64)c, safe) {
+            VecPush(<<out, #char "%");
+            VecPush(<<out, HEX[c >> 4]);
+            VecPush(<<out, HEX[c & 15]);
+        } else {
+            Limbo.AppendRune(out, cast(s64)c);
+        }
+    }
+}
+
+// s with its first rune kept and the rest encoded: a query or fragment
+// keeps its ? or #.
+EncodeAfterFirst :: (out: *Vec(u8), s: string, safe: string) {
+    if s.count == 0 { return }
+    rune, width := Limbo.RuneAt(s, 0);
+    BuilderAppend(<<out, s[:width]);
+    EncodeTo(out, s[width:], safe);
+}
+
+Decode :: (s: string, out: *Text) {
+    VecClear(out.bytes);
+    DecodeTo(*out.bytes, s);
+}
+
+Encode :: (s: string, safe: string, out: *Text) {
+    VecClear(out.bytes);
+    EncodeTo(*out.bytes, s, safe);
+}
+
+// Splits a URI reference with the RFC's pattern
+//
+//     ^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?
+//
+// except that an authority runs to the first slash. The scheme is put in
+// lower case, and userinfo, host, path and fragment are decoded.
+Parse :: (url: string) -> URI {
+    u: URI;
+    rest := url;
+    for i: 0..url.count - 1 {
+        if url[i] == #char ":" {
+            for c: 0..i - 1 {
+                letter := url[c];
+                if letter >= #char "A" && letter <= #char "Z" { letter += #char "a" - #char "A" }
+                VecPush(u.scheme.bytes, letter);
+            }
+            rest = url[i + 1:];
+            break;
+        }
+        if !SchemeChar(url[i]) { break }
+    }
+    path := rest;
+    userinfo := "";
+    host := "";
+    if rest.count >= 2 && rest[:2] == "//" {
+        authority, after := Limbo.SplitLeft(rest[2:], "/");
+        path = ifx after.count == 0 then "/" else after;
+        user, place := Trimmed(authority, "@");
+        if place.count == 0 { place = authority } else { userinfo = user }
+        host = place;
+        port := "";
+        if place.count > 0 && place[0] == #char "[" {
+            // An IPv6 address holds colons; a port follows its bracket.
+            address, tail := Limbo.SplitRight(place, "]");
+            if tail.count > 0 && tail[0] == #char ":" { host = address; port = tail[1:] }
+        } else {
+            name, number := Trimmed(place, ":");
+            host = name;
+            port = number;
+        }
+        Set(*u.port, port);
+    }
+    before_fragment, fragment := Limbo.SplitLeft(path, "#");
+    before_query, query := Limbo.SplitLeft(before_fragment, "?");
+    Decode(userinfo, *u.userinfo);
+    Decode(host, *u.host);
+    Decode(before_query, *u.path);
+    Set(*u.query, query);
+    Decode(fragment, *u.fragment);
+    return u;
+}
+
+HasAuthority :: (u: *URI) -> bool {
+    return u.host.bytes.count > 0 || u.userinfo.bytes.count > 0 || u.port.bytes.count > 0;
+}
+
+IsAbsolute :: (u: *URI) -> bool { return u.scheme.bytes.count > 0 }
+
+// The user and password of a userinfo in the deprecated user:password form.
+UserPassword :: (userinfo: string) -> (user: string, password: string) {
+    user, password := Trimmed(userinfo, ":");
+    return user, password;
+}
+
+AuthorityTo :: (out: *Vec(u8), u: *URI) {
+    EncodeTo(out, TextView(u.userinfo), ":");
+    if u.userinfo.bytes.count > 0 { VecPush(<<out, #char "@") }
+    if u.host.bytes.count == 0 { return }
+    EncodeTo(out, TextView(u.host), "[]:");
+    if u.port.bytes.count > 0 {
+        VecPush(<<out, #char ":");
+        EncodeTo(out, TextView(u.port), "");
+    }
+}
+
+Authority :: (u: *URI, out: *Text) {
+    VecClear(out.bytes);
+    AuthorityTo(*out.bytes, u);
+}
+
+// The URI as text, encoded again.
+Format :: (u: *URI, out: *Text) {
+    VecClear(out.bytes);
+    if u.scheme.bytes.count > 0 {
+        BuilderAppend(out.bytes, TextView(u.scheme));
+        VecPush(out.bytes, #char ":");
+    }
+    if HasAuthority(u) {
+        BuilderAppend(out.bytes, "//");
+        AuthorityTo(*out.bytes, u);
+    }
+    EncodeTo(*out.bytes, TextView(u.path), "/@:");
+    BuilderAppend(out.bytes, TextView(u.query));
+    EncodeAfterFirst(*out.bytes, TextView(u.fragment), "@:/?");
+}
+
+Copy :: (u: *URI) -> URI {
+    v: URI;
+    Set(*v.scheme, TextView(u.scheme));
+    Set(*v.userinfo, TextView(u.userinfo));
+    Set(*v.host, TextView(u.host));
+    Set(*v.port, TextView(u.port));
+    Set(*v.path, TextView(u.path));
+    Set(*v.query, TextView(u.query));
+    Set(*v.fragment, TextView(u.fragment));
+    return v;
+}
+
+// The URI without its userinfo, query and fragment.
+PathOnly :: (u: *URI) -> URI {
+    v := Copy(u);
+    VecClear(v.userinfo.bytes);
+    VecClear(v.query.bytes);
+    VecClear(v.fragment.bytes);
+    return v;
+}
+
+// A path without its . and .. segments: a simpler form of RFC 3986 5.2.4
+// that takes one whole segment at a time. A leading .. is dropped and a
+// path that ends in a dot segment ends in a slash.
+RemoveDots :: (path: string) -> Text {
+    work: Vec(u8);
+    BuilderAppend(work, path);
+    out: Vec(u8);
+    p: s64 = 0;
+    while p < work.count {
+        // One segment with the slash before it, at least two bytes long.
+        q := p;
+        p += 1;
+        if p < work.count {
+            p += 1;
+            while p < work.count && work[p] != #char "/" { p += 1 }
+        }
+        end := ifx p < work.count then p + 1 else p;
+        key := TextView(work[q:end]); // with the slash after it, if any
+        if key == "/./" || key == "/." || key == "/../" || key == "/.." {
+            back := key == "/../" || key == "/..";
+            if p >= work.count { VecPush(work, #char "/") }
+            if back && out.count > 0 {
+                keep := out.count - 1;
+                while keep > 0 && out[keep] != #char "/" { keep -= 1 }
+                unused VecResize(out, keep);
+            }
+        } else if key != "../" && key != "./" && key != "." && key != ".." {
+            BuilderAppend(out, TextView(work[q:p]));
+        }
+    }
+    result: Text;
+    VecSwap(result.bytes, out);
+    return result;
+}
+
+// The reference u resolved against base (RFC 3986 5.2.2), with dot
+// segments removed. A null base only removes the dot segments.
+AddBase :: (u: *URI, base: *URI) -> URI {
+    r := Copy(u);
+    if r.scheme.bytes.count == 0 && base != null {
+        Set(*r.scheme, TextView(base.scheme));
+        if !HasAuthority(*r) {
+            Set(*r.userinfo, TextView(base.userinfo));
+            Set(*r.host, TextView(base.host));
+            Set(*r.port, TextView(base.port));
+            if r.path.bytes.count == 0 {
+                Set(*r.path, TextView(base.path));
+                if r.query.bytes.count == 0 { Set(*r.query, TextView(base.query)) }
+            } else if r.path.bytes[0] != #char "/" {
+                // 5.2.3: the reference replaces the base's last segment.
+                merged: Vec(u8);
+                if base.path.bytes.count == 0 && HasAuthority(base) {
+                    VecPush(merged, #char "/");
+                } else {
+                    directory, last := Limbo.SplitRight(TextView(base.path), "/");
+                    BuilderAppend(merged, directory);
+                }
+                BuilderAppend(merged, TextView(r.path));
+                VecSwap(r.path.bytes, merged);
+            }
+        }
+    }
+    clean: Text = RemoveDots(TextView(r.path));
+    VecSwap(r.path.bytes, clean.bytes);
+    return r;
+}
+
+NoDots :: (u: *URI) -> URI { return AddBase(u, null) }
+
+// Whether two URIs are the same apart from their fragments.
+Equal :: (u: *URI, v: *URI) -> bool {
+    if v == null { return false }
+    return TextView(u.scheme) == TextView(v.scheme) && TextView(u.userinfo) == TextView(v.userinfo) &&
+        TextView(u.host) == TextView(v.host) && TextView(u.port) == TextView(v.port) &&
+        TextView(u.path) == TextView(v.path) && TextView(u.query) == TextView(v.query);
+}
+
+EqualWithFragment :: (u: *URI, v: *URI) -> bool {
+    return Equal(u, v) && TextView(u.fragment) == TextView(v.fragment);
+}

@@ -1,0 +1,156 @@
+// The XPointer framework and its element() and xmlns() schemes, as the
+// Limbo Xpointers module read them. The xpointer() scheme's data is an
+// XPath expression: see xpath.zi. The results view the text they were
+// read from.
+//
+//     Pointer     ::= Shorthand | SchemeBased
+//     Shorthand   ::= NCName
+//     SchemeBased ::= PointerPart (S? PointerPart)*
+//     PointerPart ::= QName '(' SchemeData ')'
+//     SchemeData  ::= (NormalChar | '^(' | '^)' | '^^' | '(' SchemeData ')')*
+#import "std/vec";
+using Limbo :: #import "limbo_text";
+using Names :: #import "xml_names";
+
+Part :: struct {
+    prefix: string;
+    name: string;
+    data: Text; // the scheme data without its ^ escapes
+}
+
+Pointer :: struct {
+    shorthand: string; // the name of a shorthand pointer
+    parts: Vec(Part);  // the parts of a scheme-based pointer
+    error: Text;
+}
+
+// Puts "message at N" in the pointer's error, N being the rune offset of
+// byte offset at, and drops the parts read so far.
+FailAt :: (pointer: *Pointer, message: string, s: string, at: s64) {
+    VecClear(pointer.parts);
+    BuilderPrint(*pointer.error.bytes, "% at %", message, Limbo.RuneCount(s[:at]));
+}
+
+ReadPointer :: (s: string, result: *Pointer) {
+    first_prefix, first_name, first_end := Names.QName(s, 0);
+    if first_end >= s.count {
+        if first_prefix.count > 0 {
+            BuilderAppend(result.error.bytes, "shorthand pointer must be unqualified name");
+        } else if first_name.count == 0 {
+            BuilderAppend(result.error.bytes, "missing pointer name");
+        } else {
+            result.shorthand = first_name;
+        }
+        return;
+    }
+    at: s64 = 0;
+    while true {
+        prefix, name, i := Names.QName(s, at);
+        if name.count == 0 { FailAt(result, "expected name", s, i); return }
+        if i >= s.count || s[i] != #char "(" { FailAt(result, "expected '('", s, i); return }
+        open := i;
+        i += 1;
+        part: Part;
+        part.prefix = prefix;
+        part.name = name;
+        nesting: s64 = 0;
+        while i < s.count && (s[i] != #char ")" || nesting > 0) {
+            c, width := Limbo.RuneAt(s, i);
+            if c == #char "^" {
+                i += 1;
+                if i >= s.count {
+                    VecClear(result.parts);
+                    BuilderAppend(result.error.bytes, "unexpected eof after ^");
+                    return;
+                }
+                escaped, escaped_width := Limbo.RuneAt(s, i);
+                if escaped != #char "(" && escaped != #char ")" && escaped != #char "^" {
+                    message: Vec(u8);
+                    BuilderPrint(*message, "invalid escape ^%", s[i:i + escaped_width]);
+                    FailAt(result, TextView(message[:]), s, i);
+                    return;
+                }
+                width = escaped_width;
+            } else if c == #char "(" {
+                nesting += 1;
+            } else if c == #char ")" {
+                nesting -= 1;
+            }
+            BuilderAppend(part.data.bytes, s[i:i + width]);
+            i += width;
+        }
+        if i >= s.count { FailAt(result, "unbalanced (", s, open); return }
+        VecPush(result.parts, part);
+        i += 1;
+        if i == s.count { return }
+        while i < s.count && Names.IsSpace(cast(s64)s[i]) { i += 1 }
+        at = i;
+    }
+}
+
+Framework :: (s: string) -> Pointer {
+    result: Pointer;
+    ReadPointer(s, *result);
+    return result;
+}
+
+// xmlns(): a prefix bound to a namespace name.
+//
+//     XmlnsSchemeData ::= NCName S? '=' S? EscapedNamespaceName
+Namespace :: struct {
+    prefix: string;
+    name: string;
+    error: string;
+}
+
+Xmlns :: (s: string) -> Namespace {
+    result: Namespace;
+    i := Names.NcName(s, 0);
+    if i == 0 { result.error = "illegal namespace name"; return result }
+    prefix := s[:i];
+    while i < s.count && Names.IsSpace(cast(s64)s[i]) { i += 1 }
+    if i >= s.count || s[i] != #char "=" { result.error = "illegal xmlns declaration"; return result }
+    i += 1;
+    while i < s.count && Names.IsSpace(cast(s64)s[i]) { i += 1 }
+    result.prefix = prefix;
+    result.name = s[i:];
+    return result;
+}
+
+// element(): an element by name, by child numbers, or both.
+//
+//     ElementSchemeData ::= (NCName ChildSequence?) | ChildSequence
+//     ChildSequence     ::= ('/' [1-9] [0-9]*)+
+//
+// As in the Limbo module, a name alone is refused and 0 is accepted.
+ElementPath :: struct {
+    name: string;
+    children: Vec(s64);
+    error: string;
+}
+
+Element :: (s: string) -> ElementPath {
+    result: ElementPath;
+    i: s64 = 0;
+    if s.count > 0 && s[0] != #char "/" {
+        i = Names.NcName(s, 0);
+        if i == 0 { result.error = "illegal element name"; return result }
+    }
+    name := s[:i];
+    while true {
+        if i >= s.count || s[i] != #char "/" { result.error = "illegal child sequence (expected '/')"; break }
+        i += 1;
+        number: s64 = 0;
+        while true {
+            if i >= s.count || !Names.IsDigit(cast(s64)s[i]) { result.error = "illegal child sequence (expected integer)"; break }
+            number = number * 10 + cast(s64)(s[i] - #char "0");
+            i += 1;
+            if i >= s.count || s[i] == #char "/" { break }
+        }
+        if result.error.count > 0 { break }
+        VecPush(result.children, number);
+        if i >= s.count { result.name = name; return result }
+    }
+    VecClear(result.children);
+    return result;
+}
