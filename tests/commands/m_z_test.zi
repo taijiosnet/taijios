@@ -30,7 +30,7 @@ WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [229]Case = Case.[
+cases: [237]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -305,6 +305,17 @@ fakenet/2/status
     .{tool = "unicode", args = "0041 zz", out = "A\n", err = "unicode: bad unicode value zz\n"},
     .{tool = "unicode", err = "usage: unicode { [-t] hex hex ... | hexmin-hexmax ... | [-n] char ... }\n"},
     .{tool = "unicode", args = "-n", err = "usage: unicode { [-t] hex hex ... | hexmin-hexmax ... | [-n] char ... }\n"},
+    // mv: a same-directory rename, moves into a directory, and the refusals.
+    .{args = "{ echo moved > m1; mv m1 m2; cat m2 }", out = "moved\n"},
+    .{args = "{ echo into > m3; mv m3 tree; cat tree/m3 }", out = "into\n"},
+    .{args = "{ echo two > m4; echo three > m5; mv m4 m5 tree; cat tree/m4 tree/m5 }", out = "two\nthree\n"},
+    .{tool = "mv", args = "gone1 gone2", status = "error", err = "mv: can't stat gone1: 'gone1' file does not exist\n"},
+    .{tool = "mv", status = "usage", err = "usage: mv fromfile tofile\n       mv fromfile ... todir\n"},
+    .{tool = "mv", args = "one", status = "usage", err = "usage: mv fromfile tofile\n       mv fromfile ... todir\n"},
+    .{args = "{ echo keep > m6; mv m6 m6 }", status = "error", err = "mv: ./m6 and ./m6 are the same\n"},
+    // A target that is not there yet still reports the rename refusal here,
+    // as the Limbo stat of a missing name did.
+    .{args = "{ mkdir -p mdir; mv tree mdir }", status = "error", err = "mv: can't rename a directory to an existing name\n"},
 ];
 
 failures: s32;

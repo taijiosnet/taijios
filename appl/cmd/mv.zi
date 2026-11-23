@@ -1,0 +1,252 @@
+// Move files, replacing the Limbo mv.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Names :: #import "taijios_names";
+using Cli :: #import "zx_cli";
+
+Usage :: "usage: mv fromfile tofile\n       mv fromfile ... todir\n";
+
+// Report a failure with its reason, as the Limbo diagnostics did.
+Warn :: (before: string, name: string, after: string) {
+    unused Cli.WriteAll(2, "mv: ");
+    unused Cli.WriteAll(2, before);
+    unused Cli.WriteAll(2, name);
+    if after.count > 0 {
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, after);
+    }
+    unused Cli.WriteAll(2, "\n");
+}
+
+// Split a path into its directory, with the slash, and its last element, as
+// str->splitr did; a bare ".." becomes "../" and ".".
+Split :: (name: string) -> (directory: string, element: string) {
+    slash := Names.LastSlash(name);
+    if slash >= 0 { return name[:slash+1], name[slash+1:] }
+    if name == ".." { return "../", "." }
+    return "./", name
+}
+
+// The fields mv needs from a status record: its identity and mode.
+Entry :: struct {
+    identity: Fs.Identity;
+    mode: u32;
+}
+
+Stat :: (name: string, info: *Entry) -> bool {
+    bytes: [Fs.BufferSize]u8;
+    size := Io.StatPacked(name, bytes[:]);
+    if size <= 0 { return false }
+    decoded := Fs.Decode(bytes[:size]);
+    info.identity = decoded.identity;
+    info.mode = decoded.mode;
+    return true
+}
+
+SameFile :: (a: string, b: string) -> bool {
+    if a == b { return true }
+    left: Entry;
+    if !Stat(a, *left) { return false }
+    right: Entry;
+    if !Stat(b, *right) { return false }
+    return Fs.SameFile(left.identity, right.identity)
+}
+
+// Remove a target that is in the way, repeating as the Limbo loop did.
+HardRemove :: (name: string) -> bool {
+    if Io.Remove(name) < 0 {
+        problem: Vec(u8);
+        BuilderPrint(*problem, "can't remove %: %", name, Io.LastError());
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, BuilderFinish(problem));
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    while Io.Remove(name) >= 0 { }
+    return true
+}
+
+// Copy the contents of one file to another.
+CopyContent :: (source: s32, target: s32, from: string, to: string) -> bool {
+    buffer: [8192]u8;
+    while true {
+        count := Io.ReadBytes(source, buffer[:]);
+        if count < 0 {
+            problem: Vec(u8);
+            BuilderPrint(*problem, "error reading %: %", from, Io.LastError());
+            unused Cli.WriteAll(2, "mv: ");
+            unused Cli.WriteAll(2, BuilderFinish(problem));
+            unused Cli.WriteAll(2, "\n");
+            return false
+        }
+        if count == 0 { break }
+        if !Cli.WriteAll(target, TextView(buffer[:count])) {
+            problem: Vec(u8);
+            BuilderPrint(*problem, "error writing %: %", to, Io.LastError());
+            unused Cli.WriteAll(2, "mv: ");
+            unused Cli.WriteAll(2, BuilderFinish(problem));
+            unused Cli.WriteAll(2, "\n");
+            return false
+        }
+    }
+    return true
+}
+
+// Move one source into todir, under toelem when it names a directory.
+Move :: (from: string, todir: string, toelem: string, has_element: bool) -> bool {
+    info: Entry;
+    if !Stat(from, *info) {
+        problem: Vec(u8);
+        BuilderPrint(*problem, "can't stat %: %", from, Io.LastError());
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, BuilderFinish(problem));
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    fromdir, fromelem := Split(from);
+    // Split keeps the slash, so the two join without another one.
+    fromname: Vec(u8);
+    BuilderPrint(*fromname, "%", fromdir);
+    unused BuilderAppend(fromname, fromelem);
+    source := BuilderFinish(fromname);
+    directory := todir;
+    element := toelem;
+    if !has_element {
+        if directory.count == 0 || directory[directory.count-1] != #char "/" {
+            joined: Vec(u8);
+            BuilderPrint(*joined, "%/", directory);
+            directory = TextDetach(BuilderFinish(joined));
+        }
+        element = fromelem;
+    }
+    if element.count == 0 {
+        unused Cli.WriteAll(2, "mv: null last name element moving ");
+        unused Cli.WriteAll(2, source);
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    target: Vec(u8);
+    BuilderPrint(*target, "%", directory);
+    unused BuilderAppend(target, element);
+    toname := TextDetach(BuilderFinish(target));
+    if SameFile(fromdir, directory) {
+        if SameFile(source, toname) {
+            unused Cli.WriteAll(2, "mv: ");
+            unused Cli.WriteAll(2, source);
+            unused Cli.WriteAll(2, " and ");
+            unused Cli.WriteAll(2, toname);
+            unused Cli.WriteAll(2, " are the same\n");
+            return false
+        }
+        existing: Entry;
+        present := Stat(toname, *existing);
+        if present && (info.mode & Fs.Directory) != 0 {
+            unused Cli.WriteAll(2, "mv: can't rename a directory to an existing name\n");
+            return false
+        }
+        if present && !HardRemove(toname) { return false }
+        handle := Io.OpenFile(source, 0);
+        if handle >= 0 {
+            renamed := Io.RenameSameDir(handle, element) >= 0;
+            unused Io.CloseFile(handle);
+            if renamed { return true }
+        }
+        if (info.mode & Fs.Directory) != 0 {
+            problem: Vec(u8);
+            BuilderPrint(*problem, "can't rename directory %: %", source, Io.LastError());
+            unused Cli.WriteAll(2, "mv: ");
+            unused Cli.WriteAll(2, BuilderFinish(problem));
+            unused Cli.WriteAll(2, "\n");
+            return false
+        }
+    }
+    // Renaming will not work here, so the file is copied and the source removed.
+    if (info.mode & Fs.Directory) != 0 {
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, source);
+        unused Cli.WriteAll(2, " is a directory, not copied to ");
+        unused Cli.WriteAll(2, toname);
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    reader := Io.OpenFile(source, 0);
+    if reader < 0 {
+        problem: Vec(u8);
+        BuilderPrint(*problem, "can't open %: %", source, Io.LastError());
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, BuilderFinish(problem));
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    writer := Io.CreateFile(toname, 1, cast(s32)(info.mode & 0x1ff));
+    if writer < 0 {
+        unused Io.CloseFile(reader);
+        problem: Vec(u8);
+        BuilderPrint(*problem, "can't create %: %", toname, Io.LastError());
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, BuilderFinish(problem));
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    copied := CopyContent(reader, writer, source, toname);
+    unused Io.CloseFile(reader);
+    unused Io.CloseFile(writer);
+    if !copied { return false }
+    if Io.Remove(source) < 0 {
+        problem: Vec(u8);
+        BuilderPrint(*problem, "can't remove %: %", source, Io.LastError());
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, BuilderFinish(problem));
+        unused Cli.WriteAll(2, "\n");
+        return false
+    }
+    return true
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 2 {
+        unused Cli.WriteAll(2, Usage);
+        unused Args.SetFailure("usage");
+        return 1
+    }
+    last := Args.Operand(count - 1);
+    todir := last;
+    toelem := "";
+    has_element := false;
+    lastinfo: Entry;
+    last_ok := Stat(last, *lastinfo);
+    if last_ok && (lastinfo.mode & Fs.Directory) != 0 {
+        firstinfo: Entry;
+        first_ok := Stat(Args.Operand(0), *firstinfo);
+        if count == 2 && first_ok && (firstinfo.mode & Fs.Directory) != 0 {
+            todir, toelem = Split(last);
+            has_element = true;
+        } else {
+            todir = last;
+            has_element = false;
+        }
+    } else {
+        todir, toelem = Split(last);
+        has_element = true;
+    }
+    if count > 2 && has_element && toelem.count > 0 {
+        unused Cli.WriteAll(2, "mv: ");
+        unused Cli.WriteAll(2, last);
+        unused Cli.WriteAll(2, " not a directory\n");
+        unused Args.SetFailure("error");
+        return 1
+    }
+    failed := 0;
+    for i: 0..count-2 {
+        if !Move(Args.Operand(i), todir, toelem, has_element) { failed += 1 }
+    }
+    if failed != 0 {
+        unused Args.SetFailure("error");
+        return 1
+    }
+    return 0
+}
