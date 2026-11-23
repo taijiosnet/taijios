@@ -1,5 +1,6 @@
 // Table-driven unit tests for appl/grid/lib/srvbrowse.zi.
 #import "std/vec"
+using Reg :: #import "registry_client"
 using Srv :: #import "srvbrowse"
 
 failures: s32;
@@ -44,6 +45,15 @@ main :: () -> s32 {
     p: Text;
     Srv.PrevPath("services/Cpu Pool/worker1/", *p);
     Expect(TextView(p) == "services/Cpu Pool/", "PrevPath");
+
+    Expect(Srv.GetQid(*store, "tcp!node3!6678") == q, "GetQid matches");
+    Expect(Srv.GetQid(*store, "tcp!missing!9999") == -1, "GetQid missing");
+
+    extra: Reg.AttrList;
+    Reg.AttrListSet(*extra, "resource", "Data source");
+    Reg.AttrListSet(*extra, "name", "Local Filestore");
+    Expect(Srv.AddService(*store, "@local", *extra), "AddService");
+    Expect(store.count == 4, "4 services after AddService");
 
     if failures == 0 { print("query_test: all checks passed\n") }
     return ifx failures == 0 then 0 else 1;

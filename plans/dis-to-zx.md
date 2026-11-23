@@ -23,7 +23,7 @@ Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window m
 
 Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
 
-Catalog applications that still need the legacy chain (39): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof qt readmail remotelogon reversi rmtdir rt sam sendmail sh snake sweeper telnet tetris unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
+Catalog applications that still need the legacy chain (38): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof qt readmail remotelogon reversi rmtdir rt sam sendmail sh sweeper telnet tetris unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
 
 ## Column legend
 
@@ -466,7 +466,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 54 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 53 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -514,7 +514,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/wm/sendmail.dis | appl/wm/sendmail.b |  | - |  |
 | dis/wm/sh.dis | appl/wm/sh.b | module/sh.m | - |  |
 | dis/wm/smenu.dis | appl/wm/smenu.b |  | - |  |
-| dis/wm/snake.dis | appl/wm/snake.b |  | - |  |
 | dis/wm/sweeper.dis | appl/wm/sweeper.b |  | - |  |
 | dis/wm/task.dis | appl/wm/task.b |  | - |  |
 | dis/wm/telnet.dis | appl/wm/telnet.b |  | - |  |
@@ -691,7 +690,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/spree/lib/tricks.dis | appl/spree/lib/tricks.b |  | - |  |
 | dis/spree/spree.dis | appl/spree/spree.b |  | - |  |
 
-### 10. Grid - computing grid family - 9 rows
+### 10. Grid - computing grid family - 8 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -699,7 +698,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/grid/lib/announce.dis | appl/grid/lib/announce.b | module/grid/announce.m | - |  |
 | dis/grid/lib/browser.dis | appl/grid/lib/browser.b | module/grid/browser.m | - |  |
 | dis/grid/lib/fbrowse.dis | appl/grid/lib/fbrowse.b | module/grid/fbrowse.m | - |  |
-| dis/grid/lib/srvbrowse.dis | appl/grid/lib/srvbrowse.b | module/grid/srvbrowse.m | - |  |
 | dis/grid/readjpg.dis | appl/grid/readjpg.b | module/grid/readjpg.m | - |  |
 | dis/grid/reglisten.dis | appl/grid/reglisten.b |  | - |  |
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |
