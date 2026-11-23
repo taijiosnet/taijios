@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove the MPEG Player, a stale pre-4e Dis binary that fails at load and whose source no longer compiles.
+
 - Ship the File Chooser only as ZX and remove its Dis version. It keeps the Miller columns, the glob patterns, the path and filter rows, the Tab expansion to the browsed path, double-click acceptance and the chosen path on standard output.
 
 - Ship Coffee and Man only as ZX and remove their Dis versions. The Tcl/Tk apps keep the six-cup Coffee animation with Stop/Go and the three sliders, and the manual browser's lookup, search and history.
