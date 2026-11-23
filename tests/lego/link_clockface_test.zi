@@ -1,0 +1,107 @@
+// Guest live parity test for lego/link and lego/clockface.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/lego tests/lego/link_clockface_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/legosrv";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".zx";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/legosrv/work") ||
+        !CreateDirectory("build/dis-legacy-math/legosrv/work/motor") ||
+        !CreateDirectory("build/dis-legacy-math/legosrv/work/sensor") ||
+        !CreateDirectory("build/dis-legacy-math/legosrv/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Mock lego motor & sensor files for clockface (no light sensor -> skips lightwait loop)
+    unused WriteEntireFile("build/dis-legacy-math/legosrv/work/motor/0", "");
+    unused WriteEntireFile("build/dis-legacy-math/legosrv/work/motor/2", "");
+    unused WriteEntireFile("build/dis-legacy-math/legosrv/work/motor/012", "");
+    unused WriteEntireFile("build/dis-legacy-math/legosrv/work/sensor/0", "0   ");
+    unused WriteEntireFile("build/dis-legacy-math/legosrv/work/sensor/2", "0   ");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. lego/link usage and missing serial port
+    BuilderPrint(*script, "/dis/lego/link% > ../result/link_usage.out >[2] ../result/link_usage.err\n", suffix);
+    BuilderPrint(*script, "/dis/lego/link% 99 > ../result/link_nop.out >[2] ../result/link_nop.err\n", suffix);
+    // 2. lego/clockface usage
+    BuilderPrint(*script, "/dis/lego/clockface% > ../result/cf_usage.out >[2] ../result/cf_usage.err\n", suffix);
+    BuilderPrint(*script, "echo $status > ../result/cf_usage.st\n");
+    // 3. lego/clockface live /chan/clockface test: read initial 12:00, write 3:15, read 3:15, bad syntax error
+    BuilderPrint(*script, "bind '#s' /chan\n");
+    BuilderPrint(*script, "/dis/lego/clockface% /%/work > ../result/cf.out >[2] ../result/cf.err &\n", suffix, WORK);
+    BuilderPrint(*script, "cfpid=$apid\n");
+    BuilderPrint(*script, "sleep 1\n");
+    BuilderPrint(*script, "read < /chan/clockface > ../result/cf_t0.out >[2] ../result/cf_t0.err\n");
+    BuilderPrint(*script, "echo -n 3:15 > /chan/clockface >[2] ../result/cf_set.err\n");
+    BuilderPrint(*script, "read < /chan/clockface > ../result/cf_t1.out >[2] ../result/cf_t1.err\n");
+    BuilderPrint(*script, "echo -n badcmd > /chan/clockface >[2] ../result/cf_bad.err\n");
+    BuilderPrint(*script, "unmount /chan\n");
+    BuilderPrint(*script, "for p in /prog/* { if {~ `{cat $p/status >[2]/dev/null} *Clockface* *clockface*} { echo killgrp > $p/ctl >[2]/dev/null } }\n");
+    unused WriteEntireFile("build/dis-legacy-math/legosrv/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [7]string = .["timeout", "8", emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("link_usage.out") == "usage: lego/link portnum\n", "link usage");
+    Expect(Contains(Result("link_nop.out"), "cannot read"), "link missing serial port");
+    Expect(Result("cf_usage.out") == "usage: [-v] legodir\n", "clockface usage");
+    Expect(Result("cf_usage.st") != "\n", "clockface usage status");
+    Expect(Result("cf_t0.out") == "12:00\n", "clockface initial time 12:00");
+    Expect(Result("cf_set.err") == "", "clockface set 3:15 no error");
+    Expect(Result("cf_t1.out") == " 3:15\n", "clockface updated time  3:15");
+    Expect(Contains(Result("cf_bad.err"), "syntax is hh:mm or `reset'"), "clockface bad syntax error");
+
+    if failures != 0 {
+        print("link_clockface_test: % failures\n", failures);
+        return 1;
+    }
+    print("link_clockface_test: all checks passed\n");
+    return 0;
+}

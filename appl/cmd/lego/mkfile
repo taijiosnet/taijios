@@ -2,26 +2,28 @@
 
 TARG=\
 	clock.dis\
-	clockface.dis\
-	link.dis\
-	timers.dis\
 
 SYSMODULES=\
 	sys.m\
 	draw.m\
 	bufio.m\
 
-MODULES=\
-	timers.m\
+MODULES=
 
 DISBIN=$ROOT/dis/lego
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=firmdl send
-ZXUTIL=lego_proto.zi rcx_serial.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi
+ZXCOMMANDS=firmdl send link clockface
+ZXUTIL=lego_proto.zi rcx_serial.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi ../taijios_namespace.zi ../taijios_file2chan.zi ../taijios_clock.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+link.zx: link.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_clock --entry link:main -o $target link.zi
+
+clockface.zx: clockface.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_clock --entry clockface:main -o $target clockface.zi
 
 &.zx: &.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
