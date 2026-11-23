@@ -1,0 +1,79 @@
+// Table-driven unit test for appl/demo/chat/chat_model.zi.
+#import "std/vec"
+using Model :: #import "chat_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+PathCase :: struct {
+    dir: string;
+    expected: string;
+}
+
+OutputCase :: struct {
+    msg: string;
+    expected: string;
+}
+
+SendCase :: struct {
+    connected: bool;
+    msg: string;
+    expected: bool;
+}
+
+main :: () -> s32 {
+    path_cases: [3]PathCase = PathCase.[
+        .{dir = ".", expected = "./msgs"},
+        .{dir = "/n/client", expected = "/n/client/msgs"},
+        .{dir = "/tmp/chat", expected = "/tmp/chat/msgs"},
+    ];
+    out: Text;
+    for path_cases {
+        Model.MsgsPath(it.dir, *out);
+        Expect(TextView(out) == it.expected, it.expected);
+    }
+
+    state: Model.State;
+    output_cases: [3]OutputCase = OutputCase.[
+        .{msg = "*** connected", expected = "*** connected"},
+        .{msg = "hello world", expected = "\nhello world"},
+        .{msg = "*** disconnected", expected = "\n*** disconnected"},
+    ];
+    for output_cases {
+        Model.FormatOutput(*state, it.msg, *out);
+        Expect(TextView(out) == it.expected, it.msg);
+    }
+
+    Model.FormatConnectError("/n/client/msgs", "file does not exist", *out);
+    Expect(TextView(out) == "*** internal error: can't open /n/client/msgs: file does not exist", "connect error");
+    Expect(Model.FormatStatus(true) == "*** connected", "connected status");
+    Expect(Model.FormatStatus(false) == "*** disconnected", "disconnected status");
+
+    send_cases: [4]SendCase = SendCase.[
+        .{connected = false, msg = "hi", expected = false},
+        .{connected = true, msg = "", expected = false},
+        .{connected = true, msg = "hi", expected = true},
+        .{connected = false, msg = "", expected = false},
+    ];
+    for send_cases {
+        s: Model.State;
+        s.connected = it.connected;
+        Expect(Model.ShouldSend(*s, it.msg) == it.expected, "ShouldSend");
+    }
+
+    meta: [12]u8;
+    meta[0] = 0x34;
+    meta[1] = 0x12;
+    Expect(Model.ParseFileSize(meta[:]) == 0x1234, "ParseFileSize little-endian");
+    short_meta: [4]u8;
+    Expect(Model.ParseFileSize(short_meta[:]) == -1, "ParseFileSize short");
+
+    if failures == 0 { print("chat_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

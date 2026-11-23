@@ -763,14 +763,13 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
 | dis/grid/usercreatesrv.dis | appl/grid/usercreatesrv.b |  | - |  |
 
-### 11. Demo - demonstration apps - 15 rows
+### 11. Demo - demonstration apps - 14 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 | dis/demo/camera/camera.dis | appl/demo/camera/camera.b |  | - |  |
 | dis/demo/camera/readjpg.dis | unknown | module/grid/readjpg.m | - |  |
 | dis/demo/camera/tkinterface.dis | appl/demo/camera/tkinterface.b |  | - |  |
-| dis/demo/chat/chat.dis | appl/demo/chat/chat.b |  | - |  |
 | dis/demo/chat/chatsrv.dis | appl/demo/chat/chatsrv.b |  | - |  |
 | dis/demo/cpupool/regpoll.dis | appl/demo/cpupool/regpoll.b | module/grid/regpoll.m | - |  |
 | dis/demo/lego/clockface.dis | appl/demo/lego/clockface.b |  | - |  |

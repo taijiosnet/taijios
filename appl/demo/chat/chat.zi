@@ -1,0 +1,128 @@
+// Inferno demo chat client, ported from appl/demo/chat/chat.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using View :: #import "tk/view"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Model :: #import "chat_model"
+
+CONTROLS :: #string END_CONTROLS
+frame .f
+text .f.t -yscrollcommand {.f.sb set}
+scrollbar .f.sb -command {.f.t yview}
+entry .e -bg white
+bind .e <Key-\n> {chat_send}
+pack .f.sb -side left -fill y
+pack .f.t -fill both -expand 1
+pack .e -side bottom -fill x
+pack .f -fill both -expand 1
+focus .e
+END_CONTROLS;
+
+ORDWR :: 2;
+SEEK_START :: 0;
+
+state: Model.State;
+msgs_path: Text;
+msgs_fd: s32 = -1;
+send_requested: bool;
+
+RequestSend :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count != 0 {
+        result.code = .Error;
+        unused BuilderAppend(result.value.bytes, "expected chat_send");
+        return;
+    }
+    send_requested = true;
+}
+
+AppendLog :: (msg: string) -> bool {
+    found := Tk.Find(".f.t");
+    if found < 0 { return false }
+    widget := *Tk.widgets[found];
+    formatted: Text;
+    Model.FormatOutput(*state, msg, *formatted);
+    if !Tk.AppendText(widget, TextView(formatted)) { return false }
+    Tk.TextLayout(widget);
+    View.See(*widget.view, widget.text.bytes.count);
+    return true;
+}
+
+PollIncoming :: () -> bool {
+    if !state.connected || msgs_fd < 0 { return false }
+    meta: [12]u8;
+    if IO.Stat(TextView(msgs_path), meta[:]) != 0 { return false }
+    size := Model.ParseFileSize(meta[:]);
+    if size <= state.read_offset { return false }
+    if IO.Seek(msgs_fd, state.read_offset, SEEK_START) < 0 { return false }
+    buf: [4096]u8;
+    changed := false;
+    while state.read_offset < size {
+        n := IO.Read(msgs_fd, buf[:]);
+        if n <= 0 { break }
+        state.read_offset += cast(s64)n;
+        if !AppendLog(TextView(buf[:n])) { return false }
+        changed = true;
+    }
+    return changed;
+}
+
+Start :: () -> bool {
+    path := TextView(msgs_path);
+    handle := IO.Open(path, ORDWR);
+    if handle < 0 {
+        err_text: Text;
+        Model.FormatConnectError(path, IO.Error(), *err_text);
+        return AppendLog(TextView(err_text));
+    }
+    msgs_fd = handle;
+    state.connected = true;
+    if !AppendLog(Model.FormatStatus(true)) { return false }
+    unused PollIncoming();
+    return true;
+}
+
+Tick :: (tcl: *Tcl.Interpreter, _event: Surface.SurfaceEvent) -> Window.PollResult {
+    changed := false;
+    if send_requested {
+        send_requested = false;
+        entry := Tcl.Eval(tcl, ".e get");
+        if entry.code != .OK { return .Failed }
+        msg := TextView(entry.value);
+        if Model.ShouldSend(*state, msg) {
+            if !Window.Execute(tcl, ".e delete 0 end") { return .Failed }
+            if IO.Write(msgs_fd, msg) < 0 {
+                unused IO.Close(msgs_fd);
+                msgs_fd = -1;
+                state.connected = false;
+                if !AppendLog(Model.FormatStatus(false)) { return .Failed }
+            }
+            changed = true;
+        }
+    }
+    if PollIncoming() { changed = true }
+    return ifx changed then .Changed else .Idle;
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() == 0 {
+        print("usage: chat [servicedir]\n");
+        unused Args.SetFailure("init");
+        return 1;
+    }
+    servicedir := Args.Operand(0);
+    Model.MsgsPath(servicedir, *msgs_path);
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "chat_send", RequestSend) { return 1 }
+    code := Window.RunPolled(*tcl, CONTROLS, "Chat", 360, 300, Start, Tick, 50);
+    if msgs_fd >= 0 {
+        unused IO.Close(msgs_fd);
+        msgs_fd = -1;
+    }
+    return code;
+}

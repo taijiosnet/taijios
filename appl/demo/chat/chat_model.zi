@@ -1,0 +1,50 @@
+// Pure state and formatting logic for the Inferno demo chat client,
+// ported from appl/demo/chat/chat.b.
+#import "std/vec"
+
+State :: struct {
+    connected: bool;
+    has_output: bool;
+    read_offset: s64;
+}
+
+MsgsPath :: (servicedir: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, servicedir);
+    unused BuilderAppend(out.bytes, "/msgs");
+}
+
+FormatOutput :: (state: *State, msg: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if state.has_output {
+        unused BuilderAppend(out.bytes, "\n");
+    } else {
+        state.has_output = true;
+    }
+    unused BuilderAppend(out.bytes, msg);
+}
+
+FormatConnectError :: (path: string, err: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, "*** internal error: can't open ");
+    unused BuilderAppend(out.bytes, path);
+    unused BuilderAppend(out.bytes, ": ");
+    unused BuilderAppend(out.bytes, err);
+}
+
+FormatStatus :: (connected: bool) -> string {
+    return ifx connected then "*** connected" else "*** disconnected";
+}
+
+ShouldSend :: (state: *State, msg: string) -> bool {
+    return state.connected && msg.count > 0;
+}
+
+ParseFileSize :: (metadata: []u8) -> s64 {
+    if metadata.count < 8 { return -1 }
+    value: u64 = 0;
+    for i: 0..7 {
+        value |= (cast(u64)metadata[i]) << (cast(u64)i * 8);
+    }
+    return cast(s64)value;
+}
