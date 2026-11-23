@@ -7,13 +7,14 @@ using Csv :: #import "csv_cases"
 using Blocks :: #import "diskblocks_cases"
 using Ninep :: #import "ninep_cases"
 using Rabin :: #import "rabin_cases"
+using Rfc :: #import "rfc822_cases"
 using Slip :: #import "slip_cases"
 using Ubfa :: #import "ubfa_cases"
 using Uris :: #import "uris_cases"
 using Pointers :: #import "xpointers_cases"
 using Golden :: #import "golden"
 
-NAMES: [10]string = .["bloomfilter", "complete", "csv", "diskblocks", "ninep", "rabin", "slip", "ubfa", "uris", "xpointers"];
+NAMES: [11]string = .["bloomfilter", "complete", "csv", "diskblocks", "ninep", "rabin", "rfc822", "slip", "ubfa", "uris", "xpointers"];
 
 Lines :: (suite: s64, out: *Vec(u8)) {
     if suite == 0 { Bloom.Lines(out) }
@@ -22,10 +23,11 @@ Lines :: (suite: s64, out: *Vec(u8)) {
     if suite == 3 { Blocks.Lines(out) }
     if suite == 4 { Ninep.Lines(out) }
     if suite == 5 { Rabin.Lines(out) }
-    if suite == 6 { Slip.Lines(out) }
-    if suite == 7 { Ubfa.Lines(out) }
-    if suite == 8 { Uris.Lines(out) }
-    if suite == 9 { Pointers.Lines(out) }
+    if suite == 6 { Rfc.Lines(out) }
+    if suite == 7 { Slip.Lines(out) }
+    if suite == 8 { Ubfa.Lines(out) }
+    if suite == 9 { Uris.Lines(out) }
+    if suite == 10 { Pointers.Lines(out) }
 }
 
 // Appends "DIR/NAME.limbo.txt", the file a suite is compared with.

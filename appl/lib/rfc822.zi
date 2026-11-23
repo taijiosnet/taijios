@@ -1,0 +1,504 @@
+// Mail and HTTP headers in the RFC 822 style, read as the Limbo RFC822
+// module read them: the header lines of a message, the tokens of a
+// header's value, MIME content types with their parameters, and the
+// content type a file's suffix or its data suggests. Dates are in
+// http_date.zi. The caller reads the files; the suffix table comes from
+// the text of /lib/mimetype.
+//
+// Results keep the Limbo module's shape, including its oddities: words
+// and quoted strings are put in lower case, a byte above 127 in one
+// becomes the character of that number, and content types come back
+// last first.
+#import "std/vec";
+using Limbo :: #import "limbo_text";
+
+Header :: struct {
+    name: Text;  // in lower case; empty for a line without a colon
+    value: Text; // what follows the colon, with the line's newline
+}
+
+HeaderBlock :: struct {
+    headers: Vec(Header);
+    next: s64;  // the offset after the block
+    fits: bool; // false when the block is longer than the limit
+}
+
+// Reads header lines from byte offset at up to and including the first
+// empty line. A line that starts with a space or tab continues the one
+// before, a CR LF is a newline, and the empty line is itself the last
+// header. The block must fit in limit bytes, rounded up to the next 512.
+ReadHeaders :: (text: string, at: s64, limit: s64) -> HeaderBlock {
+    result: HeaderBlock;
+    result.fits = true;
+    capacity: s64 = 512;
+    while capacity < limit { capacity += 512 }
+    block: Vec(u8);
+    starts: Vec(s64);
+    VecPush(starts, 0);
+    i := at;
+    while i < text.count {
+        c := text[i];
+        i += 1;
+        if c == #char "\r" {
+            if i >= text.count { break }
+            if text[i] == #char "\n" {
+                c = #char "\n";
+                i += 1;
+            }
+        }
+        if block.count >= capacity {
+            result.fits = false;
+            break;
+        }
+        VecPush(block, c);
+        if c != #char "\n" { continue }
+        if block.count == 1 || block[block.count - 2] == #char "\n" { break } // empty line
+        if i >= text.count { break }
+        if text[i] == #char " " || text[i] == #char "\t" {
+            i += 1;
+            block[block.count - 1] = #char " ";
+        } else {
+            VecPush(starts, block.count);
+        }
+    }
+    result.next = i;
+    if !result.fits { unused VecResize(starts, 0) }
+    if starts.count > 0 && starts[starts.count - 1] == block.count { unused VecResize(starts, starts.count - 1) }
+    for s: 0..starts.count - 1 {
+        end := ifx s + 1 < starts.count then starts[s + 1] else block.count;
+        line := TextView(block[starts[s]:end]);
+        header: Header;
+        colon: s64 = -1;
+        for line { if it == #char ":" && colon < 0 { colon = it_index } }
+        for n: 0..colon - 1 {
+            letter := line[n];
+            if letter >= #char "A" && letter <= #char "Z" { letter += #char "a" - #char "A" }
+            VecPush(header.name.bytes, letter);
+        }
+        BuilderAppend(header.value.bytes, line[colon + 1:]);
+        VecPush(result.headers, header);
+    }
+    return result;
+}
+
+// Tokens: a Word, a QuotedString, or the character itself for one of
+// ) < > [ ] @ / , ; : ? = and for the newline that ends the line.
+Word :: 1;
+QuotedString :: 2;
+NEWLINE :: 10;
+
+Seen :: struct {
+    token: s64;
+    word: Text;
+}
+
+Lexer :: struct {
+    text: string;
+    at: s64;
+    ended: bool;      // the end was read; nothing is put back after it
+    token: s64;       // the last token
+    word: Text;       // its text when it is a Word or a QuotedString
+    seen: Vec(Seen);  // tokens put back, the next one last
+}
+
+// A lexer on one header value.
+Open :: (lexer: *Lexer, text: string) {
+    lexer.text = text;
+    lexer.at = 0;
+    lexer.ended = false;
+    lexer.token = NEWLINE;
+    VecClear(lexer.word.bytes);
+    VecClear(lexer.seen);
+}
+
+Get :: (lexer: *Lexer) -> s64 {
+    if lexer.at >= lexer.text.count {
+        lexer.ended = true;
+        return -1;
+    }
+    lexer.at += 1;
+    return cast(s64)lexer.text[lexer.at - 1];
+}
+
+Unget :: (lexer: *Lexer) {
+    if !lexer.ended { lexer.at -= 1 }
+}
+
+In :: (c: s64, set: string) -> bool {
+    for set { if cast(s64)it == c { return true } }
+    return false;
+}
+
+// Reads a word into lexer.word, up to a byte of stop, which is left
+// unread. A backslash keeps the byte after it.
+ReadWord :: (lexer: *Lexer, stop: string) {
+    VecClear(lexer.word.bytes);
+    while true {
+        c := Get(lexer);
+        if c < 0 { break }
+        if c == #char "\r" { c = #char " " }
+        if c == #char "\\" {
+            c = Get(lexer);
+            if c < 0 { break }
+        } else if In(c, stop) {
+            Unget(lexer);
+            break;
+        }
+        if c >= #char "A" && c <= #char "Z" { c += #char "a" - #char "A" }
+        Limbo.AppendRune(*lexer.word.bytes, c);
+    }
+}
+
+// The next token. With peek, only white space and comments are read: the
+// result is the first byte of the token, which stays unread.
+Scan :: (lexer: *Lexer, peek: bool) -> s64 {
+    VecClear(lexer.word.bytes);
+    while true {
+        c := Get(lexer);
+        if c < 0 { break }
+        if c == #char "(" {
+            // A comment, which can hold comments, to the end of the line.
+            level: s64 = 1;
+            while true {
+                c = Get(lexer);
+                if c < 0 || c == #char "\n" { break }
+                if c == #char "\\" {
+                    if Get(lexer) < 0 { return NEWLINE }
+                    continue;
+                }
+                if c == #char "(" { level += 1 }
+                if c == #char ")" {
+                    level -= 1;
+                    if level == 0 { break }
+                }
+            }
+            continue;
+        }
+        if c == #char " " || c == #char "\t" || c == #char "\r" || c == 0 { continue }
+        if c == #char "\n" { return NEWLINE }
+        if In(c, ")<>[]@/,;:?=") {
+            if peek { Unget(lexer) }
+            return c;
+        }
+        if c == 34 {
+            if peek {
+                Unget(lexer);
+                return c;
+            }
+            ReadWord(lexer, "\"");
+            unused Get(lexer); // the closing quote
+            return QuotedString;
+        }
+        Unget(lexer);
+        if peek { return c }
+        ReadWord(lexer, "\"()<>@,;:/[]?={}\r\n \t");
+        return Word;
+    }
+    return NEWLINE;
+}
+
+// The next token, one put back first.
+Lex :: (lexer: *Lexer) -> s64 {
+    if lexer.seen.count == 0 {
+        lexer.token = Scan(lexer, false);
+        return lexer.token;
+    }
+    last := lexer.seen.count - 1;
+    lexer.token = lexer.seen[last].token;
+    VecSwap(lexer.word.bytes, lexer.seen[last].word.bytes);
+    unused VecResize(lexer.seen, last);
+    return lexer.token;
+}
+
+// Puts the last token back.
+Unlex :: (lexer: *Lexer) {
+    seen: Seen;
+    seen.token = lexer.token;
+    BuilderAppend(seen.word.bytes, TextView(lexer.word));
+    VecPush(lexer.seen, seen);
+}
+
+// Skips white space and comments; the first byte of what follows.
+SkipSpace :: (lexer: *Lexer) -> s64 { return Scan(lexer, true) }
+
+// Reads the rest of the line into lexer.word, a backslash keeping the
+// byte after it.
+Line :: (lexer: *Lexer) {
+    VecClear(lexer.word.bytes);
+    while true {
+        c := Get(lexer);
+        if c < 0 || c == #char "\n" || c == #char "\r" { break }
+        if c == #char "\\" {
+            c = Get(lexer);
+            if c < 0 { break }
+        }
+        Limbo.AppendRune(*lexer.word.bytes, c);
+    }
+    lexer.token = NEWLINE;
+}
+
+Param :: struct {
+    name: Text;
+    value: Text;
+}
+
+// Reads name=value pairs separated by semicolons, the value a word or a
+// quoted string, and appends them; the token that ends them is put back.
+ParamsInto :: (lexer: *Lexer, params: *Vec(Param)) {
+    while true {
+        if Lex(lexer) != Word { break }
+        param: Param;
+        BuilderAppend(param.name.bytes, TextView(lexer.word));
+        if Lex(lexer) != #char "=" { break }
+        value := Lex(lexer);
+        if value != Word && value != QuotedString { break }
+        BuilderAppend(param.value.bytes, TextView(lexer.word));
+        VecPush(<<params, param);
+        if Lex(lexer) != #char ";" { break }
+    }
+    Unlex(lexer);
+}
+
+ParseParams :: (lexer: *Lexer) -> Vec(Param) {
+    params: Vec(Param);
+    ParamsInto(lexer, *params);
+    return params;
+}
+
+Field :: struct {
+    word: Text;
+    params: Vec(Param);
+}
+
+// Reads words separated by commas, each with optional ;parameters; the
+// token that ends them is put back.
+MimeFields :: (lexer: *Lexer) -> Vec(Field) {
+    fields: Vec(Field);
+    while true {
+        if Lex(lexer) == Word {
+            field: Field;
+            BuilderAppend(field.word.bytes, TextView(lexer.word));
+            if Lex(lexer) == #char ";" {
+                ParamsInto(lexer, *field.params);
+                unused Lex(lexer);
+            }
+            VecPush(fields, field);
+        }
+        if lexer.token != #char "," { break }
+    }
+    Unlex(lexer);
+    return fields;
+}
+
+Content :: struct {
+    generic: Text;
+    specific: Text;
+    params: Vec(Param);
+}
+
+SetContent :: (content: *Content, generic: string, specific: string) {
+    VecClear(content.generic.bytes);
+    VecClear(content.specific.bytes);
+    VecClear(content.params);
+    BuilderAppend(content.generic.bytes, generic);
+    BuilderAppend(content.specific.bytes, specific);
+}
+
+// Reads content types separated by commas and gives them last one first.
+// With multipart each must be generic/specific; without it only generic
+// or generic/* is taken. The token that ends them is put back.
+ParseContent :: (lexer: *Lexer, multipart: bool) -> Vec(Content) {
+    contents: Vec(Content);
+    found: Vec(Content);
+    while true {
+        if Lex(lexer) == Word {
+            content: Content;
+            SetContent(*content, TextView(lexer.word), "*");
+            if Lex(lexer) == #char "/" {
+                if Lex(lexer) != Word { break }
+                VecClear(content.specific.bytes);
+                BuilderAppend(content.specific.bytes, TextView(lexer.word));
+                if !multipart && TextView(lexer.word) != "*" { break }
+            } else if multipart {
+                break;
+            } else {
+                Unlex(lexer);
+            }
+            if Lex(lexer) == #char ";" {
+                ParamsInto(lexer, *content.params);
+                unused Lex(lexer);
+            }
+            VecPush(found, content);
+        }
+        if lexer.token != #char "," { break }
+    }
+    Unlex(lexer);
+    while found.count > 0 {
+        last: Content;
+        VecSwap(last.generic.bytes, found[found.count - 1].generic.bytes);
+        VecSwap(last.specific.bytes, found[found.count - 1].specific.bytes);
+        VecSwap(last.params, found[found.count - 1].params);
+        unused VecResize(found, found.count - 1);
+        VecPush(contents, last);
+    }
+    return contents;
+}
+
+QUOTABLE :: "()<>@,;:\\\"/[]?={} \t";
+
+Quotable :: (text: string) -> bool {
+    for text { if In(cast(s64)it, QUOTABLE) { return true } }
+    return false;
+}
+
+// Appends text, in double quotes with a backslash before each special
+// character when it has one.
+Quote :: (out: *Vec(u8), text: string) {
+    if !Quotable(text) { BuilderAppend(<<out, text); return }
+    VecPush(<<out, 34);
+    for text {
+        if In(cast(s64)it, QUOTABLE) { VecPush(<<out, #char "\\") }
+        VecPush(<<out, it);
+    }
+    VecPush(<<out, 34);
+}
+
+// Appends a content type as generic/specific;name=value.
+ContentText :: (out: *Vec(u8), content: *Content) {
+    BuilderAppend(<<out, TextView(content.generic));
+    if content.specific.bytes.count > 0 { BuilderPrint(out, "/%", TextView(content.specific)) }
+    for i: 0..content.params.count - 1 {
+        BuilderPrint(out, ";%=", TextView(content.params[i].name));
+        Quote(out, TextView(content.params[i].value));
+    }
+}
+
+LowerEqual :: (mixed: string, lower: string) -> bool {
+    if mixed.count != lower.count { return false }
+    for mixed {
+        c := it;
+        if c >= #char "A" && c <= #char "Z" { c += #char "a" - #char "A" }
+        if c != lower[it_index] { return false }
+    }
+    return true;
+}
+
+// Whether a content type is one of the accepted ones, in which * stands
+// for anything; no accepted ones accept everything.
+Accepted :: (content: *Content, accepted: []Content) -> bool {
+    if accepted.count == 0 { return true }
+    for i: 0..accepted.count - 1 {
+        generic := TextView(accepted[i].generic) == "*" || LowerEqual(TextView(content.generic), TextView(accepted[i].generic));
+        specific := content.specific.bytes.count == 0 || TextView(accepted[i].specific) == "*" ||
+            LowerEqual(TextView(content.specific), TextView(accepted[i].specific));
+        if generic && specific { return true }
+    }
+    return false;
+}
+
+// One line of the suffix table: a file name suffix with the content type
+// or the encoding it stands for.
+Suffix :: struct {
+    suffix: Text;
+    generic: Text;
+    specific: Text;
+    encoding: Text;
+}
+
+// Reads the suffix table, the text of /lib/mimetype: lines of a suffix,
+// a generic type, a specific type and an encoding, - for none, with #
+// comments.
+ReadSuffixes :: (text: string) -> Vec(Suffix) {
+    suffixes: Vec(Suffix);
+    at: s64 = 0;
+    while at < text.count {
+        end := at;
+        while end < text.count && text[end] != #char "\n" { end += 1 }
+        line := text[at:end];
+        at = end + 1;
+        for line { if it == #char "#" { line = line[:it_index]; break } }
+        words: [4]string;
+        count: s64 = 0;
+        i: s64 = 0;
+        while i < line.count && count < 4 {
+            while i < line.count && (line[i] == #char " " || line[i] == #char "\t") { i += 1 }
+            start := i;
+            while i < line.count && line[i] != #char " " && line[i] != #char "\t" { i += 1 }
+            if i > start {
+                words[count] = line[start:i];
+                count += 1;
+            }
+        }
+        if count < 4 { continue }
+        for w: 1..3 { if words[w] == "-" { words[w] = "" } }
+        if (words[1].count == 0 || words[2].count == 0) && words[3].count == 0 { continue }
+        suffix: Suffix;
+        BuilderAppend(suffix.suffix.bytes, words[0]);
+        BuilderAppend(suffix.generic.bytes, words[1]);
+        BuilderAppend(suffix.specific.bytes, words[2]);
+        BuilderAppend(suffix.encoding.bytes, words[3]);
+        VecPush(suffixes, suffix);
+    }
+    return suffixes;
+}
+
+// What a file's name says about it: the content type of one of its
+// suffixes and the encoding of another, such as application/x-tar and
+// gzip for x.tar.gz. Each found flag tells whether there is one. The
+// last line of the table with a suffix is the one used, and letter case
+// matters.
+SuffixClass :: (suffixes: []Suffix, name: string, kind: *Content, encoding: *Content) -> (has_kind: bool, has_encoding: bool) {
+    has_kind := false;
+    has_encoding := false;
+    rest := name;
+    for name { if it == #char "/" && it_index + 1 < name.count { rest = name[it_index + 1:] } }
+    while true {
+        dot: s64 = -1;
+        for rest { if it == #char "." { dot = it_index } }
+        if dot < 0 { break }
+        suffix := rest[dot:];
+        rest = rest[:dot];
+        i := suffixes.count;
+        while i > 0 && !(has_kind && has_encoding) {
+            i -= 1;
+            if TextView(suffixes[i].suffix) != suffix { continue }
+            if suffixes[i].generic.bytes.count > 0 && !has_kind {
+                SetContent(kind, TextView(suffixes[i].generic), TextView(suffixes[i].specific));
+                has_kind = true;
+            }
+            if suffixes[i].encoding.bytes.count > 0 && !has_encoding {
+                SetContent(encoding, TextView(suffixes[i].encoding), "");
+                has_encoding = true;
+            }
+        }
+    }
+    return has_kind, has_encoding;
+}
+
+// What data looks like: text/plain, with charset=utf-8 when it holds
+// UTF-8 beyond ASCII. False for data with control characters or bytes
+// that are not UTF-8.
+DataClass :: (data: string, kind: *Content) -> bool {
+    utf8 := false;
+    i: s64 = 0;
+    while i < data.count {
+        c := data[i];
+        if c < 0x80 {
+            if c < 32 && c != #char "\n" && c != #char "\r" && c != #char "\t" && c != 11 && c != 12 { return false }
+            i += 1;
+            continue;
+        }
+        utf8 = true;
+        rune, width := Limbo.RuneAt(data, i);
+        if rune == Limbo.BadRune { return false }
+        i += width;
+    }
+    SetContent(kind, "text", "plain");
+    if utf8 {
+        param: Param;
+        BuilderAppend(param.name.bytes, "charset");
+        BuilderAppend(param.value.bytes, "utf-8");
+        VecPush(kind.params, param);
+    }
+    return true;
+}

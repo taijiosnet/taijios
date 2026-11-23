@@ -966,6 +966,7 @@ appl
 		hash.b
 		html.b
 		ida.NOTICE
+		http_date.zi
 		ida.zi
 		imageremap.b
 		inflate.b
@@ -1015,7 +1016,7 @@ appl
 		readxbitmap.b
 		regex.b
 		registries.b
-		rfc822.b
+		rfc822.zi
 		riff.b
 		secstore.b
 		scoretable.b
@@ -1606,7 +1607,6 @@ dis
 		readxbitmap.dis
 		regex.dis
 		registries.dis
-		rfc822.dis
 		riff.dis
 		secstore.dis
 		scoretable.dis
@@ -2228,7 +2228,6 @@ module
 	readdir.m
 	regex.m
 	registries.m
-	rfc822.m
 	riff.m
 	runt.m
 	scoretable.m

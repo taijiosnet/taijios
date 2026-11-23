@@ -1,0 +1,255 @@
+headers 0 3 rest=4: <host>=< example.org\n> <content-type>=< text/html; charset=utf-8\n> <>=<\n>
+headers 1 4 rest=4: <a>=< 1\n> <b>=< 2 continued more\n> <c>=<3\n> <>=<\n>
+headers 2 2 rest=0: <>=<NoColon\n> <x-y>=< z\n>
+headers 3 1 rest=0: <only>=< one>
+headers 4 0 rest=0:
+headers 5 1 rest=0: <>=<\n>
+headers 6 1 rest=0: <>=<\n>
+headers 7 2 rest=0: <a>=< 1\r\rB: 2\n> <>=<\n>
+headers 8 2 rest=6: <a>=< 1\n> <>=<\n>
+headers 9 1 rest=0: <mixed-case>=<  v \n>
+headers 10 2 rest=0: <>=< empty name\n> <a>=<\n>
+headers 11 1 rest=0: <a>=< 1 B\n>
+headers 12 1 rest=0: <a>=< line>
+headers 13 1 rest=0: <a>=< a:b:c\n>
+limit 0 100
+lex 0: W<text> / W<html> ; W<charset> = Q<utf-8> ; W<q> = W<0.5>
+params 0: next=47
+fields 0: [text] next=47
+content 0 0: next=1
+content 0 1: [text/html;charset=utf-8;q=0.5] next=10
+skipws 0 116 line=<text/html; charset="utf-8"; q=0.5>
+lex 1: W<a> , W<b> ; W<x> = W<1> , W<c> / W<d>
+params 1: next=44
+fields 1: [a] [b x=<1>] [c] next=47
+content 1 0: [b/*;x=1] [a/*] next=1
+content 1 1: next=44
+skipws 1 97 line=<a, b;x=1, c/d>
+lex 2: W<word> W<next>
+params 2: next=1
+fields 2: [word] next=1
+content 2 0: [word/*] next=1
+content 2 1: next=1
+skipws 2 87 line=<Word (comment (nested) ) more) next>
+lex 3: W<a> @ W<b.c> < W<x> @ W<y> >
+params 3: next=64
+fields 3: [a] next=64
+content 3 0: [a/*] next=64
+content 3 1: next=64
+skipws 3 97 line=<a@b.c <x@y>>
+lex 4: Q<quoted " string> W<tail>
+params 4: next=2
+fields 4: next=2
+content 4 0: next=2
+content 4 1: next=2
+skipws 4 34 line=<"quoted " string" tail>
+lex 5: W<upper> W<lower> W<mixed>
+params 5: next=1
+fields 5: [upper] next=1
+content 5 0: [upper/*] next=1
+content 5 1: next=1
+skipws 5 85 line=<UPPER lower MiXed>
+lex 6: W<a> = W<b> ; W<c> = W<d>
+params 6: a=<b> c=<d> next=10
+fields 6: [a] next=61
+content 6 0: [a/*] next=61
+content 6 1: next=61
+skipws 6 97 line=<a=b;c=d>
+lex 7: W<multipart> / W<mixed> ; W<boundary> = Q<--xx>
+params 7: next=47
+fields 7: [multipart] next=47
+content 7 0: next=1
+content 7 1: [multipart/mixed;boundary=--xx] next=10
+skipws 7 109 line=<multipart/mixed; boundary="--xx">
+lex 8: W<leading> W<spaces>
+params 8: next=1
+fields 8: [leading] next=1
+content 8 0: [leading/*] next=1
+content 8 1: next=1
+skipws 8 108 line=<leading\tspaces  >
+lex 9: W<escaped word>
+params 9: next=10
+fields 9: [escaped word] next=10
+content 9 0: [escaped word/*] next=10
+content 9 1: next=10
+skipws 9 101 line=<escaped word>
+lex 10: W<unterminated> Q<quote>
+params 10: next=2
+fields 10: [unterminated] next=2
+content 10 0: [unterminated/*] next=2
+content 10 1: next=2
+skipws 10 117 line=<unterminated "quote>
+lex 11:
+params 11: next=10
+fields 11: next=10
+content 11 0: next=10
+content 11 1: next=10
+skipws 11 10 line=<>
+lex 12:
+params 12: next=10
+fields 12: next=10
+content 12 0: next=10
+content 12 1: next=10
+skipws 12 10 line=<>
+lex 13: W<a>
+params 13: next=10
+fields 13: [a] next=10
+content 13 0: [a/*] next=10
+content 13 1: next=10
+skipws 13 97 line=<a>
+lex 14: W<x> / W<*> ; W<q> = W<1> , W<*> / W<*>
+params 14: next=47
+fields 14: [x] next=47
+content 14 0: [*/*] [x/*;q=1] next=10
+content 14 1: [*/*] [x/*;q=1] next=10
+skipws 14 120 line=<x/*;q=1, */*>
+lex 15: W<text> / W<*> , W<image> / W<png> ; W<a> = W<1> ; W<b> = Q<two words>
+params 15: next=47
+fields 15: [text] next=47
+content 15 0: [text/*] next=1
+content 15 1: [image/png;a=1;b="two\ words"] [text/*] next=10
+skipws 15 116 line=<text/*, image/png;a=1;b="two words">
+lex 16: W<key> = W<value>
+params 16: key=<value> next=10
+fields 16: [key] next=61
+content 16 0: [key/*] next=61
+content 16 1: next=61
+skipws 16 107 line=<key= value>
+lex 17: W<key> = W<value> ;
+params 17: key=<value> next=10
+fields 17: [key] next=61
+content 17 0: [key/*] next=61
+content 17 1: next=61
+skipws 17 107 line=<key =value ;>
+lex 18: W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<> W<>
+params 18: next=1
+fields 18: [] next=1
+content 18 0: [/*] next=1
+content 18 1: next=1
+skipws 18 123 line=<{braces} [brackets]>
+lex 19: W<cafÃ©> ; W<naÃ¯ve> = W<Ã¼>
+params 19: next=59
+fields 19: [cafÃ© naÃ¯ve=<Ã¼>] next=10
+content 19 0: [cafÃ©/*;naÃ¯ve=Ã¼] next=10
+content 19 1: next=59
+skipws 19 99 line=<cafÃ©; naÃ¯ve=Ã¼>
+lex 20: W<a> ; W<b>
+params 20: next=59
+fields 20: [a] next=10
+content 20 0: [a/*] next=10
+content 20 1: next=59
+skipws 20 97 line=<a;b>
+lex 21: W<a> ; W<b> = ; W<c> = W<d>
+params 21: next=59
+fields 21: [a] next=59
+content 21 0: [a/*] next=59
+content 21 1: next=59
+skipws 21 97 line=<a;b=;c=d>
+lex 22: W<a> /
+params 22: next=47
+fields 22: [a] next=47
+content 22 0: next=10
+content 22 1: next=10
+skipws 22 97 line=<a/>
+lex 23: / W<b>
+params 23: next=47
+fields 23: next=47
+content 23 0: next=47
+content 23 1: next=47
+skipws 23 47 line=</b>
+lex 24: W<a> / W<b> / W<c>
+params 24: next=47
+fields 24: [a] next=47
+content 24 0: next=1
+content 24 1: [a/b] next=47
+skipws 24 97 line=<a/b/c>
+lex 25: ; W<x> = W<1>
+params 25: next=59
+fields 25: next=59
+content 25 0: next=59
+content 25 1: next=59
+skipws 25 59 line=<;x=1>
+suffix 0 <text/html> <nil>
+suffix 1 <application/x-tar> <gzip>
+suffix 2 <nil> <nil>
+suffix 3 <nil> <nil>
+suffix 4 <text/plain> <nil>
+suffix 5 <nil> <compress>
+suffix 6 <nil> <nil>
+suffix 7 <image/jpeg> <nil>
+suffix 8 <image/gif> <nil>
+suffix 9 <nil> <nil>
+suffix 10 <nil> <nil>
+suffix 11 <application/postscript> <gzip>
+suffix 12 <nil> <nil>
+suffix 13 <text/plain> <compress>
+suffix 14 <nil> <nil>
+data 0 <text/plain> <nil>
+data 1 <text/plain> <nil>
+data 2 <text/plain;charset=utf-8> <nil>
+data 3 <text/plain> <nil>
+data 4 <nil> <nil>
+data 5 <nil> <nil>
+data bad <nil> <nil>
+check 0 1 1
+check 1 1 1
+check 2 0 1
+check 3 1 1
+check 4 1 1
+check 5 0 1
+check 6 1 1
+quote 0 0 <plain> <t/s;n=plain;m=v>
+quote 1 1 <"two\ words"> <t/s;n="two\ words";m=v>
+quote 2 1 <"a\"b"> <t/s;n="a\"b";m=v>
+quote 3 1 <"back\\slash"> <t/s;n="back\\slash";m=v>
+quote 4 0 <> <t/s;n=;m=v>
+quote 5 1 <"semi\;colon"> <t/s;n="semi\;colon";m=v>
+quote 6 0 <café> <t/s;n=café;m=v>
+quote 7 1 <"tab\	here"> <t/s;n="tab\	here";m=v>
+quote 8 1 <"a\=b"> <t/s;n="a\=b";m=v>
+quote 9 1 <"\{x\}"> <t/s;n="\{x\}";m=v>
+date 0 <Thu, 01 Jan 1970 00:00:00 GMT>
+date 1 <Thu, 01 Jan 1970 00:00:01 GMT>
+date 86399 <Thu, 01 Jan 1970 23:59:59 GMT>
+date 86400 <Fri, 02 Jan 1970 00:00:00 GMT>
+date 951782400 <Tue, 29 Feb 2000 00:00:00 GMT>
+date 951868799 <Tue, 29 Feb 2000 23:59:59 GMT>
+date 951868800 <Wed, 01 Mar 2000 00:00:00 GMT>
+date 1000000000 <Sun, 09 Sep 2001 01:46:40 GMT>
+date 1234567890 <Fri, 13 Feb 2009 23:31:30 GMT>
+date 2147483647 <Tue, 19 Jan 2038 03:14:07 GMT>
+date 68169600 <Tue, 29 Feb 1972 00:00:00 GMT>
+date 946684799 <Fri, 31 Dec 1999 23:59:59 GMT>
+date 946684800 <Sat, 01 Jan 2000 00:00:00 GMT>
+date 1078099200 <Mon, 01 Mar 2004 00:00:00 GMT>
+date -192522496 <Mon, 25 Nov 1963 17:31:44 GMT>
+secs 0 784111777
+secs 1 784111777
+secs 2 784111777
+secs 3 0
+secs 4 951825600
+secs 5 1078099200
+secs 6 1078095600
+secs 7 1078119000
+secs 8 0
+secs 9 1078099200
+secs 10 1078099200
+secs 11 1078099200
+secs 12 0
+secs 13 0
+secs 14 0
+secs 15 0
+secs 16 0
+secs 17 0
+secs 18 0
+secs 19 0
+secs 20 0
+secs 21 -2143952896
+secs 22 1078286706
+secs 23 0
+secs 24 1078286706
+secs 25 0
+secs 26 1078102923
+secs 27 0
+secs 28 0
+secs 29 0

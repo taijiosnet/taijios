@@ -1,0 +1,206 @@
+// The cases of the RFC 822 test: header blocks, the tokens and the MIME
+// readings of header values, suffix and data classes, quoting and dates,
+// each printed as the Limbo probe printed it from the RFC822 module, for
+// comparison with rfc822.limbo.txt.
+using Rfc :: #import "rfc822"
+using Dates :: #import "http_date"
+
+// Appends text with newline, return and tab written as \n, \r and \t.
+Show :: (out: *Vec(u8), text: string) {
+    for text {
+        if it == #char "\n" { BuilderAppend(<<out, "\\n") }
+        else if it == #char "\r" { BuilderAppend(<<out, "\\r") }
+        else if it == #char "\t" { BuilderAppend(<<out, "\\t") }
+        else { VecPush(<<out, it) }
+    }
+}
+
+// The lines the suffix cases need from /lib/mimetype, in its order.
+MIMETYPES :: "# suffix generic specific encoding\n\n.Z\t\t-\t\t-\t\tcompress\tm\n.gif\t\timage\t\tgif\t\t-\t\ty\n.gz\t\t-\t\t-\t\tgzip\t\tm # gzipped file\n.html\t\ttext\t\thtml\t\t-\t\tm\n.jpg\t\timage\t\tjpeg\t\t-\t\ty\n.ps\t\tapplication\tpostscript\t-\t\tm\n.tar\t\tapplication\tx-tar\t\t-\t\tm\n.txt\t\ttext\t\t-\t\t-\t\ty\n.txt\t\ttext\t\tplain\t\t-\t\ty\n.Z\t\t-\t\t-\t\tcompress\tm\n";
+
+Headers :: (out: *Vec(u8)) {
+    blocks := string.[
+        "Host: example.org\r\nContent-Type: text/html; charset=utf-8\r\n\r\nbody",
+        "A: 1\nB: 2\n continued\n\tmore\nC:3\n\nrest",
+        "NoColon\nX-Y: z\n", "Only: one", "", "\n", "\r\n", "A: 1\r\rB: 2\r\n\r\n", "A: 1\n\n\nB: 2\n", "Mixed-CASE:  v \n",
+        ": empty name\nA:\n", "A: 1\n B\n", "A: line\r", "A: a:b:c\n",
+    ]
+    for blocks {
+        block := Rfc.ReadHeaders(it, 0, 4096)
+        BuilderPrint(out, "headers % % rest=%:", it_index, block.headers.count, it.count - block.next)
+        for i: 0..block.headers.count - 1 {
+            BuilderPrint(out, " <%>=<", TextView(block.headers[i].name))
+            Show(out, TextView(block.headers[i].value))
+            BuilderAppend(<<out, ">")
+        }
+        BuilderAppend(<<out, "\n")
+    }
+    block: Vec(u8)
+    for 1..100 { BuilderAppend(block, "Header-Name: some value that makes the block long\n") }
+    small := Rfc.ReadHeaders(TextView(block[:]), 0, 1024)
+    large := Rfc.ReadHeaders(TextView(block[:]), 0, 8192)
+    BuilderPrint(out, "limit % %\n", ifx small.fits then small.headers.count else 0, ifx large.fits then large.headers.count else 0)
+}
+
+Values :: (out: *Vec(u8)) {
+    lines := string.[
+        "text/html; charset=\"utf-8\"; q=0.5", "a, b;x=1, c/d", "Word (comment (nested) \\) more) next", "a@b.c <x@y>",
+        "\"quoted \\\" string\" tail", "UPPER lower MiXed", "a=b;c=d", "multipart/mixed; boundary=\"--xx\"", "  leading\tspaces  ",
+        "esc\\aped\\ word", "unterminated \"quote", "(unterminated comment", "", "a\r\nb", "x/*;q=1, */*", "text/*, image/png;a=1;b=\"two words\"",
+        "key= value", "key =value ;", "{braces} [brackets]", "café; naïve=ü", "a;b", "a;b=;c=d", "a/", "/b", "a/b/c", ";x=1",
+    ]
+    for line: lines {
+        index := it_index
+        lexer: Rfc.Lexer
+        Rfc.Open(*lexer, line)
+        BuilderPrint(out, "lex %:", index)
+        for 1..40 {
+            token := Rfc.Lex(*lexer)
+            if token == Rfc.NEWLINE { break }
+            if token == Rfc.Word || token == Rfc.QuotedString {
+                BuilderAppend(<<out, ifx token == Rfc.Word then " W<" else " Q<")
+                Show(out, TextView(lexer.word))
+                BuilderAppend(<<out, ">")
+            } else {
+                BuilderAppend(<<out, " ")
+                VecPush(<<out, cast(u8)token)
+            }
+        }
+        BuilderAppend(<<out, "\n")
+
+        Rfc.Open(*lexer, line)
+        params := Rfc.ParseParams(*lexer)
+        BuilderPrint(out, "params %:", index)
+        for i: 0..params.count - 1 { BuilderPrint(out, " %=<%>", TextView(params[i].name), TextView(params[i].value)) }
+        BuilderPrint(out, " next=%\n", Rfc.Lex(*lexer))
+
+        Rfc.Open(*lexer, line)
+        fields := Rfc.MimeFields(*lexer)
+        BuilderPrint(out, "fields %:", index)
+        for i: 0..fields.count - 1 {
+            BuilderPrint(out, " [%", TextView(fields[i].word))
+            for j: 0..fields[i].params.count - 1 {
+                BuilderPrint(out, " %=<%>", TextView(fields[i].params[j].name), TextView(fields[i].params[j].value))
+            }
+            BuilderAppend(<<out, "]")
+        }
+        BuilderPrint(out, " next=%\n", Rfc.Lex(*lexer))
+
+        for multipart: 0..1 {
+            Rfc.Open(*lexer, line)
+            contents := Rfc.ParseContent(*lexer, multipart == 1)
+            BuilderPrint(out, "content % %:", index, multipart)
+            for i: 0..contents.count - 1 {
+                BuilderAppend(<<out, " [")
+                Rfc.ContentText(out, *contents[i])
+                BuilderAppend(<<out, "]")
+            }
+            BuilderPrint(out, " next=%\n", Rfc.Lex(*lexer))
+        }
+
+        Rfc.Open(*lexer, line)
+        first := Rfc.SkipSpace(*lexer)
+        Rfc.Line(*lexer)
+        BuilderPrint(out, "skipws % % line=<", index, first)
+        Show(out, TextView(lexer.word))
+        BuilderAppend(<<out, ">\n")
+    }
+}
+
+// A content type, or "nil" when there is none.
+Class :: (out: *Vec(u8), found: bool, content: *Rfc.Content) {
+    BuilderAppend(<<out, "<")
+    if found { Rfc.ContentText(out, content) } else { BuilderAppend(<<out, "nil") }
+    BuilderAppend(<<out, ">")
+}
+
+Classes :: (out: *Vec(u8)) {
+    suffixes := Rfc.ReadSuffixes(MIMETYPES)
+    names := string.["a.html", "x.tar.gz", "noext", "dir.d/file", "/a/b/c.txt", "a.Z", "pic.JPG", "pic.jpg", "a.b.c.gif", ".profile", "x.", "a.ps.gz", "f.unknown", "a.txt.Z", ""]
+    for names {
+        kind: Rfc.Content
+        encoding: Rfc.Content
+        has_kind, has_encoding := Rfc.SuffixClass(suffixes[:], it, *kind, *encoding)
+        BuilderPrint(out, "suffix % ", it_index)
+        Class(out, has_kind, *kind)
+        BuilderAppend(<<out, " ")
+        Class(out, has_encoding, *encoding)
+        BuilderAppend(<<out, "\n")
+    }
+    datas := string.["plain text\n", "", "café", "tab\tand\r\nlines\f\v", "bell\x07", "nul\x00x"]
+    for datas {
+        kind: Rfc.Content
+        found := Rfc.DataClass(it, *kind)
+        BuilderPrint(out, "data % ", it_index)
+        Class(out, found, *kind)
+        BuilderAppend(<<out, " <nil>\n")
+    }
+    stray: Rfc.Content
+    cut: Rfc.Content
+    BuilderAppend(<<out, "data bad ")
+    bad := u8.[#char "a", 0xFF, #char "b", 0xC3]
+    Class(out, Rfc.DataClass(TextView(bad[:3]), *stray), *stray)
+    BuilderAppend(<<out, " ")
+    Class(out, Rfc.DataClass(TextView(bad[3:]), *cut), *cut)
+    BuilderAppend(<<out, "\n")
+
+    accepted: Vec(Rfc.Content)
+    generics := string.["text", "image", "*"]
+    specifics := string.["html", "*", "x-special"]
+    for generics {
+        content: Rfc.Content
+        Rfc.SetContent(*content, it, specifics[it_index])
+        VecPush(accepted, content)
+    }
+    none: Vec(Rfc.Content)
+    checks := string.["text", "html", "TEXT", "HTML", "text", "plain", "image", "png", "audio", "x-special", "audio", "mp3", "text", ""]
+    for i: 0..checks.count / 2 - 1 {
+        content: Rfc.Content
+        Rfc.SetContent(*content, checks[i * 2], checks[i * 2 + 1])
+        BuilderPrint(out, "check % % %\n", i, ifx Rfc.Accepted(*content, accepted[:]) then 1 else 0,
+            ifx Rfc.Accepted(*content, none[:]) then 1 else 0)
+    }
+    quotes := string.["plain", "two words", "a\"b", "back\\slash", "", "semi;colon", "café", "tab\there", "a=b", "{x}"]
+    param_names := string.["n", "m"]
+    for quotes {
+        content: Rfc.Content
+        Rfc.SetContent(*content, "t", "s")
+        for name: param_names {
+            param: Rfc.Param
+            BuilderAppend(param.name.bytes, name)
+            BuilderAppend(param.value.bytes, ifx name == "n" then it else "v")
+            VecPush(content.params, param)
+        }
+        BuilderPrint(out, "quote % % <", it_index, ifx Rfc.Quotable(it) then 1 else 0)
+        Rfc.Quote(out, it)
+        BuilderAppend(<<out, "> <")
+        Rfc.ContentText(out, *content)
+        BuilderAppend(<<out, ">\n")
+    }
+}
+
+Times :: (out: *Vec(u8)) {
+    seconds := s64.[0, 1, 86399, 86400, 951782400, 951868799, 951868800, 1000000000, 1234567890, 2147483647, 68169600, 946684799, 946684800, 1078099200, -192522496]
+    for seconds {
+        BuilderPrint(out, "date % <", it)
+        Dates.Format(out, it)
+        BuilderAppend(<<out, ">\n")
+    }
+    dates := string.[
+        "Sun, 06 Nov 1994 08:49:37 GMT", "Sunday, 06-Nov-94 08:49:37 GMT", "Sun Nov  6 08:49:37 1994", "Thu, 01 Jan 1970 00:00:00 GMT",
+        "Tue, 29 Feb 2000 12:00:00 GMT", "Mon, 01 Mar 2004 00:00:00 +0000", "Mon, 01 Mar 2004 00:00:00 +0100", "Mon, 01 Mar 2004 00:00:00 -0530",
+        "Mon, 01 Mar 2004 00:00:00 EST", "Mon, 01 Mar 2004 00:00:00 UTC", "Mon, 01 Mar 2004 00:00:00 Z", "Mon, 01 Mar 2004 00:00:00",
+        "garbage", "", "Xyz, 01 Mar 2004 00:00:00 GMT", "Mon, 32 Mar 2004 00:00:00 GMT", "Mon, 01 Foo 2004 00:00:00 GMT", "Mon, 01 Mar 2004 24:00:00 GMT",
+        "Mon, 01 Mar 2004 00:60:00 GMT", "Mon, 01 Mar 1969 00:00:00 GMT", "Mon, 01 Mar 69 00:00:00 GMT", "Mon, 01 Mar 2038 00:00:00 GMT",
+        "Wed Mar  3 04:05:06 GMT 2004", "Wed Mar  3 04:05:06 PST 2004", "Wed Mar  3 04:05:06 2004 extra", "mon, 01 mar 2004 00:00:00 GMT",
+        "Mon, 1 Mar 2004 1:2:3 GMT", "Mon,01Mar2004 00:00:00GMT", "Mon, 01 Mar 2004 00:00:00 +2400", "Mon, 01 Mar 2004 00:00:00 +0060",
+    ]
+    for dates { BuilderPrint(out, "secs % %\n", it_index, Dates.Parse(it)) }
+}
+
+Lines :: (out: *Vec(u8)) {
+    Headers(out)
+    Values(out)
+    Classes(out)
+    Times(out)
+}
