@@ -1,7 +1,6 @@
 <../../../mkconfig
 
 TARG=\
-		odbcmnt.dis\
 
 SHTARG=\
 		runodbc.sh\
@@ -9,21 +8,21 @@ SHTARG=\
 MODULES=\
 
 SYSMODULES= \
-	arg.m\
-	convcs.m\
-	daytime.m\
-	draw.m\
-	string.m\
-	styx.m\
-	styxservers.m\
-	sys.m\
 
 DISBIN=$ROOT/dis/demo/odbc
 
 <$ROOT/mkfiles/mkdis
 
+odbcmnt.zx: odbcmnt.zi odbcmnt_model.zi ../../cmd/taijios_args.zi ../../cmd/taijios_dial.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_dial --bind-host taijios_io --bind-host taijios_namespace --entry odbcmnt:main -o $target odbcmnt.zi
+
+$DISBIN/odbcmnt.zx: odbcmnt.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 odbcmnt.zx "$staged" && mv "$staged" "$target"
+
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES
+install:V:	$SHFILES $DISBIN/odbcmnt.zx
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 

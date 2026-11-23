@@ -1,0 +1,155 @@
+// Table-driven unit tests for appl/demo/odbc/odbcmnt_model.zi.
+#import "std/vec"
+using Model :: #import "odbcmnt_model"
+
+failures: s32;
+last_sql_written: Text;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+MockRead :: (_src: s32, _off: s64, _cnt: s64, out: *Text, _err: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    // Return "caf" + 0xE9 ('é' in Win-1252) + 0x80 ('€' in Win-1252)
+    unused BuilderAppend(out.bytes, "caf");
+    unused VecPush(out.bytes, 0xE9);
+    unused VecPush(out.bytes, 0x80);
+    return true;
+}
+
+MockWrite :: (_src: s32, data: string, _err: *Text) -> s32 {
+    unused VecResize(last_sql_written.bytes, 0);
+    unused BuilderAppend(last_sql_written.bytes, data);
+    return cast(s32)data.count;
+}
+
+MakePacket :: (kind: u8, tag: u16, payload: []u8, out: *Vec(u8)) {
+    unused VecResize(<<out, 0);
+    Model.PushU32(out, cast(u32)(7 + payload.count));
+    Model.PushU8(out, kind);
+    Model.PushU16(out, tag);
+    unused BuilderAppend(<<out, TextView(payload));
+}
+
+AddrCase :: struct {
+    addr: string;
+    expected: string;
+}
+
+main :: () -> s32 {
+    // 1. NetMkAddr cases
+    addr_cases: [3]AddrCase = AddrCase.[
+        .{addr = "127.0.0.1", expected = "tcp!127.0.0.1!6700"},
+        .{addr = "tcp!10.0.0.2", expected = "tcp!10.0.0.2!6700"},
+        .{addr = "tcp!10.0.0.2!9999", expected = "tcp!10.0.0.2!9999"},
+    ];
+    out: Text;
+    for addr_cases {
+        Model.NetMkAddr(it.addr, "tcp", "6700", *out);
+        Expect(TextView(out) == it.expected, it.addr);
+    }
+
+    // 2. ParseArgs cases
+    a0: [0]string;
+    Expect(Model.ParseArgs(a0[:], *out) && TextView(out) == "127.0.0.1", "default addr");
+    a1: [2]string = .["-a", "tcp!10.0.0.5"];
+    Expect(Model.ParseArgs(a1[:], *out) && TextView(out) == "tcp!10.0.0.5", "-a addr");
+    a_bad: [1]string = .["-x"];
+    Expect(!Model.ParseArgs(a_bad[:], *out), "reject -x");
+
+    // 3. PipeField & SplitSourceName
+    tname, tok := Model.PipeField("cat|sch|users|TABLE", 2);
+    Expect(tok && tname == "users", "PipeField table");
+    Expect(Model.SplitSourceName("mydb:SQLite3") == "mydb", "SplitSourceName");
+
+    // 4. 9P2000 virtual tree + Win1252->UTF8 on sql read
+    srv: Model.Server;
+    Model.InitServer(*srv, "wao");
+    src_n := Model.AddNode(*srv, 0, Model.NODE_DIR, 0, "mydb", cast(u32)Model.DMDIR | 365, "");
+    tdir_n := Model.AddNode(*srv, src_n, Model.NODE_DIR, 0, "tables", cast(u32)Model.DMDIR | 365, "");
+    tbl_n := Model.AddNode(*srv, tdir_n, Model.NODE_DIR, 0, "users", cast(u32)Model.DMDIR | 365, "");
+    unused Model.AddNode(*srv, tbl_n, Model.NODE_COLUMN, 0, "id", 365, "INTEGER 4\n");
+    unused Model.AddNode(*srv, src_n, Model.NODE_SQL, 0, "sql", 438, "");
+
+    pkt: Vec(u8);
+    body: Vec(u8);
+    reply: Text;
+
+    // Attach fid 1
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 0xFFFFFFFF);
+    Model.PushStr(*body, "wao");
+    Model.PushStr(*body, "");
+    MakePacket(Model.TATTACH, 1, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+    Expect(reply.bytes[4] == Model.RATTACH, "Rattach");
+
+    // Walk fid 1 -> fid 2: mydb/tables/users/id
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 2);
+    Model.PushU16(*body, 4);
+    Model.PushStr(*body, "mydb");
+    Model.PushStr(*body, "tables");
+    Model.PushStr(*body, "users");
+    Model.PushStr(*body, "id");
+    MakePacket(Model.TWALK, 2, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+    Expect(reply.bytes[4] == Model.RWALK, "Rwalk column");
+
+    // Open & read column
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU8(*body, 0);
+    MakePacket(Model.TOPEN, 3, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, 64);
+    MakePacket(Model.TREAD, 4, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+    Expect(reply.bytes[4] == Model.RREAD && TextView(reply)[11:] == "INTEGER 4\n", "column metadata read");
+
+    // Walk & open mydb/sql on fid 3, write SQL, read Win1252->UTF8
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 3);
+    Model.PushU16(*body, 2);
+    Model.PushStr(*body, "mydb");
+    Model.PushStr(*body, "sql");
+    MakePacket(Model.TWALK, 5, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 3);
+    Model.PushU8(*body, 2);
+    MakePacket(Model.TOPEN, 6, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+
+    unused VecResize(body, 0);
+    q := "SELECT 1";
+    Model.PushU32(*body, 3);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, cast(u32)q.count);
+    unused BuilderAppend(body, q);
+    MakePacket(Model.TWRITE, 7, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+    Expect(reply.bytes[4] == Model.RWRITE && TextView(last_sql_written) == "SELECT 1", "sql write");
+
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 3);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, 64);
+    MakePacket(Model.TREAD, 8, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockRead, MockWrite, *reply);
+    Expect(reply.bytes[4] == Model.RREAD && TextView(reply)[11:] == "café€", "sql read Win1252->UTF8");
+
+    if failures == 0 { print("odbcmnt_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

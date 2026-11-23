@@ -1,0 +1,249 @@
+// Mount and re-export an Inferno ODBC database server as a 9P2000 tree on fd 0,
+// ported from appl/demo/odbc/odbcmnt.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using Dial :: #import "taijios_dial"
+using IO :: #import "taijios_io"
+using Namespace :: #import "taijios_namespace"
+using Model :: #import "odbcmnt_model"
+
+ORDWR :: 2;
+SEEK_START :: 0;
+MAX_SOURCES :: 32;
+
+SrcFds :: struct {
+    clonefd: s32;
+    ctlfd: s32;
+    cmdfd: s32;
+    datafd: s32;
+}
+
+src_fds: [MAX_SOURCES]SrcFds;
+src_count: s32;
+
+ReadFdOnce :: (fd: s32, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    buf: [8192]u8;
+    n := IO.Read(fd, buf[:]);
+    if n <= 0 { return false }
+    unused BuilderAppend(out.bytes, TextView(buf[:n]));
+    return true;
+}
+
+ReadSmallFile :: (path: string, out: *Text) -> bool {
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    ok := ReadFdOnce(fd, out);
+    unused IO.Close(fd);
+    return ok;
+}
+
+DoClone :: (dbdir: string, cdir_out: *Text) -> s32 {
+    unused VecResize(cdir_out.bytes, 0);
+    newpath: Text;
+    unused BuilderAppend(newpath.bytes, dbdir);
+    unused BuilderAppend(newpath.bytes, "/new");
+    cfd := IO.Open(TextView(newpath), 0);
+    if cfd < 0 { return -1 }
+    cname: Text;
+    if !ReadFdOnce(cfd, *cname) {
+        unused IO.Close(cfd);
+        return -1;
+    }
+    unused BuilderAppend(cdir_out.bytes, dbdir);
+    unused BuilderAppend(cdir_out.bytes, "/");
+    unused BuilderAppend(cdir_out.bytes, TextView(cname));
+    return cfd;
+}
+
+SqlRead :: (src_idx: s32, offset: s64, count: s64, out: *Text, err: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    unused VecResize(err.bytes, 0);
+    if src_idx < 0 || src_idx >= src_count {
+        unused BuilderAppend(err.bytes, "invalid source");
+        return false;
+    }
+    fd := src_fds[src_idx].datafd;
+    unused IO.Seek(fd, offset, SEEK_START);
+    buf: [8192]u8;
+    want := ifx count > 8192 then 8192 else count;
+    n := IO.Read(fd, buf[:want]);
+    if n < 0 {
+        unused BuilderAppend(err.bytes, IO.Error());
+        return false;
+    }
+    if n > 0 { unused BuilderAppend(out.bytes, TextView(buf[:n])) }
+    return true;
+}
+
+SqlWrite :: (src_idx: s32, data: string, err: *Text) -> s32 {
+    unused VecResize(err.bytes, 0);
+    if src_idx < 0 || src_idx >= src_count {
+        unused BuilderAppend(err.bytes, "invalid source");
+        return -1;
+    }
+    n := IO.Write(src_fds[src_idx].cmdfd, data);
+    if n < 0 {
+        unused BuilderAppend(err.bytes, IO.Error());
+        return -1;
+    }
+    return n;
+}
+
+ReadExact :: (fd: s32, buf: []u8) -> bool {
+    got: s64 = 0;
+    while got < buf.count {
+        n := IO.Read(fd, buf[got:]);
+        if n <= 0 { return false }
+        got += cast(s64)n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    arg_list: Vec(string);
+    for i: 0..cast(s64)argc-1 { unused VecPush(arg_list, Args.Operand(cast(s32)i)) }
+
+    addr: Text;
+    if !Model.ParseArgs(VecSlice(arg_list, 0, arg_list.count), *addr) {
+        print("Usage: odbcmnt [ -a address ]\n");
+        unused Args.SetFailure("usage");
+        return 2;
+    }
+
+    unused Namespace.Fork();
+
+    dial_addr: Text;
+    Model.NetMkAddr(TextView(addr), "tcp", "6700", *dial_addr);
+    handles: [2]s32 = .[-1, -1];
+    dir: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(TextView(dial_addr), "", handles[:], dir[:]) != 0 {
+        print("odbcgw: failed to dial odbc server on %: %\n", TextView(dial_addr), IO.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    if Namespace.Mount(handles[0], -1, "/n/remote", Namespace.Replace, "") != 0 {
+        unused IO.Close(handles[0]);
+        if handles[1] >= 0 { unused IO.Close(handles[1]) }
+        print("odbcgw: failed to mount odbc server on %: %\n", TextView(dial_addr), Namespace.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    dbdir := "/n/remote/db";
+    cdir: Text;
+    cfd := DoClone(dbdir, *cdir);
+    if cfd < 0 {
+        print("odbcgw: failed to open %/new: %\n", dbdir, IO.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    sfile: Text;
+    unused BuilderAppend(sfile.bytes, TextView(cdir));
+    unused BuilderAppend(sfile.bytes, "/sources");
+    src_raw: Text;
+    if !ReadSmallFile(TextView(sfile), *src_raw) {
+        print("odbcgw: failed to open %: %\n", TextView(sfile), IO.Error());
+        unused Args.SetFailure("error");
+        return 1;
+    }
+
+    uid: Text;
+    unused ReadSmallFile("/dev/user", *uid);
+    srv: Model.Server;
+    Model.InitServer(*srv, TextView(uid));
+
+    // Parse sources lines and populate virtual tree.
+    raw := TextView(src_raw);
+    start: s64 = 0;
+    for i: 0..raw.count {
+        if i == raw.count || raw[i] == 10 {
+            if i > start && src_count < MAX_SOURCES {
+                srcname := Model.SplitSourceName(raw[start:i]);
+                if srcname.count > 0 {
+                    scdir: Text;
+                    scfd := DoClone(dbdir, *scdir);
+                    if scfd >= 0 {
+                        ctlp: Text; unused BuilderAppend(ctlp.bytes, TextView(scdir)); unused BuilderAppend(ctlp.bytes, "/ctl");
+                        cmdp: Text; unused BuilderAppend(cmdp.bytes, TextView(scdir)); unused BuilderAppend(cmdp.bytes, "/cmd");
+                        datp: Text; unused BuilderAppend(datp.bytes, TextView(scdir)); unused BuilderAppend(datp.bytes, "/data");
+                        ctlfd := IO.Open(TextView(ctlp), ORDWR);
+                        cmdfd := IO.Open(TextView(cmdp), ORDWR);
+                        datafd := IO.Open(TextView(datp), ORDWR);
+                        conn_cmd: Text;
+                        unused BuilderAppend(conn_cmd.bytes, "connect ");
+                        unused BuilderAppend(conn_cmd.bytes, srcname);
+                        if ctlfd >= 0 && cmdfd >= 0 && datafd >= 0 && IO.Write(ctlfd, TextView(conn_cmd)) >= 0 {
+                            si := src_count;
+                            src_fds[si] = .{clonefd = scfd, ctlfd = ctlfd, cmdfd = cmdfd, datafd = datafd};
+                            src_count += 1;
+
+                            src_node := Model.AddNode(*srv, 0, Model.NODE_DIR, si, srcname, cast(u32)Model.DMDIR | 365, "");
+                            tdir_node := Model.AddNode(*srv, src_node, Model.NODE_DIR, si, "tables", cast(u32)Model.DMDIR | 365, "");
+                            unused Model.AddNode(*srv, src_node, Model.NODE_SQL, si, "sql", 438, "");
+
+                            // Discover tables & columns
+                            if IO.Write(cmdfd, "tables") >= 0 {
+                                rec: Text;
+                                tables: Vec(Text);
+                                while ReadFdOnce(datafd, *rec) {
+                                    tname, ok := Model.PipeField(TextView(rec), 2);
+                                    if ok && tname.count > 0 {
+                                        t: Text;
+                                        unused BuilderAppend(t.bytes, tname);
+                                        unused VecPush(tables, t);
+                                    }
+                                }
+                                unused IO.Write(ctlfd, "headings");
+                                for ti: 0..tables.count-1 {
+                                    tname := TextView(tables[ti]);
+                                    tnode := Model.AddNode(*srv, tdir_node, Model.NODE_DIR, si, tname, cast(u32)Model.DMDIR | 365, "");
+                                    ccmd: Text;
+                                    unused BuilderAppend(ccmd.bytes, "columns ");
+                                    unused BuilderAppend(ccmd.bytes, tname);
+                                    if IO.Write(cmdfd, TextView(ccmd)) >= 0 {
+                                        crec: Text;
+                                        while ReadFdOnce(datafd, *crec) {
+                                            cname, cok := Model.PipeField(TextView(crec), 3);
+                                            if cok && cname.count > 0 {
+                                                ctype, _ := Model.PipeField(TextView(crec), 5);
+                                                csize, _ := Model.PipeField(TextView(crec), 6);
+                                                cdesc: Text;
+                                                unused BuilderAppend(cdesc.bytes, ctype);
+                                                unused BuilderAppend(cdesc.bytes, " ");
+                                                unused BuilderAppend(cdesc.bytes, ifx csize.count > 0 then csize else "0");
+                                                unused BuilderAppend(cdesc.bytes, "\n");
+                                                unused Model.AddNode(*srv, tnode, Model.NODE_COLUMN, si, cname, 365, TextView(cdesc));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            start = i + 1;
+        }
+    }
+
+    pkt: Vec(u8);
+    reply: Text;
+    hdr: [4]u8;
+    while ReadExact(0, hdr[:]) {
+        size := cast(s64)Model.ReadU32(hdr[:], 0);
+        if size < 7 || size > 65536 { break }
+        if !VecResizeBounded(pkt, size, 65536) { break }
+        pkt_slice := VecSlice(pkt, 0, size);
+        for k: 0..3 { pkt_slice[k] = hdr[k] }
+        if !ReadExact(0, pkt_slice[4:size]) { break }
+        Model.HandlePacket(*srv, pkt_slice, SqlRead, SqlWrite, *reply);
+        if reply.bytes.count > 0 {
+            out := TextView(reply);
+            if IO.Write(0, out) < out.count { return 1 }
+        }
+    }
+    return 0;
+}
