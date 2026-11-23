@@ -30,17 +30,14 @@ TARG=\
 	dbsrv.dis\
 	debug.dis\
 	deflate.dis\
-	devpointer.dis\
 	dhcpclient.dis\
 	dial.dis\
 	dialog.dis\
-	dict.dis\
 	dis.dis\
 	disks.dis\
 	dividers.dis\
 	env.dis\
 	ether.dis\
-	exception.dis\
 	factotum.dis\
 	filepat.dis\
 	format.dis\
@@ -54,14 +51,10 @@ TARG=\
 	ip.dis\
 	ipattr.dis\
 	ir.dis\
-	irsage.dis\
 	irsim.dis\
 	itslib.dis\
-	json.dis\
 	keyset.dis\
-	libc.dis\
 	libc0.dis\
-	lists.dis\
 	lock.dis\
 	login.dis\
 	man.dis\
@@ -79,7 +72,6 @@ TARG=\
 	plumbing.dis\
 	pop3.dis\
 	popup.dis\
-	powerman.dis\
 	profile.dis\
 	pslib.dis\
 	quicktime.dis\
@@ -96,14 +88,12 @@ TARG=\
 	rfc822.dis\
 	riff.dis\
 	scoretable.dis\
-	scsiio.dis\
 	secstore.dis\
 	selectfile.dis\
 	sets.dis\
 	sets32.dis\
 	sexprs.dis\
 	smtp.dis\
-	sort.dis\
 	ssl.dis\
 	string.dis\
 	strinttab.dis\
@@ -136,9 +126,6 @@ TARG=\
 	vac.dis\
 	venti.dis\
 	virgil.dis\
-	volume.dis\
-	wait.dis\
-	watchvars.dis\
 	wmclient.dis\
 	wmlib.dis\
 	wmsrv.dis\
@@ -219,13 +206,10 @@ factotum.dis:	$ROOT/module/factotum.m
 sexprs.dis:	$ROOT/module/sexprs.m
 dbm.dis: $ROOT/module/dbm.m
 disks.dis: $ROOT/module/disks.m
-scsiio.dis:	$ROOT/module/scsiio.m
 dhcpclient.dis:	$ROOT/module/dhcp.m
 ubfa.dis: $ROOT/module/ubfa.m
 secstore.dis:	$ROOT/module/secstore.m
 rfc822.dis:	$ROOT/module/rfc822.m
-json.dis: $ROOT/module/json.m
-lists.dis:	$ROOT/module/lists.m
 vac.dis:	$ROOT/module/vac.m $ROOT/module/venti.m
 dial.dis:	$ROOT/module/dial.m
 styxflush.dis:	$ROOT/module/styxflush.m

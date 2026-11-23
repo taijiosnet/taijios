@@ -3,7 +3,6 @@ Ir: module
 	PATH:	con	"/dis/lib/ir.dis";
 	SIMPATH:	con	"/dis/lib/irsim.dis";
 	MPATH:	con	"/dis/lib/irmpath.dis";
-	SAGEPATH:	con	"/dis/lib/irsage.dis";
 
 	#
 	# "standard" remote buttons

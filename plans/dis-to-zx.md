@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **790** open rows = **768** on-disk `dis/` files (**148** top-level `dis/*.dis` + **620** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **788** open rows = **766** on-disk `dis/` files (**148** top-level `dis/*.dis` + **618** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -38,7 +38,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 ## Next ready order (independent, boot-ordered)
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
-2. Non-boot libraries (176 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+2. Non-boot libraries (163 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (95 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
@@ -56,7 +56,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/zxrun.dis | appl/cmd/zxrun.b | module/zxrun.m | P2 | untracked gitignored local build of tracked appl/cmd/zxrun.b |
 | dis/lib/winplace.dis | unknown |  | - | zx-twin; Limbo source removed; untracked local artifact (not gitignored) |
 
-### 2. Libraries - dis/lib/** (boot-loaded rows first) - 183 rows
+### 2. Libraries - dis/lib/** (boot-loaded rows first) - 170 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -100,11 +100,9 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/dbsrv.dis | appl/lib/dbsrv.b |  | - |  |
 | dis/lib/debug.dis | appl/lib/debug.b | module/debug.m | - |  |
 | dis/lib/deflate.dis | appl/lib/deflate.b |  | - |  |
-| dis/lib/devpointer.dis | appl/lib/devpointer.b | module/devpointer.m | - |  |
 | dis/lib/dhcpclient.dis | appl/lib/dhcpclient.b |  | - |  |
 | dis/lib/dial.dis | appl/lib/dial.b | module/dial.m | - |  |
 | dis/lib/dialog.dis | appl/lib/dialog.b | module/dialog.m | - |  |
-| dis/lib/dict.dis | appl/lib/dict.b | module/dict.m | - |  |
 | dis/lib/dis.dis | appl/lib/dis.b | module/dis.m | - |  |
 | dis/lib/disks.dis | appl/lib/disks.b | module/disks.m | - |  |
 | dis/lib/dividers.dis | appl/lib/dividers.b | module/dividers.m | - |  |
@@ -116,7 +114,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/encoding/base64.dis | appl/lib/encoding/base64.b |  | - |  |
 | dis/lib/env.dis | appl/lib/env.b | module/env.m | - |  |
 | dis/lib/ether.dis | appl/lib/ether.b | module/ether.m | - |  |
-| dis/lib/exception.dis | appl/lib/exception.b | module/exception.m | - |  |
 | dis/lib/factotum.dis | appl/lib/factotum.b | module/factotum.m | - |  |
 | dis/lib/filepat.dis | appl/lib/filepat.b | module/filepat.m | - |  |
 | dis/lib/format.dis | appl/lib/format.b | module/format.m | - |  |
@@ -133,14 +130,10 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/ip.dis | appl/lib/ip.b | module/ip.m | - |  |
 | dis/lib/ipattr.dis | appl/lib/ipattr.b | module/ipattr.m | - |  |
 | dis/lib/ir.dis | appl/lib/ir.b | module/ir.m | - |  |
-| dis/lib/irsage.dis | appl/lib/irsage.b |  | - |  |
 | dis/lib/irsim.dis | appl/lib/irsim.b |  | - |  |
 | dis/lib/itslib.dis | appl/lib/itslib.b | module/itslib.m | - |  |
-| dis/lib/json.dis | appl/lib/json.b | module/json.m | - |  |
 | dis/lib/keyset.dis | appl/lib/keyset.b | module/keyset.m | - |  |
-| dis/lib/libc.dis | appl/lib/libc.b | module/libc.m | - |  |
 | dis/lib/libc0.dis | appl/lib/libc0.b | module/libc0.m | - |  |
-| dis/lib/lists.dis | appl/lib/lists.b | module/lists.m | - |  |
 | dis/lib/lock.dis | appl/lib/lock.b | module/lock.m | - |  |
 | dis/lib/login.dis | appl/lib/login.b |  | - |  |
 | dis/lib/man.dis | appl/lib/man.b | module/man.m | - |  |
@@ -164,7 +157,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/plumbmsg.dis | appl/lib/plumbmsg.b | module/plumbmsg.m | - |  |
 | dis/lib/pop3.dis | appl/lib/pop3.b | module/pop3.m | - |  |
 | dis/lib/popup.dis | appl/lib/popup.b | module/popup.m | - |  |
-| dis/lib/powerman.dis | appl/lib/powerman.b | module/powerman.m | - |  |
 | dis/lib/print/hp_driver.dis | appl/lib/print/hp_driver.b |  | - |  |
 | dis/lib/print/print.dis | appl/lib/print/print.b | module/print.m | - |  |
 | dis/lib/print/scaler.dis | appl/lib/print/scaler.b |  | - |  |
@@ -184,14 +176,12 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/rfc822.dis | appl/lib/rfc822.b | module/rfc822.m | - |  |
 | dis/lib/riff.dis | appl/lib/riff.b | module/riff.m | - |  |
 | dis/lib/scoretable.dis | appl/lib/scoretable.b | module/scoretable.m | - |  |
-| dis/lib/scsiio.dis | appl/lib/scsiio.b | module/scsiio.m | - |  |
 | dis/lib/secstore.dis | appl/lib/secstore.b | module/secstore.m | - |  |
 | dis/lib/selectfile.dis | appl/lib/selectfile.b | module/selectfile.m | - |  |
 | dis/lib/sets.dis | appl/lib/sets.b | module/sets.m | - |  |
 | dis/lib/sets32.dis | appl/lib/sets32.b | module/sets32.m | - |  |
 | dis/lib/sexprs.dis | appl/lib/sexprs.b | module/sexprs.m | - |  |
 | dis/lib/smtp.dis | appl/lib/smtp.b | module/smtp.m | - |  |
-| dis/lib/sort.dis | appl/lib/sort.b | module/sort.m | - |  |
 | dis/lib/spki/keyreps.dis | appl/cmd/auth/factotum/proto/keyreps.b |  | - |  |
 | dis/lib/spki/spki.dis | appl/lib/spki/spki.b | module/spki.m | - |  |
 | dis/lib/spki/verifier.dis | appl/lib/spki/verifier.b |  | - |  |
@@ -236,10 +226,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/vac.dis | appl/lib/vac.b | module/vac.m | - |  |
 | dis/lib/venti.dis | appl/lib/venti.b | module/venti.m | - |  |
 | dis/lib/virgil.dis | appl/lib/virgil.b |  | - |  |
-| dis/lib/volume.dis | appl/lib/volume.b | module/volume.m | - |  |
 | dis/lib/w3c/css.dis | appl/lib/w3c/css.b | module/css.m | - |  |
-| dis/lib/wait.dis | appl/lib/wait.b | module/wait.m | - |  |
-| dis/lib/watchvars.dis | appl/lib/watchvars.b | module/watchvars.m | - |  |
 | dis/lib/workdir.dis | appl/lib/workdir.b | module/workdir.m | - |  |
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
