@@ -779,7 +779,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/demo/ns/ns.dis | appl/demo/ns/ns.b |  | - |  |
 | dis/demo/odbc/odbcmnt.dis | appl/demo/odbc/odbcmnt.b |  | - |  |
 | dis/demo/whiteboard/wbsrv.dis | appl/demo/whiteboard/wbsrv.b |  | - |  |
-| dis/demo/whiteboard/whiteboard.dis | appl/demo/whiteboard/whiteboard.b |  | - |  |
 
 ### 12. Ebook - readers - 10 rows
 

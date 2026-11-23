@@ -2,7 +2,6 @@
 
 TARG=\
 		wbsrv.dis\
-		whiteboard.dis\
 
 SHTARG=\
 		runwb.sh\
@@ -12,15 +11,21 @@ MODULES=\
 SYSMODULES= \
 	draw.m\
 	sys.m\
-	tk.m\
-	tkclient.m\
 
 DISBIN=$ROOT/dis/demo/whiteboard
 
 <$ROOT/mkfiles/mkdis
 
+whiteboard.zx: whiteboard.zi whiteboard_model.zi ../../cmd/tcltk/zx_surface.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_args --bind-host taijios_io --entry whiteboard:main -o $target whiteboard.zi
+
+$DISBIN/whiteboard.zx: whiteboard.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 whiteboard.zx "$staged" && mv "$staged" "$target"
+
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES
+install:V:	$SHFILES $DISBIN/whiteboard.zx
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 
