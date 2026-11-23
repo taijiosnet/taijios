@@ -830,7 +830,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/avr/burn.dis | appl/cmd/avr/burn.b |  | - |  |
 | dis/dbm/delete.dis | appl/cmd/dbm/delete.b |  | - |  |
 | dis/dbm/fetch.dis | appl/cmd/dbm/fetch.b |  | - |  |
 | dis/dbm/keys.dis | appl/cmd/dbm/keys.b |  | - |  |

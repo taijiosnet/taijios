@@ -1,0 +1,321 @@
+// Motorola S-record decoding and STK500 / MIB510 framing for avr/burn.
+#import "std/vec";
+
+ATMEGA128 :: 0xB2;
+
+RESP_STK_OK :: 0x10;
+RESP_STK_FAILED :: 0x11;
+RESP_STK_UNKNOWN :: 0x12;
+RESP_STK_NODEVICE :: 0x13;
+RESP_STK_INSYNC :: 0x14;
+RESP_STK_NOSYNC :: 0x15;
+
+SYNC_CRC_EOP :: 0x20;
+
+CMD_STK_GET_SYNC :: 0x30;
+CMD_STK_GET_SIGN_ON :: 0x31;
+CMD_STK_SET_PARAMETER :: 0x40;
+CMD_STK_GET_PARAMETER :: 0x41;
+CMD_STK_SET_DEVICE :: 0x42;
+CMD_STK_SET_DEVICE_EXT :: 0x45;
+CMD_STK_ENTER_PROGMODE :: 0x50;
+CMD_STK_LEAVE_PROGMODE :: 0x51;
+CMD_STK_CHIP_ERASE :: 0x52;
+CMD_STK_LOAD_ADDRESS :: 0x55;
+CMD_STK_UNIVERSAL :: 0x56;
+CMD_STK_PROG_PAGE :: 0x64;
+CMD_STK_READ_PAGE :: 0x74;
+CMD_STK_READ_SIGN :: 0x75;
+
+PARM_STK_SW_MAJOR :: 0x81;
+PARM_STK_SW_MINOR :: 0x82;
+
+Avr :: struct {
+    id: u8;
+    rev: u8;
+    flashsize: u32;
+    eepromsize: u32;
+    fusebytes: u8;
+    lockbytes: u8;
+    serfprog: u8;
+    serlprog: u8;
+    serflread: u8;
+    commonlfr: u8;
+    sermemprog: u8;
+    pagesize: u32;
+    eeprompagesize: u8;
+    selftimed: u8;
+    fullpar: u8;
+    polling: u8;
+    fpoll: u8;
+    epoll1: u8;
+    epoll2: u8;
+    name: string;
+    signalpagel: u8;
+    signalbs2: u8;
+}
+
+Atmega128 :: () -> Avr {
+    return .{
+        id = ATMEGA128,
+        rev = 1,
+        flashsize = 131072,
+        eepromsize = 4096,
+        fusebytes = 3,
+        lockbytes = 1,
+        serfprog = 1,
+        serlprog = 1,
+        serflread = 1,
+        commonlfr = 0,
+        sermemprog = 1,
+        pagesize = 256,
+        eeprompagesize = 8,
+        selftimed = 1,
+        fullpar = 1,
+        polling = 1,
+        fpoll = 0xFF,
+        epoll1 = 0xFF,
+        epoll2 = 0xFF,
+        name = "ATmega128",
+        signalpagel = 0xD7,
+        signalbs2 = 0xA0,
+    };
+}
+
+SRecord :: struct {
+    kind: u8;
+    addr: u32;
+    data: Vec(u8);
+    err: Text;
+}
+
+HexDigit :: (c: u8) -> s32 {
+    if c >= #char "0" && c <= #char "9" { return cast(s32)(c - #char "0") }
+    if c >= #char "a" && c <= #char "f" { return cast(s32)(c - #char "a") + 10 }
+    if c >= #char "A" && c <= #char "F" { return cast(s32)(c - #char "A") + 10 }
+    return -1;
+}
+
+HexByte :: (s: string, at: s64) -> s32 {
+    if at + 2 > s.count { return -1 }
+    c0 := HexDigit(s[at]);
+    c1 := HexDigit(s[at + 1]);
+    if c0 < 0 || c1 < 0 { return -1 }
+    return (c0 << 4) | c1;
+}
+
+// Parses a hexadecimal fuse byte in 0..255 with no trailing characters.
+ParseFuseVal :: (s: string) -> (value: s32, ok: bool) {
+    if s.count == 0 { return 0, false }
+    i: s64 = 0;
+    while i < s.count && (s[i] == #char " " || s[i] == #char "\t") { i += 1 }
+    if i >= s.count { return 0, false }
+    neg := false;
+    if s[i] == #char "+" {
+        i += 1;
+    } else if s[i] == #char "-" {
+        neg = true;
+        i += 1;
+    }
+    if i >= s.count { return 0, false }
+    val: s32 = 0;
+    digits := 0;
+    while i < s.count {
+        d := HexDigit(s[i]);
+        if d < 0 { return 0, false }
+        if val > 255 { return 0, false }
+        val = (val << 4) | d;
+        digits += 1;
+        i += 1;
+    }
+    if digits == 0 || neg || val < 0 || val > 255 { return 0, false }
+    return val, true;
+}
+
+CheckFuses :: (fuseext: s32, fuselow: s32, fusehigh: s32) -> (msg: string, ok: bool) {
+    if fuselow >= 0 && (fuselow & 0xF) == 0 {
+        return "don't program external clock", false;
+    }
+    if fuseext >= 0 && (fuseext & 1) == 0 {
+        return "don't program ATmega103 compatibility", false;
+    }
+    if fusehigh >= 0 && (fusehigh & 0x80) == 0 {
+        return "don't program OCDEN=0", false;
+    }
+    return "", true;
+}
+
+SetSrecErr :: (out: *SRecord, prefix: string, rec: string) -> bool {
+    VecClear(out.err.bytes);
+    BuilderAppend(out.err.bytes, "bad S record: ");
+    BuilderAppend(out.err.bytes, prefix);
+    BuilderAppend(out.err.bytes, rec);
+    return false;
+}
+
+DecodeSRecord :: (raw: string, out: *SRecord) -> bool {
+    VecClear(out.data);
+    VecClear(out.err.bytes);
+    out.kind = 0;
+    out.addr = 0;
+
+    end := raw.count;
+    while end > 0 && (raw[end - 1] == #char "\r" || raw[end - 1] == #char "\n") {
+        end -= 1;
+    }
+    s := raw[:end];
+    if s.count < 4 || s[0] != #char "S" {
+        return SetSrecErr(out, "", s);
+    }
+    length := HexByte(s, 2);
+    if length < 0 || cast(s64)(2 * length) != s.count - 4 {
+        return SetSrecErr(out, "length: ", s);
+    }
+    csum: s32 = length;
+    kind := s[1];
+    na: s32 = 2;
+    if kind >= #char "1" && kind <= #char "3" {
+        na = cast(s32)(kind - #char "1") + 2;
+    }
+    addr: u32 = 0;
+    for i: 0..na - 1 {
+        b := HexByte(s, 4 + cast(s64)i * 2);
+        if b < 0 { return SetSrecErr(out, "", s) }
+        csum += b;
+        addr = (addr << 8) | cast(u32)b;
+    }
+    valid_kind := kind == #char "0" || (kind >= #char "1" && kind <= #char "3") ||
+        kind == #char "5" || (kind >= #char "7" && kind <= #char "9");
+    if !valid_kind {
+        return SetSrecErr(out, "type: ", s);
+    }
+    dlen := length - na - 1;
+    if dlen < 0 {
+        return SetSrecErr(out, "length: ", s);
+    }
+    for i: 0..dlen - 1 {
+        c := HexByte(s, 4 + cast(s64)(na + i) * 2);
+        if c < 0 { return SetSrecErr(out, "", s) }
+        csum += c;
+        VecPush(out.data, cast(u8)c);
+    }
+    v := HexByte(s, 4 + cast(s64)length * 2 - 2);
+    if v < 0 { return SetSrecErr(out, "", s) }
+    csum += v;
+    if (csum & 0xFF) != 0xFF {
+        return SetSrecErr(out, "checksum: ", s);
+    }
+    out.kind = kind;
+    out.addr = addr;
+    return true;
+}
+
+BuildSetIsp :: (on: u8, out: *Vec(u8)) {
+    VecClear(<<out);
+    prefix: [8]u8 = .[0xAA, 0x55, 0x55, 0xAA, 0x17, 0x51, 0x31, 0x13];
+    for prefix { VecPush(<<out, it) }
+    VecPush(<<out, on);
+}
+
+BuildSetDevice :: (d: Avr, out: *Vec(u8)) {
+    VecClear(<<out);
+    VecPush(<<out, CMD_STK_SET_DEVICE);
+    VecPush(<<out, d.id);
+    VecPush(<<out, d.rev);
+    VecPush(<<out, 0);
+    VecPush(<<out, d.fullpar);
+    VecPush(<<out, d.polling);
+    VecPush(<<out, d.selftimed);
+    VecPush(<<out, d.lockbytes);
+    VecPush(<<out, d.fusebytes);
+    VecPush(<<out, d.fpoll);
+    VecPush(<<out, d.fpoll);
+    VecPush(<<out, d.epoll1);
+    VecPush(<<out, d.epoll2);
+    VecPush(<<out, cast(u8)((d.pagesize >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(d.pagesize & 0xFF));
+    VecPush(<<out, cast(u8)((d.eepromsize >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(d.eepromsize & 0xFF));
+    VecPush(<<out, cast(u8)((d.flashsize >> 24) & 0xFF));
+    VecPush(<<out, cast(u8)((d.flashsize >> 16) & 0xFF));
+    VecPush(<<out, cast(u8)((d.flashsize >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(d.flashsize & 0xFF));
+}
+
+BuildSetDeviceExt :: (d: Avr, out: *Vec(u8)) {
+    VecClear(<<out);
+    VecPush(<<out, CMD_STK_SET_DEVICE_EXT);
+    VecPush(<<out, 4);
+    VecPush(<<out, d.eeprompagesize);
+    VecPush(<<out, d.signalpagel);
+    VecPush(<<out, d.signalbs2);
+    VecPush(<<out, 0);
+}
+
+BuildLoadAddress :: (addr: u32, out: *Vec(u8)) {
+    VecClear(<<out);
+    VecPush(<<out, CMD_STK_LOAD_ADDRESS);
+    VecPush(<<out, cast(u8)(addr & 0xFF));
+    VecPush(<<out, cast(u8)((addr >> 8) & 0xFF));
+}
+
+BuildReadPage :: (memtype: u8, nb: s32, out: *Vec(u8)) {
+    VecClear(<<out);
+    VecPush(<<out, CMD_STK_READ_PAGE);
+    VecPush(<<out, cast(u8)((nb >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(nb & 0xFF));
+    VecPush(<<out, memtype);
+    VecPush(<<out, SYNC_CRC_EOP);
+}
+
+BuildProgPage :: (memtype: u8, data: []u8, out: *Vec(u8)) {
+    VecClear(<<out);
+    nb := data.count;
+    VecPush(<<out, CMD_STK_PROG_PAGE);
+    VecPush(<<out, cast(u8)((nb >> 8) & 0xFF));
+    VecPush(<<out, cast(u8)(nb & 0xFF));
+    VecPush(<<out, memtype);
+    for data { VecPush(<<out, it) }
+}
+
+BuildUniversal :: (b0: u8, b1: u8, b2: u8, b3: u8, out: *Vec(u8)) {
+    VecClear(<<out);
+    VecPush(<<out, CMD_STK_UNIVERSAL);
+    VecPush(<<out, b0);
+    VecPush(<<out, b1);
+    VecPush(<<out, b2);
+    VecPush(<<out, b3);
+}
+
+ReplyOk :: (r: []u8) -> bool {
+    return r.count >= 2 && r[0] == RESP_STK_INSYNC && r[r.count - 1] == RESP_STK_OK;
+}
+
+ReadPageReplyOk :: (r: []u8) -> bool {
+    return r.count >= 2 && r[0] == RESP_STK_INSYNC &&
+        (r[r.count - 1] == RESP_STK_INSYNC || r[r.count - 1] == RESP_STK_OK);
+}
+
+ReadSigReplyOk :: (r: []u8) -> bool {
+    return r.count == 5 && r[0] == CMD_STK_READ_SIGN && r[4] == SYNC_CRC_EOP;
+}
+
+AppendHex2 :: (out: *Vec(u8), v: u8) {
+    digits := "0123456789abcdef";
+    VecPush(<<out, digits[(v >> 4) & 0xF]);
+    VecPush(<<out, digits[v & 0xF]);
+}
+
+AppendHex4 :: (out: *Vec(u8), v: u32) {
+    AppendHex2(out, cast(u8)((v >> 8) & 0xFF));
+    AppendHex2(out, cast(u8)(v & 0xFF));
+}
+
+DumpHex :: (a: []u8, out: *Vec(u8)) {
+    VecClear(<<out);
+    BuilderPrint(out, "[%]", a.count);
+    for a {
+        VecPush(<<out, #char " ");
+        AppendHex2(out, it);
+    }
+}

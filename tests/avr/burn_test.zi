@@ -1,0 +1,207 @@
+// Table-driven tests for avr/burn S-record decoding, STK500 framing,
+// fuse validation, and guest CLI parity.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root appl/cmd/avr tests/avr/burn_test.zi -- [EMU]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+using Proto :: #import "burn_proto"
+
+WORK :: "build/dis-legacy-math/avr";
+
+SrecCase :: struct {
+    name: string;
+    line: string;
+    ok: bool;
+    kind: u8;
+    addr: u32;
+    data_hex: string;
+    err: string;
+}
+
+srec_cases: [9]SrecCase = SrecCase.[
+    .{name = "S0 header", line = "S00600004844521B\n", ok = true, kind = #char "0", addr = 0, data_hex = "[3] 48 44 52"},
+    .{name = "S1 16-bit data", line = "S107010001020304ED\r\n", ok = true, kind = #char "1", addr = 0x0100, data_hex = "[4] 01 02 03 04"},
+    .{name = "S2 24-bit data", line = "S206010203AABB8E", ok = true, kind = #char "2", addr = 0x010203, data_hex = "[2] aa bb"},
+    .{name = "S3 32-bit data", line = "S30601020304CC23", ok = true, kind = #char "3", addr = 0x01020304, data_hex = "[1] cc"},
+    .{name = "S9 end record", line = "S9030000FC", ok = true, kind = #char "9", addr = 0, data_hex = "[0]"},
+    .{name = "missing S prefix", line = "X1030000FC", ok = false, err = "bad S record: X1030000FC"},
+    .{name = "bad length", line = "S1050000FC", ok = false, err = "bad S record: length: S1050000FC"},
+    .{name = "bad type", line = "S4030000FC", ok = false, err = "bad S record: type: S4030000FC"},
+    .{name = "bad checksum", line = "S107010001020304EC", ok = false, err = "bad S record: checksum: S107010001020304EC"},
+];
+
+FuseCase :: struct {
+    input: string;
+    ok: bool;
+    value: s32;
+}
+
+fuse_cases: [7]FuseCase = FuseCase.[
+    .{input = "00", ok = true, value = 0},
+    .{input = "ff", ok = true, value = 255},
+    .{input = "A5", ok = true, value = 0xA5},
+    .{input = "100", ok = false},
+    .{input = "-1", ok = false},
+    .{input = "gg", ok = false},
+    .{input = "", ok = false},
+];
+
+CliCase :: struct {
+    args: string;
+    status: string;
+    err: string;
+}
+
+cli_cases: [5]CliCase = CliCase.[
+    .{args = "", status = "usage", err = "usage: burn [-rD] [-d serialdev] file.out\n"},
+    .{args = "-Z foo.srec", status = "usage", err = "usage: burn [-rD] [-d serialdev] file.out\n"},
+    .{args = "-L zz foo.srec", status = "error", err = "burn: illegal fuse value\n"},
+    .{args = "missing.srec", status = "error", err = "burn: can't open missing.srec: 'missing.srec' file does not exist\n"},
+    .{args = "-d /nonexist/eia0 sample.srec", status = "error", err = "burn: can't open /dev/eia0: '/nonexist' file does not exist\n"},
+];
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+TestProto :: () {
+    rec: Proto.SRecord;
+    dump: Vec(u8);
+    for srec_cases {
+        ok := Proto.DecodeSRecord(it.line, *rec);
+        Expect(ok == it.ok, it.name);
+        if it.ok && ok {
+            Expect(rec.kind == it.kind, it.name);
+            Expect(rec.addr == it.addr, it.name);
+            Proto.DumpHex(rec.data[:], *dump);
+            Expect(TextView(dump[:]) == it.data_hex, it.name);
+        } else if !it.ok && !ok {
+            Expect(TextView(rec.err) == it.err, it.name);
+        }
+    }
+
+    for fuse_cases {
+        v, ok := Proto.ParseFuseVal(it.input);
+        Expect(ok == it.ok, it.input);
+        if it.ok { Expect(v == it.value, it.input) }
+    }
+
+    msg, fok := Proto.CheckFuses(-1, 0xF0, -1);
+    Expect(!fok && msg == "don't program external clock", "fuse external clock guard");
+    msg, fok = Proto.CheckFuses(0xFE, -1, -1);
+    Expect(!fok && msg == "don't program ATmega103 compatibility", "fuse ATmega103 guard");
+    msg, fok = Proto.CheckFuses(-1, -1, 0x7F);
+    Expect(!fok && msg == "don't program OCDEN=0", "fuse OCDEN guard");
+    _, fok = Proto.CheckFuses(0xFF, 0xFF, 0xFF);
+    Expect(fok, "safe fuses accepted");
+
+    pkt: Vec(u8);
+    Proto.BuildSetIsp(1, *pkt);
+    Proto.DumpHex(pkt[:], *dump);
+    Expect(TextView(dump[:]) == "[9] aa 55 55 aa 17 51 31 13 01", "BuildSetIsp");
+
+    Proto.BuildSetDevice(Proto.Atmega128(), *pkt);
+    Expect(pkt.count == 21 && pkt[0] == Proto.CMD_STK_SET_DEVICE && pkt[1] == Proto.ATMEGA128 &&
+        pkt[13] == 0x01 && pkt[14] == 0x00 && pkt[17] == 0x00 && pkt[18] == 0x02, "BuildSetDevice ATmega128");
+
+    Proto.BuildLoadAddress(0x1234, *pkt);
+    Proto.DumpHex(pkt[:], *dump);
+    Expect(TextView(dump[:]) == "[3] 55 34 12", "BuildLoadAddress");
+
+    Proto.BuildReadPage(#char "F", 256, *pkt);
+    Proto.DumpHex(pkt[:], *dump);
+    Expect(TextView(dump[:]) == "[5] 74 01 00 46 20", "BuildReadPage");
+
+    payload: [2]u8 = .[0xDE, 0xAD];
+    Proto.BuildProgPage(#char "F", payload[:], *pkt);
+    Proto.DumpHex(pkt[:], *dump);
+    Expect(TextView(dump[:]) == "[6] 64 00 02 46 de ad", "BuildProgPage");
+
+    Proto.BuildUniversal(0x58, 0x08, 0x00, 0x00, *pkt);
+    Proto.DumpHex(pkt[:], *dump);
+    Expect(TextView(dump[:]) == "[5] 56 58 08 00 00", "BuildUniversal");
+
+    ok_rep: [2]u8 = .[Proto.RESP_STK_INSYNC, Proto.RESP_STK_OK];
+    Expect(Proto.ReplyOk(ok_rep[:]), "ReplyOk");
+    mib_rep: [3]u8 = .[Proto.RESP_STK_INSYNC, 0x42, Proto.RESP_STK_INSYNC];
+    Expect(Proto.ReadPageReplyOk(mib_rep[:]), "ReadPageReplyOk MIB510");
+    sig_rep: [5]u8 = .[Proto.CMD_STK_READ_SIGN, 0x1E, 0x97, 0x02, Proto.SYNC_CRC_EOP];
+    Expect(Proto.ReadSigReplyOk(sig_rep[:]), "ReadSigReplyOk");
+}
+
+Result :: (kind: string, index: s64) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%.%", WORK, kind, index);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+TestGuest :: (emu: string, cmd_path: string) {
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/avr/work") ||
+        !CreateDirectory("build/dis-legacy-math/avr/result") {
+        failures += 1;
+        print("FAIL: cannot prepare %\n", WORK);
+        return;
+    }
+    unused WriteEntireFile("build/dis-legacy-math/avr/work/sample.srec", "S00600004844521B\nS9030000FC\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    for cli_cases {
+        BuilderPrint(*script, "% % < /dev/null > ../result/out.% >[2] ../result/err.%\n", cmd_path, it.args, it_index, it_index);
+        BuilderPrint(*script, "echo $status > ../result/status.%\n", it_index);
+    }
+    unused WriteEntireFile("build/dis-legacy-math/avr/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    started := RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run);
+    if !started {
+        failures += 1;
+        print("FAIL: cannot start %\n", emu);
+        return;
+    }
+    for cli_cases {
+        want_status: Vec(u8);
+        BuilderPrint(*want_status, "%\n", it.status);
+        got_status := Result("status", it_index);
+        got_err := Result("err", it_index);
+        if got_status != BuilderFinish(want_status) {
+            failures += 1;
+            print("FAIL guest case % status: got [%] want [%]\n", it_index, got_status, it.status);
+        }
+        if got_err != it.err {
+            failures += 1;
+            print("FAIL guest case % stderr: got [%] want [%]\n", it_index, got_err, it.err);
+        }
+    }
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    cmd := ifx argc > 2 then TextFromCString(argv[2]) else "avr/burn";
+    TestProto();
+    TestGuest(emu, cmd);
+    if failures != 0 {
+        print("avr/burn_test: % failures\n", failures);
+        return 1;
+    }
+    print("avr/burn_test: all checks passed\n");
+    return 0;
+}

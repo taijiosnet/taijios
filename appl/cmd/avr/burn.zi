@@ -1,0 +1,584 @@
+// burn [-rD] [-d serialdev] file.out: program or verify an AVR ATmega128
+// over STK500 / MIB510 serial interface from a Motorola S-record file.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Lines :: #import "zx_lines";
+using Proto :: #import "burn_proto";
+
+USAGE :: "usage: burn [-rD] [-d serialdev] file.out\n";
+
+State :: struct {
+    sfd: s32;
+    cfd: s32;
+    debug: s32;
+    verify: bool;
+    erase: bool;
+    ignore: bool;
+    mib510: bool;
+    cache_addr: u32;
+    cache_valid: bool;
+    cache_data: Vec(u8);
+    failed: bool;
+}
+
+Fail :: (st: *State, msg: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "burn: %\n", msg);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    st.failed = true;
+}
+
+ReadExact :: (st: *State, n: s64, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    chunk: [258]u8;
+    while out.count < n {
+        need := n - out.count;
+        if need > chunk.count { need = chunk.count }
+        got := Io.ReadBytes(st.sfd, chunk[:need]);
+        if got <= 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "read error: %", Io.LastError());
+            Fail(st, BuilderFinish(msg));
+            return false;
+        }
+        if st.debug > 0 {
+            d: Vec(u8);
+            Proto.DumpHex(chunk[:got], *d);
+            line: Vec(u8);
+            BuilderPrint(*line, "<- %\n", TextView(d[:]));
+            unused Cli.WriteAll(1, BuilderFinish(line));
+        }
+        for chunk[:got] { VecPush(<<out, it) }
+    }
+    return true;
+}
+
+Send :: (st: *State, req: []u8, repn: s64, reply: *Vec(u8)) -> bool {
+    if st.debug > 0 {
+        d: Vec(u8);
+        Proto.DumpHex(req, *d);
+        line: Vec(u8);
+        BuilderPrint(*line, "-> %\n", TextView(d[:]));
+        unused Cli.WriteAll(1, BuilderFinish(line));
+    }
+    if Io.WriteBytes(st.sfd, TextView(req)) != cast(s32)req.count {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "write error: %", Io.LastError());
+        Fail(st, BuilderFinish(msg));
+        return false;
+    }
+    return ReadExact(st, repn, reply);
+}
+
+Rpc :: (st: *State, cmd: []u8, repn: s64, body: *Vec(u8)) -> bool {
+    VecClear(<<body);
+    req: Vec(u8);
+    for cmd { VecPush(req, it) }
+    VecPush(req, Proto.SYNC_CRC_EOP);
+    raw: Vec(u8);
+    if !Send(st, req[:], repn + 2, *raw) { return false }
+    if !Proto.ReplyOk(raw[:]) {
+        if raw.count >= 2 && raw[0] == Proto.RESP_STK_INSYNC && raw[raw.count - 1] == Proto.RESP_STK_NODEVICE {
+            Fail(st, "internal error: programming parameters not correctly set");
+            return false;
+        }
+        if raw.count >= 1 && raw[0] == Proto.RESP_STK_NOSYNC {
+            Fail(st, "lost synchronisation");
+            return false;
+        }
+        d: Vec(u8);
+        Proto.DumpHex(raw[:], *d);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "bad reply %\n", TextView(d[:]));
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        return false;
+    }
+    for i: 1..raw.count - 2 { VecPush(<<body, raw[i]) }
+    return true;
+}
+
+PgmOn :: (st: *State) -> bool {
+    cmd: [1]u8 = .[Proto.CMD_STK_ENTER_PROGMODE];
+    body: Vec(u8);
+    if !Rpc(st, cmd[:], 0, *body) {
+        if !st.failed { Fail(st, "programming failed") }
+        return false;
+    }
+    return true;
+}
+
+PgmOff :: (st: *State) -> bool {
+    cmd: [1]u8 = .[Proto.CMD_STK_LEAVE_PROGMODE];
+    body: Vec(u8);
+    if !Rpc(st, cmd[:], 0, *body) {
+        if !st.failed { Fail(st, "programming failed") }
+        return false;
+    }
+    return true;
+}
+
+PgmRpc :: (st: *State, cmd: []u8, repn: s64, body: *Vec(u8)) -> bool {
+    if !PgmOn(st) { return false }
+    ok := Rpc(st, cmd, repn, body);
+    if !PgmOff(st) { return false }
+    return ok;
+}
+
+SetIsp :: (st: *State, on: u8) -> bool {
+    req: Vec(u8);
+    Proto.BuildSetIsp(on, *req);
+    reply: Vec(u8);
+    if !Send(st, req[:], 2, *reply) { return false }
+    return reply.count == 2 && Proto.ReplyOk(reply[:]);
+}
+
+ReadSig :: (st: *State, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    req: [2]u8 = .[Proto.CMD_STK_READ_SIGN, Proto.SYNC_CRC_EOP];
+    raw: Vec(u8);
+    if !Send(st, req[:], 5, *raw) { return false }
+    if !Proto.ReadSigReplyOk(raw[:]) {
+        d: Vec(u8);
+        Proto.DumpHex(raw[:], *d);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "bad reply %\n", TextView(d[:]));
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        return false;
+    }
+    for i: 1..3 { VecPush(<<out, raw[i]) }
+    return true;
+}
+
+Resync :: (st: *State) -> bool {
+    cmd: [1]u8 = .[Proto.CMD_STK_GET_SYNC];
+    body: Vec(u8);
+    for i: 0..7 {
+        if Rpc(st, cmd[:], 0, *body) { return true }
+        if st.failed { return false }
+    }
+    Fail(st, "lost sync with programmer");
+    return false;
+}
+
+GetParam :: (st: *State, p: u8) -> s32 {
+    cmd: [2]u8 = .[Proto.CMD_STK_GET_PARAMETER, p];
+    body: Vec(u8);
+    if !Rpc(st, cmd[:], 1, *body) || body.count == 0 { return -1 }
+    return cast(s32)body[0];
+}
+
+Universal :: (st: *State, b0: u8, b1: u8, b2: u8, b3: u8) -> s32 {
+    req: Vec(u8);
+    Proto.BuildUniversal(b0, b1, b2, b3, *req);
+    body: Vec(u8);
+    if !PgmRpc(st, req[:], 1, *body) || body.count == 0 { return -1 }
+    return cast(s32)body[0];
+}
+
+SetDevice :: (st: *State, d: Proto.Avr) -> bool {
+    req: Vec(u8);
+    Proto.BuildSetDevice(d, *req);
+    body: Vec(u8);
+    if !Rpc(st, req[:], 0, *body) {
+        if !st.failed { Fail(st, "programming failed") }
+        return false;
+    }
+    if st.mib510 { return true }
+    Proto.BuildSetDeviceExt(d, *req);
+    if !Rpc(st, req[:], 0, *body) {
+        if !st.failed { Fail(st, "programming failed") }
+        return false;
+    }
+    return true;
+}
+
+ChipErase :: (st: *State) -> bool {
+    cmd: [1]u8 = .[Proto.CMD_STK_CHIP_ERASE];
+    body: Vec(u8);
+    if !PgmRpc(st, cmd[:], 0, *body) {
+        if !st.failed { Fail(st, "programming failed") }
+        return false;
+    }
+    return true;
+}
+
+ReadMem :: (st: *State, memtype: u8, addr: u32, nb_in: s32, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    nb := ifx nb_in > 256 then 256 else nb_in;
+    if !PgmOn(st) { return false }
+    laddr: Vec(u8);
+    Proto.BuildLoadAddress(addr, *laddr);
+    body: Vec(u8);
+    ok := Rpc(st, laddr[:], 0, *body);
+    if ok {
+        req: Vec(u8);
+        Proto.BuildReadPage(memtype, nb, *req);
+        raw: Vec(u8);
+        if Send(st, req[:], cast(s64)nb + 2, *raw) {
+            if Proto.ReadPageReplyOk(raw[:]) {
+                for i: 1..raw.count - 2 { VecPush(<<out, raw[i]) }
+            } else {
+                d: Vec(u8);
+                Proto.DumpHex(raw[:], *d);
+                msg: Vec(u8);
+                BuilderPrint(*msg, "bad reply: %\n", TextView(d[:]));
+                unused Cli.WriteAll(1, BuilderFinish(msg));
+                ok = false;
+            }
+        } else {
+            ok = false;
+        }
+    }
+    if !PgmOff(st) { return false }
+    return ok;
+}
+
+WriteMem :: (st: *State, memtype: u8, addr: u32, data: []u8) -> s32 {
+    nb := cast(s32)data.count;
+    if nb > 256 { nb = 256 }
+    if !PgmOn(st) { return -1 }
+    laddr: Vec(u8);
+    Proto.BuildLoadAddress(addr, *laddr);
+    body: Vec(u8);
+    if Rpc(st, laddr[:], 0, *body) {
+        req: Vec(u8);
+        Proto.BuildProgPage(memtype, data[:nb], *req);
+        if !Rpc(st, req[:], 0, *body) { nb = -1 }
+    } else {
+        nb = -1;
+    }
+    if !PgmOff(st) { return -1 }
+    return nb;
+}
+
+FlushPage :: (st: *State) -> bool {
+    if !st.cache_valid || st.cache_data.count == 0 { return true }
+    ca := st.cache_addr;
+    st.cache_valid = false;
+    wrote := WriteMem(st, #char "F", ca / 2, st.cache_data[:]);
+    return wrote == cast(s32)st.cache_data.count;
+}
+
+ReadFlashData :: (st: *State, addr_in: u32, nbytes: s64, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    for i: 0..nbytes - 1 { VecPush(<<out, 0) }
+    addr := addr_in;
+    ea := addr + cast(u32)nbytes;
+    while addr < ea {
+        if st.cache_valid && addr >= st.cache_addr && addr < st.cache_addr + cast(u32)st.cache_data.count {
+            o := cast(s64)(addr - st.cache_addr);
+            n := cast(s64)(ea - addr);
+            if o + n > st.cache_data.count { n = st.cache_data.count - o }
+            dst := cast(s64)(addr - addr_in);
+            for i: 0..n - 1 { (<<out)[dst + i] = st.cache_data[o + i] }
+            addr += cast(u32)n;
+        } else {
+            ca := addr & ~cast(u32)0xFF;
+            if !ReadMem(st, #char "F", ca / 2, 256, *st.cache_data) { return false }
+            st.cache_addr = ca;
+            st.cache_valid = true;
+        }
+    }
+    return true;
+}
+
+WriteFlashData :: (st: *State, addr_in: u32, data: []u8) -> bool {
+    pagesize := cast(s64)Proto.Atmega128().pagesize;
+    addr := addr_in;
+    off: s64 = 0;
+    while off < data.count {
+        if st.cache_valid && addr >= st.cache_addr && addr < st.cache_addr + cast(u32)st.cache_data.count {
+            o := cast(s64)(addr - st.cache_addr);
+            n := data.count - off;
+            if o + n > st.cache_data.count { n = st.cache_data.count - o }
+            for i: 0..n - 1 { st.cache_data[o + i] = data[off + i] }
+            addr += cast(u32)n;
+            off += n;
+        } else {
+            if !FlushPage(st) { return false }
+            VecClear(st.cache_data);
+            for i: 0..pagesize - 1 { VecPush(st.cache_data, 0xFF) }
+            st.cache_addr = addr & ~cast(u32)0xFF;
+            st.cache_valid = true;
+        }
+    }
+    return true;
+}
+
+Initialise :: (st: *State) -> bool {
+    if st.mib510 {
+        ok := false;
+        for i: 0..7 {
+            if SetIsp(st, 1) { ok = true; break }
+            if st.failed { return false }
+        }
+        if !ok && !SetIsp(st, 1) {
+            if !st.failed { Fail(st, "no response from programmer") }
+            return false;
+        }
+    }
+    if !Resync(st) || !Resync(st) { return false }
+    sig: Vec(u8);
+    if ReadSig(st, *sig) && sig.count > 0 && sig[0] != 0xFF {
+        d: Vec(u8);
+        Proto.DumpHex(sig[:], *d);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sig: %\n", TextView(d[:]));
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+    }
+    if st.failed { return false }
+    maj := GetParam(st, Proto.PARM_STK_SW_MAJOR);
+    min := GetParam(st, Proto.PARM_STK_SW_MINOR);
+    if st.failed { return false }
+    vmsg: Vec(u8);
+    if st.mib510 {
+        BuilderPrint(*vmsg, "Firmware version: ");
+        VecPush(vmsg, cast(u8)(min & 0xFF));
+        VecPush(vmsg, #char ".");
+        VecPush(vmsg, cast(u8)(maj & 0xFF));
+        VecPush(vmsg, #char "\n");
+    } else {
+        BuilderPrint(*vmsg, "Firmware version: %.%\n", min, maj);
+    }
+    unused Cli.WriteAll(1, BuilderFinish(vmsg));
+    if !SetDevice(st, Proto.Atmega128()) { return false }
+    if !PgmOn(st) { return false }
+    unused ReadSig(st, *sig);
+    if !st.failed {
+        d: Vec(u8);
+        Proto.DumpHex(sig[:], *d);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "sig: %\n", TextView(d[:]));
+        unused Cli.WriteAll(1, BuilderFinish(msg));
+    }
+    if !PgmOff(st) { return false }
+    if sig.count < 3 || sig[0] != 0x1E || sig[1] != 0x97 || sig[2] != 0x02 {
+        if !st.ignore {
+            Fail(st, "unlikely response: check connections");
+            return false;
+        }
+    }
+    fh := Universal(st, 0x58, 8, 0, 0);
+    fl := Universal(st, 0x50, 0, 0, 0);
+    fe := Universal(st, 0x50, 8, 0, 0);
+    if st.failed { return false }
+    fmsg: Vec(u8);
+    BuilderPrint(*fmsg, "fuses: h=");
+    Proto.AppendHex2(*fmsg, cast(u8)(fh & 0xFF));
+    BuilderPrint(*fmsg, " l=");
+    Proto.AppendHex2(*fmsg, cast(u8)(fl & 0xFF));
+    BuilderPrint(*fmsg, " e=");
+    Proto.AppendHex2(*fmsg, cast(u8)(fe & 0xFF));
+    VecPush(fmsg, #char "\n");
+    unused Cli.WriteAll(1, BuilderFinish(fmsg));
+    return true;
+}
+
+main :: () -> s32 {
+    st: State;
+    st.sfd = -1;
+    st.cfd = -1;
+    st.erase = true;
+    st.mib510 = true;
+
+    serial := "/dev/eia0";
+    fuseext: s32 = -1;
+    fuselow: s32 = -1;
+    fusehigh: s32 = -1;
+
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "D" {
+            st.debug += 1;
+        } else if letter == #char "e" {
+            st.erase = false;
+        } else if letter == #char "r" {
+            st.verify = true;
+        } else if letter == #char "i" {
+            st.ignore = true;
+        } else if letter == #char "d" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            serial = val;
+        } else if letter == #char "E" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            n, fok := Proto.ParseFuseVal(val);
+            if !fok { Fail(*st, "illegal fuse value"); return 1 }
+            fuseext = n;
+        } else if letter == #char "L" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            n, fok := Proto.ParseFuseVal(val);
+            if !fok { Fail(*st, "illegal fuse value"); return 1 }
+            fuselow = n;
+        } else if letter == #char "H" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            n, fok := Proto.ParseFuseVal(val);
+            if !fok { Fail(*st, "illegal fuse value"); return 1 }
+            fusehigh = n;
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+
+    if Args.OperandCount() - scan.next != 1 { return Cli.Usage(USAGE) }
+    sfile := Args.Operand(scan.next);
+    fd := Io.OpenFile(sfile, 0);
+    if fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", sfile, Io.LastError());
+        Fail(*st, BuilderFinish(msg));
+        return 1;
+    }
+
+    st.sfd = Io.OpenFile(serial, 2);
+    if st.sfd < 0 {
+        unused Io.CloseFile(fd);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open /dev/eia0: %", Io.LastError());
+        Fail(*st, BuilderFinish(msg));
+        return 1;
+    }
+
+    ctlpath: Vec(u8);
+    BuilderPrint(*ctlpath, "%ctl", serial);
+    st.cfd = Io.OpenFile(BuilderFinish(ctlpath), 2);
+    if st.cfd >= 0 {
+        unused Io.WriteBytes(st.cfd, "f");
+        unused Io.WriteBytes(st.cfd, "b115200");
+        unused Io.WriteBytes(st.cfd, "i8");
+    }
+
+    if !Initialise(*st) {
+        unused Io.CloseFile(fd);
+        unused Io.CloseFile(st.sfd);
+        if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+        return 1;
+    }
+
+    if fuseext >= 0 || fuselow >= 0 || fusehigh >= 0 {
+        fmsg, fok := Proto.CheckFuses(fuseext, fuselow, fusehigh);
+        if !fok {
+            Fail(*st, fmsg);
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(st.sfd);
+            if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+            return 1;
+        }
+        if fusehigh >= 0 && Universal(*st, 0xAC, 0xA8, 0xFF, cast(u8)fusehigh) >= 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "set fuse high=");
+            Proto.AppendHex2(*out, cast(u8)fusehigh);
+            VecPush(out, #char "\n");
+            unused Cli.WriteAll(1, BuilderFinish(out));
+        }
+        if fuselow >= 0 && Universal(*st, 0xAC, 0xA0, 0xFF, cast(u8)fuselow) >= 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "set fuse low=");
+            Proto.AppendHex2(*out, cast(u8)fuselow);
+            VecPush(out, #char "\n");
+            unused Cli.WriteAll(1, BuilderFinish(out));
+        }
+        if fuseext >= 0 && Universal(*st, 0xAC, 0xA4, 0xFF, cast(u8)fuseext) >= 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "set fuse ext=");
+            Proto.AppendHex2(*out, cast(u8)fuseext);
+            VecPush(out, #char "\n");
+            unused Cli.WriteAll(1, BuilderFinish(out));
+        }
+        unused Io.CloseFile(fd);
+        unused Io.CloseFile(st.sfd);
+        if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+        return ifx st.failed then 1 else 0;
+    }
+
+    if !st.verify && st.erase {
+        if !ChipErase(*st) {
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(st.sfd);
+            if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+            return 1;
+        }
+        unused Cli.WriteAll(1, "Erased flash\n");
+    }
+
+    reader: Lines.LineReader;
+    reader.handle = fd;
+    line: Vec(u8);
+    rec: Proto.SRecord;
+    totbytes: u32 = 0;
+    while Lines.ReadLine(*reader, *line) {
+        if !Proto.DecodeSRecord(TextView(line[:]), *rec) {
+            Fail(*st, TextView(rec.err));
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(st.sfd);
+            if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+            return 1;
+        }
+        if rec.kind >= #char "1" && rec.kind <= #char "3" {
+            if st.verify {
+                fdata: Vec(u8);
+                if !ReadFlashData(*st, rec.addr, rec.data.count, *fdata) {
+                    unused Io.CloseFile(fd);
+                    unused Io.CloseFile(st.sfd);
+                    if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+                    return 1;
+                }
+                same := fdata.count == rec.data.count;
+                if same {
+                    for i: 0..rec.data.count - 1 {
+                        if fdata[i] != rec.data[i] { same = false; break }
+                    }
+                }
+                if !same {
+                    m: Vec(u8);
+                    BuilderPrint(*m, "mismatch: %::% at ", rec.data.count, fdata.count);
+                    Proto.AppendHex4(*m, rec.addr);
+                    VecPush(m, #char "\n");
+                    unused Cli.WriteAll(1, BuilderFinish(m));
+                }
+            } else {
+                if !WriteFlashData(*st, rec.addr, rec.data[:]) {
+                    if !st.failed { Fail(*st, "failed to program device") }
+                    unused Io.CloseFile(fd);
+                    unused Io.CloseFile(st.sfd);
+                    if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+                    return 1;
+                }
+            }
+            totbytes += cast(u32)rec.data.count;
+        } else if rec.kind == #char "0" {
+            m: Vec(u8);
+            BuilderPrint(*m, "title: '%'\n", TextView(rec.data[:]));
+            unused Cli.WriteAll(1, BuilderFinish(m));
+        }
+    }
+
+    if !st.verify {
+        if !FlushPage(*st) {
+            if !st.failed { Fail(*st, "failed to program device") }
+            unused Io.CloseFile(fd);
+            unused Io.CloseFile(st.sfd);
+            if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+            return 1;
+        }
+        m: Vec(u8);
+        BuilderPrint(*m, "Programmed % (0x", totbytes);
+        Proto.AppendHex4(*m, totbytes);
+        BuilderPrint(*m, ") bytes\n");
+        unused Cli.WriteAll(1, BuilderFinish(m));
+    }
+
+    unused Io.CloseFile(fd);
+    unused Io.CloseFile(st.sfd);
+    if st.cfd >= 0 { unused Io.CloseFile(st.cfd) }
+    return 0;
+}
