@@ -1,0 +1,82 @@
+// Content-defined chunking with a Rabin rolling hash, as the Limbo Rabin
+// module did it. The hash of the last width bytes is kept as the data is
+// read; a chunk ends width bytes before a place where the hash is mod - 1,
+// once it has at least min bytes, and no later than max bytes. The same
+// data always gives the same chunks, wherever it starts in a file.
+//
+// The arithmetic is Limbo's: 32-bit integers that wrap, and a remainder
+// with the sign of its dividend.
+
+Config :: struct {
+    prime: s64;
+    width: s64;
+    mod: s64;
+    table: [256]s64; // what a byte leaving the window takes from the hash
+}
+
+// x as a wrapped 32-bit integer.
+Wrap :: (x: s64) -> s64 {
+    low := x & 0xFFFFFFFF;
+    return ifx low >= 0x80000000 then low - 0x100000000 else low;
+}
+
+NewConfig :: (prime: s64, width: s64, mod: s64) -> Config {
+    config: Config;
+    config.prime = prime;
+    config.width = width;
+    config.mod = mod;
+    power: s64 = 1;
+    for 1..width { power = Wrap(power * prime) % mod }
+    for i: 0..255 { config.table[i] = Wrap(i * power) % mod }
+    return config;
+}
+
+// Where a chunker is in its data: the window is the count bytes from start.
+Chunker :: struct {
+    config: Config;
+    min: s64;
+    max: s64;
+    start: s64;
+    count: s64;
+    state: s64;
+}
+
+// Starts chunking data. The result is "" or why the sizes are refused.
+Open :: (chunker: *Chunker, config: *Config, data: string, min: s64, max: s64) -> string {
+    if min > max { return "bad min/max" }
+    if min < config.width { return "min < width" }
+    chunker.config = <<config;
+    chunker.min = min;
+    chunker.max = max;
+    chunker.start = 0;
+    chunker.count = 0;
+    chunker.state = 0;
+    while chunker.count < config.width && chunker.count < data.count {
+        chunker.state = Wrap(config.prime * chunker.state + cast(s64)data[chunker.count]) % config.mod;
+        chunker.count += 1;
+    }
+    return "";
+}
+
+// The next chunk of the data given to Open and its offset there; the chunk
+// is empty when the data is used up.
+Next :: (chunker: *Chunker, data: string) -> (chunk: string, offset: s64) {
+    offset := chunker.start;
+    width := chunker.config.width;
+    while chunker.start + chunker.count < data.count {
+        at := chunker.start + chunker.count;
+        leaving := chunker.config.table[data[at - width]];
+        chunker.state = Wrap(chunker.config.mod + chunker.config.prime * chunker.state + cast(s64)data[at] - leaving) % chunker.config.mod;
+        chunker.count += 1;
+        length := chunker.count - width;
+        if length >= chunker.max || (length >= chunker.min && chunker.state == chunker.config.mod - 1) {
+            chunker.start += length;
+            chunker.count = width;
+            return data[offset:offset + length], offset;
+        }
+    }
+    length := chunker.count;
+    chunker.start += length;
+    chunker.count = 0;
+    return data[offset:offset + length], offset;
+}

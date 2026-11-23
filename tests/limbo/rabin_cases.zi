@@ -1,0 +1,50 @@
+// The cases of the Rabin chunking test: each one printed as the Limbo
+// probe printed it, for comparison with rabin.limbo.txt.
+using Rabin :: #import "rabin"
+
+// count bytes from a linear congruential generator, as the probe made them.
+Data :: (count: s64, seed: s64) -> Vec(u8) {
+    data: Vec(u8)
+    x := seed
+    for 1..count {
+        x = (x * 1103515245 + 12345) & 0x7fffffff
+        VecPush(data, cast(u8)((x >> 16) & 0xFF))
+    }
+    return data
+}
+
+Run :: (out: *Vec(u8), label: string, prime: s64, width: s64, mod: s64, min: s64, max: s64, data: string) {
+    config := Rabin.NewConfig(prime, width, mod)
+    BuilderPrint(out, "% table % % % %\n", label, config.table[1], config.table[2], config.table[127], config.table[255])
+    chunker: Rabin.Chunker
+    error := Rabin.Open(*chunker, *config, data, min, max)
+    if error.count > 0 { BuilderPrint(out, "% error <%>\n", label, error); return }
+    while true {
+        chunk, offset := Rabin.Next(*chunker, data)
+        if chunk.count == 0 { break }
+        sum: s64 = 0
+        for chunk { sum = (sum * 31 + cast(s64)it) & 0xffffff }
+        BuilderPrint(out, "% chunk % % %\n", label, offset, chunk.count, sum)
+    }
+    BuilderPrint(out, "% end\n", label)
+}
+
+Lines :: (out: *Vec(u8)) {
+    big := Data(6000, 1)
+    other := Data(3000, 7)
+    short := Data(31, 3)
+    Run(out, "small", 269, 31, 1024, 40, 400, TextView(big[:]))
+    Run(out, "prime3", 3, 16, 8191, 16, 2000, TextView(big[:]))
+    Run(out, "wrap", 65537, 48, 2000000011, 64, 512, TextView(big[:]))
+    Run(out, "wrap2", 1000003, 12, 1000000007, 12, 300, TextView(other[:]))
+    Run(out, "tiny", 269, 31, 1024, 40, 400, TextView(short[:10]))
+    Run(out, "exact", 269, 31, 1024, 40, 400, TextView(short[:]))
+    Run(out, "empty", 269, 31, 1024, 40, 400, "")
+    Run(out, "badminmax", 269, 31, 1024, 400, 40, TextView(big[:]))
+    Run(out, "minwidth", 269, 31, 1024, 30, 400, TextView(big[:]))
+    Run(out, "mod64", 7, 4, 64, 4, 100, TextView(big[:2000]))
+    repeated: Vec(u8)
+    for 1..60 { BuilderAppend(repeated, "the quick brown fox jumps over the lazy dog. ") }
+    Run(out, "text", 31, 8, 256, 8, 200, TextView(repeated[:]))
+    Run(out, "minmax", 269, 31, 1024, 50, 50, TextView(big[:500]))
+}
