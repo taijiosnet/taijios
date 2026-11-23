@@ -146,3 +146,19 @@ distinct icons, transparent pixels, stable IDs and the actual PNG decoder at
 16, 20, 24, 30, 32, 40 and 48 pixels. The ZX run also checks the guest registry,
 Rill's themed row reader and PNG fallback against the native decoded pixels.
 The driver compares all 63 native and ZX pixel hashes.
+
+`game_icons_preview.py --bundle VERIFIED_BUNDLE --sha256 SHA256` runs only on a
+scrubbed private Xvfb. It overlays the generated assets and eight desktop files,
+uses a private favorites file, and verifies actual 20-pixel panel, 30-pixel menu
+and 40-pixel desktop icon pixels. Use a verified Rill bundle with the guest
+favorites provider. The tests preserve the installed emulator, Rill and chrome
+bundles and never restart or control the owner's desktop.
+
+`catalog_preinstall_test.py OUTPUT_ROOT` checks the preinstall manifest. The
+shipped application set is described once, in `lib/preinstall.list`, and
+`tools/generate-app-catalog.py --preinstall lib/preinstall.list --output-root
+OUTPUT_ROOT` emits an entry only for a row whose bundle exists in that root, so
+the manifest may name an app before it ships. The test asserts that every
+present row's `Exec` and `TryExec` name its bundle, that an absent row emits
+nothing, that desktop IDs stay stable, and that a second run is byte-identical.
+It never writes outside the output root it is given.

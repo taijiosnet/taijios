@@ -207,6 +207,69 @@ def generate_catalog(output):
     print(f'Generated {len(apps)} desktop entries, {families} app icon families and standard desktop icons.')
 
 
+def read_preinstall(manifest):
+    """Parse the preinstall manifest into rows.
+
+    Returns a list of dicts with repo, bundle, ident, name, icon, categories,
+    size, sha256 and first_run. Blank lines and lines starting with # are
+    ignored. A malformed row raises ValueError naming its line number, so a
+    broken manifest fails the build rather than silently shipping less.
+    """
+    rows = []
+    with open(manifest, encoding='utf-8') as handle:
+        for number, line in enumerate(handle, 1):
+            line = line.rstrip('\n')
+            if not line.strip() or line.lstrip().startswith('#'):
+                continue
+            columns = line.split('\t')
+            if len(columns) != 9:
+                raise ValueError(f'{manifest}:{number}: expected 9 tab-separated columns, found {len(columns)}')
+            repo, bundle, ident, name, icon, categories, size, digest, first_run = columns
+            if not bundle or not ident:
+                raise ValueError(f'{manifest}:{number}: bundle and desktop id are required')
+            if first_run not in ('root', 'lazy'):
+                raise ValueError(f'{manifest}:{number}: first-run must be root or lazy, found {first_run!r}')
+            rows.append({
+                'repo': repo, 'bundle': bundle, 'ident': ident, 'name': name,
+                'icon': icon, 'categories': categories, 'size': size,
+                'sha256': digest, 'first_run': first_run,
+            })
+    return rows
+
+
+def preinstall_entry(output, row):
+    """The .desktop text for one manifest row, or None when its bundle is absent."""
+    if not (output / row['bundle'].lstrip('/')).exists():
+        return None
+    text = '[Desktop Entry]\nType=Application\nVersion=1.5\n'
+    text += f"Name={row['name']}\nGenericName={row['name']}\n"
+    text += f"Comment={DESCRIPTIONS.get(row['bundle'].rsplit('/', 1)[-1].removesuffix('.zx'), row['name'])}\n"
+    text += f"Icon=taiji-{row['icon']}\n"
+    text += f"Exec={row['bundle']}\nTryExec={row['bundle']}\n"
+    text += f"Terminal=false\nCategories={row['categories']};\n"
+    text += f"Keywords=TaijiOS;{row['name']};\nX-Taiji-Preinstall={row['first_run']}\n"
+    return text
+
+
+def generate_preinstall_catalog(output, manifest):
+    """Emit catalog entries for the preinstall manifest only.
+
+    Existing entries are left untouched, and a row whose bundle is not present
+    in output emits nothing, so the manifest can name apps before they ship.
+    """
+    catalog = output / 'lib/apps'
+    catalog.mkdir(parents=True, exist_ok=True)
+    rows = read_preinstall(manifest)
+    emitted = 0
+    for row in rows:
+        text = preinstall_entry(output, row)
+        if text is None:
+            continue
+        (catalog / (row['ident'] + '.desktop')).write_text(text, encoding='utf-8')
+        emitted += 1
+    print(f'Preinstalled {emitted} of {len(rows)} manifest rows into {catalog}.')
+
+
 def generate_guest_assets(output):
     # Finish rendering before adding anything to the guest. A hard link publishes
     # each complete file without replacing an existing file, even on concurrent installs.
@@ -236,9 +299,13 @@ def main():
                        help='render the host icons and the X11 window icon header')
     modes.add_argument('--desktop-icons', action='store_true',
                        help='refresh only the standard guest desktop icons')
+    parser.add_argument('--preinstall', type=Path, metavar='MANIFEST',
+                        help='emit only the catalog entries named in a preinstall manifest')
     parser.add_argument('--output-root', type=Path, default=ROOT, help='destination tree (default: TaijiOS root)')
     args = parser.parse_args()
-    if args.guest_assets:
+    if args.preinstall:
+        generate_preinstall_catalog(args.output_root, args.preinstall)
+    elif args.guest_assets:
         generate_guest_assets(args.output_root)
     elif args.host_icons:
         generate_host_icons(args.output_root)
