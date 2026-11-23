@@ -778,20 +778,9 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/demo/odbc/odbcmnt.dis | appl/demo/odbc/odbcmnt.b |  | - |  |
 | dis/demo/whiteboard/wbsrv.dis | appl/demo/whiteboard/wbsrv.b |  | - |  |
 
-### 12. Ebook - readers - 10 rows
+### 12. Ebook - readers - 0 rows
 
-| Path | Limbo source | Interface | Boot | Notes |
-|---|---|---|---|---|
-| dis/ebook/cssfont.dis | appl/ebook/cssfont.b |  | - |  |
-| dis/ebook/cssparser.dis | appl/ebook/cssparser.b |  | - |  |
-| dis/ebook/ebook.dis | appl/ebook/ebook.b |  | - |  |
-| dis/ebook/mimeimage.dis | appl/ebook/mimeimage.b |  | - |  |
-| dis/ebook/oebpackage.dis | appl/ebook/oebpackage.b |  | - |  |
-| dis/ebook/reader.dis | appl/ebook/reader.b |  | - |  |
-| dis/ebook/strmap.dis | appl/ebook/strmap.b |  | - |  |
-| dis/ebook/stylesheet.dis | appl/ebook/stylesheet.b |  | - |  |
-| dis/ebook/table.dis | appl/ebook/table.b |  | - |  |
-| dis/ebook/units.dis | appl/ebook/units.b |  | - |  |
+(complete; shipped as `dis/ebook/ebook.zx`)
 
 ### 13. Math - numeric modules - 22 rows
 

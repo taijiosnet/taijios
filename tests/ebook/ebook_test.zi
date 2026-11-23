@@ -1,0 +1,80 @@
+// Table-driven unit tests for appl/ebook (units, oebpackage, reader_model).
+#import "std/vec"
+using Units :: #import "units"
+using Pkg :: #import "oebpackage"
+using Reader :: #import "reader_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+UnitCase :: struct {
+    input: string;
+    em: s64;
+    ex: s64;
+    rel: s64;
+    ok: bool;
+    expected: s64;
+}
+
+main :: () -> s32 {
+    // 1. Units tests
+    unit_cases: [8]UnitCase = UnitCase.[
+        .{input = "12px", em = 16, ex = 8, rel = 100, ok = true, expected = 12},
+        .{input = "2em", em = 16, ex = 8, rel = 100, ok = true, expected = 32},
+        .{input = "1.5ex", em = 16, ex = 10, rel = 100, ok = true, expected = 15},
+        .{input = "1in", em = 16, ex = 8, rel = 100, ok = true, expected = 100},
+        .{input = "72pt", em = 16, ex = 8, rel = 100, ok = true, expected = 100},
+        .{input = "50%", em = 16, ex = 8, rel = 200, ok = true, expected = 100},
+        .{input = "-10px", em = 16, ex = 8, rel = 100, ok = true, expected = -10},
+        .{input = "badunit", em = 16, ex = 8, rel = 100, ok = false, expected = 0},
+    ];
+    for unit_cases {
+        px, ok := Units.LengthPx(it.input, it.em, it.ex, it.rel);
+        Expect(ok == it.ok && (!ok || px == it.expected), it.input);
+    }
+    Expect(Units.IsRelative("2em") && Units.IsRelative("50%") && !Units.IsRelative("12px"), "IsRelative");
+
+    // 2. OEB package parser tests
+    opf := "<?xml version=\"1.0\"?><package><metadata><dc-metadata><dc:Title>Test Book</dc:Title></dc-metadata></metadata><manifest><item id=\"c1\" href=\"ch1.html\" media-type=\"text/x-oeb1-document\"/><item id=\"c2\" href=\"ch2.html\" media-type=\"text/x-oeb1-document\"/></manifest><spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine><guide><reference type=\"toc\" title=\"Contents\" href=\"ch1.html\"/></guide></package>";
+    pkg: Pkg.Package;
+    Pkg.ParsePackage("/lib/ebooks/demo/book.opf", opf, *pkg);
+    Expect(TextView(pkg.title) == "Test Book", "opf title");
+    Expect(pkg.manifest_count == 2 && pkg.spine_count == 2 && pkg.guide_count == 1, "opf counts");
+    Expect(TextView(pkg.manifest[0].file) == "/lib/ebooks/demo/ch1.html", "opf resolved path");
+    Expect(TextView(pkg.guide[0].title) == "Contents", "opf guide");
+
+    // Standalone HTML wrapped as 1-item package
+    html := "<html><head><title>Hello &amp; World</title></head><body><h1>Chapter 1</h1><p>First paragraph.</p><p>Second paragraph with &lt;tags&gt;.</p></body></html>";
+    Pkg.ParsePackage("/tmp/sample.html", html, *pkg);
+    Expect(pkg.manifest_count == 1 && pkg.spine_count == 1, "standalone html package");
+
+    // 3. Reader text extraction, pagination & navigation tests
+    doc: Reader.Document;
+    Reader.ExtractText(html, *doc);
+    Expect(TextView(doc.title) == "Hello & World", "html title entity decode");
+    body := TextView(doc.body);
+    Expect(body.count > 20, "extracted body non-empty");
+
+    Reader.Paginate(*doc, 20, 4);
+    Expect(doc.page_count >= 2, "paginated into multiple pages");
+    Expect(doc.current_page == 0, "starts on page 0");
+    Expect(!Reader.PrevPage(*doc), "cannot prev from page 0");
+    Expect(Reader.NextPage(*doc) && doc.current_page == 1, "next page");
+    Expect(Reader.PrevPage(*doc) && doc.current_page == 0, "prev page");
+    Expect(Reader.GotoPage(*doc, 1) && doc.current_page == 1, "goto page 1");
+    Expect(Reader.HistoryBack(*doc) && doc.current_page == 0, "history back");
+    Expect(Reader.HistoryForward(*doc) && doc.current_page == 1, "history forward");
+
+    lbl: Text;
+    Reader.FormatPageLabel(*doc, *lbl);
+    Expect(TextView(lbl)[0] == 50, "page label starts with 2");
+
+    if failures == 0 { print("ebook_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

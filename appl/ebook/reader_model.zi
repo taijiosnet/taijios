@@ -1,0 +1,228 @@
+// HTML/OEB document text extraction, word-wrapping pagination, and navigation state,
+// ported from appl/ebook/reader.b and appl/ebook/ebook.b.
+#import "std/vec"
+#import "std/number_text"
+
+MAX_PAGES :: 512;
+MAX_HISTORY :: 64;
+
+PageSpan :: struct {
+    start: s64;
+    end: s64;
+}
+
+Document :: struct {
+    title: Text;
+    body: Text;
+    pages: [MAX_PAGES]PageSpan;
+    page_count: s32;
+    current_page: s32;
+    history: [MAX_HISTORY]s32;
+    history_count: s32;
+    history_pos: s32;
+}
+
+LowerByte :: (c: u8) -> u8 {
+    return ifx c >= 65 && c <= 90 then c + 32 else c;
+}
+
+TagEquals :: (tag: string, target: string) -> bool {
+    if tag.count != target.count { return false }
+    for i: 0..tag.count-1 {
+        if LowerByte(tag[i]) != target[i] { return false }
+    }
+    return true;
+}
+
+AppendEntity :: (ent: string, out: *Text) {
+    if ent == "amp" { unused BuilderAppend(out.bytes, "&") }
+    else if ent == "lt" { unused BuilderAppend(out.bytes, "<") }
+    else if ent == "gt" { unused BuilderAppend(out.bytes, ">") }
+    else if ent == "quot" { unused BuilderAppend(out.bytes, "\"") }
+    else if ent == "apos" { unused BuilderAppend(out.bytes, "'") }
+    else if ent == "nbsp" { unused BuilderAppend(out.bytes, " ") }
+    else if ent.count > 1 && ent[0] == 35 {
+        code: s64 = 0;
+        for i: 1..ent.count-1 {
+            if ent[i] >= 48 && ent[i] <= 57 { code = code * 10 + cast(s64)(ent[i] - 48) }
+        }
+        if code >= 32 && code < 127 { unused VecPush(out.bytes, cast(u8)code) }
+        else { unused BuilderAppend(out.bytes, " ") }
+    }
+}
+
+EnsureNewlines :: (out: *Text, count: s64) {
+    n := out.bytes.count;
+    if n == 0 { return }
+    trailing: s64 = 0;
+    while trailing < n && out.bytes[n - 1 - trailing] == 10 { trailing += 1 }
+    while trailing < count {
+        unused VecPush(out.bytes, 10);
+        trailing += 1;
+    }
+}
+
+ExtractText :: (html: string, doc: *Document) {
+    unused VecResize(doc.title.bytes, 0);
+    unused VecResize(doc.body.bytes, 0);
+    in_style := false;
+    in_script := false;
+    in_title := false;
+    last_space := true;
+
+    i: s64 = 0;
+    while i < html.count {
+        c := html[i];
+        if c == 60 { // '<'
+            end := i + 1;
+            while end < html.count && html[end] != 62 { end += 1 }
+            if end >= html.count { break }
+            raw := html[i + 1:end];
+            i = end + 1;
+
+            ns: s64 = 0;
+            while ns < raw.count && (raw[ns] == 32 || raw[ns] == 9) { ns += 1 }
+            closing := false;
+            if ns < raw.count && raw[ns] == 47 { closing = true; ns += 1 }
+            ne := ns;
+            while ne < raw.count && raw[ne] != 32 && raw[ne] != 9 && raw[ne] != 10 && raw[ne] != 13 && raw[ne] != 47 { ne += 1 }
+            tname := raw[ns:ne];
+
+            if TagEquals(tname, "style") { in_style = !closing }
+            else if TagEquals(tname, "script") { in_script = !closing }
+            else if TagEquals(tname, "title") { in_title = !closing }
+            else if TagEquals(tname, "br") {
+                EnsureNewlines(*doc.body, 1);
+                last_space = true;
+            } else if TagEquals(tname, "p") || TagEquals(tname, "div") || TagEquals(tname, "blockquote") ||
+                      TagEquals(tname, "h1") || TagEquals(tname, "h2") || TagEquals(tname, "h3") ||
+                      TagEquals(tname, "h4") || TagEquals(tname, "h5") || TagEquals(tname, "h6") ||
+                      TagEquals(tname, "tr") {
+                EnsureNewlines(*doc.body, 2);
+                last_space = true;
+            } else if TagEquals(tname, "li") {
+                EnsureNewlines(*doc.body, 1);
+                if !closing { unused BuilderAppend(doc.body.bytes, "- ") }
+                last_space = true;
+            } else if TagEquals(tname, "td") || TagEquals(tname, "th") {
+                if !closing && doc.body.bytes.count > 0 && !last_space {
+                    unused BuilderAppend(doc.body.bytes, "  ");
+                    last_space = true;
+                }
+            }
+            continue;
+        }
+        if in_style || in_script { i += 1; continue }
+        if c == 38 { // '&'
+            semi := i + 1;
+            while semi < html.count && semi - i < 12 && html[semi] != 59 && html[semi] != 32 && html[semi] != 60 { semi += 1 }
+            if semi < html.count && html[semi] == 59 {
+                ent := html[i + 1:semi];
+                if in_title { AppendEntity(ent, *doc.title) }
+                else { AppendEntity(ent, *doc.body); last_space = false }
+                i = semi + 1;
+                continue;
+            }
+        }
+        if c == 32 || c == 9 || c == 10 || c == 13 {
+            if in_title {
+                if doc.title.bytes.count > 0 { unused VecPush(doc.title.bytes, 32) }
+            } else if !last_space {
+                unused VecPush(doc.body.bytes, 32);
+                last_space = true;
+            }
+        } else {
+            if in_title { unused VecPush(doc.title.bytes, c) }
+            else { unused VecPush(doc.body.bytes, c); last_space = false }
+        }
+        i += 1;
+    }
+}
+
+Paginate :: (doc: *Document, cols: s32, rows: s32) {
+    doc.page_count = 0;
+    doc.current_page = 0;
+    doc.history_count = 1;
+    doc.history_pos = 0;
+    doc.history[0] = 0;
+
+    c := ifx cols < 16 then 16 else cols;
+    r := ifx rows < 4 then 4 else rows;
+    text := TextView(doc.body);
+    if text.count == 0 {
+        doc.pages[0] = .{start = 0, end = 0};
+        doc.page_count = 1;
+        return;
+    }
+
+    pos: s64 = 0;
+    while pos < text.count && doc.page_count < MAX_PAGES {
+        page_start := pos;
+        lines: s32 = 0;
+        col: s32 = 0;
+        while pos < text.count && lines < r {
+            ch := text[pos];
+            pos += 1;
+            if ch == 10 {
+                lines += 1;
+                col = 0;
+            } else {
+                col += 1;
+                if col >= c {
+                    lines += 1;
+                    col = 0;
+                }
+            }
+        }
+        doc.pages[doc.page_count] = .{start = page_start, end = pos};
+        doc.page_count += 1;
+    }
+}
+
+NextPage :: (doc: *Document) -> bool {
+    if doc.current_page + 1 >= doc.page_count { return false }
+    doc.current_page += 1;
+    return true;
+}
+
+PrevPage :: (doc: *Document) -> bool {
+    if doc.current_page <= 0 { return false }
+    doc.current_page -= 1;
+    return true;
+}
+
+GotoPage :: (doc: *Document, page: s32) -> bool {
+    p := page;
+    if p < 0 { p = 0 }
+    if p >= doc.page_count { p = doc.page_count - 1 }
+    if p < 0 || p == doc.current_page { return false }
+    if doc.history_pos + 1 < MAX_HISTORY {
+        doc.history_pos += 1;
+        doc.history[doc.history_pos] = p;
+        doc.history_count = doc.history_pos + 1;
+    }
+    doc.current_page = p;
+    return true;
+}
+
+HistoryBack :: (doc: *Document) -> bool {
+    if doc.history_pos <= 0 { return false }
+    doc.history_pos -= 1;
+    doc.current_page = doc.history[doc.history_pos];
+    return true;
+}
+
+HistoryForward :: (doc: *Document) -> bool {
+    if doc.history_pos + 1 >= doc.history_count { return false }
+    doc.history_pos += 1;
+    doc.current_page = doc.history[doc.history_pos];
+    return true;
+}
+
+FormatPageLabel :: (doc: *Document, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    buf: [24]u8;
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)(doc.current_page + 1), buf[:]));
+    unused BuilderAppend(out.bytes, " / ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.page_count, buf[:]));
+}
