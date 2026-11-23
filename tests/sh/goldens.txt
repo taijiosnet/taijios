@@ -334,5 +334,13 @@ out:  5\n\n
 err: 
 === mod-file2chan
 status: usage\n
-out: hello from read\nread error\n\nread error\n
-err: closed\ngot written\n at 0\nclosed\ncat: error reading $W/c2: no reads\ncat: error reading $W/c3: invalid read\nusage: file2chan file {readcmd} {writecmd} [ {closecmd} ]\n
+out: hello from read\nread error\n\nread error\n0 closes\n1 closes\n
+err: got written\n at 0\ncat: error reading $W/c2: no reads\ncat: error reading $W/c3: invalid read\nusage: file2chan file {readcmd} {writecmd} [ {closecmd} ]\n
+=== mod-mpexpr
+status: divide by zero\n
+out: 1267650600228229401496703205376\n121932631124828532112482853211126352690\n16 3 2 -3 -2\n8 -2\n16rff 2r1010 8r100 64rD0JA 16r0\n256 11 1295\n8 14 6 3 -5 5\n-6 1 0 8 1180591620717411303424 125\n445 4\n1 2 3 4 5 10\n1 1 0\n
+err: sh: or: './or' file does not exist\nsh: and: './and' file does not exist\nexpr: division by zero\n
+=== mod-mpexpr-errors
+status: usage\n
+out: 
+err: expr: invalid radix 99\n

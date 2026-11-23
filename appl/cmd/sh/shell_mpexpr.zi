@@ -1,0 +1,524 @@
+// The mpexpr builtin module of appl/cmd/sh/mpexpr.b: ${expr} and ntest on
+// integers of any size. Numbers are hexadecimal text for the guest's big
+// integer calls (taijios_keyring.Big); and, or, xor and not act on 32-bit
+// digits of the magnitude as Keyring's IPint did, and mpexpr's own two's
+// complement helpers sit on top as in the Limbo module.
+#import "std/vec";
+#import "std/option";
+Keyring :: #import "taijios_keyring";
+#import "shell_util";
+#import "shell";
+
+#scope_file
+
+EQ :: 0; GT :: 1; LT :: 2; GE :: 3; LE :: 4; PLUS :: 5; MINUS :: 6; DIVIDE :: 7; AND :: 8; TIMES :: 9; MOD :: 10;
+OR :: 11; XOR :: 12; UMINUS :: 13; SHL :: 14; SHR :: 15; NOT :: 16; BNOT :: 17; NEQ :: 18; REP :: 19; SEQ :: 20;
+BITS :: 21; EXPMOD :: 22; INVERT :: 23; RAND :: 24; EXP :: 25;
+
+Num :: struct { hex: Text; }
+
+reply: [65536]u8;
+
+Make :: (s: string) -> Num {
+    n: Num;
+    unused BuilderAppend(n.hex.bytes, s);
+    return n;
+}
+
+Copy :: (a: *Num) -> Num { return Make(TextView(a.hex)) }
+
+Mki :: (i: s64) -> Num {
+    out: Vec(u8);
+    neg := i < 0;
+    u := cast(u64)i;
+    if neg { u = 0 - u; VecPush(out, #char "-") }
+    digits := "0123456789abcdef";
+    d: Vec(u8);
+    while true {
+        VecPush(d, digits[cast(s64)(u & 15)]);
+        u = u >> 4;
+        if u == 0 { break }
+    }
+    k := d.count - 1;
+    while k >= 0 { VecPush(out, d[k]); k -= 1 }
+    return Make(TextView(out[:]));
+}
+
+Failed :: () { Fail("bad number", "expr: number out of range") }
+
+Op :: (op: s32, a: *Num, b: *Num, c: string) -> Num {
+    n := Keyring.Big(op, TextView(a.hex), TextView(b.hex), c, reply[:]);
+    if n < 0 { Failed(); return Make("0") }
+    return Make(TextView(reply[:n]));
+}
+
+Cmp :: (a: *Num, b: *Num) -> s32 { return Keyring.BigCompare(TextView(a.hex), TextView(b.hex)) }
+
+IsZero :: (a: *Num) -> bool { z := Make("0"); return Cmp(a, *z) == 0 }
+
+Neg :: (a: *Num) -> Num { z := Make("0"); return Op(Keyring.Negate, a, *z, "") }
+
+Bits :: (a: *Num) -> s32 { return Keyring.BigBits(TextView(a.hex)) }
+
+IsNeg :: (a: *Num) -> bool { return a.hex.bytes.count > 0 && a.hex.bytes[0] == #char "-" }
+
+// mptoi: the value as an int, saturating.
+ToInt :: (a: *Num) -> s64 {
+    n := Keyring.BigConvert(TextView(a.hex), 16, 10, reply[:]);
+    if n < 0 { return 0 }
+    text := TextView(reply[:n]);
+    neg := text.count > 0 && text[0] == #char "-";
+    v: s64 = 0;
+    for i: (ifx neg then 1 else 0)..text.count - 1 {
+        v = v * 10 + cast(s64)(text[i] - #char "0");
+        if v > 2147483647 { return ifx neg then -2147483648 else 2147483647 }
+    }
+    return ifx neg then -v else v;
+}
+
+// The 32-bit digits of the magnitude, least significant first.
+Limbs :: (a: *Num, out: *Vec(u32)) -> bool {
+    VecClear(<<out);
+    text := TextView(a.hex);
+    neg := text.count > 0 && text[0] == #char "-";
+    start: s64 = ifx neg then 1 else 0;
+    i := text.count;
+    while i > start {
+        lo := i - 8;
+        if lo < start { lo = start }
+        v: u32 = 0;
+        for k: lo..i - 1 {
+            c := text[k];
+            d: u32 = 0;
+            if c >= #char "0" && c <= #char "9" { d = cast(u32)(c - #char "0") }
+            else if c >= #char "a" && c <= #char "f" { d = cast(u32)(c - #char "a" + 10) }
+            else if c >= #char "A" && c <= #char "F" { d = cast(u32)(c - #char "A" + 10) }
+            v = (v << 4) | d;
+        }
+        VecPush(<<out, v);
+        i = lo;
+    }
+    while out.count > 0 && out.*[out.count - 1] == 0 { unused VecPop(<<out) }
+    return neg;
+}
+
+FromLimbs :: (neg: bool, limbs: *Vec(u32)) -> Num {
+    top := limbs.count;
+    while top > 0 && limbs.*[top - 1] == 0 { top -= 1 }
+    if top == 0 { return Make("0") }
+    out: Vec(u8);
+    if neg { VecPush(out, #char "-") }
+    digits := "0123456789abcdef";
+    started := false;
+    k := top - 1;
+    while k >= 0 {
+        v := limbs.*[k];
+        shift: s64 = 28;
+        while shift >= 0 {
+            d := cast(s64)((v >> cast(u32)shift) & 15);
+            if d != 0 || started { VecPush(out, digits[d]); started = true }
+            shift -= 4;
+        }
+        k -= 1;
+    }
+    return Make(TextView(out[:]));
+}
+
+// Keyring's mpand, mpor, mpxor and mpnot.
+LogicAnd :: (b: *Num, m: *Num) -> Num {
+    bl: Vec(u32);
+    ml: Vec(u32);
+    bneg := Limbs(b, *bl);
+    unused Limbs(m, *ml);
+    res: Vec(u32);
+    if bl.count != 0 && ml.count != 0 {
+        for i: 0..bl.count - 1 {
+            if i < ml.count { VecPush(res, bl[i] & ml[i]) } else { VecPush(res, 0) }
+        }
+    }
+    return FromLimbs(bneg, *res);
+}
+
+LogicOrXor :: (b1: *Num, b2: *Num, xor: bool) -> Num {
+    l1: Vec(u32);
+    l2: Vec(u32);
+    n1 := Limbs(b1, *l1);
+    n2 := Limbs(b2, *l2);
+    if l2.count > l1.count {
+        VecSwap(l1, l2);
+        t := n1; n1 = n2; n2 = t;
+    }
+    if l1.count == 0 { return FromLimbs(n2, *l2) }
+    if l2.count == 0 { return FromLimbs(n1, *l1) }
+    for i: 0..l2.count - 1 {
+        if xor { l1[i] = l1[i] ^ l2[i] } else { l1[i] = l1[i] | l2[i] }
+    }
+    return FromLimbs(n1, *l1);
+}
+
+LogicNot :: (b: *Num) -> Num {
+    bl: Vec(u32);
+    unused Limbs(b, *bl);
+    for i: 0..bl.count - 1 { bl[i] = ~bl[i] }
+    return FromLimbs(false, *bl);
+}
+
+OneBits :: (n: s64) -> Num {
+    one := Make("1");
+    d := Mki(n);
+    s := Op(Keyring.ShiftLeft, *one, *d, "");
+    return Op(Keyring.Subtract, *s, *one, "");
+}
+
+// A two's complement version of n, sign-extended to b bits if negative.
+TwosComp :: (n: *Num, b: s64) -> Num {
+    if !IsNeg(n) { return Copy(n) }
+    notn := LogicNot(n);
+    ob := OneBits(b);
+    on := OneBits(cast(s64)Bits(n));
+    x := LogicOrXor(*ob, *on, true);
+    o := LogicOrXor(*notn, *x, false);
+    one := Make("1");
+    return Op(Keyring.Add, *o, *one, "");
+}
+
+// The usual form of n, written in two's complement in b bits.
+SignedMag :: (n: *Num, b: s64) -> Num {
+    one := Make("1");
+    d := Mki(b);
+    bit := Op(Keyring.ShiftLeft, *one, *d, "");
+    test := LogicAnd(n, *bit);
+    if IsZero(*test) { return Copy(n) }
+    s := Op(Keyring.Subtract, n, *one, "");
+    ns := LogicNot(*s);
+    ob := OneBits(b);
+    a := LogicAnd(*ns, *ob);
+    return Neg(*a);
+}
+
+BitOp :: (op: s32, n1: *Num, n2: *Num) -> Num {
+    b1 := cast(s64)Bits(n1);
+    b2 := cast(s64)Bits(n2);
+    bits := ifx b1 > b2 then b1 else b2;
+    t1 := TwosComp(n1, bits);
+    t2 := TwosComp(n2, bits);
+    r: Num;
+    if op == AND { x := LogicAnd(*t1, *t2); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else { x := LogicOrXor(*t1, *t2, op == XOR); VecSwap(r.hex.bytes, x.hex.bytes) }
+    return SignedMag(*r, bits);
+}
+
+// strtoip: "Nr" chooses a radix; a decimal number keeps no sign.
+StrToIp :: (s: string) -> Num {
+    t := s;
+    neg := s.count > 0 && s[0] == #char "-";
+    if neg { s = s[1:] }
+    radix: s64 = 10;
+    for i: 0..s.count - 1 {
+        if i >= 3 { break }
+        if s[i] == #char "r" { radix = LimboInt(s); s = s[i + 1:]; break }
+    }
+    if radix == 10 { return FromText(s, 10) }
+    if radix == 0 || (radix > 36 && radix != 64) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "expr: bad number %", t);
+        Fail("usage", TextView(msg[:]));
+        return Make("0");
+    }
+    n: Num;
+    if radix == 16 || radix == 64 {
+        x := FromText(s, radix);
+        VecSwap(n.hex.bytes, x.hex.bytes);
+    } else {
+        SetText(*n.hex, "0");
+        r := Mki(radix);
+        for i: 0..s.count - 1 {
+            c := cast(s64)s[i];
+            d: s64 = -1;
+            if c >= #char "0" && c <= #char "9" { d = c - #char "0" }
+            else if c >= #char "a" && c < #char "a" + radix - 10 { d = c - #char "a" + 10 }
+            else if c >= #char "A" && c < #char "A" + radix - 10 { d = c - #char "A" + 10 }
+            if d < 0 { break }
+            m := Op(Keyring.Multiply, *n, *r, "");
+            dd := Mki(d);
+            a := Op(Keyring.Add, *m, *dd, "");
+            VecSwap(n.hex.bytes, a.hex.bytes);
+        }
+    }
+    if neg { return Neg(*n) }
+    return n;
+}
+
+// IPint.strtoip: the leading digits in base 10, 16 or 64.
+FromText :: (s: string, base: s64) -> Num {
+    n := Keyring.BigConvert(s, cast(s32)base, 16, reply[:]);
+    if n < 0 { return Make("0") }
+    return Make(TextView(reply[:n]));
+}
+
+Digit :: (d: s64) -> u8 { return ifx d < 10 then cast(u8)(#char "0" + d) else cast(u8)(#char "a" + d - 10) }
+
+IpToStr :: (n: *Num, radix: s64) -> Text {
+    neg := IsNeg(n);
+    out: Vec(u8);
+    t: Vec(u8);
+    if radix == 10 {
+        c := Keyring.BigConvert(TextView(n.hex), 16, 10, reply[:]);
+        if c < 0 { return TextCopy("0") }
+        return TextCopy(TextView(reply[:c]));
+    }
+    if radix == 2 || radix == 4 || radix == 16 || radix == 32 {
+        limbs: Vec(u32);
+        unused Limbs(n, *limbs);
+        rbits: s64 = 1;
+        if radix == 4 { rbits = 2 } else if radix == 16 { rbits = 4 } else if radix == 32 { rbits = 5 }
+        // Keyring counts zero as one bit, so it prints a digit.
+        nbits := cast(s64)Bits(n);
+        if nbits == 0 { nbits = 1 }
+        bits := rbits * ((nbits + rbits - 1) / rbits);
+        i := bits - rbits;
+        while i >= 0 {
+            d: s64 = 0;
+            for j: 0..rbits - 1 {
+                bit := i + j;
+                w := bit / 32;
+                b: s64 = 0;
+                if w < limbs.count { b = cast(s64)((limbs[w] >> cast(u32)(bit % 32)) & 1) }
+                d |= b << j;
+            }
+            VecPush(t, Digit(d));
+            i -= rbits;
+        }
+    } else if radix == 64 {
+        c := Keyring.BigConvert(TextView(n.hex), 16, 64, reply[:]);
+        if c > 0 {
+            text := TextView(reply[:c]);
+            if neg && text.count > 0 { text = text[1:] }
+            unused BuilderAppend(t, text);
+        }
+    } else {
+        v: Num;
+        if neg { x := Neg(n); VecSwap(v.hex.bytes, x.hex.bytes) } else { SetText(*v.hex, TextView(n.hex)) }
+        r := Mki(radix);
+        s: Vec(u8);
+        zero := Make("0");
+        while true {
+            q := Op(Keyring.Divide, *v, *r, "");
+            m := Op(Keyring.Multiply, *q, *r, "");
+            d := Op(Keyring.Subtract, *v, *m, "");
+            VecPush(s, Digit(ToInt(*d)));
+            VecSwap(v.hex.bytes, q.hex.bytes);
+            if Cmp(*v, *zero) <= 0 { break }
+        }
+        k := s.count - 1;
+        while k >= 0 { VecPush(t, s[k]); k -= 1 }
+    }
+    if neg { VecPush(out, #char "-") }
+    BuilderPrint(*out, "%r", radix);
+    unused BuilderAppend(out, TextView(t[:]));
+    return BuilderFinish(out);
+}
+
+OpOf :: (w: string) -> (op: s32, nops: s32) {
+    if w == "+" { return PLUS, 2 }
+    if w == "-" { return MINUS, 2 }
+    if w == "x" || w == "*" || w == "×" { return TIMES, 2 }
+    if w == "/" { return DIVIDE, 2 }
+    if w == "%" { return MOD, 2 }
+    if w == "and" { return AND, 2 }
+    if w == "or" { return OR, 2 }
+    if w == "xor" { return XOR, 2 }
+    if w == "_" { return UMINUS, 1 }
+    if w == "<<" || w == "shl" { return SHL, 2 }
+    if w == ">>" || w == "shr" { return SHR, 2 }
+    if w == "=" || w == "==" || w == "eq" { return EQ, 2 }
+    if w == "!=" || w == "neq" { return NEQ, 2 }
+    if w == ">" || w == "gt" { return GT, 2 }
+    if w == "<" || w == "lt" { return LT, 2 }
+    if w == ">=" || w == "ge" { return GE, 2 }
+    if w == "<=" || w == "le" { return LE, 2 }
+    if w == "!" || w == "not" { return NOT, 1 }
+    if w == "~" { return BNOT, 1 }
+    if w == "rep" { return REP, 0 }
+    if w == "seq" { return SEQ, 2 }
+    if w == "bits" { return BITS, 1 }
+    if w == "expmod" { return EXPMOD, 3 }
+    if w == "invert" { return INVERT, 2 }
+    if w == "rand" { return RAND, 1 }
+    if w == "exp" || w == "xx" || w == "**" { return EXP, 2 }
+    return -1, 2;
+}
+
+B :: (c: bool) -> Num {
+    if c { return Make("1") }
+    return Make("0");
+}
+
+// The value a stack argument held, or zero when the operator takes fewer.
+Arg :: (args: *Vec(Num), nops: s32, k: s32) -> Num {
+    if nops >= k { return Copy(*args.*[nops - k]) }
+    return Make("0");
+}
+
+Push :: (stk: *Vec(Num), n: Num) { VecPush(<<stk, n) }
+
+Operator :: (stk: *Vec(Num), op: s32, nops: s32, lastop: s32, lastn: s32, opname: string, lastname: string) {
+    args: Vec(Num);
+    for i: 0..nops - 1 {
+        if stk.count == 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "expr: empty stack on op '%'", opname);
+            Fail("empty stack", TextView(msg[:]));
+            return;
+        }
+        top := VecPop(<<stk);
+        VecPush(args, top.value);
+    }
+    if op == REP {
+        if lastop == -1 || lastop == SEQ || lastn != 2 { Fail("usage", "expr: bad operator for rep"); return }
+        while stk.count > 1 {
+            Operator(stk, lastop, 2, -1, -1, lastname, "");
+            if Unwinding() { return }
+        }
+        return;
+    }
+    // args holds the popped values, the top first; n1 was pushed first.
+    zero := Make("0");
+    n1 := Arg(*args, nops, 1);
+    n2 := Arg(*args, nops, 2);
+    n3 := Arg(*args, nops, 3);
+    one := Make("1");
+    r: Num;
+    if op == EQ { x := B(Cmp(*n1, *n2) == 0); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == NEQ { x := B(Cmp(*n1, *n2) != 0); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == GT { x := B(Cmp(*n1, *n2) > 0); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == LT { x := B(Cmp(*n1, *n2) < 0); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == GE { x := B(Cmp(*n1, *n2) >= 0); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == LE { x := B(Cmp(*n1, *n2) <= 0); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == PLUS { x := Op(Keyring.Add, *n1, *n2, ""); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == MINUS { x := Op(Keyring.Subtract, *n1, *n2, ""); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == NOT { x := B(IsZero(*n1)); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == DIVIDE || op == MOD {
+        if IsZero(*n2) { Fail("divide by zero", "expr: division by zero"); return }
+        q := Op(Keyring.Divide, *n1, *n2, "");
+        if op == DIVIDE { VecSwap(r.hex.bytes, q.hex.bytes) }
+        else {
+            m := Op(Keyring.Multiply, *q, *n2, "");
+            x := Op(Keyring.Subtract, *n1, *m, "");
+            VecSwap(r.hex.bytes, x.hex.bytes);
+        }
+    }
+    else if op == TIMES { x := Op(Keyring.Multiply, *n1, *n2, ""); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == AND || op == OR || op == XOR { x := BitOp(op, *n1, *n2); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == UMINUS { x := Neg(*n1); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == BNOT { ng := Neg(*n1); x := Op(Keyring.Subtract, *ng, *one, ""); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == SHL || op == SHR {
+        d := Mki(ToInt(*n2));
+        x := Op(ifx op == SHL then Keyring.ShiftLeft else Keyring.ShiftRight, *n1, *d, "");
+        VecSwap(r.hex.bytes, x.hex.bytes);
+    }
+    else if op == SEQ {
+        incr := Make("1");
+        if Cmp(*n2, *n1) < 0 { x := Make("-1"); VecSwap(incr.hex.bytes, x.hex.bytes) }
+        while Cmp(*n1, *n2) != 0 {
+            VecPush(<<stk, Copy(*n1));
+            x := Op(Keyring.Add, *n1, *incr, "");
+            VecSwap(n1.hex.bytes, x.hex.bytes);
+            if Unwinding() { return }
+        }
+        VecPush(<<stk, Copy(*n1));
+        return;
+    }
+    else if op == BITS { x := Mki(cast(s64)Bits(*n1)); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == EXPMOD { x := Op(Keyring.PowerModulo, *n1, *n2, TextView(n3.hex)); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == EXP { x := Op(Keyring.PowerModulo, *n1, *n2, ""); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == INVERT { x := Op(Keyring.Invert, *n1, *n2, ""); VecSwap(r.hex.bytes, x.hex.bytes) }
+    else if op == RAND {
+        c := Keyring.BigRandom(cast(s32)ToInt(*n1), reply[:]);
+        if c < 0 { Failed(); return }
+        x := Make(TextView(reply[:c]));
+        VecSwap(r.hex.bytes, x.hex.bytes);
+    }
+    if Unwinding() { return }
+    VecPush(<<stk, r);
+}
+
+ExprList :: (args: *Items) -> Items {
+    radix: s64 = 10;
+    at: s64 = 1;
+    if args.count > 1 {
+        w: Text = TextCopy(TextView(args.*[1].word));
+        v := TextView(w);
+        if v.count >= 2 && v[0] == #char "-" && !(v[1] >= #char "0" && v[1] <= #char "9") {
+            if v[1] != #char "r" { Fail("usage", "usage: expr [-r radix] [arg...]"); return NoItems() }
+            rtext: Text;
+            if v.count > 2 {
+                SetText(*rtext, v[2:]);
+                at = 2;
+            } else {
+                if args.count < 3 { Fail("usage", "usage: expr [-r radix] [arg...]"); return NoItems() }
+                SetText(*rtext, TextView(args.*[2].word));
+                at = 3;
+            }
+            radix = LimboInt(TextView(rtext));
+            if radix <= 0 || (radix > 36 && radix != 64) {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "expr: invalid radix %", radix);
+                Fail("usage", TextView(msg[:]));
+                return NoItems();
+            }
+        }
+    }
+    stk: Vec(Num);
+    lastop: s32 = -1;
+    lastn: s32 = -1;
+    lastname: Text;
+    for i: at..args.count - 1 {
+        w: Text = TextCopy(TextView(args.*[i].word));
+        op, nops := OpOf(TextView(w));
+        if op == -1 {
+            v := TextView(w);
+            if v.count == 0 || (v[0] != #char "-" && (v[0] < #char "0" || v[0] > #char "9")) {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "expr: unknown operator '%'", v);
+                Fail("usage", TextView(msg[:]));
+                return NoItems();
+            }
+            VecPush(stk, StrToIp(v));
+            if Unwinding() { return NoItems() }
+        } else {
+            Operator(*stk, op, nops, lastop, lastn, TextView(w), TextView(lastname));
+            if Unwinding() { return NoItems() }
+        }
+        lastop = op;
+        lastn = nops;
+        SetText(*lastname, TextView(w));
+    }
+    out: Items;
+    for i: 0..stk.count - 1 {
+        t: Text = IpToStr(*stk[i], radix);
+        PushWord(*out, TextView(t));
+    }
+    return out;
+}
+
+#scope_export
+
+MpexprInit :: (mod: s32, err: *Text) -> bool {
+    AddSBuiltin("expr", mod);
+    AddBuiltin("ntest", mod);
+    return true;
+}
+
+MpexprRun :: (mod: s32, args: *Items, last: bool, status: *Text) -> bool {
+    if args.count != 2 { Fail("usage", "usage: ntest n"); return true }
+    n := StrToIp(TextView(args.*[1].word));
+    if !Unwinding() && IsZero(*n) { SetText(status, "false") }
+    return true;
+}
+
+MpexprSRun :: (mod: s32, args: *Items, out: *Items) -> bool {
+    result := ExprList(args);
+    VecSwap(<<out, result);
+    return true;
+}

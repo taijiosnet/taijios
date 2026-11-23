@@ -18,6 +18,7 @@ Ns :: #import "taijios_namespace";
 #import "shell_csv";
 #import "shell_sexprs";
 #import "shell_file2chan";
+#import "shell_mpexpr";
 
 main :: () -> s32 {
     unused RegisterModule("builtin", InitShellBuiltins, ShellRun, ShellSRun, ShellWhatis);
@@ -31,6 +32,7 @@ main :: () -> s32 {
     unused RegisterModule("csv", CsvInit, CsvRun, CsvSRun, NoWhatis);
     unused RegisterModule("sexprs", SexprsInit, SexprsRun, SexprsSRun, NoWhatis);
     unused RegisterModule("file2chan", F2cInit, F2cRun, F2cSRun, NoWhatis);
+    unused RegisterModule("mpexpr", MpexprInit, MpexprRun, MpexprSRun, NoWhatis);
     count := Args.OperandCount();
     if count > 0 && Args.Operand(0) == "-%" { return Child(count, false) }
     if count > 0 && Args.Operand(0) == "-%f" { return Child(count, true) }

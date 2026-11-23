@@ -759,7 +759,7 @@ echo $status
 === mod-file2chan
 script:
 load std file2chan
-file2chan $W/chan {rreadone 'hello from read'} {echo got ${rget data} at ${rget offset} >[1=2]; rwrite} {echo closed >[1=2]}
+file2chan $W/chan {rreadone 'hello from read'} {echo got ${rget data} at ${rget offset} >[1=2]; rwrite}
 cat $W/chan
 echo written > $W/chan
 echo $status
@@ -771,5 +771,35 @@ echo $status
 file2chan $W/c3 {} {}
 cat $W/c3
 echo $status
+file2chan $W/c4 {rreadone $#closes^' closes'} {rwrite} {closes = $closes x}
+cat $W/c4; echo
+cat $W/c4; echo
 file2chan only args
 echo $status
+
+=== mod-mpexpr
+script:
+load mpexpr
+echo ${expr 2 100 exp}
+echo ${expr 123456789012345678901234567890 987654321 x}
+echo ${expr 7 3 - 4 x} ${expr 17 5 /} ${expr 17 5 %} ${expr 17 _ 5 /} ${expr 17 _ 5 %}
+echo ${expr -5 3 +} ${expr 5 _ 3 +}
+echo ${expr -r 16 255} ${expr -r 2 10} ${expr -r 8 64} ${expr -r 64 1000000} ${expr -r 16 0}
+echo ${expr 16rff 1 +} ${expr 2r1010 1 +} ${expr 36rzz}
+echo ${expr 12 10 and} ${expr 12 10 or} ${expr 12 10 xor} ${expr 5 _ 3 and} ${expr 5 _ 3 or} ${expr 5 _ 2 _ xor}
+echo ${expr 5 ~} ${expr 0 not} ${expr 3 not} ${expr 255 bits} ${expr 1 70 shl} ${expr 1000 3 shr}
+echo ${expr 4 13 497 expmod} ${expr 3 11 invert}
+echo ${expr 1 5 seq} ${expr 1 2 3 4 + rep}
+echo ${expr 3 3 eq} ${expr 3 4 lt} ${expr 3 4 ge}
+ntest 0 || echo zero
+ntest 7 && echo nonzero
+echo ${expr 1 0 /}
+echo after
+
+=== mod-mpexpr-errors
+script:
+load mpexpr
+echo ${expr -r 99 5}
+echo ${expr 99r5}
+echo ${expr foo}
+echo unreached
