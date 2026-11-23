@@ -255,8 +255,8 @@ argument.
 .SH SOURCE
 .B /appl/cmd/auth/ai2key.b
 .br
-.B /appl/cmd/auth/dsagen.b
+.B /appl/cmd/auth/dsagen.zi
 .br
-.B /appl/cmd/auth/rsagen.b
+.B /appl/cmd/auth/rsagen.zi
 .SH "SEE ALSO"
 .IR factotum (4)

@@ -368,7 +368,7 @@ appl
 			countersigner.b
 			convpasswd.b
 			createsignerkey.b
-			dsagen.b
+			dsagen.zi
 			factotum
 				authio.m
 				mkfile
@@ -384,12 +384,13 @@ appl
 				rpc.b
 			getpk.b
 			keyfs.b
+			keygen.zi
 			keysrv.b
 			logind.b
 			mkauthinfo.b
 			mkfile
 			passwd.b
-			rsagen.b
+			rsagen.zi
 			secstore.b
 			signer.b
 			verify.b

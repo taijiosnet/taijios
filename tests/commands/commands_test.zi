@@ -1,7 +1,7 @@
 // Guest regression for the shell commands rewritten in Ziran: cat, echo,
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
 // ndb/csquery, ndb/dnsquery, ndb/mkhash, ndb/query, ndb/regquery,
-// auxi/digest, export, mntgen and auth/aescbc.
+// auxi/digest, export, mntgen, auth/aescbc, auth/rsagen and auth/dsagen.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -44,7 +44,7 @@ AES_OLD :: "30313233343536373839616263646566a1013d70569efef1a8384a987afbf4365c42
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [136]Case = Case.[
+cases: [146]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -192,6 +192,18 @@ cases: [136]Case = Case.[
     .{tool = "auth/aescbc", args = "-d -k x extra", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
     .{tool = "auth/aescbc", args = "-d -k", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
     .{tool = "auth/aescbc", args = "-x", status = "usage", err = "usage: auth/aescbc -d [-k key] [-f keyfile] <file.aes >clear.txt\n  or: auth/aescbc -e [-k key] [-f keyfile] <clear.txt >file.aes\n"},
+    // auth/rsagen and auth/dsagen print new keys: their numbers are random,
+    // so the cases check the fields, the size and the failures.
+    .{args = "auth/rsagen -b 256 -t 'user=me service=x' | sed 's/=[0-9A-F]+/=H/g'", out = "key proto=rsa user=me service=x size=H ek=H n=H !dk=H !p=H !q=H !kp=H !kq=H !c2=H\n"},
+    .{args = "auth/rsagen -b 320 | sed 's/.* size=([0-9]+) .*/\\1/'", out = "320\n"},
+    .{tool = "auth/rsagen", args = "-b 0", status = "usage", err = "usage: auth/rsagen [-b bits] [-t 'attr=value attr=value ...']\n"},
+    .{tool = "auth/rsagen", args = "-b x", status = "usage", err = "usage: auth/rsagen [-b bits] [-t 'attr=value attr=value ...']\n"},
+    .{tool = "auth/rsagen", args = "-b 5000", status = "error", err = "rsagen: bits must be no greater than 4096\n"},
+    .{tool = "auth/rsagen", args = "extra", status = "usage", err = "usage: auth/rsagen [-b bits] [-t 'attr=value attr=value ...']\n"},
+    .{tool = "auth/rsagen", args = "-q", status = "usage", err = "usage: auth/rsagen [-b bits] [-t 'attr=value attr=value ...']\n"},
+    .{args = "auth/dsagen -t 'a=b' | sed 's/=[0-9A-F]+/=H/g'", out = "key proto=dsa a=b p=H q=H alpha=H key=H !secret=H\n"},
+    .{tool = "auth/dsagen", args = "x", status = "usage", err = "usage: auth/dsagen [-t 'attr=value attr=value ...']\n"},
+    .{tool = "auth/dsagen", args = "-t", status = "usage", err = "usage: auth/dsagen [-t 'attr=value attr=value ...']\n"},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},

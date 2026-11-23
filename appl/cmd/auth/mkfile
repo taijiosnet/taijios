@@ -9,14 +9,12 @@ TARG=\
 	countersigner.dis\
 	convpasswd.dis\
 	createsignerkey.dis\
-	dsagen.dis\
 	keyfs.dis\
 	keysrv.dis\
 	getpk.dis\
 	logind.dis\
 	mkauthinfo.dis\
 	passwd.dis\
-	rsagen.dis\
 	secstore.dis\
 	signer.dis\
 	verify.dis\
@@ -38,8 +36,8 @@ DISBIN=$ROOT/dis/auth
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
 
-ZXCOMMANDS=aescbc
-ZXUTIL=../zx_cli.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_keyring.zi ../../lib/taijios_quote.zi
+ZXCOMMANDS=aescbc rsagen dsagen
+ZXUTIL=keygen.zi ../zx_cli.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_keyring.zi ../../lib/taijios_quote.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 

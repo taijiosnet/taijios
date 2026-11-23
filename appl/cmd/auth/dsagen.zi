@@ -1,0 +1,32 @@
+// auth/dsagen [-t 'attr=value ...']: prints a new DSA key, in a new group,
+// for factotum.
+using Args :: #import "taijios_args";
+using Crypto :: #import "taijios_keyring";
+using Arg :: #import "zx_arg";
+using Key :: #import "keygen";
+
+USAGE :: "auth/dsagen [-t 'attr=value attr=value ...']";
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    tag := "";
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option != #char "t" { return Key.Usage(USAGE) }
+        value, ok := Arg.Value(*scan);
+        if !ok { return Key.Usage(USAGE) }
+        tag = value;
+    }
+    if scan.next < Args.OperandCount() { return Key.Usage(USAGE) }
+    made: [4096]u8;
+    count := Crypto.DsaGenerate("", "", "", made[:]);
+    if count <= 0 { return Key.Fail("dsagen", "unable to generate key") }
+    numbers := Key.Lines(TextView(made[:count]));
+    if numbers.count < 5 { return Key.Fail("dsagen", "unable to generate key") }
+    line: Vec(u8);
+    Key.Start(*line, "dsa", tag);
+    names := string.["p", "q", "alpha", "key", "!secret"];
+    for names { Key.Field(*line, it, numbers[it_index]) }
+    return Key.Write("dsagen", TextView(line[:]));
+}

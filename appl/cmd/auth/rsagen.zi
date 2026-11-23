@@ -1,0 +1,51 @@
+// auth/rsagen [-b bits] [-t 'attr=value ...']: prints a new RSA key for
+// factotum, 1024 bits unless asked otherwise and at most 4096.
+using Args :: #import "taijios_args";
+using Crypto :: #import "taijios_keyring";
+using Arg :: #import "zx_arg";
+using Key :: #import "keygen";
+
+USAGE :: "auth/rsagen [-b bits] [-t 'attr=value attr=value ...']";
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    bits: s64 = 1024;
+    tag := "";
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option != #char "b" && option != #char "t" { return Key.Usage(USAGE) }
+        value, ok := Arg.Value(*scan);
+        if !ok { return Key.Usage(USAGE) }
+        if option == #char "t" {
+            tag = value;
+            continue;
+        }
+        bits = Key.Int(value);
+        if bits <= 0 { return Key.Usage(USAGE) }
+        if bits > 4096 { return Key.Fail("rsagen", "bits must be no greater than 4096") }
+    }
+    if scan.next < Args.OperandCount() { return Key.Usage(USAGE) }
+    // A public exponent of up to 6 bits and 18 Miller-Rabin rounds, which
+    // is what libsec gave the Limbo command's 0, tried again until the
+    // modulus has exactly the bits asked for, as Limbo's Crypt did.
+    made: [8192]u8;
+    count: s32 = 0;
+    while true {
+        count = Crypto.RsaGenerate(cast(s32)bits, 6, 18, made[:]);
+        if count <= 0 { return Key.Fail("rsagen", "unable to generate key") }
+        first: s64 = 0;
+        while first < count && made[first] != #char "\n" { first += 1 }
+        if Crypto.BigBits(TextView(made[:first])) == bits { break }
+    }
+    numbers := Key.Lines(TextView(made[:count]));
+    if numbers.count < 8 { return Key.Fail("rsagen", "unable to generate key") }
+    // The numbers come as n, e, d, p, q, d mod p-1, d mod q-1 and p^-1 mod q.
+    line: Vec(u8);
+    Key.Start(*line, "rsa", tag);
+    BuilderPrint(*line, " size=%", Crypto.BigBits(numbers[0]));
+    names := string.["n", "ek", "!dk", "!p", "!q", "!kp", "!kq", "!c2"];
+    order := s64.[1, 0, 2, 3, 4, 5, 6, 7];
+    for order { Key.Field(*line, names[it], numbers[it]) }
+    return Key.Write("rsagen", TextView(line[:]));
+}

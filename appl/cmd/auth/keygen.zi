@@ -1,0 +1,80 @@
+// What auth/rsagen and auth/dsagen share: their option scanning, their
+// messages, and the factotum key line they print, such as
+//
+//     key proto=dsa a=b p=DF24... q=FFEC... alpha=B4F6... key=... !secret=...
+//
+// with each number in upper-case hexadecimal, as Limbo's IPint printed it.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+Usage :: (usage: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "usage: %\n", usage);
+    unused Cli.WriteAll(2, TextView(out[:]));
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+Fail :: (command: string, message: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "%: %\n", command, message);
+    unused Cli.WriteAll(2, TextView(out[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+// The number at the start of text as Limbo's int conversion read it: an
+// optional sign and the digits after it, 0 when there are none.
+Int :: (text: string) -> s64 {
+    i: s64 = 0;
+    while i < text.count && (text[i] == #char " " || text[i] == #char "\t") { i += 1 }
+    negative := false;
+    if i < text.count && (text[i] == #char "-" || text[i] == #char "+") {
+        negative = text[i] == #char "-";
+        i += 1;
+    }
+    value: s64 = 0;
+    while i < text.count && text[i] >= #char "0" && text[i] <= #char "9" && value < 0x80000000 {
+        value = value * 10 + cast(s64)(text[i] - #char "0");
+        i += 1;
+    }
+    return ifx negative then -value else value;
+}
+
+// The lines of what a key call wrote.
+Lines :: (text: string) -> Vec(string) {
+    lines: Vec(string);
+    start: s64 = 0;
+    for i: 0..text.count - 1 {
+        if text[i] != #char "\n" { continue }
+        if i > start { VecPush(lines, text[start:i]) }
+        start = i + 1;
+    }
+    if start < text.count { VecPush(lines, text[start:]) }
+    return lines;
+}
+
+// Appends " name=VALUE" with the number in upper case.
+Field :: (out: *Vec(u8), name: string, hex: string) {
+    BuilderPrint(out, " %=", name);
+    for hex {
+        c := it;
+        if c >= #char "a" && c <= #char "f" { c -= #char "a" - #char "A" }
+        VecPush(<<out, c);
+    }
+}
+
+// Starts the key line: "key proto=PROTO" and the tag, if any.
+Start :: (out: *Vec(u8), proto: string, tag: string) {
+    BuilderPrint(out, "key proto=%", proto);
+    if tag.count > 0 { BuilderPrint(out, " %", tag) }
+}
+
+// Prints the key line and its newline.
+Write :: (command: string, line: string) -> s32 {
+    if Cli.WriteAll(1, line) && Cli.WriteAll(1, "\n") { return 0 }
+    message: Vec(u8);
+    BuilderPrint(*message, "error writing key: %", Io.Error());
+    return Fail(command, TextView(message[:]));
+}
