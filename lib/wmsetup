@@ -50,11 +50,7 @@ if {ftest -f /dis/wm/memory.zx} {
 } {
 	menu System 'Memory Monitor' {wmrun wm/memory}
 }
-if {ftest -f /dis/wm/about.zx} {
-	menu System About         {wmrun zxrun -w /dis/wm/about.zx}
-} {
-	menu System About         {wmrun wm/about}
-}
+menu System About         {wmrun zxrun -w /dis/wm/about.zx}
 menu Utilities Manual       {wmrun wm/man}
 menu Utilities Coffee       {wmrun wm/coffee}
 if {ftest -f /dis/wm/colors.zx} {

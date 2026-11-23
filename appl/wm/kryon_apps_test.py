@@ -285,7 +285,7 @@ def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
                 ((42, 489), (142, 554), 'wm/colors'),
                 ((42, 489), (138, 570), 'wm/coffee'),
                 ((42, 489), (138, 585), 'wm/man'),
-                ((30, 507), (134, 505), 'wm/about'),
+                ((30, 507), (134, 505), 'zxrun -w /dis/wm/about.zx'),
                 ((30, 507), (138, 522), 'wm/memory'),
                 ((30, 507), (150, 538), 'zxrun -w /dis/wm/taskmgr.zx'),
                 ((30, 507), (138, 554), 'wm/rt'),
@@ -315,7 +315,6 @@ def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
 
             guest_apps = (
                 ('wm/colors', 'colors.zx', '-w'),
-                ('wm/about', 'about.zx', '-w'),
                 ('wm/memory', 'memory.zx', '-p -w'),
                 ('wm/date', 'date.zx', '-w'),
             )

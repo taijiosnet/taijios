@@ -29,7 +29,8 @@ def fixture(root):
     (child / "inside").touch()
     (directory / DOCUMENT).write_text(MARKER + "\n")
     shutil.copyfile(ROOT / "icons/tk/file.bit", directory / PICTURE)
-    shutil.copyfile(ROOT / "dis/wm/about.dis", directory / MODULE)
+    # Any Dis module serves: stock Dir fails to load it, and Ziran Dir starts it.
+    shutil.copyfile(ROOT / "dis/wm/bounce.dis", directory / MODULE)
     (root / "chan").mkdir()
     return directory, root / "chan/plumb.input"
 
@@ -116,7 +117,7 @@ def about_content(image):
     return glyphs(image, ABOUT_ORANGE)
 
 
-def direct_about(env, emulator, invocation="wm/about"):
+def direct_about(env, emulator, invocation):
     with desktop(env, emulator, invocation):
         window = inferno_window(env)
 
@@ -146,7 +147,7 @@ def run_actions(env, emulator, launch_browser, directory, sink, *, stock):
             until(lambda: focused_window(browser, previous), "stock did not show its Dis load dialog")
             module = None
         else:
-            module = until(lambda: about_content(browser.capture()), "the Dis file did not open About Inferno")
+            module = until(lambda: focused_window(browser, previous), "the Dis file did not open a window")
     sink.write_bytes(b"")
     with start(f"bind -b {guest(sink.parent)} /chan; ") as process:
         browser = Browser(env, process, stock=stock)
@@ -217,8 +218,8 @@ def main():
         launcher += "zxrun -w /dis/wm/dir.zx"
         actual = run_actions(env, args.emulator, launcher, directory, sink, stock=False)
         assert actual[:3] == expected[:3], "stock and Ziran file action windows differ"
-        assert actual[3] == direct_about(env, args.emulator), "the launched About Inferno logo differs"
-        print("Ziran matched stock child window, editor contents, viewer and plumbing, and launched a valid .dis directly")
+        assert actual[3], "Ziran did not start the Dis module"
+        print("Ziran matched stock child window, editor contents, viewer and plumbing, and started a valid .dis")
         native = directory / NATIVE_IMAGE
         shutil.copyfile(ROOT / "dis/wm/about.zx", native)
         native.chmod(0o644)

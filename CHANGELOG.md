@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship About Inferno only as ZX and remove its Dis version.
+
 - Give ZX programs the Keyring cryptography: digests, HMAC, AES-CBC, big integers, and RSA, DSA and ElGamal keys and signatures.
 
 - Let ZX programs dial, announce and listen on the guest network, export part of their namespace, and serve a file2chan file.

@@ -35,7 +35,7 @@ menu System			'Debugger'		{wmrun wm/deb}
 menu System			'Module manager'	{wmrun wm/rt}
 menu System			'Task manager'		{wmrun wm/task}
 menu System			'Memory monitor'	{wmrun wm/memory}
-menu System			'About'			{wmrun wm/about}
+menu System			'About'			{wmrun zxrun -w /dis/wm/about.zx}
 menu Misc			'Tetris'			{wmrun wm/tetris}
 menu Misc			'Coffee'			{wmrun wm/coffee}
 menu Misc			'Colours'			{wmrun wm/colors}

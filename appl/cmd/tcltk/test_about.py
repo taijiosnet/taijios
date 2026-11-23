@@ -1,4 +1,8 @@
-"""Compare the installed About Inferno and bitmap commands with shipped Tk."""
+"""Compare About Inferno and the bitmap commands with what the Dis About and tkcmd produced.
+
+about_stock_art.png and about_bitmap_commands.expected were recorded from the
+Dis About Inferno and Inferno tkcmd before they were removed.
+"""
 
 import argparse
 import io
@@ -14,8 +18,11 @@ from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command
 DESKTOP = (119, 119, 119)
 VERSION_INK = (255, 85, 0)
 ART_SIZE = 300, 207
-STOCK_ORIGIN = 7, 25
+# Both window managers draw their title bar over the logo's first rows.
+COVERED_ROWS = 8
 FIXTURE = SOURCES / "about_bitmap_commands.tcl"
+REFERENCE = SOURCES / "about_bitmap_commands.expected"
+STOCK_ART = SOURCES / "about_stock_art.png"
 END = b"ABOUT-RETURNED"
 BITMAP_FLAGS = ("--define", "TK_BITMAP", "--define", "TK_NO_CANVAS",
                 "--bind-host", "zx_surface", "--bind-host", "taijios_files")
@@ -70,10 +77,6 @@ def capture_window(env, invocation, locate):
         if "zxrun -w " in invocation:
             assert b"0" in output.splitlines(), output
         return art, label.crop(bounds)
-
-
-def stock_origin(image):
-    return STOCK_ORIGIN if image.getpixel((162, 100)) == (85, 0, 0) else None
 
 
 def locate_art(art):
@@ -144,18 +147,19 @@ def main():
     model = BUILD / "about_bitmap_test.zx"
     compile_image("about_bitmap_test", model, *BITMAP_FLAGS)
     with private_display() as env:
-        reference = transcript(env, f"tkcmd < {guest(FIXTURE)}")
+        reference = REFERENCE.read_bytes().splitlines()
         assert reference and all(line.startswith(b"#") for line in reference), reference
         hosted = transcript(env, f"zxrun {guest(model)}")
         assert hosted == [*(line[1:] for line in reference), b"0"], (reference, hosted)
-        print(f"Inferno tkcmd and Ziran matched {len(reference)} label, bitmap, frame and packing results")
-        stock, version = capture_window(env, "wm/about", stock_origin)
-        assert version.width > 200 and len(stock.getcolors(62101)) > 30
-        print("Stock About Inferno displayed the original artwork, live version and closed")
+        print(f"Ziran matched {len(reference)} label, bitmap, frame and packing results recorded from Inferno tkcmd")
+        stock = Image.open(STOCK_ART).convert("RGB")
+        assert stock.size == ART_SIZE and len(stock.getcolors(62101)) > 30
         run = f"zxrun -w {guest(about)}"
         find_art = locate_art(stock)
         pixels, version = capture_window(env, run, find_art)
-        assert not ImageChops.difference(stock, pixels).getbbox(), "Hosted bitmap pixels differ from Inferno Tk"
+        visible = (0, COVERED_ROWS, *ART_SIZE)
+        assert not ImageChops.difference(stock.crop(visible), pixels.crop(visible)).getbbox(), \
+            "About artwork differs from the recorded Inferno Tk pixels"
         assert version.width > 250
         with TemporaryDirectory(dir=BUILD) as folder:
             folder = Path(folder)
@@ -165,7 +169,8 @@ def main():
             changed_pixels, changed_version = capture_window(env, fixture, find_art)
             assert not ImageChops.difference(pixels, changed_pixels).getbbox()
             assert changed_version.tobytes() != version.tobytes(), "Hosted About ignored the guest namespace's sysctl"
-            print("Hosted About matched all 62,100 artwork pixels, rendered the live and replaced guest sysctl, and closed")
+            print("Hosted About matched the recorded artwork below the title bar, rendered the live and replaced "
+                  "guest sysctl, and closed")
             named_mask(env, runner, folder)
         print("The generic runner rendered a retained 1-bit image with its configured foreground")
 

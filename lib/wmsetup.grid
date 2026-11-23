@@ -46,7 +46,7 @@ menu Grid			'Job monitor' {wmrun jobmonitor}
 menu System			'Debugger'		{wmrun wm/deb}
 menu System			'Task manager'		{wmrun wm/task}
 menu System			'Memory monitor'	{wmrun wm/memory}
-menu System			'About'			{wmrun wm/about}
+menu System			'About'			{wmrun zxrun -w /dis/wm/about.zx}
 menu Games			'Tetris'			{wmrun wm/tetris}
 menu Games			'Bounce'			{wmrun wm/bounce}
 

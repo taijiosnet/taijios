@@ -40,7 +40,8 @@ About Inferno displays the shipped 300×207 `/icons/inferno.bit` and reads up to
 128 bytes from the live guest `/dev/sysctl`. The window uses the stock bitmap,
 black ridge frame, and orange version label. The version uses the shared stroke
 font and the window closes through the guest window manager.
-[ZX source](about_app.zi) · [Inferno source](../../wm/about.b)
+[ZX source](about_app.zi). The Dis version is removed; `test_about.py` compares
+the window with the artwork and tkcmd results recorded from it.
 
 Log Window reads a live guest pipe. It starts as a toolbar task and pops up
 when a message arrives. Scroll follows the newest lines when checked. Clear it
