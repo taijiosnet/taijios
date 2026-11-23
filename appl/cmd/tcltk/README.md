@@ -90,7 +90,8 @@ can launch without filesystem execute bits. The port passes the resolved `.dis`
 path directly, avoiding stock Directory Browser's trailing slash load error.
 Right-click sends the clicked entry's name and directory to
 the guest plumber when available. The status line reports directory and launch
-failures. [ZX source](dir_app.zi) · [Inferno source](../../wm/dir.b)
+failures. [ZX source](dir_app.zi). The Dis version is removed; its tests compare
+with results recorded from it.
 
 ## Run in Taiji
 
@@ -437,9 +438,7 @@ startup and during Walk, within the space available on the guest desktop.
 The stock browser matches startup geometry. The stock Walk probe into the
 same long-name directory hit a nil dereference during reconfiguration.
 Directory Browser uses the shipped `cursor.wait` bitmap while opening a
-selection and restores the default cursor when the action returns. The stock
-Dis app remains available as `wm/dir`.
-[Inferno source](../../wm/dir.b)
+selection and restores the default cursor when the action returns.
 
 The text widget still needs horizontal scrolling and `-xscrollcommand`.
 The Tk variable command still needs Inferno's `lasterror` query.

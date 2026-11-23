@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship the Directory Browser only as ZX and remove its Dis version.
+
 - Report RSA keys from taijios_keyring as the Limbo Keyring does, including a negative private exponent, and accept 0 rounds and key sizes from 8 bits.
 
 - Let ZX commands run from the Dis shell start, wait for and kill children, and let ZX programs change their current directory.

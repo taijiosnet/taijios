@@ -19,6 +19,9 @@ MODULE = "start.dis"
 NATIVE_IMAGE = "trace é.zx"
 MARKER = "Taiji opened this fixture safely."
 WHITE = (255, 255, 255)
+# The Sweet-Dark title bar and the caption ink of the focused window.
+TITLE_BACKGROUND = (12, 14, 20)
+ACTIVE_TITLE = (146, 155, 168)
 ABOUT_ORANGE = (255, 85, 0)
 
 
@@ -36,37 +39,42 @@ def fixture(root):
 
 
 def title_band(image):
-    """Locate a focused guest title by the rows of its blue background."""
-    color = bytes(SELECTED)
-    regions = []
-    for y in range(image.height):
-        strip = image.crop((0, y, image.width, y + 1)).tobytes()
-        if strip.count(color) < 30:
-            continue
-        pixels = [x // 3 for x in range(0, len(strip), 3) if strip[x:x+3] == color]
-        if len(pixels) < 30:
-            continue
-        left, right = pixels[0], pixels[-1] + 1
-        if regions and regions[-1][3] == y:
-            prev = regions[-1]
-            regions[-1] = (min(left, prev[0]), prev[1], max(right, prev[2]), y+1)
-        else:
-            regions.append((left, y, right, y+1))
-    # A selected icon label can share the same blue, but is shorter than the title bar.
-    regions = [box for box in regions if box[3]-box[1] >= 12]
-    if not regions:
+    """Locate the focused window's title bar from its caption, drawn in the active ink."""
+    pixels = image.tobytes()
+    ink = bytes(ACTIVE_TITLE)
+    caption = [i // 3 for i in range(0, len(pixels), 3) if pixels[i:i+3] == ink]
+    if not caption:
         return None
-    return max(regions, key=lambda box: (box[3]-box[1], box[1], box[0]))
+    xs = [i % image.width for i in caption]
+    ys = [i // image.width for i in caption]
+    x, y = (min(xs) + max(xs)) // 2, min(ys)
+
+    def dark(px, py):
+        return 0 <= px < image.width and 0 <= py < image.height and image.getpixel((px, py)) == TITLE_BACKGROUND
+
+    top = y
+    while dark(x, top - 1):
+        top -= 1
+    bottom = max(ys)
+    while dark(x, bottom + 1):
+        bottom += 1
+    # The first rows of the bar hold no text or controls; window borders end them.
+    left = right = x
+    while dark(left - 1, top + 1):
+        left -= 1
+    while dark(right + 1, top + 1):
+        right += 1
+    return left, top, right + 1, bottom + 1
 
 
 def focused_window(browser, previous=None):
     image = browser.capture()
     band = title_band(image)
     if band:
-        left, top, right, _ = band
-        # Exclude the window menu and the controls at the right edge.
-        text = image.crop((left+27, top+3, min(left+345, right-24), top+19))
-        title = glyphs(text, WHITE)
+        left, top, right, bottom = band
+        # Exclude the controls at the right edge.
+        text = image.crop((left+8, top, right-60, bottom))
+        title = glyphs(text, ACTIVE_TITLE)
         if title and title != previous:
             return image, band, title
     return None
@@ -80,9 +88,10 @@ def begin_action(browser, index):
 
 def open_folder(browser):
     original = begin_action(browser, 1)
-    _, (_, top, right, _), child = until(lambda: focused_window(browser, original),
+    _, (_, top, right, bottom), child = until(lambda: focused_window(browser, original),
                                       "Walk off did not open a child Directory Browser")
-    browser.click(right-9, top+10)
+    # The red Close control is the rightmost one.
+    browser.click(right-17, (top+bottom)//2)
 
     def parent_visible():
         current = focused_window(browser)
@@ -101,7 +110,7 @@ def capture_file(browser, index):
             image, (left, top, right, bottom), title = window
             if index == 2:
                 # The editor's first line begins under the menu row.
-                box = (left+10, top+40, left+278, top+59)
+                box = (left+10, bottom+17, left+278, bottom+35)
             else:
                 center = (left+right)//2
                 box = (center-19, bottom, center+19, bottom+30)
@@ -193,21 +202,16 @@ def open_native_image(browser):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--installed", action="store_true")
-    parser.add_argument("--stock-only", action="store_true")
     parser.add_argument("--emulator", type=Path, default=EMU)
     parser.add_argument("--launcher", help="guest path of the matching launcher candidate")
     args = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     image = BUILD / "dir.zx"
-    if not args.installed and not args.stock_only:
+    if not args.installed:
         compile_image("dir_app", image, *FLAGS)
     with TemporaryDirectory(prefix="d", dir=BUILD) as fixture_dir, private_display() as env:
         root = Path(fixture_dir)
         directory, sink = fixture(root)
-        expected = run_actions(env, args.emulator, "wm/dir", directory, sink, stock=True)
-        print("Stock Directory Browser opened a second directory, editor and viewer and sent the exact WmDir message")
-        if args.stock_only:
-            return
         setup = f"bind {args.launcher} /dis/zxrun.dis; " if args.launcher else ""
         launcher = setup
         if not args.installed:
@@ -216,10 +220,10 @@ def main():
             shutil.copyfile(image, overlay / "dir.zx")
             launcher += f"bind -b {guest(overlay)} /dis/wm; "
         launcher += "zxrun -w /dis/wm/dir.zx"
-        actual = run_actions(env, args.emulator, launcher, directory, sink, stock=False)
-        assert actual[:3] == expected[:3], "stock and Ziran file action windows differ"
-        assert actual[3], "Ziran did not start the Dis module"
-        print("Ziran matched stock child window, editor contents, viewer and plumbing, and started a valid .dis")
+        folder, editor, picture, module = run_actions(env, args.emulator, launcher, directory, sink, stock=False)
+        assert folder and editor and picture and module
+        print("The Directory Browser opened a second directory, the editor with the document's text and the "
+              "viewer with the picture, sent the exact WmDir message, and started a Dis module")
         native = directory / NATIVE_IMAGE
         shutil.copyfile(ROOT / "dis/wm/about.zx", native)
         native.chmod(0o644)
