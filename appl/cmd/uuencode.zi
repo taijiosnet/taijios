@@ -1,0 +1,116 @@
+// Uuencode a file or the standard input, replacing the Limbo uuencode.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+// Print a diagnostic and report failure, as the Limbo fatal did.
+Fatal :: (text: string) -> bool {
+    unused Cli.WriteAll(2, text);
+    unused Cli.WriteAll(2, "\n");
+    return false;
+}
+
+// The mode in octal, as Limbo's %o printed it.
+Octal :: (out: *Vec(u8), value: u32) {
+    digits: [12]u8;
+    end: s64 = 12;
+    remaining := value;
+    if remaining == 0 {
+        end -= 1;
+        digits[end] = cast(u8)48;
+    }
+    while remaining > 0 {
+        end -= 1;
+        digits[end] = cast(u8)(48 + (remaining & 7));
+        remaining = remaining >> 3;
+    }
+    unused BuilderAppend(<<out, TextView(digits[end:12]));
+}
+
+// One six-bit value as its printable character.
+Put :: (out: *Vec(u8), value: s32) {
+    unused VecPush(out.*, cast(u8)((value & 0x3f) + 32));
+}
+
+WriteFailure :: () -> bool {
+    problem: Vec(u8);
+    BuilderPrint(*problem, "bad write to output: %", Io.LastError());
+    return Fatal(BuilderFinish(problem));
+}
+// Encode the input in 45-byte lines, then the empty last line.
+Encode :: (handle: s32) -> bool {
+    input: [45]u8;
+    while true {
+        count := Io.ReadBytes(handle, input[:]);
+        if count < 0 {
+            problem: Vec(u8);
+            BuilderPrint(*problem, "cannot read input file: %", Io.LastError());
+            return Fatal(BuilderFinish(problem));
+        }
+        if count == 0 { break }
+        line: Vec(u8);
+        Put(*line, count);
+        j: s64 = 0;
+        while j < count {
+            c := cast(s32)input[j];
+            d: s32 = 0;
+            if j + 1 < count { d = cast(s32)input[j+1] }
+            e: s32 = 0;
+            if j + 2 < count { e = cast(s32)input[j+2] }
+            Put(*line, (c >> 2) & 0x3f);
+            Put(*line, ((c << 4) & 0x30) | ((d >> 4) & 0x0f));
+            Put(*line, ((d << 2) & 0x3c) | ((e >> 6) & 0x03));
+            Put(*line, e & 0x3f);
+            j += 3;
+        }
+        unused VecPush(line, cast(u8)10);
+        if !Cli.WriteAll(1, BuilderFinish(line)) { return WriteFailure() }
+    }
+    if !Cli.WriteAll(1, " \nend\n") { return WriteFailure() }
+    return true;
+}
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 || count > 2 {
+        unused Fatal("usage: uuencode [ sourcefile ] remotefile");
+        return 0;
+    }
+    handle: s32 = 0;
+    mode: u32 = 0x1b6;
+    if count == 2 {
+        source := Args.Operand(0);
+        handle = Io.OpenFile(source, 0);
+        if handle < 0 {
+            message: Vec(u8);
+            BuilderPrint(*message, "cannot open %", source);
+            unused Fatal(BuilderFinish(message));
+            return 0;
+        }
+        metadata: [Fs.BufferSize]u8;
+        size := Io.FstatPacked(handle, metadata[:]);
+        if size <= 0 {
+            message: Vec(u8);
+            BuilderPrint(*message, "cannot stat %: %", source, Io.LastError());
+            unused Fatal(BuilderFinish(message));
+            return 0;
+        }
+        info := Fs.Decode(metadata[:size]);
+        if (info.mode & Fs.Directory) != 0 {
+            unused Fatal("cannot uuencode a directory");
+            return 0;
+        }
+        mode = info.mode;
+    }
+    line: Vec(u8);
+    unused BuilderAppend(line, "begin ");
+    Octal(*line, mode);
+    unused BuilderAppend(line, " ");
+    unused BuilderAppend(line, Args.Operand(count - 1));
+    unused BuilderAppend(line, "\n");
+    if !Cli.WriteAll(1, BuilderFinish(line)) { return 0 }
+    if !Encode(handle) { return 0 }
+    return 0;
+}

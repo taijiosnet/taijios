@@ -1,0 +1,115 @@
+// Remove files, and directories with -r, replacing the Limbo rm.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Arg :: #import "zx_arg";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+Usage :: "Usage: rm [-fr] file ...\n";
+
+State :: struct {
+    recursive: bool;
+    quiet: bool;
+    force: bool;
+    errors: s32;
+}
+
+// Report one failure unless -f was given; every report fails the command.
+Report :: (state: *State, name: string, reason: string) {
+    if state.quiet { return }
+    unused Cli.WriteAll(2, "rm: ");
+    unused Cli.WriteAll(2, name);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, reason);
+    unused Cli.WriteAll(2, "\n");
+    state.errors += 1;
+}
+
+// Why Remove failed: the host rejects an empty name before the kernel sees it.
+Failure :: (name: string) -> string {
+    if name.count == 0 { return "empty file name" }
+    return Io.LastError();
+}
+
+Remove :: (state: *State, name: string) {
+    if Io.Remove(name) < 0 { Report(state, name, Failure(name)) }
+}
+
+// Remove a directory after its contents, making it writable first with -F.
+RemoveDirectory :: (state: *State, name: string) {
+    if state.force {
+        handle := Io.OpenFile(name, 0);
+        if handle >= 0 {
+            unused Fs.Change(handle, .{mode = 0x1ff | Fs.Directory}, true, false, false, false);
+            unused Io.CloseFile(handle);
+        }
+    }
+    // Read every name before removing any, as Readdir->init did.
+    names: Vec(string);
+    handle := Io.OpenFile(name, 0);
+    if handle >= 0 {
+        buffer: [Fs.BufferSize]u8;
+        while true {
+            size := Io.ReadBytes(handle, buffer[:]);
+            if size <= 0 { break }
+            offset: s64 = 0;
+            while offset < size {
+                entry := Fs.Decode(buffer[offset:size]);
+                if entry.size == 0 { break }
+                offset += entry.size;
+                path: Vec(u8);
+                BuilderPrint(*path, "%/%", name, entry.name);
+                if !VecPush(names, BuilderFinish(path)) { break }
+            }
+        }
+        unused Io.CloseFile(handle);
+    }
+    for names {
+        metadata: [Fs.BufferSize]u8;
+        size := Io.StatPacked(it, metadata[:]);
+        if size > 0 && (Fs.Decode(metadata[:size]).mode & Fs.Directory) != 0 {
+            RemoveDirectory(state, it);
+        } else {
+            Remove(state, it);
+        }
+    }
+    Remove(state, name);
+}
+
+#program_export
+main :: () -> s32 {
+    state: State;
+    scan: Arg.Scan;
+    count := Args.OperandCount();
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "r" {
+            state.recursive = true;
+        } else if option == #char "f" {
+            state.quiet = true;
+        } else if option == #char "F" {
+            state.force = true;
+        } else {
+            return Cli.Usage(Usage);
+        }
+    }
+    for i: scan.next..count-1 {
+        name := Args.Operand(i);
+        if Io.Remove(name) >= 0 { continue }
+        reason := Failure(name);
+        metadata: [Fs.BufferSize]u8;
+        size := Io.StatPacked(name, metadata[:]);
+        if state.recursive && size > 0 && (Fs.Decode(metadata[:size]).mode & Fs.Directory) != 0 {
+            RemoveDirectory(*state, name);
+        } else {
+            Report(*state, name, reason);
+        }
+    }
+    if state.errors > 0 {
+        unused Args.SetFailure("errors");
+        return 1;
+    }
+    return 0;
+}

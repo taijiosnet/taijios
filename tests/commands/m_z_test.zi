@@ -25,8 +25,9 @@ WORK :: "build/tests/commands-m-z";
 
 ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
+QUICK :: "The quick brown fox\n";
 
-cases: [127]Case = Case.[
+cases: [182]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -167,6 +168,82 @@ cases: [127]Case = Case.[
     // netstat: the numbered entries of each protocol directory.
     .{tool = "netstat"},
     .{tool = "netstat", args = "ignored"},
+    // rm: usage, -r on files and directories, -f quiet, -F makes directories writable.
+    .{args = "{ chmod 555 d4; chmod 555 d7/c; chmod 555 d8 }"},
+    .{args = "{ ls fakenet/2 }", out = "fakenet/2/local
+fakenet/2/remote
+fakenet/2/status
+"},
+    .{tool = "rm", args = "-x a", status = "usage", err = "Usage: rm [-fr] file ...\n"},
+    .{tool = "rm", args = "-- q2"},
+    .{tool = "rm", args = "-r q2", status = "errors", err = "rm: q2: 'q2' file does not exist\n"},
+    .{tool = "rm", args = "nosuch", status = "errors", err = "rm: nosuch: 'nosuch' file does not exist\n"},
+    .{tool = "rm", args = "''", status = "errors", err = "rm: : empty file name\n"},
+    .{tool = "rm", args = "-f nosuch ''"},
+    .{tool = "rm", args = "-fr d8"},
+    .{tool = "rm", args = "-r d8", status = "errors", err = "rm: d8/x: permission denied\nrm: d8: Directory not empty\n"},
+    .{tool = "rm", args = "-r d4", status = "errors", err = "rm: d4/x: permission denied\nrm: d4: Directory not empty\n"},
+    .{tool = "rm", args = "-rF d4"},
+    .{tool = "rm", args = "d4", status = "errors", err = "rm: d4: 'd4' file does not exist\n"},
+    .{tool = "rm", args = "-r d7", status = "errors", err = "rm: d7/c/z: permission denied\nrm: d7/c: Directory not empty\nrm: d7: Directory not empty\n"},
+    .{args = "{ ls d7 }", out = "d7/c\n"},
+    .{args = "{ chmod 755 d7/c }"},
+    .{tool = "rm", args = "-rf d7"},
+    .{tool = "rm", args = "d7", status = "errors", err = "rm: d7: 'd7' file does not exist\n"},
+    .{tool = "rm", args = "-F d9", status = "errors", err = "rm: d9: Directory not empty\n"},
+    .{tool = "rm", args = "dempty"},
+    .{tool = "rm", args = "dempty", status = "errors", err = "rm: dempty: 'dempty' file does not exist\n"},
+    .{args = "{ ls fakenet/2 }", out = "fakenet/2/local
+fakenet/2/remote
+fakenet/2/status
+"},
+    // uuencode: the begin line, 45-byte lines, a space for the empty last line.
+    .{tool = "uuencode", err = "usage: uuencode [ sourcefile ] remotefile\n"},
+    .{tool = "uuencode", args = "q.txt remote extra", err = "usage: uuencode [ sourcefile ] remotefile\n"},
+    .{tool = "uuencode", args = "q.txt remote", out = "begin 600 remote\n45&AE('%U:6-K(&)R;W=N(&9O> H \n \nend\n"},
+    .{tool = "uuencode", args = "out", input = "hello", out = "begin 666 out\n%:&5L;&\\ \n \nend\n"},
+    .{tool = "uuencode", args = "empty remote", out = "begin 600 remote\n \nend\n"},
+    .{tool = "uuencode", args = "'' remote", err = "cannot open \n"},
+    .{tool = "uuencode", args = "nosuch remote", err = "cannot open nosuch\n"},
+    .{tool = "uuencode", args = "dd remote", err = "cannot uuencode a directory\n"},
+    .{args = "{ uuencode bin remote > bin.uu; uudecode -p < bin.uu > out.bin; cmp out.bin bin }"},
+    .{args = "{ ls fakenet/2 }", out = "fakenet/2/local
+fakenet/2/remote
+fakenet/2/status
+"},
+    // uudecode: to standard output with -p, otherwise to the named file in mode 644.
+    .{tool = "uudecode", args = "-p", input = "six.uu", out = "Cat"},
+    .{tool = "uudecode", input = "six.uu"},
+    .{tool = "uudecode", args = "-p six.uu junk.uu", out = "CatCat"},
+    .{args = "{ ls fakenet/2 }", out = "fakenet/2/local
+fakenet/2/remote
+fakenet/2/status
+"},
+    .{tool = "uudecode", args = "-p", input = "bad0.uu", out = "Cat", err = "bad 0 count line\n"},
+    .{tool = "uudecode", args = "-p", input = "badend.uu", out = "Cat", err = "missing end line\n"},
+    .{tool = "uudecode", args = "-p", input = "noend.uu", out = "Cat", err = "missing end line\n"},
+    .{tool = "uudecode", args = "-p", input = "toolong.uu", err = "bad uuencode count\n"},
+    .{tool = "uudecode", args = "-p", input = "shortline.uu", err = "bad uuencode count\n"},
+    .{tool = "uudecode", args = "-p", input = "toomany.uu", err = "too many bytes on line\n"},
+    .{tool = "uudecode", args = "-p", input = "badbegin.uu", err = "bad begin line\n"},
+    .{tool = "uudecode", args = "-p", input = "junk.uu", out = "Cat"},
+    .{tool = "uudecode", args = "-p", input = "nobegin.uu", err = "no begin line\n"},
+    .{tool = "uudecode", args = "six.uu"},
+    .{args = "{ ls fakenet/2 }", out = "fakenet/2/local
+fakenet/2/remote
+fakenet/2/status
+"},
+    .{args = "{ cat name; ls -lm name | sed 's/ U 0.*//' }", out = "Cat[] --rw-r--r--\n"},
+    .{tool = "uudecode", args = "tilde.uu", err = "cannot create /usr/u/f: '/usr/u' does not exist\n"},
+    .{args = "{ ls fakenet/2 }", out = "fakenet/2/local
+fakenet/2/remote
+fakenet/2/status
+"},
+    .{tool = "uudecode", args = "-p", input = "tilde.uu", out = "Cat"},
+    .{tool = "uudecode", args = "-p", input = "empty", err = "no begin line\n"},
+    .{tool = "uudecode", args = "-p -x", input = "six.uu", err = "cannot open -x\n"},
+    .{tool = "uudecode", args = "-x", input = "six.uu", err = "cannot open -x\n"},
+    .{tool = "uudecode", args = "nosuch", err = "cannot open nosuch\n"},
     .{args = "{ bind fakenet /net/tcp; netstat; unmount /net/tcp }", out = "tcp/2      wao        Established  udp!0.0.0.0!53       udp!9.9.9.9!53\ntcp/1      wao        listen       tcp!1.2.3.4!80       tcp!5.6.7.8!1234\n"},
 ];
 
@@ -222,6 +299,15 @@ S2 :: () -> string {
     return BuilderFinish(data)
 }
 
+// A begin line and fifty encoded characters: longer than the count permits.
+TOOLONG :: () -> string {
+    data: Vec(u8)
+    for "begin 644 n\n" { VecPush(data, it) }
+    for 1..50 { VecPush(data, #char "A") }
+    for "\n`\nend\n" { VecPush(data, it) }
+    return BuilderFinish(data)
+}
+
 Prepare :: (binary: string) -> bool {
     unused RemoveTree(WORK)
     unused CreateDirectory("build")
@@ -236,6 +322,8 @@ Prepare :: (binary: string) -> bool {
     // ps prints only the first 128 bytes of a status file.
     long: Vec(u8)
     for 1..130 { VecPush(long, #char "y") }
+    if !Directory("work/d4") || !Directory("work/d7") || !Directory("work/d7/c") || !Directory("work/d8") ||
+        !Directory("work/d9") || !Directory("work/dempty") || !Directory("work/dd") { return false }
     return Write("a.txt", ALPHA) && Write("words", WORDS) && Write("empty", "") && Write("bin", binary) &&
         Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
@@ -243,6 +331,16 @@ Prepare :: (binary: string) -> bool {
         Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long)) &&
         Write("fakenet/1/status", "listen 0 0\n") && Write("fakenet/1/local", "tcp!1.2.3.4!80\n") &&
         Write("fakenet/1/remote", "tcp!5.6.7.8!1234\n") && Write("fakenet/2/status", "Established x\n") &&
+        Write("q.txt", QUICK) && Write("q2", "q\n") && Write("hello", "hello") &&
+        Write("d4/x", "a\n") && Write("d7/a", "a\n") && Write("d7/b", "b\n") && Write("d7/c/z", "c\n") &&
+        Write("d8/x", "x\n") && Write("d9/x", "x\n") && Write("dd/name", "n\n") &&
+        Write("six.uu", "begin 644 name\n#0V%T\n`\nend\n") &&
+        Write("bad0.uu", "begin 644 n\n#0V%T\n`x\nend\n") &&
+        Write("badend.uu", "begin 644 n\n#0V%T\n") && Write("noend.uu", "begin 644 n\n#0V%T\n`\n") &&
+        Write("toolong.uu", TOOLONG()) && Write("shortline.uu", "begin 644 n\n#0V%\n`\nend\n") &&
+        Write("toomany.uu", "begin 644 n\nN\n`\nend\n") && Write("badbegin.uu", "begin 644\n#0V%T\n`\nend\n") &&
+        Write("junk.uu", "x\ny\nbegin 644 n\n#0V%T\n`\nend\n") &&
+        Write("tilde.uu", "begin 644 ~u/f\n#0V%T\n`\nend\n") && Write("nobegin.uu", "hello\n") &&
         Write("fakenet/2/local", "udp!0.0.0.0!53\n") && Write("fakenet/2/remote", "udp!9.9.9.9!53\n")
 }
 

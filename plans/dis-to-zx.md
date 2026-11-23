@@ -222,7 +222,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 126 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 123 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -302,7 +302,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
 | dis/rdp.dis | appl/cmd/rdp.b |  | - |  |
 | dis/rioimport.dis | appl/cmd/rioimport.b |  | - |  |
-| dis/rm.dis | appl/cmd/rm.b |  | - |  |
 | dis/runas.dis | appl/cmd/runas.b |  | - |  |
 | dis/sed.dis | appl/cmd/sed.b |  | - |  |
 | dis/sendmail.dis | appl/cmd/sendmail.b |  | - |  |
@@ -340,8 +339,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/tsort.dis | appl/cmd/tsort.b |  | - |  |
 | dis/unicode.dis | appl/cmd/unicode.b |  | - |  |
 | dis/units.dis | appl/cmd/units.b |  | - |  |
-| dis/uudecode.dis | appl/cmd/uudecode.b |  | - |  |
-| dis/uuencode.dis | appl/cmd/uuencode.b |  | - |  |
 | dis/vacget.dis | appl/cmd/vacget.b |  | - |  |
 | dis/vacput.dis | appl/cmd/vacput.b |  | - |  |
 | dis/wav2iaf.dis | appl/cmd/wav2iaf.b |  | - |  |
