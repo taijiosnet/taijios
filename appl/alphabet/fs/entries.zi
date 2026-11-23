@@ -70,6 +70,8 @@ Next1 :: (v: s32, go: bool) -> EntryItem {
                 p = Slash(entries_states[s].name, d.name);
                 entries_states[s].reply = Next;
             }
+            // a directory with no name, such as a null root, is not an entry
+            if p.count == 0 { continue }
             return EntryItemOf(d, p, depth);
         }
         entries_states[s].reply = Next;

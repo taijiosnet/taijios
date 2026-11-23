@@ -1,0 +1,134 @@
+// /fs/write [-v] fs string -> status: make the tree in the file system, its
+// root named by the string, or by its own name when that is empty; -v
+// reports each file made.
+#import "std/vec";
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Stat :: #import "taijios_stat";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "write", "rxs-v", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("fswrite");
+        p.run = RunWrite;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "r", prod);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetText(v, Va.ValueText(call.args[1]));
+    Va.SetErrc(v, Va.ReportStart(call.report, "fswrite"));
+    Va.SetN0(v, ifx Al.OptCount(call) > 0 then 1 else 0);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { Va.Free(Va.Kid(v, 0), false) }
+    return 0;
+}
+
+RunWrite :: (v: s32) -> string {
+    src := Va.Kid(v, 0);
+    item := FsNext(src, Start);
+    if item.kind != Entry { return "" }
+    d := item.dir;
+    root := Va.ValueText(v);
+    if root.count > 0 { d.name = root }
+    unused WriteDir(v, src, d.name, d);
+    return "";
+}
+
+// fswritedir: makes path as d, answering the item d came in, and gives the
+// item after d's contents.
+WriteDir :: (v: s32, src: s32, path: string, d: FsDir) -> Item {
+    errc := Va.ErrcOf(v);
+    if Va.N0(v) == 1 {
+        out: Vec(u8);
+        BuilderPrint(*out, "create % ", Ty.Q(path));
+        Octal(*out, cast(u64)d.mode);
+        Va.Report(errc, BuilderFinish(out));
+    }
+    if IsDir(d) {
+        created := true;
+        h := Io.CreateFile(path, 0, cast(s32)(d.mode | 0x1FF));
+        if h < 0 {
+            err := Io.LastError();
+            h = Io.OpenFile(path, 0);
+            if h < 0 {
+                next := FsNext(src, Next);
+                out: Vec(u8);
+                BuilderPrint(*out, "cannot create %, mode ", Ty.Q(path));
+                Octal(*out, cast(u64)(d.mode | 0xC0));
+                BuilderPrint(*out, ": %", err);
+                Va.Report(errc, BuilderFinish(out));
+                return next;
+            }
+            created = false;
+        }
+        item := FsNext(src, Down);
+        dir := Al.Join(path, "/");
+        while item.kind == Entry { item = WriteDir(v, src, Al.Join(dir, item.dir.name), item.dir) }
+        next := FsNext(src, Next);
+        if created && (d.mode & 0x1FF) != 0x1FF {
+            if !SetMode(h, d.mode) { Va.Report(errc, Va.WithError(Al.Join("cannot wstat ", Ty.Q(path)))) }
+        }
+        unused Io.CloseFile(h);
+        return next;
+    }
+    h := Io.CreateFile(path, 1, cast(s32)d.mode);
+    if h < 0 {
+        next := FsNext(src, Next);
+        out: Vec(u8);
+        BuilderPrint(*out, "cannot create %, mode ", Ty.Q(path));
+        Octal(*out, cast(u64)(d.mode | 0xC0));
+        BuilderPrint(*out, ": %", Io.LastError());
+        Va.Report(errc, BuilderFinish(out));
+        return next;
+    }
+    item := FsNext(src, Down);
+    while item.kind == Data {
+        nw := Io.WriteBytes(h, item.data);
+        if nw < item.data.count {
+            if nw < 0 {
+                Va.Report(errc, Va.WithError(Al.Join("error writing ", Ty.Q(path))));
+            } else {
+                Va.Report(errc, "short write");
+            }
+            unused Io.CloseFile(h);
+            return FsNext(src, Skip);
+        }
+        item = FsNext(src, Next);
+    }
+    unused Io.CloseFile(h);
+    return FsNext(src, Next);
+}
+
+SetMode :: (h: s32, mode: u32) -> bool {
+    info: Stat.Info;
+    info.mode = mode;
+    return Stat.Change(h, info, true, false, false, false);
+}
+
+Octal :: (out: *Vec(u8), n: u64) {
+    digits: [24]u8;
+    k := 0;
+    x := n;
+    while true {
+        digits[k] = cast(u8)(#char "0" + (x & 7));
+        k += 1;
+        x >>= 3;
+        if x == 0 { break }
+    }
+    while k > 0 {
+        k -= 1;
+        VecPush(<<out, digits[k]);
+    }
+}

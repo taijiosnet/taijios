@@ -1,0 +1,359 @@
+// /fs/unbundle fd -> fs: the tree an archive made by /fs/bundle holds.
+#import "std/vec";
+#import "std/option";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Quote :: #import "taijios_quote";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "unbundle", "xf", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = FsProducer("unbundle", Next1) }
+    v := Va.NewValue(#char "x", prod);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "unbundle"));
+    u: UnbundleState;
+    VecPush(unbundles, u);
+    Va.SetN0(v, unbundles.count - 1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+ARCHIVE_END :: "end of archive\n";
+
+// What the item given last was.
+NONE :: 0;
+NULLROOT :: 1;
+NULLEND :: 2;
+ROOT :: 3;
+DIRENTRY :: 4;
+FILEENTRY :: 5;
+DATA :: 6;
+FILEEND :: 7;
+DIREND :: 8;
+OVER :: 9;
+
+UnbundleFrame :: struct {
+    failed: bool;   // a nested directory ended in error
+    skipping: bool;
+}
+
+UnbundleState :: struct {
+    last: s32;
+    frames: Vec(UnbundleFrame);
+    buffer: Vec(u8);
+    at: s64;
+    eof: bool;
+    file: FsDir;
+    n: s64;
+    notdir: bool;  // report after the null root: the first entry was no directory
+}
+
+unbundles: Vec(UnbundleState);
+
+// Bytes from the archive into the buffer; false at its end.
+Fill :: (v: s32, u: s64) -> bool {
+    if unbundles[u].eof { return false }
+    chunk: [8192]u8;
+    n := Va.Read(Va.Kid(v, 0), chunk[:]);
+    if n <= 0 {
+        unbundles[u].eof = true;
+        return false;
+    }
+    rest: Vec(u8);
+    i := unbundles[u].at;
+    while i < unbundles[u].buffer.count {
+        VecPush(rest, unbundles[u].buffer[i]);
+        i += 1;
+    }
+    for chunk[:n] { VecPush(rest, it) }
+    VecSwap(unbundles[u].buffer, rest);
+    unbundles[u].at = 0;
+    return true;
+}
+
+// Bytes from..to-1 of the buffer as a string of their own.
+Slice :: (u: s64, from: s64, to: s64) -> string {
+    out: Vec(u8);
+    i := from;
+    while i < to {
+        VecPush(out, unbundles[u].buffer[i]);
+        i += 1;
+    }
+    return BuilderFinish(out);
+}
+
+// iob.gets('\n'): a line with its newline, or "" at the end.
+Line :: (v: s32, u: s64) -> string {
+    while true {
+        i := unbundles[u].at;
+        while i < unbundles[u].buffer.count {
+            if unbundles[u].buffer[i] == #char "\n" {
+                line := Slice(u, unbundles[u].at, i + 1);
+                unbundles[u].at = i + 1;
+                return line;
+            }
+            i += 1;
+        }
+        if !Fill(v, u) {
+            if unbundles[u].at >= unbundles[u].buffer.count { return "" }
+            line := Slice(u, unbundles[u].at, unbundles[u].buffer.count);
+            unbundles[u].at = unbundles[u].buffer.count;
+            return line;
+        }
+    }
+    return "";
+}
+
+// Up to n bytes of the archive.
+Bytes :: (v: s32, u: s64, n: s64) -> string {
+    if unbundles[u].at >= unbundles[u].buffer.count { unused Fill(v, u) }
+    have := unbundles[u].buffer.count - unbundles[u].at;
+    if have <= 0 { return "" }
+    take := ifx have < n then have else n;
+    data := Slice(u, unbundles[u].at, unbundles[u].at + take);
+    unbundles[u].at += take;
+    return data;
+}
+
+// skipdata: false when the archive ends first.
+SkipData :: (v: s32, u: s64, length: s64) -> bool {
+    n: s64 = 0;
+    while n < length {
+        want := length - n;
+        if want > ATOMICIO { want = ATOMICIO }
+        got := Bytes(v, u, want);
+        if got.count == 0 { return false }
+        n += got.count;
+    }
+    return true;
+}
+
+// header2dir
+Header :: (s: string) -> (dir: FsDir, ok: bool) {
+    words: Vec(Text);
+    Quote.Unquoted(s, *words);
+    d := NullDir();
+    if words.count != 6 { return d, false }
+    d.name = Keep(TextView(words[0]));
+    d.mode = cast(u32)OctalPrefix(TextView(words[1]));
+    d.uid = Keep(TextView(words[2]));
+    d.gid = Keep(TextView(words[3]));
+    d.mtime = cast(u32)Al.LimboInt(TextView(words[4]));
+    d.length = Al.LimboInt(TextView(words[5]));
+    return d, true;
+}
+
+// str->toint(s, 8): the octal digits it starts with.
+OctalPrefix :: (s: string) -> s64 {
+    n: s64 = 0;
+    for s {
+        if it < #char "0" || it > #char "7" { break }
+        n = n * 8 + cast(s64)(it - #char "0");
+    }
+    return n;
+}
+
+Report :: (v: s32, message: string) { Va.Report(Va.ErrcOf(v), message) }
+
+// unbundledir with skipping set: reads a directory's contents, giving none.
+SkipDir :: (v: s32, u: s64) -> bool {
+    skipping := true;
+    while true {
+        p := Line(v, u);
+        if p.count == 0 {
+            Report(v, "unexpected eof");
+            return true;
+        }
+        if p == ARCHIVE_END || p[0] == #char "\n" { return true }
+        d, ok := Header(p);
+        if !ok {
+            Report(v, Al.Join("invalid bundle header ", Ty.Q(p[0:p.count - 1])));
+            return false;
+        }
+        if IsDir(d) { continue }
+        if !SkipData(v, u, d.length) { return false }
+    }
+    return true;
+}
+
+Over :: (u: s64) -> Item {
+    unbundles[u].last = OVER;
+    return ItemOf(Done);
+}
+
+// Sys->nulldir: no name, every number all ones.
+NullDir :: () -> FsDir {
+    d: FsDir;
+    d.qpath = 0xFFFFFFFFFFFFFFFF;
+    d.qvers = 0xFFFFFFFF;
+    d.qtype = 0xFF;
+    d.mode = 0xFFFFFFFF;
+    d.atime = 0xFFFFFFFF;
+    d.mtime = 0xFFFFFFFF;
+    d.length = -1;
+    d.dtype = -1;
+    d.dev = -1;
+    return d;
+}
+
+// The end of the innermost directory: its End, or for one that failed the
+// failure handed up.
+CloseFrame :: (u: s64) -> Item {
+    unbundles[u].last = DIREND;
+    return ItemOf(End);
+}
+
+// The next item of the innermost directory being given.
+Advance :: (v: s32, u: s64) -> Item {
+    while true {
+        k := unbundles[u].frames.count - 1;
+        p := Line(v, u);
+        if p.count == 0 {
+            Report(v, "unexpected eof");
+            return CloseFrame(u);
+        }
+        if p == ARCHIVE_END || p[0] == #char "\n" { return CloseFrame(u) }
+        d, ok := Header(p);
+        if !ok {
+            Report(v, Al.Join("invalid bundle header ", Ty.Q(p[0:p.count - 1])));
+            unbundles[u].frames[k].failed = true;
+            return CloseFrame(u);
+        }
+        if IsDir(d) {
+            if unbundles[u].frames[k].skipping { continue }
+            unbundles[u].last = DIRENTRY;
+            return EntryOf(d);
+        }
+        if unbundles[u].frames[k].skipping {
+            if !SkipData(v, u, d.length) {
+                unbundles[u].frames[k].failed = true;
+                return CloseFrame(u);
+            }
+            continue;
+        }
+        unbundles[u].file = d;
+        unbundles[u].n = 0;
+        unbundles[u].last = FILEENTRY;
+        return EntryOf(d);
+    }
+    return ItemOf(Done);
+}
+
+// After a nested directory's contents were read without giving them.
+AfterSkip :: (v: s32, u: s64, ok: bool, skipping: bool) -> Item {
+    k := unbundles[u].frames.count - 1;
+    if !ok {
+        unbundles[u].frames[k].failed = true;
+        return CloseFrame(u);
+    }
+    if skipping { unbundles[u].frames[k].skipping = true }
+    return Advance(v, u);
+}
+
+Block :: (v: s32, u: s64) -> Item {
+    length := unbundles[u].file.length;
+    if unbundles[u].n < length {
+        want := length - unbundles[u].n;
+        if want > ATOMICIO { want = ATOMICIO }
+        data := Bytes(v, u, want);
+        if data.count == 0 {
+            Report(v, "premature eof");
+            k := unbundles[u].frames.count - 1;
+            unbundles[u].frames[k].failed = true;
+            return CloseFrame(u);
+        }
+        unbundles[u].n += data.count;
+        unbundles[u].last = DATA;
+        item := ItemOf(Data);
+        item.data = data;
+        return item;
+    }
+    unbundles[u].last = FILEEND;
+    return ItemOf(End);
+}
+
+Next1 :: (v: s32, reply: s32) -> Item {
+    u := Va.N0(v);
+    last := unbundles[u].last;
+    if last == OVER { return ItemOf(Done) }
+    if last == NONE {
+        p := Line(v, u);
+        if p.count == 0 || p == ARCHIVE_END {
+            unbundles[u].last = NULLROOT;
+            return EntryOf(NullDir());
+        }
+        d, ok := Header(p);
+        if !ok {
+            unbundles[u].last = NULLROOT;
+            Report(v, Al.Join("invalid first header ", Ty.Q(p[0:p.count - 1])));
+            return EntryOf(NullDir());
+        }
+        if !IsDir(d) {
+            unbundles[u].last = NULLROOT;
+            unbundles[u].notdir = true;
+            return EntryOf(NullDir());
+        }
+        unbundles[u].last = ROOT;
+        return EntryOf(d);
+    }
+    if last == NULLROOT {
+        // sendnulldir, then the report of a first entry that was no directory
+        if reply == Down {
+            unbundles[u].last = NULLEND;
+            return ItemOf(End);
+        }
+        if unbundles[u].notdir { Report(v, "first entry is not a directory") }
+        return Over(u);
+    }
+    if last == NULLEND {
+        if unbundles[u].notdir { Report(v, "first entry is not a directory") }
+        return Over(u);
+    }
+    if reply == Quit { return Over(u) }
+    if last == ROOT {
+        if reply == Down {
+            f: UnbundleFrame;
+            VecPush(unbundles[u].frames, f);
+            return Advance(v, u);
+        }
+        unused SkipDir(v, u);
+        return Over(u);
+    }
+    if last == DIRENTRY {
+        if reply == Down {
+            f: UnbundleFrame;
+            VecPush(unbundles[u].frames, f);
+            return Advance(v, u);
+        }
+        return AfterSkip(v, u, SkipDir(v, u), reply == Skip);
+    }
+    if last == FILEENTRY {
+        if reply == Down { return Block(v, u) }
+        ok := SkipData(v, u, unbundles[u].file.length);
+        return AfterSkip(v, u, ok, reply == Skip);
+    }
+    if last == DATA {
+        if reply == Skip {
+            ok := SkipData(v, u, unbundles[u].file.length - unbundles[u].n);
+            return AfterSkip(v, u, ok, false);
+        }
+        return Block(v, u);
+    }
+    if last == FILEEND { return Advance(v, u) }
+    // the end of a directory
+    failed := unbundles[u].frames[unbundles[u].frames.count - 1].failed;
+    unused VecPop(unbundles[u].frames);
+    if unbundles[u].frames.count == 0 { return Over(u) }
+    k := unbundles[u].frames.count - 1;
+    if failed {
+        unbundles[u].frames[k].failed = true;
+        return CloseFrame(u);
+    }
+    return Advance(v, u);
+}

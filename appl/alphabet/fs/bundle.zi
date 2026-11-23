@@ -1,0 +1,166 @@
+// /fs/bundle fs -> fd: the tree as an archive: a header line for each
+// entry (its quoted name, octal mode, owner, group, modification time and
+// length), a file's data after its header, an empty line at the end of
+// each directory, and "end of archive".
+#import "std/vec";
+#import "std/option";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+Ty :: #import "alpha_types";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "bundle", "fx", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    v := St.FillStream(Fill);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "bundle"));
+    b: BundleState;
+    VecPush(bundles, b);
+    Va.SetSession(v, cast(s32)(bundles.count - 1));
+    return v;
+}
+
+ARCHIVE_END :: "end of archive\n";
+
+// dir2header
+Header :: (d: FsDir) -> string {
+    out: Vec(u8);
+    Ty.AppendQ(*out, d.name);
+    VecPush(out, #char " ");
+    Octal(*out, cast(u64)d.mode);
+    VecPush(out, #char " ");
+    Ty.AppendQ(*out, d.uid);
+    VecPush(out, #char " ");
+    Ty.AppendQ(*out, d.gid);
+    BuilderPrint(*out, " % %\n", d.mtime, d.length);
+    return BuilderFinish(out);
+}
+
+Octal :: (out: *Vec(u8), n: u64) {
+    digits: [24]u8;
+    k := 0;
+    x := n;
+    while true {
+        digits[k] = cast(u8)(#char "0" + (x & 7));
+        k += 1;
+        x >>= 3;
+        if x == 0 { break }
+    }
+    while k > 0 {
+        k -= 1;
+        VecPush(<<out, digits[k]);
+    }
+}
+
+#scope_file
+
+BundleFrame :: struct {
+    isdir: bool;
+    path: string;
+    length: s64;
+    n: s64;
+}
+
+BundleState :: struct {
+    frames: Vec(BundleFrame);
+    reply: s32;
+    started: bool;
+    over: bool;
+}
+
+bundles: Vec(BundleState);
+
+Chunk :: (text: string, more: bool) -> St.Chunk { return St.Chunk.{text = text, more = more} }
+
+Push :: (b: s64, d: FsDir, path: string) {
+    f: BundleFrame;
+    f.isdir = IsDir(d);
+    f.path = path;
+    f.length = d.length;
+    VecPush(bundles[b].frames, f);
+}
+
+// endarchive
+End1 :: (b: s64) -> St.Chunk {
+    bundles[b].over = true;
+    return Chunk(ARCHIVE_END, false);
+}
+
+Fill :: (v: s32) -> St.Chunk {
+    b := cast(s64)Va.SessionOf(v);
+    src := Va.Kid(v, 0);
+    errc := Va.ErrcOf(v);
+    if bundles[b].over { return Chunk("", false) }
+    if !bundles[b].started {
+        bundles[b].started = true;
+        item := FsNext(src, Start);
+        if item.kind != Entry {
+            Va.Report(errc, "no root directory");
+            return End1(b);
+        }
+        Push(b, item.dir, item.dir.name);
+        bundles[b].reply = Down;
+        return Chunk(Header(item.dir), true);
+    }
+    k := bundles[b].frames.count - 1;
+    if k < 0 { return End1(b) }
+    item := FsNext(src, bundles[b].reply);
+    if bundles[b].frames[k].isdir {
+        if item.kind != Entry {
+            bundles[b].reply = Skip;
+            unused VecPop(bundles[b].frames);
+            if bundles[b].frames.count == 0 {
+                unused FsNext(src, Skip);
+                return Chunk(Al.Join("\n", ARCHIVE_END), false);
+            }
+            return Chunk("\n", true);
+        }
+        path := Al.Join3(bundles[b].frames[k].path, "/", item.dir.name);
+        Push(b, item.dir, path);
+        bundles[b].reply = Down;
+        return Chunk(Header(item.dir), true);
+    }
+    // a file's data
+    length := bundles[b].frames[k].length;
+    if item.kind == Data {
+        n := bundles[b].frames[k].n + item.data.count;
+        bundles[b].frames[k].n = n;
+        if n > length {
+            out: Vec(u8);
+            BuilderPrint(*out, "% is longer than expected (fatal)", Ty.Q(bundles[b].frames[k].path));
+            Va.Report(errc, BuilderFinish(out));
+            unused FsNext(src, Quit);
+            bundles[b].over = true;
+            return Chunk(item.data, false);
+        }
+        if n == length {
+            bundles[b].reply = Skip;
+            unused VecPop(bundles[b].frames);
+        } else {
+            bundles[b].reply = Next;
+        }
+        return Chunk(item.data, true);
+    }
+    // the end of the data
+    bundles[b].reply = Skip;
+    n := bundles[b].frames[k].n;
+    path := bundles[b].frames[k].path;
+    unused VecPop(bundles[b].frames);
+    if n >= length { return Chunk("", true) }
+    out: Vec(u8);
+    BuilderPrint(*out, "% is shorter than expected (%/%); adding null bytes", Ty.Q(path), n, length);
+    Va.Report(errc, BuilderFinish(out));
+    pad: Vec(u8);
+    while n < length {
+        nb: s64 = ATOMICIO;
+        if length - n < nb { nb = length - n }
+        for 1..nb { VecPush(pad, 0) }
+        msg: Vec(u8);
+        BuilderPrint(*msg, "added % null bytes", nb);
+        Va.Report(errc, BuilderFinish(msg));
+        n += nb;
+    }
+    return Chunk(BuilderFinish(pad), true);
+}

@@ -194,7 +194,7 @@ block7: [16]Case = Case.[
     .{name = "fs:mode-x", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/mode u+x}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\ntree/sub\ntree/sub/deep\n", err = ""},
 ];
 
-block8: [13]Case = Case.[
+block8: [16]Case = Case.[
     .{name = "fs:mode-bad", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/mode zz}}} 1}\n", input = "", status = "no value", out = "", err = "fs: mode: bad mode 'zz'\nalphabet: 0. eval: error: command failed\n"},
     .{name = "fs:path", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/path tree/sub}}} 1}\n", input = "", status = "", out = "tree\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
     .{name = "fs:path-x", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/path -x tree/sub tree/b.b}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\n", err = ""},
@@ -208,9 +208,25 @@ block8: [13]Case = Case.[
     .{name = "fs:compose-bad", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/walk tree}}} 1}\n- {/fs/compose nosuch}\n", input = "", status = "no value", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = "fs: join: bad op nosuch\nalphabet: 0. eval: error: command failed\n"},
     .{name = "fs:err-type", script = "typeset /fs\n- {/print {/fs/print {/fs/entries tree}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /fs/fs\nalphabet: 0. eval: error: conversion failed for /fs/entries\nalphabet: 0. eval: error: usage: /fs/entries /fs/fs -> /fs/entries\n"},
     .{name = "fs:auto", script = "typeset /fs\ntype /fs/fs /fs/entries\nautoconvert string fs /fs/walk\nautoconvert fs entries /fs/entries\nautoconvert entries fd /fs/print\n- {/print tree/sub 1}\n", input = "", status = "error", out = "", err = "cannot autoconvert string to fs via /fs/walk: unknown type string\n"},
+    .{name = "fs:bundle", script = "typeset /fs\n- {/print {/fs/bundle {/fs/walk tree}} 1}\n", input = "", status = "", out = "tree 20000000700 @USER@ @USER@ 1577979240 0\na.txt 600 @USER@ @USER@ 1577979240 6\nalpha\nb.b 755 @USER@ @USER@ 1577979240 4\nbee\nsub 20000000700 @USER@ @USER@ 1577979240 0\nc.txt 600 @USER@ @USER@ 1577979240 4\nsea\nd.b 600 @USER@ @USER@ 1577979240 4\ndee\ndeep 20000000700 @USER@ @USER@ 1577979240 0\ne.txt 600 @USER@ @USER@ 1577979240 2\ne\n\n\n\nend of archive\n", err = ""},
+    .{name = "fs:bundle-filter", script = "typeset /fs\n- {/print {/fs/bundle {/fs/filter {/fs/walk tree} {/fs/match '*.txt'}}} 1}\n", input = "", status = "", out = "tree 20000000700 @USER@ @USER@ 1577979240 0\na.txt 600 @USER@ @USER@ 1577979240 6\nalpha\n\nend of archive\n", err = ""},
+    .{name = "fs:unbundle", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/fs/bundle {/fs/walk tree}}}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
 ];
 
-CASES :: 141;
+block9: [10]Case = Case.[
+    .{name = "fs:unbundle-ls", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/unbundle {/fs/bundle {/fs/walk tree/sub}}}}} 1}\n", input = "", status = "", out = "d-rwx------ � -1 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n--rw------- � -1 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n--rw------- � -1 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\nd-rwx------ � -1 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n--rw------- � -1 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:unbundle-garbage", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/echo garbage}}}} 1}\n", input = "", status = "", out = "", err = "alphabet: 1. unbundle: invalid first header garbage\n"},
+    .{name = "fs:unbundle-empty", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/echo -n ''}}}} 1}\n", input = "", status = "", out = "", err = ""},
+    .{name = "fs:unbundle-file", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/unbundle {/echo 'f 644 u g 0 0'}}}} 1}\n", input = "", status = "", out = "", err = "alphabet: 1. unbundle: first entry is not a directory\n"},
+    .{name = "fs:unbundle-filter", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/filter {/fs/unbundle {/fs/bundle {/fs/walk tree}}} {/fs/match '*.b'}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\n", err = ""},
+    .{name = "fs:write", script = "typeset /fs\n- {/fs/write {/fs/walk tree} copy}\n- {/print {/fs/print {/fs/entries {/fs/walk copy}}} 1}\n- {/print {/read copy/sub/deep/e.txt} 1}\n", input = "", status = "", out = "copy\ncopy/a.txt\ncopy/b.b\ncopy/sub\ncopy/sub/c.txt\ncopy/sub/d.b\ncopy/sub/deep\ncopy/sub/deep/e.txt\ne\n", err = ""},
+    .{name = "fs:write-unbundle", script = "typeset /fs\n- {/fs/write {/fs/unbundle {/fs/bundle {/fs/walk tree/sub}}} copy2}\n- {/print {/read copy2/c.txt} 1}\n- {/print {/fs/print {/fs/entries {/fs/walk copy2}}} 1}\n", input = "", status = "", out = "sea\ncopy2\ncopy2/c.txt\ncopy2/d.b\ncopy2/deep\ncopy2/deep/e.txt\n", err = ""},
+    .{name = "fs:write-v", script = "typeset /fs\n- {/fs/write -v {/fs/walk tree/sub} copy3}\n", input = "", status = "", out = "", err = "alphabet: 2. fswrite: create copy3 20000000700\nalphabet: 2. fswrite: create copy3/c.txt 600\nalphabet: 2. fswrite: create copy3/d.b 600\nalphabet: 2. fswrite: create copy3/deep 20000000700\nalphabet: 2. fswrite: create copy3/deep/e.txt 600\n"},
+    .{name = "fs:write-filter", script = "typeset /fs\n- {/fs/write {/fs/filter {/fs/walk tree} {/fs/match '*.b'}} copy4}\n- {/print {/fs/print {/fs/entries {/fs/walk copy4}}} 1}\n", input = "", status = "", out = "copy4\ncopy4/b.b\n", err = ""},
+    .{name = "fs:write-bad", script = "typeset /fs\n- {/fs/write {/fs/walk tree} /nodir/x}\n", input = "", status = "", out = "", err = "alphabet: 2. fswrite: cannot create /nodir/x, mode 20000000700: '/nodir' file does not exist\n"},
+];
+
+CASES :: 154;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -230,7 +246,9 @@ CaseAt :: (i: s64) -> Case {
 
     if i < 128 { return block7[i - 112] }
 
-    if i < 141 { return block8[i - 128] }
+    if i < 144 { return block8[i - 128] }
+
+    if i < 154 { return block9[i - 144] }
 
     return block0[0];
 }

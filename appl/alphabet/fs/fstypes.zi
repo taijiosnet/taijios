@@ -2,6 +2,9 @@
 // selectors, with the modules in fs/ that make and use them.
 Ty :: #import "alpha_types";
 And :: #import "fs/and";
+Bundle :: #import "fs/bundle";
+Unbundle :: #import "fs/unbundle";
+Write :: #import "fs/write";
 Compose :: #import "fs/compose";
 Depth :: #import "fs/depth";
 Entries :: #import "fs/entries";
@@ -26,6 +29,9 @@ Register :: () {
     Ty.RegisterType(reg, #char "t", "entries");
     Ty.RegisterType(reg, #char "x", "fs");
     And.Register(reg);
+    Bundle.Register(reg);
+    Unbundle.Register(reg);
+    Write.Register(reg);
     Compose.Register(reg);
     Depth.Register(reg);
     Entries.Register(reg);

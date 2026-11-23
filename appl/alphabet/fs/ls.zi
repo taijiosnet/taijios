@@ -38,7 +38,8 @@ Fill :: (v: s32) -> St.Chunk {
     if (flags & 1) != 0 { BuilderPrint(*out, "[%] ", d.muid) }
     BuilderAppend(out, Modes(d.mode));
     VecPush(out, #char " ");
-    Ty.AppendRune(*out, d.dtype);
+    // %c of a code that is no character prints the replacement character
+    Ty.AppendRune(*out, ifx d.dtype < 0 || d.dtype > 0x10FFFF then 0xFFFD else d.dtype);
     t := ifx (flags & 2) != 0 then d.atime else d.mtime;
     BuilderPrint(*out, " % % % % % %\n", d.dev, d.uid, d.gid, d.length, Filet(Now(), cast(s64)t), e.path);
     return St.Chunk.{text = BuilderFinish(out), more = true};
@@ -91,7 +92,7 @@ Filet :: (now: s64, file: s64) -> string {
     year, month, day := Civil(days);
     out: Vec(u8);
     if now - file < 6 * 30 * 24 * 3600 {
-        BuilderPrint(*out, "% %:", MONTHS[month - 1], Two(day));
+        BuilderPrint(*out, "% % ", MONTHS[month - 1], Two(day));
         BuilderPrint(*out, "%:%", Two(secs / 3600), Two((secs / 60) % 60));
     } else {
         BuilderPrint(*out, "% %  %", MONTHS[month - 1], Two(day), year);
