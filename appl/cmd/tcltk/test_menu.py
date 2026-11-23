@@ -1,4 +1,4 @@
-"""Compare the hosted Ziran menu with shipped Inferno tkcmd and Sweeper."""
+"""Compare the hosted Ziran menu with shipped Inferno tkcmd, and use the Sweeper Options menu."""
 
 import argparse
 import io
@@ -46,7 +46,8 @@ def pointer(env, window, x, y, *actions):
 
 
 def sweeper(env):
-    with desktop(env, "wm/sweeper"):
+    # Coordinates below the window manager's 32-pixel title bar.
+    with desktop(env, "zxrun -w /dis/wm/sweeper.zx"):
         window = inferno_window(env)
 
         def capture():
@@ -55,18 +56,18 @@ def sweeper(env):
 
         def board():
             image = capture()
-            return image.crop((2, 74, 17, 91)) if image.getpixel((10, 75)) != DESKTOP else None
+            return image.crop((2, 84, 17, 101)) if image.getpixel((10, 85)) != DESKTOP else None
 
         initial = until(board, "Sweeper did not draw the board")
-        pointer(env, window, 10, 75, "mousedown", "3", "sleep", "0.15", "mouseup", "3")
-        pointer(env, window, 31, 32)
+        pointer(env, window, 10, 85, "mousedown", "3", "sleep", "0.15", "mouseup", "3")
+        pointer(env, window, 31, 42)
         until(lambda: ImageChops.difference(initial, board()).getbbox(), "Sweeper did not mark the first cell")
-        menu_strip = (1, 41, 68, 59)
+        menu_strip = (1, 51, 68, 69)
         closed = capture().crop(menu_strip)
-        pointer(env, window, 31, 32, "mousedown", "1")
+        pointer(env, window, 31, 42, "mousedown", "1")
         until(lambda: ImageChops.difference(closed, capture().crop(menu_strip)).getbbox(),
               "Sweeper did not post the Options menu")
-        pointer(env, window, 31, 52, "sleep", "0.10", "mouseup", "1")
+        pointer(env, window, 31, 62, "sleep", "0.10", "mouseup", "1")
         until(lambda: not ImageChops.difference(initial, board()).getbbox(),
               "Sweeper Options → restart did not clear the marked cell")
 
@@ -146,7 +147,7 @@ def main():
         reference = oracle_transcript(env)
         print(f"Inferno tkcmd produced {len(reference)} menu and menubutton results")
         sweeper(env)
-        print("Inferno Sweeper marked a real board cell and cleared it through Options → restart")
+        print("Sweeper marked a real board cell and cleared it through Options → restart")
         if not args.oracle_only:
             assert portable.stdout.splitlines() == [*reference, "0"] and not portable.stderr, portable
             print("Portable Ziran menu matches the full Inferno tkcmd transcript")

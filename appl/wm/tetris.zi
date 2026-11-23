@@ -1,0 +1,393 @@
+// Port of Inferno's Tetris (appl/wm/tetris.b). See ../../NOTICE.
+// Left and right, z and c, or 7 and 9 move; Up, x or 8 rotates; Down, space
+// or a click below the white line drops; p pauses and q quits. Clicks above
+// the line move left, rotate or move right by thirds of the board. After a
+// game, a key shows the high scores and another starts a new game.
+// usage: wm/tetris [-b blocksize]
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Text :: #import "kryon/text";
+Tetris :: #import "tetris_model";
+Rand :: #import "inferno_rand";
+Scores :: #import "score_table";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Clock :: #import "taijios_clock";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/input_protocol"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+ScoreFile :: "/lib/scores/tetris"
+PanelWidth :: 90
+RowHeight :: 18
+
+grey: Color = .{221, 221, 221, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{173, 173, 173, 255};
+black: Color = .{0, 0, 0, 255};
+
+Playing :: 0
+Over :: 1
+HighScores :: 2
+
+random: Rand.Random;
+game: Tetris.Game;
+table: Scores.Table;
+user_bytes: [256]u8;
+preferred: s32 = 17;
+// The block size of the current game.
+size: s32 = 17;
+mode: s32;
+paused: bool;
+next_tick: s64;
+rank: s32 = -1;
+board_held: bool;
+button_held: bool;
+started: bool;
+// The rows in the high score table, which places the New game button.
+listed: s32;
+
+ShapeColor :: (shape: s32) -> Color {
+    if shape == 0 { return .{255, 0, 0, 255} }
+    if shape == 1 { return .{255, 170, 0, 255} }
+    if shape == 2 { return .{255, 255, 0, 255} }
+    if shape == 3 { return .{0, 128, 0, 255} }
+    if shape == 4 { return .{0, 0, 204, 255} }
+    if shape == 5 { return .{147, 221, 241, 255} }
+    return .{255, 170, 255, 255}
+}
+
+BoardWidth :: () -> s32 { return size * Tetris.Width + 1 + 4 }
+BoardHeight :: () -> s32 { return size * Tetris.Height + 1 + 4 }
+PreviewSize :: () -> s32 { return 4 * size + 1 - 4 }
+Panel :: () -> s32 {
+    return ifx PreviewSize() > PanelWidth then PreviewSize() else PanelWidth
+}
+// The white line two thirds down the board, in canvas coordinates.
+Boundary :: () -> s32 { return BoardHeight() * 2 / 3 }
+
+// Blocks are as large as the preferred size allows within the window.
+Fit :: (session: Session) {
+    bounds := TreeRootBounds(session)
+    across := (cast(s32)bounds.width - Panel() - 5) / Tetris.Width
+    down := (cast(s32)bounds.height - 5) / Tetris.Height
+    size = preferred
+    if across < size { size = across }
+    if down < size { size = down }
+    if size < 1 { size = 1 }
+}
+
+NewGame :: (session: Session) {
+    Fit(session)
+    Tetris.Start(*game, *random)
+    mode = Playing
+    paused = false
+    rank = -1
+    // The ticker's first tick comes at once.
+    next_tick = Clock.Millis()
+}
+
+GameOver :: () {
+    mode = Over
+    if !table.ready { return }
+    time: [64]u8
+    seconds: s64 = 0
+    fd := IO.Open("/dev/time", 0)
+    if fd >= 0 {
+        count := IO.Read(fd, time[:])
+        unused IO.Close(fd)
+        for i: 0..count-1 {
+            if time[i] < cast(u8)48 || time[i] > cast(u8)57 { break }
+            seconds = seconds * 10 + cast(s64)(time[i] - cast(u8)48)
+        }
+    }
+    digits: [24]u8
+    other: Vec(u8)
+    defer VecFree(other)
+    unused BuilderAppend(other, FormatInteger(cast(s64)game.rows, digits[:]))
+    unused BuilderAppend(other, " ")
+    unused BuilderAppend(other, FormatInteger(cast(s64)game.level, digits[:]))
+    unused BuilderAppend(other, " ")
+    unused BuilderAppend(other, FormatInteger(seconds / 1000000, digits[:]))
+    rank = Scores.Set(table, game.score, TextView(other[:]))
+}
+
+Quit :: () { Surface.Close() }
+
+// A key or click while the game runs; true when the window closes.
+Play :: (session: Session, key: s32) -> bool {
+    if mode == Over {
+        if key == 113 { Quit(); return true }
+        if table.ready { mode = HighScores } else { NewGame(session) }
+        return false
+    }
+    if mode == HighScores {
+        if key == 113 { Quit(); return true }
+        NewGame(session)
+        return false
+    }
+    if paused {
+        paused = false
+        if next_tick < Clock.Millis() { next_tick = Clock.Millis() }
+        if key != 113 { return false }
+    }
+    if key == 57 || key == 99 || key == Tetris.RightKey { Tetris.Move(*game, 1) }
+    else if key == 55 || key == 122 || key == Tetris.LeftKey { Tetris.Move(*game, -1) }
+    else if key == 56 || key == 120 || key == Tetris.UpKey { Tetris.Rotate(*game) }
+    else if key == 32 || key == Tetris.DownKey { Tetris.Drop(*game) }
+    else if key == 112 { paused = true }
+    else if key == 113 { Quit(); return true }
+    return false
+}
+
+Input :: (session: Session) -> bool {
+    key := KeyboardTake(session)
+    nav: s32 = 0
+    if key == KeyUp { nav = Tetris.UpKey }
+    else if key == KeyDown { nav = Tetris.DownKey }
+    else if key == KeyLeft { nav = Tetris.LeftKey }
+    else if key == KeyRight { nav = Tetris.RightKey }
+    if nav != 0 && Play(session, nav) { return true }
+    while true {
+        rune := TypedCodepointTake(session)
+        if rune <= 0 { break }
+        if Play(session, rune) { return true }
+    }
+    pointer := PointerSample(session)
+    if mode == HighScores {
+        top := cast(float32)(36 + listed * RowHeight)
+        on_button := pointer.x >= 95.0 && pointer.x < 170.0 && pointer.y >= top && pointer.y < top + cast(float32)RowHeight
+        if pointer.pressed { button_held = on_button }
+        if pointer.released {
+            if button_held && on_button { NewGame(session) }
+            button_held = false
+        }
+        return false
+    }
+    on_board := pointer.x >= 0.0 && pointer.y >= 0.0 &&
+        pointer.x < cast(float32)BoardWidth() && pointer.y < cast(float32)BoardHeight()
+    if pointer.pressed { board_held = on_board }
+    if pointer.released && board_held {
+        board_held = false
+        x := cast(s32)pointer.x
+        y := cast(s32)pointer.y
+        click: s32 = 0
+        if y > Boundary() { click = 32 }
+        else {
+            third := x / (BoardWidth() / 3)
+            if third == 0 { click = 55 } else if third == 1 { click = 56 } else if third == 2 { click = 57 }
+        }
+        if mode == Over || click != 0 { return Play(session, click) }
+    }
+    return false
+}
+
+Advance :: () {
+    if mode != Playing || paused { return }
+    now := Clock.Millis()
+    // Like the ticker, later ticks wait the delay after the one before.
+    while now >= next_tick && mode == Playing {
+        if !Tetris.Tick(*game, *random) { GameOver(); return }
+        next_tick += cast(s64)game.delay
+        if next_tick < now { next_tick = now }
+    }
+}
+
+Bevel :: (session: Session, key: u64, left: s32, top: s32, width: s32, height: s32, depth: s32, sunken: bool) {
+    upper := ifx sunken then dark else light
+    lower := ifx sunken then light else dark
+    x := cast(float32)left
+    y := cast(float32)top
+    w := cast(float32)width
+    h := cast(float32)height
+    d := cast(float32)depth
+    Box.Draw(session, .{.key = key, .bounds = .{x, y + h - d, w, d}, .fill = lower})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x + w - d, y, d, h}, .fill = lower})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x, y, w - d, d}, .fill = upper})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x, y, d, h - d}, .fill = upper})
+}
+
+// A Tk rectangle from (left, top) to (left + size, top + size) with a black
+// outline, clipped to the area given.
+Block :: (session: Session, key: u64, left: s32, top: s32, fill: Color, clip: Rectangle) {
+    outer: Rectangle = .{cast(float32)left, cast(float32)top, cast(float32)(size + 1), cast(float32)(size + 1)}
+    inner: Rectangle = .{cast(float32)(left + 1), cast(float32)(top + 1), cast(float32)(size - 1), cast(float32)(size - 1)}
+    outer = RectangleIntersection(outer, clip)
+    inner = RectangleIntersection(inner, clip)
+    if outer.width > 0.0 && outer.height > 0.0 { Box.Draw(session, .{.key = key, .bounds = outer, .fill = black}) }
+    if inner.width > 0.0 && inner.height > 0.0 { Box.Draw(session, .{.key = key + 1, .bounds = inner, .fill = fill}) }
+}
+
+Label :: (session: Session, key: u64, text: string, left: float32, top: float32, width: float32, align: TextAlign) {
+    Text.Draw(session, .{.key = key, .bounds = .{left, top, width, cast(float32)RowHeight},
+        .text = text, .size = 12, .align = align, .vertical_align = .TextAlignCenter})
+}
+
+DrawGame :: (session: Session) {
+    width := BoardWidth()
+    height := BoardHeight()
+    Bevel(session, 2, 0, 0, width, height, 2, true)
+    interior: Rectangle = .{2.0, 2.0, cast(float32)(width - 4), cast(float32)(height - 4)}
+    // The white line lies under every block.
+    Box.Draw(session, .{.key = 7, .bounds = .{2.0, cast(float32)(2 + Boundary()), cast(float32)(width - 4), 1.0}, .fill = light})
+    for y: cast(s32)0..Tetris.Height-1 {
+        for x: cast(s32)0..Tetris.Width-1 {
+            cell := game.cells[y * Tetris.Width + x]
+            if cell == cast(u8)0 { continue }
+            Block(session, cast(u64)(16 + (y * Tetris.Width + x) * 2), 2 + x * size, 2 + y * size,
+                ShapeColor(cast(s32)cell - 1), interior)
+        }
+    }
+    blocks := Tetris.Blocks(game.current)
+    for i: cast(s32)0..3 {
+        x := game.position.x + blocks[i * 2]
+        y := game.position.y + blocks[i * 2 + 1]
+        Block(session, cast(u64)(600 + i * 2), 2 + x * size, 2 + y * size, ShapeColor(game.current.shape), interior)
+    }
+    panel := width
+    preview := PreviewSize()
+    left := panel + (Panel() - preview) / 2
+    origin := Tetris.PreviewOrigin(game.next, size)
+    next := Tetris.Blocks(game.next)
+    area: Rectangle = .{cast(float32)left, 0.0, cast(float32)preview, cast(float32)preview}
+    for i: cast(s32)0..3 {
+        Block(session, cast(u64)(620 + i * 2), left + origin.x + next[i * 2] * size, origin.y + next[i * 2 + 1] * size,
+            ShapeColor(game.next.shape), area)
+    }
+    names: [3]string = .["Score", "Level", "Rows"]
+    values := s32.[game.score, game.level, game.rows]
+    for i: cast(s32)0..2 {
+        top := preview + i * RowHeight
+        right := panel + Panel()
+        Label(session, cast(u64)(640 + i * 8), names[i], cast(float32)(panel + 3), cast(float32)top, 50.0, .TextAlignStart)
+        Bevel(session, cast(u64)(641 + i * 8), right - 44, top, 44, RowHeight, 2, true)
+        digits: [24]u8
+        Label(session, cast(u64)(646 + i * 8), FormatInteger(cast(s64)values[i], digits[:]),
+            cast(float32)(right - 42), cast(float32)top, 37.0, .TextAlignEnd)
+    }
+    if mode == Over {
+        // The label sits where the canvas window placed it, a third of the way down.
+        cx := 2 + Tetris.Width * size / 2 + 4
+        cy := 2 + Tetris.Height * size / 3 + 4
+        Box.Draw(session, .{.key = 700, .bounds = .{cast(float32)(cx - 43), cast(float32)(cy - 11), 86.0, 22.0}, .fill = grey})
+        Bevel(session, 701, cx - 43, cy - 11, 86, 22, 2, false)
+        Bevel(session, 706, cx - 41, cy - 9, 82, 18, 2, true)
+        Label(session, 711, "Game over", cast(float32)(cx - 39), cast(float32)(cy - 9), 78.0, .TextAlignCenter)
+    }
+}
+
+DrawScores :: (session: Session) {
+    bytes: Vec(u8)
+    defer VecFree(bytes)
+    entries: Vec(Scores.Score)
+    defer VecFree(entries)
+    if Scores.ReadAll(table.path, *bytes) { Scores.Parse(TextView(bytes[:]), *entries) }
+    text := TextView(bytes[:])
+    lefts := s32.[16, 96, 152, 208]
+    widths := s32.[80, 56, 56, 40]
+    count := entries.count
+    listed = cast(s32)count
+    bottom := 36 + cast(s32)count * RowHeight
+    Bevel(session, 2, 10, 0, 244, bottom + 22, 4, false)
+    Label(session, 7, "High Scores", 14.0, 0.0, 236.0, .TextAlignCenter)
+    Bevel(session, 8, 14, 18, 236, RowHeight, 2, false)
+    headings: [4]string = .["User", "Score", "Level", "Rows"]
+    for c: cast(s32)0..3 {
+        Label(session, cast(u64)(13 + c), headings[c], cast(float32)lefts[c], 18.0,
+            cast(float32)widths[c], .TextAlignCenter)
+    }
+    for n: cast(s32)0..cast(s32)count-1 {
+        entry := entries[n]
+        top := 36 + n * RowHeight
+        key := cast(u64)(40 + n * 16)
+        if n == rank {
+            Box.Draw(session, .{.key = key + 15, .bounds = .{16.0, cast(float32)(top + 2), 232.0, 14.0}, .fill = light})
+        }
+        Bevel(session, key, 14, top, 236, RowHeight, 2, true)
+        other := text[entry.other_start:entry.other_end]
+        // The other field holds rows, level and a time.
+        split: s64 = 0
+        while split < other.count && other[split] != cast(u8)32 { split += 1 }
+        rows := other[:split]
+        after := ifx split < other.count then other[split + 1:] else ""
+        level_end: s64 = 0
+        while level_end < after.count && after[level_end] != cast(u8)32 { level_end += 1 }
+        digits: [24]u8
+        cells: [4]string = .[text[entry.user_start:entry.user_end], FormatInteger(cast(s64)entry.score, digits[:]),
+            after[:level_end], rows]
+        for c: cast(s32)0..3 {
+            Label(session, key + 4 + cast(u64)c, cells[c], cast(float32)lefts[c], cast(float32)top,
+                cast(float32)widths[c], .TextAlignCenter)
+        }
+    }
+    pointer := PointerSample(session)
+    pressed := button_held && pointer.down && pointer.x >= 95.0 && pointer.x < 170.0 &&
+        pointer.y >= cast(float32)bottom && pointer.y < cast(float32)(bottom + RowHeight)
+    Bevel(session, 300, 95, bottom, 75, RowHeight, 1, pressed)
+    Label(session, 305, "New game", 95.0, cast(float32)bottom, 75.0, .TextAlignCenter)
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    if !started { started = true; NewGame(session) }
+    if Input(session) { return }
+    Advance()
+    bounds := TreeRootBounds(session)
+    Box.Draw(session, .{.key = 1, .bounds = bounds, .fill = grey})
+    if mode == HighScores { DrawScores(session) } else { DrawGame(session) }
+}
+
+Usage :: () -> s32 {
+    unused IO.Write(2, "usage: tetris [-b blocksize]\n")
+    unused Args.SetFailure("usage")
+    return 1
+}
+
+#program_export
+main :: () -> s32 {
+    at: s32 = 0
+    while at < Args.OperandCount() {
+        word := Args.Operand(at)
+        if word.count < 2 || word[0] != cast(u8)45 { return Usage() }
+        if word != "-b" || at + 1 >= Args.OperandCount() { return Usage() }
+        value: s32 = 0
+        text := Args.Operand(at + 1)
+        for i: cast(s64)0..text.count-1 {
+            if text[i] < cast(u8)48 || text[i] > cast(u8)57 { break }
+            value = value * 10 + cast(s32)(text[i] - cast(u8)48)
+        }
+        if value <= 0 { return Usage() }
+        preferred = value
+        at += 2
+    }
+    user := ""
+    fd := IO.Open("/dev/user", 0)
+    if fd >= 0 {
+        read := IO.Read(fd, user_bytes[:])
+        if read > 0 { user = TextView(user_bytes[:read]) }
+        unused IO.Close(fd)
+    }
+    table = Scores.Open(ScoreFile, user)
+    // Seed from /dev/random as Random->randomint(ReallyRandom) did.
+    seed: s32 = 0
+    random_fd := IO.Open("/dev/random", 0)
+    if random_fd >= 0 {
+        bytes: [4]u8
+        if IO.Read(random_fd, bytes[:]) == 4 {
+            seed = cast(s32)((cast(u32)bytes[0] << cast(u32)24) | (cast(u32)bytes[1] << cast(u32)16) |
+                (cast(u32)bytes[2] << cast(u32)8) | cast(u32)bytes[3])
+        }
+        unused IO.Close(random_fd)
+    }
+    Rand.Seed(*random, seed)
+    size = preferred
+    width := size * Tetris.Width + 1 + 4 + Panel()
+    height := size * Tetris.Height + 1 + 4
+    return Surface.RunRetained(.{.title = "Tetris", .width = width, .height = height}, Draw, 20)
+}

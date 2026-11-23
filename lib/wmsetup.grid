@@ -47,7 +47,7 @@ menu System			'Debugger'		{wmrun wm/deb}
 menu System			'Task manager'		{wmrun wm/task}
 menu System			'Memory monitor'	{wmrun zxrun -p -w /dis/wm/memory.zx}
 menu System			'About'			{wmrun zxrun -w /dis/wm/about.zx}
-menu Games			'Tetris'			{wmrun wm/tetris}
+menu Games			'Tetris'			{wmrun zxrun -w /dis/wm/tetris.zx}
 menu Games			'Bounce'			{wmrun wm/bounce}
 
 # anything else

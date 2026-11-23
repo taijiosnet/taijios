@@ -1,0 +1,79 @@
+// Replays the actions recorded from the Dis Mine Sweeper (sweeper_games.expected)
+// through the Ziran rules and compares every square and the label.
+Sweeper :: #import "sweeper_model";
+Rand :: #import "inferno_rand";
+Fixture :: #import "sweeper_games_fixture";
+
+Field :: (line: string, index: s32) -> string {
+    at: s64 = 0
+    for field: 0..index {
+        start := at
+        while at < line.count && line[at] != cast(u8)32 { at += 1 }
+        if field == index { return line[start:at] }
+        at += 1
+    }
+    return ""
+}
+
+Number :: (text: string) -> s32 {
+    value: s32 = 0
+    for i: cast(s64)0..text.count-1 { value = value * 10 + cast(s32)(text[i] - cast(u8)48) }
+    return value
+}
+
+FaceLetter :: (face: s32) -> u8 {
+    if face == Sweeper.Olive { return cast(u8)111 }
+    if face == Sweeper.Red { return cast(u8)114 }
+    if face == Sweeper.Orange { return cast(u8)121 }
+    return cast(u8)46
+}
+
+// The squares and label match the recorded line; the score equals the olive squares.
+Matches :: (game: *Sweeper.Game, faces: string, label: string) -> bool {
+    if faces.count != 100 { return false }
+    olive: s32 = 0
+    for row: cast(s32)1..Sweeper.Size {
+        for column: cast(s32)1..Sweeper.Size {
+            letter := FaceLetter(game.squares[Sweeper.At(row, column)].face)
+            if letter != faces[(row - 1) * 10 + column - 1] { return false }
+            if letter == cast(u8)111 { olive += 1 }
+        }
+    }
+    if label == "lost" { return game.label == Sweeper.LabelLost }
+    if label == "won" { return game.label == Sweeper.LabelWon }
+    return game.label == Sweeper.LabelScore && game.score == olive
+}
+
+random: Rand.Random;
+game: Sweeper.Game;
+
+main :: () -> s32 {
+    text := Fixture.Games
+    start: s64 = 0
+    steps: s32 = 0
+    for at: cast(s64)0..text.count-1 {
+        if text[at] != cast(u8)10 { continue }
+        line := text[start:at]
+        start = at + 1
+        if line.count == 0 || line[0] == cast(u8)35 { continue }
+        action := Field(line, 0)
+        if action == "seed" {
+            Rand.Seed(*random, Number(Field(line, 1)))
+            Sweeper.Start(*game, *random)
+            if game.label != Sweeper.LabelStart || game.finished { return 1 }
+            continue
+        }
+        row := Number(Field(line, 1))
+        column := Number(Field(line, 2))
+        if action == "click" { Sweeper.Click(*game, row, column) }
+        else if action == "mark" { Sweeper.Mark(*game, row, column) }
+        else { Sweeper.Restart(*game, *random) }
+        steps += 1
+        if !Matches(*game, Field(line, 3), Field(line, 4)) {
+            print("step % differs: %\n", steps, line)
+            return 2
+        }
+    }
+    print("Mine Sweeper matched % actions recorded from the Dis version\n", steps)
+    return 0
+}

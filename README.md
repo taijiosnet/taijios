@@ -409,11 +409,17 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/appl/cmd/tcltk" python3 -u appl/wm/kr
 `(cd appl/wm && mk install-kryon-zx)` also installs the games rewritten from
 their Limbo versions. Snake keeps the arrow keys, `p` to pause and `q` to quit,
 records each crash with its replay in `/lib/scores/snake`, and replays a
-recorded game with `wm/snake seed.log`. Its test compares the rules and the
-window with games recorded from the Dis Snake.
+recorded game with `wm/snake seed.log`. Mine Sweeper uncovers a square on a
+click, marks it on a right click and starts again from Options; `wm/sweeper
+seed` chooses the board. Tetris keeps its keys, clicks, levels, Game over
+label and high score table in `/lib/scores/tetris`, and seeds its pieces from
+`/dev/random`. Each test compares the rules and the window with games recorded
+from the Dis version.
 
 ```sh
 python3 -u appl/wm/snake_zx_test.py
+python3 -u appl/wm/sweeper_zx_test.py
+python3 -u appl/wm/tetris_zx_test.py
 ```
 
 ### Build and run ZX Task Manager

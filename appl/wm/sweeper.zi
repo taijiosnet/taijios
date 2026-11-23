@@ -1,0 +1,196 @@
+// Port of Inferno's Mine Sweeper (appl/wm/sweeper.b). See ../../NOTICE.
+// Click a square to uncover it, right-click to mark it, and choose Options,
+// restart for a new board. `wm/sweeper seed` starts from a chosen seed
+// instead of the time.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Text :: #import "kryon/text";
+Sweeper :: #import "sweeper_model";
+Rand :: #import "inferno_rand";
+Args :: #import "taijios_args";
+Clock :: #import "taijios_clock";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/input_protocol"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+Width :: 230
+Height :: 212
+GridTop :: 32
+SquareWidth :: 16
+SquareHeight :: 18
+MenuButtonWidth :: 66
+MenuButtonHeight :: 18
+MenuTop :: 18
+MenuWidth :: 67
+MenuHeight :: 18
+
+face: Color = .{221, 221, 221, 255};
+active: Color = .{238, 238, 238, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{173, 173, 173, 255};
+olive: Color = .{128, 128, 0, 255};
+red: Color = .{255, 0, 0, 255};
+orange: Color = .{255, 170, 0, 255};
+posted: Color = .{237, 237, 237, 255};
+
+random: Rand.Random;
+game: Sweeper.Game;
+// The square under a held button: row * Inner + column, or -1.
+pressed: s32 = -1;
+marking: s32 = -1;
+menu_posted: bool;
+menu_held: bool;
+
+SquareAt :: (x: float32, y: float32) -> s32 {
+    if x < 0.0 || y < cast(float32)GridTop { return -1 }
+    column := cast(s32)x / SquareWidth
+    row := (cast(s32)y - GridTop) / SquareHeight
+    if column >= Sweeper.Size || row >= Sweeper.Size { return -1 }
+    return Sweeper.At(row + 1, column + 1)
+}
+
+Inside :: (x: float32, y: float32, left: s32, top: s32, width: s32, height: s32) -> bool {
+    return x >= cast(float32)left && y >= cast(float32)top &&
+        x < cast(float32)(left + width) && y < cast(float32)(top + height)
+}
+
+// A Tk widget border: light above and left, dark below and right, or the
+// reverse while it is pressed.
+Bevel :: (session: Session, key: u64, left: s32, top: s32, width: s32, height: s32, sunken: bool) {
+    upper := ifx sunken then dark else light
+    lower := ifx sunken then light else dark
+    x := cast(float32)left
+    y := cast(float32)top
+    w := cast(float32)width
+    h := cast(float32)height
+    Box.Draw(session, .{.key = key, .bounds = .{x, y, w, 1.0}, .fill = upper})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x, y, 1.0, h}, .fill = upper})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x, y + h - 1.0, w, 1.0}, .fill = lower})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x + w - 1.0, y, 1.0, h}, .fill = lower})
+}
+
+FaceColor :: (square: Sweeper.Square, hovered: bool) -> Color {
+    if square.face == Sweeper.Olive { return olive }
+    if square.face == Sweeper.Red { return red }
+    if square.face == Sweeper.Orange { return orange }
+    return ifx hovered then active else face
+}
+
+Pointer :: (session: Session) {
+    pointer := PointerSample(session)
+    secondary := SecondaryPointerSample(session)
+    over := SquareAt(pointer.x, pointer.y)
+    on_menu := Inside(pointer.x, pointer.y, 0, 0, MenuButtonWidth, MenuButtonHeight)
+    on_item := menu_posted && Inside(pointer.x, pointer.y, 0, MenuTop, MenuWidth, MenuHeight)
+    if pointer.pressed {
+        if on_menu {
+            menu_posted = true
+            menu_held = true
+        } else if on_item {
+            menu_held = true
+        } else if menu_posted {
+            menu_posted = false
+        } else {
+            pressed = over
+        }
+    }
+    if pointer.released {
+        if menu_held {
+            menu_held = false
+            if on_item {
+                menu_posted = false
+                Sweeper.Restart(*game, *random)
+            }
+        } else if pressed >= 0 && pressed == over {
+            Sweeper.Click(*game, pressed / Sweeper.Inner, pressed % Sweeper.Inner)
+        }
+        pressed = -1
+    }
+    if secondary.pressed { marking = over }
+    if secondary.released {
+        if marking >= 0 { Sweeper.Mark(*game, marking / Sweeper.Inner, marking % Sweeper.Inner) }
+        marking = -1
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    Pointer(session)
+    pointer := PointerSample(session)
+    hovered := SquareAt(pointer.x, pointer.y)
+    if menu_posted { hovered = -1 }
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, cast(float32)Width, cast(float32)Height}, .fill = face})
+    if menu_posted {
+        Box.Draw(session, .{.key = 2, .bounds = .{0.0, 0.0, cast(float32)MenuButtonWidth,
+            cast(float32)MenuButtonHeight}, .fill = posted})
+    }
+    Text.Draw(session, .{.key = 3, .bounds = .{6.0, 0.0, 60.0, cast(float32)MenuButtonHeight},
+        .text = "Options", .size = 12})
+    label: Vec(u8)
+    defer VecFree(label)
+    digits: [24]u8
+    if game.label == Sweeper.LabelWon { unused BuilderAppend(label, "You have Won") }
+    else if game.label == Sweeper.LabelLost { unused BuilderAppend(label, "You have Lost") }
+    else {
+        unused BuilderAppend(label, "Score: ")
+        if game.label == Sweeper.LabelScore {
+            unused BuilderAppend(label, FormatInteger(cast(s64)game.score, digits[:]))
+        }
+    }
+    Text.Draw(session, .{.key = 4, .bounds = .{70.0, 0.0, 142.0, cast(float32)MenuButtonHeight},
+        .text = TextView(label[:]), .size = 12, .align = .TextAlignEnd})
+
+    character: [1]u8
+    for row: cast(s32)1..Sweeper.Size {
+        for column: cast(s32)1..Sweeper.Size {
+            index := Sweeper.At(row, column)
+            square := game.squares[index]
+            left := (column - 1) * SquareWidth
+            top := GridTop + (row - 1) * SquareHeight
+            key := cast(u64)(16 + index * 8)
+            sunken := pressed == index && hovered == index
+            Box.Draw(session, .{.key = key, .bounds = .{cast(float32)left, cast(float32)top,
+                cast(float32)SquareWidth, cast(float32)SquareHeight}, .fill = FaceColor(square, hovered == index)})
+            Bevel(session, key + 1, left, top, SquareWidth, SquareHeight, sunken)
+            if square.text != cast(u8)32 {
+                character[0] = square.text
+                Text.Draw(session, .{.key = key + 5, .bounds = .{cast(float32)left, cast(float32)top,
+                    cast(float32)SquareWidth, cast(float32)SquareHeight}, .text = TextView(character[:]),
+                    .size = 12, .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+            }
+        }
+    }
+
+    if menu_posted {
+        item_hovered := Inside(pointer.x, pointer.y, 0, MenuTop, MenuWidth, MenuHeight)
+        Box.Draw(session, .{.key = 2000, .bounds = .{0.0, cast(float32)MenuTop, cast(float32)MenuWidth,
+            cast(float32)MenuHeight}, .fill = ifx item_hovered then active else face})
+        Bevel(session, 2001, 0, MenuTop, MenuWidth, MenuHeight, false)
+        Text.Draw(session, .{.key = 2005, .bounds = .{8.0, cast(float32)MenuTop, 58.0, cast(float32)MenuHeight},
+            .text = "restart", .size = 12})
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    seed := cast(s32)(Clock.UnixMillis() / 1000)
+    if Args.OperandCount() > 0 {
+        value: s64 = 0
+        text := Args.Operand(0)
+        for i: cast(s64)0..text.count-1 {
+            if text[i] < cast(u8)48 || text[i] > cast(u8)57 { break }
+            value = value * 10 + cast(s64)(text[i] - cast(u8)48)
+        }
+        seed = cast(s32)value
+    }
+    Rand.Seed(*random, seed)
+    Sweeper.Start(*game, *random)
+    return Surface.RunRetained(.{.title = "Mine Sweeper", .width = Width, .height = Height}, Draw, 0)
+}

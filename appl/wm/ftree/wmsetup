@@ -36,7 +36,7 @@ menu System			'Module manager'	{wmrun wm/rt}
 menu System			'Task manager'		{wmrun wm/task}
 menu System			'Memory monitor'	{wmrun zxrun -p -w /dis/wm/memory.zx}
 menu System			'About'			{wmrun zxrun -w /dis/wm/about.zx}
-menu Misc			'Tetris'			{wmrun wm/tetris}
+menu Misc			'Tetris'			{wmrun zxrun -w /dis/wm/tetris.zx}
 menu Misc			'Coffee'			{wmrun wm/coffee}
 menu Misc			'Colours'			{wmrun wm/colors}
 menu Misc			'Winctl'			{wmrun wm/winctl}

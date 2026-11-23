@@ -1,0 +1,162 @@
+// The rules of Inferno's Mine Sweeper (appl/wm/sweeper.b): 20 mine draws on a
+// 10x10 board, a revealed zero opens only its zero neighbours, a right click
+// marks a square and a marked mine still loses. See ../../NOTICE.
+Rand :: #import "inferno_rand";
+
+Size :: 10
+// The internal board has a border row and column on each side.
+Inner :: 12
+Draws :: 20
+
+Unselected :: 1
+Selected :: 2
+Marked :: 4
+
+// Square faces, as the Tk buttons show them.
+Plain :: 0
+Olive :: 1
+Red :: 2
+Orange :: 3
+
+// The label beside Options.
+LabelStart :: 0
+LabelScore :: 1
+LabelWon :: 2
+LabelLost :: 3
+
+Square :: struct {
+    mine: bool
+    state: s32
+    // ' ', '0'..'8', 'M' or '?'.
+    text: u8
+    face: s32
+}
+
+Game :: struct {
+    squares: [Inner * Inner]Square
+    score: s32
+    mines: s32
+    finished: bool
+    label: s32
+}
+
+At :: (row: s32, column: s32) -> s32 {
+    return row * Inner + column
+}
+
+// init_board: draw 20 squares; a repeated draw places no second mine.
+Place :: (game: *Game, random: *Rand.Random) {
+    game.score = 0
+    game.mines = 0
+    for index: 0..Inner*Inner-1 {
+        game.squares[index].mine = false
+        game.squares[index].state = Unselected
+    }
+    for draw: 0..Draws-1 {
+        j := Rand.Next(random, Size * Size)
+        square := *game.squares[At(j / Size + 1, j % Size + 1)]
+        if !square.mine {
+            square.mine = true
+            game.mines += 1
+        }
+    }
+}
+
+// The first board keeps the initial label and blank squares.
+Start :: (game: *Game, random: *Rand.Random) {
+    for index: 0..Inner*Inner-1 {
+        game.squares[index].text = cast(u8)32
+        game.squares[index].face = Plain
+    }
+    Place(game, random)
+    game.finished = false
+    game.label = LabelStart
+}
+
+// Options, restart.
+Restart :: (game: *Game, random: *Rand.Random) {
+    Place(game, random)
+    game.label = LabelScore
+    for index: 0..Inner*Inner-1 {
+        game.squares[index].text = cast(u8)32
+        game.squares[index].face = Plain
+    }
+    game.finished = false
+}
+
+// board_check: -1 for a mine, -2 for a selected or marked square, else the
+// mines around it.
+Check :: (game: *Game, row: s32, column: s32) -> s32 {
+    square := game.squares[At(row, column)]
+    if square.mine { return -1 }
+    if (square.state & (Selected | Marked)) != 0 { return -2 }
+    count: s32 = 0
+    for x: row-1..row+1 {
+        for y: column-1..column+1 {
+            if game.squares[At(x, y)].mine { count += 1 }
+        }
+    }
+    return count
+}
+
+Show :: (game: *Game, row: s32, column: s32, text: u8, face: s32) {
+    square := *game.squares[At(row, column)]
+    square.text = text
+    square.face = face
+}
+
+ShowMines :: (game: *Game) {
+    for row: cast(s32)1..Size {
+        for column: cast(s32)1..Size {
+            if game.squares[At(row, column)].mine { Show(game, row, column, cast(u8)77, Red) }
+        }
+    }
+}
+
+Zeros :: (game: *Game, row: s32, column: s32) {
+    for x: row-1..row+1 {
+        for y: column-1..column+1 {
+            if x < 1 || x > Size || y < 1 || y > Size { continue }
+            if Check(game, x, y) == 0 {
+                game.score += 1
+                game.squares[At(x, y)].state = Selected
+                Show(game, x, y, cast(u8)48, Olive)
+                Zeros(game, x, y)
+            }
+        }
+    }
+}
+
+// A left click on a square, rows and columns counted from 1.
+Click :: (game: *Game, row: s32, column: s32) {
+    count := Check(game, row, column)
+    if count == -1 {
+        ShowMines(game)
+        game.label = LabelLost
+        game.finished = true
+        return
+    }
+    if count < 0 || game.finished { return }
+    game.score += 1
+    game.squares[At(row, column)].state = Selected
+    Show(game, row, column, cast(u8)(48 + count), Olive)
+    if count == 0 { Zeros(game, row, column) }
+    game.label = LabelScore
+    if game.score + game.mines == Size * Size {
+        ShowMines(game)
+        game.label = LabelWon
+        game.finished = true
+    }
+}
+
+// A right click marks an unselected square or clears its mark.
+Mark :: (game: *Game, row: s32, column: s32) {
+    square := *game.squares[At(row, column)]
+    if square.state == Unselected {
+        square.state = Marked
+        Show(game, row, column, cast(u8)63, Orange)
+    } else if square.state == Marked {
+        square.state = Unselected
+        Show(game, row, column, cast(u8)32, Plain)
+    }
+}

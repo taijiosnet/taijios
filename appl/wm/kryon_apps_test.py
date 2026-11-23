@@ -277,7 +277,7 @@ def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
             wait_start(capture, legacy)
             legacy_catalog = (
                 ((26, 473), (138, 473), 'wm/bounce'),
-                ((26, 473), (138, 490), 'wm/tetris'),
+                ((26, 473), (138, 490), 'zxrun -w /dis/wm/tetris.zx'),
                 ((42, 489), (142, 489), 'zxrun -w /dis/wm/counter.zx'),
                 ((42, 489), (150, 506), 'zxrun -w /dis/wm/stopwatch.zx'),
                 ((42, 489), (134, 522), 'zxrun -w /dis/wm/clock.zx'),
