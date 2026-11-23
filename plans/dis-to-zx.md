@@ -655,27 +655,10 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/alphabet/reports.dis | appl/alphabet/reports.b | module/alphabet/reports.m | - |  |
 | dis/alphabet/rexecsrv.dis | appl/alphabet/auxi/rexecsrv.b |  | - |  |
 
-### 9. Spree - multiuser engine family - 17 rows
+### 9. Spree - multiuser engine family - 0 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/spree/archives.dis | appl/spree/archives.b |  | - |  |
-| dis/spree/engines/afghan.dis | appl/spree/engines/afghan.b |  | - |  |
-| dis/spree/engines/bounce.dis | appl/spree/engines/bounce.b |  | - |  |
-| dis/spree/engines/canfield.dis | appl/spree/engines/canfield.b |  | - |  |
-| dis/spree/engines/freecell.dis | appl/spree/engines/freecell.b |  | - |  |
-| dis/spree/engines/gather.dis | appl/spree/engines/gather.b |  | - |  |
-| dis/spree/engines/lobby.dis | appl/spree/engines/lobby.b |  | - |  |
-| dis/spree/engines/othello.dis | appl/spree/engines/othello.b |  | - |  |
-| dis/spree/engines/racingdemon.dis | appl/spree/engines/racingdemon.b |  | - |  |
-| dis/spree/engines/spider.dis | appl/spree/engines/spider.b |  | - |  |
-| dis/spree/engines/spit.dis | appl/spree/engines/spit.b |  | - |  |
-| dis/spree/engines/whist.dis | appl/spree/engines/whist.b |  | - |  |
-| dis/spree/lib/allow.dis | appl/spree/lib/allow.b |  | - |  |
-| dis/spree/lib/cardlib.dis | appl/spree/lib/cardlib.b |  | - |  |
-| dis/spree/lib/objstore.dis | appl/spree/lib/objstore.b |  | - |  |
-| dis/spree/lib/tricks.dis | appl/spree/lib/tricks.b |  | - |  |
-| dis/spree/spree.dis | appl/spree/spree.b |  | - |  |
 
 ### 10. Grid - computing grid family - 6 rows
 

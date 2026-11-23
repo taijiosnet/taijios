@@ -1,0 +1,919 @@
+// Spree multiuser game server: 9P2000/Styx server over fd 0, ported from appl/spree/spree.b.
+// Serves /name, /<clique>/ctl, lobby and gather meta-engines, all 9 game engines,
+// per-member visibility object trees, deferred update reads, and archive persistence.
+#import "std/vec"
+#import "std/number_text"
+using Io :: #import "taijios_io"
+using Ninep :: #import "ninep"
+using Core :: #import "spree_core"
+using Arch :: #import "archives"
+using Gather :: #import "gather"
+using Lobby :: #import "lobby"
+
+QTDIR :: 0x80;
+DMDIR :: 0x80000000;
+MAXRPC :: 8216;
+ARCHIVEDIR :: "/lib/spreearchive";
+
+F_ROOT :: 0;
+F_GAME :: 1;
+F_NAME :: 2;
+F_GAMEDIR :: 3;
+
+MkQid :: (kind: u64, idx: u64) -> u64 { return kind | (idx << 4) }
+QidKind :: (path: u64) -> u64 { return path & 0xf }
+QidIndex :: (path: u64) -> s32 { return cast(s32)(path >> 4) }
+
+CK_EMPTY :: 0;
+CK_LOBBY :: 1;
+CK_GATHER :: 2;
+
+CliqueSlot :: struct {
+    kind: s32;
+    clique: Core.Clique;
+    lobby: Lobby.LobbyEngine;
+    gather: Gather.GatherEngine;
+}
+
+Fid :: struct {
+    fid: s64;
+    path: u64;
+    qtype: s64;
+    open: bool;
+    mode: s64;
+    dir_offset: s64;
+    dir_index: s64;
+    uname: Text;
+    clique_id: s32;
+    member_id: s32;
+    hungup: bool;
+    pending_read: bool;
+    read_tag: s64;
+    read_count: s64;
+}
+
+Server :: struct {
+    msize: s64;
+    max_clique_fname: s32;
+    archive_num: s32;
+    now_ms: s64;
+    cliques: Vec(CliqueSlot);
+    fids: Vec(Fid);
+}
+
+srv: Server;
+
+Signed :: (value: s64) -> s64 {
+    low := value & 0xFFFFFFFF;
+    return ifx low >= 0x80000000 then low - 0x100000000 else low;
+}
+
+FindFid :: (fid: s64) -> s64 {
+    for i: 0..srv.fids.count-1 {
+        if srv.fids[i].fid == fid { return i }
+    }
+    return -1;
+}
+
+NewFid :: (fid: s64) -> s64 {
+    if FindFid(fid) >= 0 { return -1 }
+    idx := srv.fids.count;
+    unused VecResize(srv.fids, idx + 1);
+    f := *srv.fids[idx];
+    f.fid = fid;
+    f.path = 0xFFFFFFFFFFFFFFFF;
+    f.qtype = 0;
+    f.open = false;
+    f.mode = 0;
+    f.dir_offset = 0;
+    f.dir_index = 0;
+    Core.SetText(*f.uname, "");
+    f.clique_id = -1;
+    f.member_id = -1;
+    f.hungup = false;
+    f.pending_read = false;
+    f.read_tag = 0;
+    f.read_count = 0;
+    return idx;
+}
+
+DeleteFid :: (index: s64) {
+    last := srv.fids.count - 1;
+    if index != last {
+        a := *srv.fids[index];
+        b := *srv.fids[last];
+        a.fid = b.fid;
+        a.path = b.path;
+        a.qtype = b.qtype;
+        a.open = b.open;
+        a.mode = b.mode;
+        a.dir_offset = b.dir_offset;
+        a.dir_index = b.dir_index;
+        VecSwap(a.uname.bytes, b.uname.bytes);
+        a.clique_id = b.clique_id;
+        a.member_id = b.member_id;
+        a.hungup = b.hungup;
+        a.pending_read = b.pending_read;
+        a.read_tag = b.read_tag;
+        a.read_count = b.read_count;
+    }
+    unused VecResize(srv.fids, last);
+}
+
+Send :: (reply: *Ninep.Message) -> bool {
+    out: Vec(u8);
+    if srv.msize == 0 {
+        reply.kind = Ninep.Rerror;
+        reply.ename = "Tversion not seen";
+    }
+    unused Ninep.Pack(reply, *out);
+    if srv.msize != 0 && out.count > srv.msize {
+        reply.kind = Ninep.Rerror;
+        reply.ename = "Styx reply didn't fit";
+        VecClear(out);
+        unused Ninep.Pack(reply, *out);
+    }
+    at: s64 = 0;
+    while at < out.count {
+        n := Io.Write(0, TextView(out[at:]));
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+SetError :: (reply: *Ninep.Message, msg: string) {
+    reply.kind = Ninep.Rerror;
+    reply.ename = msg;
+}
+
+FindCliqueByFname :: (name: string) -> s32 {
+    for i: 0..srv.cliques.count-1 {
+        if srv.cliques[i].kind != CK_EMPTY && TextView(srv.cliques[i].clique.fname) == name {
+            return cast(s32)i;
+        }
+    }
+    return -1;
+}
+
+CountOpenOnClique :: (cid: s32) -> s32 {
+    n: s32 = 0;
+    for i: 0..srv.fids.count-1 {
+        if srv.fids[i].open && srv.fids[i].clique_id == cid { n += 1 }
+    }
+    return n;
+}
+
+HangupClique :: (cid: s32, notes: *Vec(Gather.Note)) {
+    if cid < 0 || cast(s64)cid >= srv.cliques.count { return }
+    c := *srv.cliques[cid].clique;
+    if c.hungup { return }
+    c.hungup = true;
+    for i: 0..srv.fids.count-1 {
+        if srv.fids[i].open && srv.fids[i].clique_id == cid {
+            srv.fids[i].hungup = true;
+        }
+    }
+    if c.parent_id >= 0 {
+        Gather.PushNote(notes, c.parent_id, "");
+        c.parent_id = -1;
+    }
+    for i: 0..srv.cliques.count-1 {
+        if srv.cliques[i].kind != CK_EMPTY && srv.cliques[i].clique.parent_id == cid {
+            srv.cliques[i].clique.parent_id = -1;
+        }
+    }
+}
+
+DeliverNotes :: (src_id: s32, initial: *Vec(Gather.Note)) {
+    cur: Vec(Gather.Note);
+    for i: 0..initial.count-1 {
+        Gather.PushNote(*cur, (<<initial)[i].dst_id, TextView((<<initial)[i].text));
+    }
+    unused VecResize(<<initial, 0);
+    // Keep track of src for each note; for simplicity we pass src_id on first wave
+    rounds := 0;
+    while cur.count > 0 && rounds < 50 {
+        next: Vec(Gather.Note);
+        for i: 0..cur.count-1 {
+            dst_id := cur[i].dst_id;
+            msg := TextView(cur[i].text);
+            if dst_id < 0 || cast(s64)dst_id >= srv.cliques.count { continue }
+            slot := *srv.cliques[dst_id];
+            if slot.kind == CK_EMPTY || slot.clique.hungup { continue }
+            if slot.kind == CK_LOBBY {
+                Lobby.Notify(*slot.lobby, *slot.clique, src_id, msg);
+            } else if slot.kind == CK_GATHER {
+                Gather.Notify(*slot.gather, msg);
+            }
+        }
+        unused VecResize(cur, 0);
+        for i: 0..next.count-1 {
+            Gather.PushNote(*cur, next[i].dst_id, TextView(next[i].text));
+        }
+        rounds += 1;
+    }
+}
+
+CreateClique :: (parent_id: s32, argv: []Text, arch_members: []Text, owner: string, out_fname: *Text, out_err: *Text) -> s32 {
+    Core.SetText(out_err, "");
+    Core.SetText(out_fname, "");
+    if argv.count == 0 {
+        Core.SetText(out_err, "empty argv");
+        return -1;
+    }
+    eng := TextView(argv[0]);
+    if eng != "lobby" && eng != "gather" {
+        Core.SetText(out_err, "cannot load engine");
+        return -1;
+    }
+
+    cid: s32 = -1;
+    for i: 0..srv.cliques.count-1 {
+        if srv.cliques[i].kind == CK_EMPTY { cid = cast(s32)i; break }
+    }
+    if cid < 0 {
+        cid = cast(s32)srv.cliques.count;
+        unused VecResize(srv.cliques, cast(s64)cid + 1);
+    }
+
+    slot := *srv.cliques[cid];
+    Core.CliqueInit(*slot.clique, cid, parent_id, owner);
+    fb: [24]u8;
+    fn_str := FormatInteger(cast(s64)srv.max_clique_fname, fb[:]);
+    srv.max_clique_fname += 1;
+    Core.SetText(*slot.clique.fname, fn_str);
+    Core.SetText(out_fname, fn_str);
+
+    // Save archive_argv
+    unused VecResize(slot.clique.archive_argv, argv.count);
+    for i: 0..argv.count-1 {
+        Core.SetText(*slot.clique.archive_argv[i], TextView(argv[i]));
+    }
+
+    notes: Vec(Gather.Note);
+    if eng == "lobby" {
+        slot.kind = CK_LOBBY;
+        Lobby.Init(*slot.lobby, *slot.clique);
+    } else {
+        slot.kind = CK_GATHER;
+        if !Gather.Init(*slot.gather, *slot.clique, argv, arch_members, *notes, out_err) {
+            slot.kind = CK_EMPTY;
+            return -1;
+        }
+    }
+    if notes.count > 0 {
+        DeliverNotes(cid, *notes);
+    }
+    return cid;
+}
+
+ReadFileAll :: (path: string, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    fd := Io.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [4096]u8;
+    while true {
+        n := Io.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(<<out, TextView(buf[0:n]));
+    }
+    Io.Close(fd);
+    return true;
+}
+
+ReloadLobbyArchives :: (slot: *CliqueSlot) {
+    if slot.kind != CK_LOBBY { return }
+    c := *slot.clique;
+    aobj := slot.lobby.archive_obj;
+    while c.objects[aobj].children.count > 0 {
+        ch := c.objects[aobj].children[c.objects[aobj].children.count - 1];
+        Core.ObjDelete(c, ch);
+    }
+    fd := Io.Open(ARCHIVEDIR, 0);
+    if fd < 0 { return }
+    Io.Close(fd);
+}
+
+SendUpdateForFid :: (fidx: s64) {
+    f := *srv.fids[fidx];
+    if !f.pending_read { return }
+    if f.hungup {
+        reply: Ninep.Message;
+        reply.tag = f.read_tag;
+        reply.kind = Ninep.Rread;
+        reply.data = "";
+        unused Send(*reply);
+        f.pending_read = false;
+        return;
+    }
+    if f.clique_id < 0 || cast(s64)f.clique_id >= srv.cliques.count { return }
+    c := *srv.cliques[f.clique_id].clique;
+    if f.member_id < 0 || cast(s64)f.member_id >= c.members.count { return }
+    m := *c.members[f.member_id];
+    if m.outq.bytes.count == 0 { return }
+
+    // Skip leading NUL break markers
+    while m.outq.bytes.count > 0 && m.outq.bytes[0] == 0 {
+        for j: 1..m.outq.bytes.count-1 { m.outq.bytes[j - 1] = m.outq.bytes[j] }
+        unused VecResize(m.outq.bytes, m.outq.bytes.count - 1);
+    }
+    if m.outq.bytes.count == 0 { return }
+
+    avail := f.read_count - 2; // reserve 2 bytes for "\n*" continuation
+    if avail < 1 { avail = f.read_count }
+
+    // Find end of chunk: either first NUL break or last newline within avail
+    end: s64 = 0;
+    hit_break := false;
+    while end < m.outq.bytes.count && end < avail {
+        if m.outq.bytes[end] == 0 {
+            hit_break = true;
+            break;
+        }
+        end += 1;
+    }
+
+    chunk: Vec(u8);
+    if end > 0 {
+        unused BuilderAppend(chunk, TextView(m.outq.bytes[0:end]));
+    }
+    consume := end;
+    if hit_break { consume += 1 }
+
+    // Shift remaining bytes in outq
+    rem := m.outq.bytes.count - consume;
+    if rem > 0 {
+        for j: 0..rem-1 { m.outq.bytes[j] = m.outq.bytes[consume + j] }
+    }
+    unused VecResize(m.outq.bytes, ifx rem > 0 then rem else 0);
+
+    // If more non-break data remains and we didn't stop at a break, append "\n*"
+    if !hit_break && m.outq.bytes.count > 0 && f.read_count >= 2 {
+        unused BuilderAppend(chunk, "\n*");
+    }
+
+    reply: Ninep.Message;
+    reply.tag = f.read_tag;
+    reply.kind = Ninep.Rread;
+    reply.data = TextView(chunk[:]);
+    unused Send(*reply);
+    f.pending_read = false;
+}
+
+UpdateAll :: () {
+    for i: 0..srv.fids.count-1 {
+        if srv.fids[i].pending_read {
+            SendUpdateForFid(i);
+        }
+    }
+}
+
+StatPath :: (path: u64, dir: *Ninep.Dir) -> bool {
+    none: Ninep.Dir;
+    <<dir = none;
+    kind := QidKind(path);
+    idx := QidIndex(path);
+    dir.qid.path = path;
+    if kind == F_ROOT {
+        dir.name = ".";
+        dir.uid = "spree";
+        dir.gid = "spree";
+        dir.mode = DMDIR | 365; // 0555
+        dir.qid.qtype = QTDIR;
+        return true;
+    }
+    if kind == F_NAME {
+        dir.name = "name";
+        dir.uid = "spree";
+        dir.gid = "spree";
+        dir.mode = 292; // 0444
+        dir.qid.qtype = 0;
+        return true;
+    }
+    if kind == F_GAMEDIR {
+        if idx < 0 || cast(s64)idx >= srv.cliques.count || srv.cliques[idx].kind == CK_EMPTY { return false }
+        c := *srv.cliques[idx].clique;
+        dir.name = TextView(c.fname);
+        dir.uid = TextView(c.owner);
+        dir.gid = TextView(c.owner);
+        dir.mode = DMDIR | 365; // 0555
+        dir.qid.qtype = QTDIR;
+        return true;
+    }
+    if kind == F_GAME {
+        if idx < 0 || cast(s64)idx >= srv.cliques.count || srv.cliques[idx].kind == CK_EMPTY { return false }
+        c := *srv.cliques[idx].clique;
+        dir.name = "ctl";
+        dir.uid = TextView(c.owner);
+        dir.gid = TextView(c.owner);
+        dir.mode = 438; // 0666
+        dir.qid.qtype = 0;
+        return true;
+    }
+    return false;
+}
+
+Walk1 :: (fidx: s64, name: string) -> string {
+    path := srv.fids[fidx].path;
+    kind := QidKind(path);
+    idx := QidIndex(path);
+
+    if name == ".." {
+        if kind == F_ROOT || kind == F_GAMEDIR {
+            srv.fids[fidx].path = MkQid(F_ROOT, 0);
+            srv.fids[fidx].qtype = QTDIR;
+            return "";
+        }
+        return "file does not exist";
+    }
+    if kind == F_ROOT {
+        if name == "name" {
+            srv.fids[fidx].path = MkQid(F_NAME, 0);
+            srv.fids[fidx].qtype = 0;
+            return "";
+        }
+        cid := FindCliqueByFname(name);
+        if cid >= 0 {
+            srv.fids[fidx].path = MkQid(F_GAMEDIR, cast(u64)cid);
+            srv.fids[fidx].qtype = QTDIR;
+            return "";
+        }
+        return "file does not exist";
+    }
+    if kind == F_GAMEDIR {
+        if idx >= 0 && cast(s64)idx < srv.cliques.count && srv.cliques[idx].kind != CK_EMPTY && name == "ctl" {
+            srv.fids[fidx].path = MkQid(F_GAME, cast(u64)idx);
+            srv.fids[fidx].qtype = 0;
+            return "";
+        }
+        return "file does not exist";
+    }
+    return "file does not exist";
+}
+
+HandleWalk :: (m: *Ninep.Message, reply: *Ninep.Message) {
+    fidx := FindFid(m.fid);
+    if fidx < 0 { SetError(reply, "bad fid"); return }
+    if srv.fids[fidx].open { SetError(reply, "fid already opened"); return }
+    if m.newfid != m.fid {
+        clone := NewFid(m.newfid);
+        if clone < 0 { SetError(reply, "fid already in use"); return }
+        srv.fids[clone].path = srv.fids[fidx].path;
+        srv.fids[clone].qtype = srv.fids[fidx].qtype;
+        tmp_u: Text;
+        Core.SetText(*tmp_u, TextView(srv.fids[fidx].uname));
+        Core.SetText(*srv.fids[clone].uname, TextView(tmp_u));
+        fidx = clone;
+    }
+    old_path := srv.fids[fidx].path;
+    old_qtype := srv.fids[fidx].qtype;
+    reply.kind = Ninep.Rwalk;
+    for i: 0..m.names.count-1 {
+        err := Walk1(fidx, m.names[i]);
+        if err.count > 0 {
+            if m.newfid != m.fid {
+                DeleteFid(fidx);
+            } else {
+                srv.fids[fidx].path = old_path;
+                srv.fids[fidx].qtype = old_qtype;
+            }
+            if i == 0 { SetError(reply, err) }
+            return;
+        }
+        qid: Ninep.Qid;
+        qid.path = srv.fids[fidx].path;
+        qid.qtype = srv.fids[fidx].qtype;
+        unused VecPush(reply.qids, qid);
+    }
+}
+
+HandleOpen :: (m: *Ninep.Message, reply: *Ninep.Message) {
+    fidx := FindFid(m.fid);
+    if fidx < 0 { SetError(reply, "bad fid"); return }
+    if srv.fids[fidx].open { SetError(reply, "fid already opened"); return }
+    dir: Ninep.Dir;
+    if !StatPath(srv.fids[fidx].path, *dir) { SetError(reply, "file does not exist"); return }
+
+    kind := QidKind(dir.qid.path);
+    idx := QidIndex(dir.qid.path);
+    if kind == F_GAME {
+        if idx < 0 || cast(s64)idx >= srv.cliques.count || srv.cliques[idx].kind == CK_EMPTY {
+            SetError(reply, "cannot find clique");
+            return;
+        }
+        if srv.cliques[idx].clique.hungup {
+            SetError(reply, "hungup");
+            return;
+        }
+        uname := TextView(srv.fids[fidx].uname);
+        count: s32 = 0;
+        for i: 0..srv.fids.count-1 {
+            if srv.fids[i].open && srv.fids[i].clique_id == idx {
+                if TextView(srv.fids[i].uname) == uname {
+                    SetError(reply, "you cannot join a clique twice");
+                    return;
+                }
+                count += 1;
+            }
+        }
+        if count >= Core.MAXPLAYERS {
+            SetError(reply, "too many members");
+            return;
+        }
+        srv.fids[fidx].clique_id = idx;
+        srv.fids[fidx].member_id = -1;
+        srv.fids[fidx].hungup = false;
+    }
+
+    srv.fids[fidx].open = true;
+    srv.fids[fidx].mode = m.mode & 3;
+    srv.fids[fidx].path = dir.qid.path;
+    srv.fids[fidx].qtype = dir.qid.qtype;
+    reply.kind = Ninep.Ropen;
+    reply.qid = dir.qid;
+    reply.iounit = 0;
+}
+
+HandleDirRead :: (fidx: s64, m: *Ninep.Message, reply: *Ninep.Message, data: *Vec(u8)) {
+    count := Signed(m.count);
+    reply.kind = Ninep.Rread;
+    if count <= 0 { return }
+    offset := srv.fids[fidx].dir_offset;
+    index := srv.fids[fidx].dir_index;
+    if Signed(m.offset) != offset {
+        offset = 0;
+        index = 0;
+    }
+    left := count;
+    kind := QidKind(srv.fids[fidx].path);
+    cidx := QidIndex(srv.fids[fidx].path);
+
+    if kind == F_ROOT {
+        // Entry 0 is "name", entries 1..N are active cliques
+        total := 1 + srv.cliques.count;
+        while index < total {
+            dir: Ninep.Dir;
+            valid := false;
+            if index == 0 {
+                valid = StatPath(MkQid(F_NAME, 0), *dir);
+            } else {
+                ci := index - 1;
+                if srv.cliques[ci].kind != CK_EMPTY {
+                    valid = StatPath(MkQid(F_GAMEDIR, cast(u64)ci), *dir);
+                }
+            }
+            index += 1;
+            if !valid { continue }
+            sz := Ninep.DirSize(*dir);
+            offset += sz;
+            if offset < Signed(m.offset) { continue }
+            left -= sz;
+            if left < 0 {
+                offset -= sz;
+                index -= 1;
+                break;
+            }
+            Ninep.PackDir(data, *dir);
+        }
+    } else if kind == F_GAMEDIR {
+        if index == 0 && cidx >= 0 && cast(s64)cidx < srv.cliques.count && srv.cliques[cidx].kind != CK_EMPTY {
+            dir: Ninep.Dir;
+            if StatPath(MkQid(F_GAME, cast(u64)cidx), *dir) {
+                sz := Ninep.DirSize(*dir);
+                if sz <= left {
+                    Ninep.PackDir(data, *dir);
+                    offset += sz;
+                    index = 1;
+                }
+            }
+        }
+    }
+    srv.fids[fidx].dir_offset = offset;
+    srv.fids[fidx].dir_index = index;
+}
+
+HandleWrite :: (m: *Ninep.Message, reply: *Ninep.Message) {
+    fidx := FindFid(m.fid);
+    if fidx < 0 { SetError(reply, "bad fid"); return }
+    if !srv.fids[fidx].open { SetError(reply, "not open"); return }
+    kind := QidKind(srv.fids[fidx].path);
+    if kind != F_GAME { SetError(reply, "permission denied"); return }
+    if srv.fids[fidx].hungup { SetError(reply, "hung up"); return }
+
+    cid := srv.fids[fidx].clique_id;
+    if cid < 0 || cast(s64)cid >= srv.cliques.count || srv.cliques[cid].kind == CK_EMPTY {
+        SetError(reply, "bad clique");
+        return;
+    }
+
+    cmd := m.data;
+    if cmd.count == 0 {
+        srv.fids[fidx].hungup = true;
+        reply.kind = Ninep.Rwrite;
+        reply.count = 0;
+        return;
+    }
+
+    slot := *srv.cliques[cid];
+    c := *slot.clique;
+    notes: Vec(Gather.Note);
+    err: Text;
+
+    if srv.fids[fidx].member_id < 0 {
+        // First write = join!
+        uname := TextView(srv.fids[fidx].uname);
+        // Check if member was suspended
+        mid := Core.CliqueMemberNamed(c, uname);
+        susp := false;
+        if mid >= 0 && c.members[mid].suspended {
+            c.members[mid].suspended = false;
+            susp = true;
+        } else {
+            mid = Core.CliqueAddMember(c, uname);
+        }
+        srv.fids[fidx].member_id = mid;
+        was_started := c.started;
+
+        ok := true;
+        if slot.kind == CK_LOBBY {
+            Lobby.Join(*slot.lobby, c, mid, *notes);
+        } else if slot.kind == CK_GATHER {
+            ok = Gather.Join(*slot.gather, c, mid, cmd, susp, *notes, *err);
+        }
+        if !ok {
+            Core.CliqueDelMember(c, mid, susp);
+            srv.fids[fidx].member_id = -1;
+            SetError(reply, TextView(err));
+            return;
+        }
+        if was_started {
+            Core.CliqueShow(c, mid);
+        }
+        if notes.count > 0 { DeliverNotes(cid, *notes) }
+        reply.kind = Ninep.Rwrite;
+        reply.count = cmd.count;
+        return;
+    }
+
+    // Subsequent write = command
+    mid := srv.fids[fidx].member_id;
+    srv.now_ms += 10;
+    if slot.kind == CK_LOBBY {
+        req: Lobby.LobbyRequest;
+        if !Lobby.Command(*slot.lobby, c, mid, cmd, *notes, *req, *err) {
+            SetError(reply, TextView(err));
+            return;
+        }
+        if req.kind == Lobby.LR_RELOAD {
+            ReloadLobbyArchives(slot);
+        } else if req.kind == Lobby.LR_START {
+            // Copy owner name before CreateClique may reallocate srv.cliques
+            owner_copy: Text;
+            Core.SetText(*owner_copy, TextView(c.members[mid].name));
+            title_copy: Text;
+            for i: 0..req.argv.count-1 {
+                if i > 0 { unused BuilderAppend(title_copy.bytes, " ") }
+                unused BuilderAppend(title_copy.bytes, TextView(req.argv[i]));
+            }
+            fname: Text;
+            empty_arch: Vec(Text);
+            new_cid := CreateClique(cid, req.argv[:], empty_arch[:], TextView(owner_copy), *fname, *err);
+            if new_cid < 0 {
+                SetError(reply, TextView(err));
+                return;
+            }
+            // Re-fetch slot pointer after possible VecResize
+            lslot := *srv.cliques[cid];
+            Lobby.RegisterSession(*lslot.lobby, *lslot.clique, new_cid, TextView(fname), TextView(title_copy), TextView(owner_copy));
+        } else if req.kind == Lobby.LR_UNARCHIVE {
+            content: Vec(u8);
+            if !ReadFileAll(TextView(req.archive_file), *content) {
+                SetError(reply, "cannot load archive");
+                return;
+            }
+            arch: Arch.Archive;
+            if !Arch.ParseArchive(TextView(content[:]), false, *arch) {
+                SetError(reply, "bad archive");
+                return;
+            }
+            owner_copy: Text;
+            in_arch := false;
+            {
+                pname := TextView(c.members[mid].name);
+                Core.SetText(*owner_copy, pname);
+                for i: 0..arch.members.count-1 {
+                    if TextView(arch.members[i]) == pname { in_arch = true; break }
+                }
+            }
+            if !in_arch {
+                SetError(reply, "you did not participate in that session");
+                return;
+            }
+            title_copy: Text;
+            for i: 0..arch.argv.count-1 {
+                if i > 0 { unused BuilderAppend(title_copy.bytes, " ") }
+                unused BuilderAppend(title_copy.bytes, TextView(arch.argv[i]));
+            }
+            fname: Text;
+            new_cid := CreateClique(cid, arch.argv[:], arch.members[:], TextView(owner_copy), *fname, *err);
+            if new_cid < 0 {
+                SetError(reply, TextView(err));
+                return;
+            }
+            lslot := *srv.cliques[cid];
+            Lobby.RegisterSession(*lslot.lobby, *lslot.clique, new_cid, TextView(fname), TextView(title_copy), TextView(owner_copy));
+            Core.ObjDelete(*lslot.clique, req.archive_obj_id);
+        }
+        if notes.count > 0 { DeliverNotes(cid, *notes) }
+        reply.kind = Ninep.Rwrite;
+        reply.count = cmd.count;
+        return;
+    }
+
+    if slot.kind == CK_GATHER {
+        if !Gather.Command(*slot.gather, c, mid, cmd, srv.now_ms, *notes, *err) {
+            if notes.count > 0 { DeliverNotes(cid, *notes) }
+            SetError(reply, TextView(err));
+            return;
+        }
+        if notes.count > 0 { DeliverNotes(cid, *notes) }
+        reply.kind = Ninep.Rwrite;
+        reply.count = cmd.count;
+        return;
+    }
+
+    SetError(reply, "invalid clique");
+}
+
+HandleClunk :: (m: *Ninep.Message, reply: *Ninep.Message) {
+    fidx := FindFid(m.fid);
+    if fidx < 0 { SetError(reply, "bad fid"); return }
+    cid := srv.fids[fidx].clique_id;
+    mid := srv.fids[fidx].member_id;
+    was_open := srv.fids[fidx].open;
+    DeleteFid(fidx);
+
+    if was_open && cid >= 0 && cast(s64)cid < srv.cliques.count && srv.cliques[cid].kind != CK_EMPTY {
+        notes: Vec(Gather.Note);
+        slot := *srv.cliques[cid];
+        if mid >= 0 && !slot.clique.hungup {
+            if slot.kind == CK_LOBBY {
+                Lobby.Leave(*slot.lobby, *slot.clique, mid, *notes);
+                Core.CliqueDelMember(*slot.clique, mid, false);
+            } else if slot.kind == CK_GATHER {
+                need_arch := false;
+                del_member := Gather.Leave(*slot.gather, *slot.clique, mid, *notes, *need_arch);
+                Core.CliqueDelMember(*slot.clique, mid, !del_member);
+                if need_arch {
+                    HangupClique(cid, *notes);
+                } else if slot.clique.hungup {
+                    // GatherLeave set hungup when nmembers == 0
+                    slot.clique.hungup = false;
+                    HangupClique(cid, *notes);
+                }
+            }
+        }
+        if notes.count > 0 { DeliverNotes(cid, *notes) }
+        if srv.cliques[cid].clique.hungup && CountOpenOnClique(cid) == 0 {
+            srv.cliques[cid].kind = CK_EMPTY;
+        }
+    }
+    reply.kind = Ninep.Rclunk;
+}
+
+ReadFull :: (buffer: []u8) -> bool {
+    at: s64 = 0;
+    while at < buffer.count {
+        n := Io.Read(0, buffer[at:]);
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    // Start initial lobby clique ("0")
+    lobby_argv: Vec(Text);
+    unused VecResize(lobby_argv, 1);
+    Core.SetText(*lobby_argv[0], "lobby");
+    empty_arch: Vec(Text);
+    fname: Text;
+    err: Text;
+    if CreateClique(-1, lobby_argv[:], empty_arch[:], "spree", *fname, *err) < 0 {
+        return 1;
+    }
+
+    frame: Vec(u8);
+    while true {
+        header: [4]u8;
+        if !ReadFull(header[:]) { break }
+        size, merr := Ninep.MessageSize(TextView(header[:]), srv.msize);
+        if merr.count > 0 { break }
+        VecClear(frame);
+        unused BuilderAppend(frame, TextView(header[:]));
+        unused VecResize(frame, size);
+        if !ReadFull(frame[4:]) { break }
+        m: Ninep.Message;
+        if Ninep.Unpack(TextView(frame[:]), true, *m) <= 0 { break }
+
+        reply: Ninep.Message;
+        reply.tag = m.tag;
+        data: Vec(u8);
+        send_now := true;
+
+        if m.kind == Ninep.Tversion {
+            sz, ver := Ninep.Compatible(Signed(m.msize), m.version, ifx srv.msize <= 0 then MAXRPC else srv.msize, Ninep.VERSION);
+            if sz < 256 {
+                SetError(*reply, "message size too small");
+            } else {
+                srv.msize = sz;
+                reply.kind = Ninep.Rversion;
+                reply.msize = sz;
+                reply.version = ver;
+            }
+        } else if m.kind == Ninep.Tauth {
+            SetError(*reply, "authentication not required");
+        } else if m.kind == Ninep.Tflush {
+            for i: 0..srv.fids.count-1 {
+                if srv.fids[i].pending_read && srv.fids[i].read_tag == m.oldtag {
+                    srv.fids[i].pending_read = false;
+                }
+            }
+            reply.kind = Ninep.Rflush;
+        } else if m.kind == Ninep.Tattach {
+            fidx := NewFid(m.fid);
+            if fidx < 0 {
+                SetError(*reply, "fid already in use");
+            } else {
+                Core.SetText(*srv.fids[fidx].uname, m.uname);
+                srv.fids[fidx].path = MkQid(F_ROOT, 0);
+                srv.fids[fidx].qtype = QTDIR;
+                reply.kind = Ninep.Rattach;
+                reply.qid.path = MkQid(F_ROOT, 0);
+                reply.qid.qtype = QTDIR;
+            }
+        } else if m.kind == Ninep.Twalk {
+            HandleWalk(*m, *reply);
+        } else if m.kind == Ninep.Topen {
+            HandleOpen(*m, *reply);
+        } else if m.kind == Ninep.Tread {
+            fidx := FindFid(m.fid);
+            if fidx < 0 {
+                SetError(*reply, "bad fid");
+            } else if !srv.fids[fidx].open {
+                SetError(*reply, "not open");
+            } else if (srv.fids[fidx].qtype & QTDIR) != 0 {
+                HandleDirRead(fidx, *m, *reply, *data);
+                if reply.kind == Ninep.Rread { reply.data = TextView(data[:]) }
+            } else {
+                kind := QidKind(srv.fids[fidx].path);
+                if kind == F_NAME {
+                    uname := TextView(srv.fids[fidx].uname);
+                    off := Signed(m.offset);
+                    cnt := Signed(m.count);
+                    reply.kind = Ninep.Rread;
+                    if off >= 0 && off < uname.count && cnt > 0 {
+                        end := off + cnt;
+                        if end > uname.count { end = uname.count }
+                        unused BuilderAppend(data, uname[off:end]);
+                    }
+                    reply.data = TextView(data[:]);
+                } else if kind == F_GAME {
+                    if srv.fids[fidx].pending_read {
+                        SetError(*reply, "duplicate read");
+                    } else {
+                        srv.fids[fidx].pending_read = true;
+                        srv.fids[fidx].read_tag = m.tag;
+                        srv.fids[fidx].read_count = Signed(m.count);
+                        SendUpdateForFid(fidx);
+                        send_now = false;
+                    }
+                } else {
+                    SetError(*reply, "bad file");
+                }
+            }
+        } else if m.kind == Ninep.Twrite {
+            HandleWrite(*m, *reply);
+        } else if m.kind == Ninep.Tclunk {
+            HandleClunk(*m, *reply);
+        } else if m.kind == Ninep.Tstat {
+            fidx := FindFid(m.fid);
+            if fidx < 0 {
+                SetError(*reply, "bad fid");
+            } else if !StatPath(srv.fids[fidx].path, *reply.stat) {
+                SetError(*reply, "file does not exist");
+            } else {
+                reply.kind = Ninep.Rstat;
+            }
+        } else {
+            SetError(*reply, "permission denied");
+        }
+
+        if send_now {
+            if !Send(*reply) { break }
+        }
+        UpdateAll();
+    }
+    return 0;
+}

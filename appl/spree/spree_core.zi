@@ -527,3 +527,30 @@ CliqueAction :: (c: *Clique, cmd: string, objs: []s32, rest: string, whoto: Set)
         unused BuilderAppend(m.outq.bytes, "\n");
     }
 }
+
+CliqueBreakMsg :: (c: *Clique, whoto: Set) {
+    for mi: 0..c.members.count-1 {
+        m := *c.members[mi];
+        if !m.alive || m.suspended || !SetHolds(whoto, m.id) { continue }
+        unused VecPush(m.outq.bytes, 0);
+    }
+}
+
+CliqueActionSimple :: (c: *Clique, cmd: string, whoto: Set) {
+    for mi: 0..c.members.count-1 {
+        m := *c.members[mi];
+        if !m.alive || m.suspended || !SetHolds(whoto, m.id) { continue }
+        unused BuilderAppend(m.outq.bytes, cmd);
+        unused BuilderAppend(m.outq.bytes, "\n");
+    }
+}
+
+CliqueStart :: (c: *Clique) {
+    if c.started { return }
+    for mi: 0..c.members.count-1 {
+        if c.members[mi].alive && !c.members[mi].suspended {
+            CliqueShow(c, cast(s32)mi);
+        }
+    }
+    c.started = true;
+}

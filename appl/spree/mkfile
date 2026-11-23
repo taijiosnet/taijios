@@ -1,51 +1,24 @@
 <../../mkconfig
 
-ENGINES=\
-	engines/afghan.dis \
-	engines/bounce.dis \
-	engines/canfield.dis \
-	engines/freecell.dis \
-	engines/gather.dis \
-	engines/lobby.dis \
-	engines/othello.dis \
-	engines/racingdemon.dis \
-	engines/spit.dis \
-	engines/spider.dis \
-	engines/whist.dis \
-
-CLIENTS=
-
-LIB=\
-	lib/allow.dis \
-	lib/cardlib.dis \
-	lib/objstore.dis \
-	lib/tricks.dis \
-
-MAIN=\
-	archives.dis \
-	spree.dis \
-
-MODULES=\
-	sys.m\
-	draw.m\
-	tk.m\
-	tkclient.m\
-	styx.m\
-	styxservers.m\
-
 DEST=$ROOT/dis/spree
 
-ALL= ${ENGINES:%=$DEST/%} \
-	${CLIENTS:%=$DEST/%} \
-	${LIB:%=$DEST/%} \
-	${MAIN:%=$DEST/%} \
+ALL=\
+	$DEST/spree.zx \
 	$DEST/joinsession.zx \
 	$DEST/clients/othello.zx \
 	$DEST/clients/gather.zx \
 	$DEST/clients/lobby.zx \
 	$DEST/clients/cards.zx
 
-all:V: $ENGINES $CLIENTS $LIB $MAIN joinsession.zx clients/othello.zx clients/gather.zx clients/lobby.zx clients/cards.zx
+all:V: spree.zx joinsession.zx clients/othello.zx clients/gather.zx clients/lobby.zx clients/cards.zx
+
+spree.zx: spree.zi spree_core.zi archives.zi lib/allow.zi lib/cardlib.zi lib/objstore.zi lib/tricks.zi engines/afghan.zi engines/bounce.zi engines/canfield.zi engines/freecell.zi engines/gather.zi engines/lobby.zi engines/othello.zi engines/racingdemon.zi engines/spider.zi engines/spit.zi engines/whist.zi ../cmd/taijios_io.zi ../lib/ninep.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path lib --module-path engines --module-path ../cmd --bind-host taijios_io --entry spree:main -o $target spree.zi
+
+$DEST/spree.zx: spree.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 spree.zx "$staged" && mv "$staged" "$target"
 
 clients/cards.zx: clients/cards.zi clients/cards_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_io.zi mkfile
 	(cd clients && ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_io --entry cards:main -o cards.zx cards.zi)
@@ -89,17 +62,8 @@ $DEST/joinsession.zx: joinsession.zx
 
 install:V:	$ALL
 
-$ROOT/dis/spree/%.dis:	%.dis
-	cp $prereq $target
-
-%.dis:	%.b
-	limbo -gw -I$ROOT/module -Ilib -o $stem.dis $stem.b
-
-$ENGINES $MAIN $LIB: spree.m gather.m lib/cardlib.m lib/allow.m lib/objstore.m
-$ENGINES $MAIN $CLIENTS $LIB: ${MODULES:%=$ROOT/module/%}
-
 clean:V:
-	rm -f *.dis *.sbl */*.dis */*.sbl
+	rm -f *.zx */*.zx
 
 nuke:V: clean
-	rm -f $DEST/*.dis $DEST/*/*.dis
+	rm -f $DEST/*.zx $DEST/*/*.zx

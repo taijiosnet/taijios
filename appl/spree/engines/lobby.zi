@@ -1,0 +1,298 @@
+// Spree Lobby meta-engine, ported from appl/spree/engines/lobby.b.
+// Lists available session types, active sessions, lobby members, and archives;
+// handles start, invite, uninvite, chat, kick, unarchive, and child notifications.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using Gather :: #import "gather"
+
+LobbyEngine :: struct {
+    members_obj: s32;
+    sessions_obj: s32;
+    available_obj: s32;
+    archive_obj: s32;
+}
+
+// Actions that LobbyCommand requests the Spree server to execute.
+LR_NONE :: 0;
+LR_START :: 1;
+LR_UNARCHIVE :: 2;
+LR_RELOAD :: 3;
+
+LobbyRequest :: struct {
+    kind: s32;
+    argv: Vec(Text);
+    archive_file: Text;
+    archive_obj_id: s32;
+}
+
+AddSessionType :: (c: *Core.Clique, avail: s32, name: string, title: string, clienttype: string, start: string) {
+    o := Core.CliqueNewObject(c, avail, Core.SetAll(), "sessiontype");
+    Core.ObjSetAttr(c, o, "name", name, Core.SetAll());
+    Core.ObjSetAttr(c, o, "title", title, Core.SetAll());
+    Core.ObjSetAttr(c, o, "clienttype", clienttype, Core.SetAll());
+    Core.ObjSetAttr(c, o, "start", start, Core.SetAll());
+}
+
+AddNameObj :: (c: *Core.Clique, parent: s32, name: string, otype: string) -> s32 {
+    x := Core.CliqueNewObject(c, parent, Core.SetAll(), otype);
+    Core.ObjSetAttr(c, x, "name", name, Core.SetAll());
+    return x;
+}
+
+FindNameObj :: (c: *Core.Clique, parent: s32, name: string) -> s32 {
+    if parent < 0 || cast(s64)parent >= c.objects.count { return -1 }
+    p := *c.objects[parent];
+    val: Text;
+    for i: 0..p.children.count-1 {
+        cid := p.children[i];
+        if Core.ObjGetAttr(c, cid, "name", *val) && TextView(val) == name {
+            return cid;
+        }
+    }
+    return -1;
+}
+
+DeleteNameObj :: (c: *Core.Clique, parent: s32, name: string, otype: string) {
+    if parent < 0 || cast(s64)parent >= c.objects.count { return }
+    p := *c.objects[parent];
+    val: Text;
+    for i: 0..p.children.count-1 {
+        cid := p.children[i];
+        if TextView(c.objects[cid].objtype) == otype && Core.ObjGetAttr(c, cid, "name", *val) && TextView(val) == name {
+            Core.ObjDelete(c, cid);
+            return;
+        }
+    }
+}
+
+Init :: (l: *LobbyEngine, c: *Core.Clique) {
+    l.members_obj = Core.CliqueNewObject(c, 0, Core.SetAll(), "members");
+    l.sessions_obj = Core.CliqueNewObject(c, 0, Core.SetAll(), "sessions");
+    l.available_obj = Core.CliqueNewObject(c, 0, Core.SetAll(), "available");
+    l.archive_obj = Core.CliqueNewObject(c, 0, Core.SetAll(), "archives");
+
+    AddSessionType(c, l.available_obj, "freecell", "Freecell", "cards", "gather 1 freecell");
+    AddSessionType(c, l.available_obj, "lobby", "Lobby", "lobby", "lobby");
+    AddSessionType(c, l.available_obj, "spit", "Spit", "cards", "gather 2 spit");
+    AddSessionType(c, l.available_obj, "canfield", "Canfield", "cards", "gather 1 canfield");
+    AddSessionType(c, l.available_obj, "afghan", "Afghan", "cards", "gather 1 afghan");
+    AddSessionType(c, l.available_obj, "spider", "Spider", "cards", "gather 1 spider");
+    AddSessionType(c, l.available_obj, "racingdemon", "Racing Demon", "cards", "gather 3 racingdemon");
+    AddSessionType(c, l.available_obj, "othello", "Othello", "othello", "gather 2 othello");
+    AddSessionType(c, l.available_obj, "whist", "Whist", "whist", "gather 4 whist");
+
+    Core.CliqueStart(c);
+}
+
+Join :: (l: *LobbyEngine, c: *Core.Clique, member_id: s32, out_notes: *Vec(Gather.Note)) {
+    if member_id < 0 || cast(s64)member_id >= c.members.count { return }
+    pname := TextView(c.members[member_id].name);
+    jnote: Text;
+    unused BuilderAppend(jnote.bytes, "join ");
+    unused BuilderAppend(jnote.bytes, pname);
+    Gather.PushNote(out_notes, c.parent_id, TextView(jnote));
+
+    pset := Core.SetSingleton(member_id);
+    Core.CliqueActionSimple(c, "clienttype lobby", pset);
+    Core.CliqueBreakMsg(c, pset);
+    nact: Text;
+    unused BuilderAppend(nact.bytes, "name ");
+    unused BuilderAppend(nact.bytes, pname);
+    Core.CliqueActionSimple(c, TextView(nact), pset);
+    unused AddNameObj(c, l.members_obj, pname, "member");
+}
+
+Leave :: (l: *LobbyEngine, c: *Core.Clique, member_id: s32, out_notes: *Vec(Gather.Note)) {
+    if member_id < 0 || cast(s64)member_id >= c.members.count { return }
+    pname := TextView(c.members[member_id].name);
+    lnote: Text;
+    unused BuilderAppend(lnote.bytes, "leave ");
+    unused BuilderAppend(lnote.bytes, pname);
+    Gather.PushNote(out_notes, c.parent_id, TextView(lnote));
+    DeleteNameObj(c, l.members_obj, pname, "member");
+}
+
+RegisterSession :: (l: *LobbyEngine, c: *Core.Clique, gid: s32, fname: string, title: string, owner: string) {
+    idb: [24]u8;
+    id_str := FormatInteger(cast(s64)gid, idb[:]);
+    s := AddNameObj(c, l.sessions_obj, id_str, "session");
+    Core.ObjSetAttr(c, s, "title", title, Core.SetAll());
+    Core.ObjSetAttr(c, s, "filename", fname, Core.SetAll());
+    Core.ObjSetAttr(c, s, "cliqueid", id_str, Core.SetNone());
+    Core.ObjSetAttr(c, s, "owner", owner, Core.SetAll());
+}
+
+SplitToks :: (s: string, out: *Vec(Text)) {
+    unused VecResize(<<out, 0);
+    p: s64 = 0;
+    while p < s.count {
+        while p < s.count && (s[p] == 32 || s[p] == 9 || s[p] == 10 || s[p] == 13) { p += 1 }
+        if p >= s.count { break }
+        st := p;
+        while p < s.count && s[p] != 32 && s[p] != 9 && s[p] != 10 && s[p] != 13 { p += 1 }
+        idx := out.count;
+        unused VecResize(<<out, idx + 1);
+        Core.SetText(*(<<out)[idx], s[st:p]);
+    }
+}
+
+Command :: (l: *LobbyEngine, c: *Core.Clique, member_id: s32, cmd: string, out_notes: *Vec(Gather.Note), req: *LobbyRequest, out_err: *Text) -> bool {
+    Core.SetText(out_err, "");
+    req.kind = LR_NONE;
+    unused VecResize(req.argv, 0);
+    Core.SetText(*req.archive_file, "");
+    req.archive_obj_id = -1;
+
+    toks: Vec(Text);
+    SplitToks(cmd, *toks);
+    if toks.count == 0 {
+        Core.SetText(out_err, "bad command");
+        return false;
+    }
+    verb := TextView(toks[0]);
+    pname := TextView(c.members[member_id].name);
+
+    if verb == "kick" {
+        req.kind = LR_RELOAD;
+        return true;
+    }
+    if verb == "chat" {
+        msg: Text;
+        unused BuilderAppend(msg.bytes, "chat ");
+        unused BuilderAppend(msg.bytes, pname);
+        for i: 1..toks.count-1 {
+            unused BuilderAppend(msg.bytes, " ");
+            unused BuilderAppend(msg.bytes, TextView(toks[i]));
+        }
+        Core.CliqueActionSimple(c, TextView(msg), Core.SetAll());
+        return true;
+    }
+    if verb == "start" {
+        if toks.count < 2 {
+            Core.SetText(out_err, "bad start params");
+            return false;
+        }
+        req.kind = LR_START;
+        unused VecResize(req.argv, toks.count - 1);
+        for i: 1..toks.count-1 {
+            Core.SetText(*req.argv[i - 1], TextView(toks[i]));
+        }
+        return true;
+    }
+    if verb == "invite" || verb == "uninvite" {
+        if toks.count != 3 {
+            Core.SetText(out_err, "bad invite params");
+            return false;
+        }
+        sid, ok := Gather.ParseInt(TextView(toks[1]));
+        if !ok {
+            Core.SetText(out_err, "bad object id");
+            return false;
+        }
+        obj_id := Core.MemberObj(*c.members[member_id], sid);
+        if obj_id < 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive {
+            Core.SetText(out_err, "bad object id");
+            return false;
+        }
+        if TextView(c.objects[obj_id].objtype) != "session" {
+            Core.SetText(out_err, "bad session type");
+            return false;
+        }
+        owner_val: Text;
+        if !Core.ObjGetAttr(c, obj_id, "owner", *owner_val) || TextView(owner_val) != pname {
+            Core.SetText(out_err, "permission denied");
+            return false;
+        }
+        cid_val: Text;
+        if Core.ObjGetAttr(c, obj_id, "cliqueid", *cid_val) {
+            dst_cid, cok := Gather.ParseInt(TextView(cid_val));
+            if cok {
+                nt: Text;
+                unused BuilderAppend(nt.bytes, verb);
+                unused BuilderAppend(nt.bytes, " ");
+                unused BuilderAppend(nt.bytes, TextView(toks[2]));
+                Gather.PushNote(out_notes, dst_cid, TextView(nt));
+            }
+        }
+        if verb == "invite" {
+            unused AddNameObj(c, obj_id, TextView(toks[2]), "invite");
+        } else {
+            DeleteNameObj(c, obj_id, TextView(toks[2]), "invite");
+        }
+        return true;
+    }
+    if verb == "unarchive" {
+        if toks.count != 2 {
+            Core.SetText(out_err, "bad unarchive params");
+            return false;
+        }
+        aid, ok := Gather.ParseInt(TextView(toks[1]));
+        if !ok {
+            Core.SetText(out_err, "bad archive object");
+            return false;
+        }
+        obj_id := Core.MemberObj(*c.members[member_id], aid);
+        if obj_id < 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive || TextView(c.objects[obj_id].objtype) != "archive" {
+            Core.SetText(out_err, "bad archive object");
+            return false;
+        }
+        if !Core.ObjGetAttr(c, obj_id, "file", *req.archive_file) {
+            Core.SetText(out_err, "bad archive object");
+            return false;
+        }
+        req.kind = LR_UNARCHIVE;
+        req.archive_obj_id = obj_id;
+        return true;
+    }
+
+    Core.SetText(out_err, "bad command");
+    return false;
+}
+
+Notify :: (l: *LobbyEngine, c: *Core.Clique, src_id: s32, note: string) {
+    idb: [24]u8;
+    s := FindNameObj(c, l.sessions_obj, FormatInteger(cast(s64)src_id, idb[:]));
+    if s < 0 { return }
+    if note.count == 0 {
+        Core.ObjDelete(c, s);
+        return;
+    }
+    if src_id == c.parent_id { return }
+    toks: Vec(Text);
+    SplitToks(note, *toks);
+    if toks.count == 0 { return }
+    verb := TextView(toks[0]);
+    if verb == "join" && toks.count >= 2 {
+        unused AddNameObj(c, s, TextView(toks[1]), "member");
+    } else if verb == "leave" && toks.count >= 2 {
+        DeleteNameObj(c, s, TextView(toks[1]), "member");
+    } else if verb == "invite" && toks.count >= 2 {
+        unused AddNameObj(c, s, TextView(toks[1]), "invite");
+    } else if verb == "uninvite" && toks.count >= 2 {
+        DeleteNameObj(c, s, TextView(toks[1]), "invite");
+    } else if verb == "title" && toks.count >= 2 {
+        t: Text;
+        for i: 1..toks.count-1 {
+            if i > 1 { unused BuilderAppend(t.bytes, " ") }
+            unused BuilderAppend(t.bytes, TextView(toks[i]));
+        }
+        Core.ObjSetAttr(c, s, "title", TextView(t), Core.SetAll());
+    } else if verb == "archived" && toks.count >= 2 {
+        arch := Core.CliqueNewObject(c, l.archive_obj, Core.SetAll(), "archive");
+        tval: Text;
+        unused Core.ObjGetAttr(c, s, "title", *tval);
+        Core.ObjSetAttr(c, arch, "name", TextView(tval), Core.SetAll());
+        pnames: Text;
+        mval: Text;
+        for i: 0..c.objects[s].children.count-1 {
+            cid := c.objects[s].children[i];
+            if TextView(c.objects[cid].objtype) == "member" && Core.ObjGetAttr(c, cid, "name", *mval) {
+                if pnames.bytes.count > 0 { unused BuilderAppend(pnames.bytes, " ") }
+                unused BuilderAppend(pnames.bytes, TextView(mval));
+            }
+        }
+        Core.ObjSetAttr(c, arch, "members", TextView(pnames), Core.SetAll());
+        Core.ObjSetAttr(c, arch, "file", TextView(toks[1]), Core.SetNone());
+    }
+}

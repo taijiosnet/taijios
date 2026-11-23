@@ -1,0 +1,499 @@
+// Spree Gather meta-engine, ported from appl/spree/engines/gather.b.
+// Collects players/watchers for any game engine, handles invitations,
+// suspend/resume, archive-on-all-leave, and dispatches to all 9 game engines.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+Othello :: #import "othello"
+Bounce :: #import "bounce"
+Spider :: #import "spider"
+Afghan :: #import "afghan"
+Whist :: #import "whist"
+Canfield :: #import "canfield"
+FreeCell :: #import "freecell"
+RacingDemon :: #import "racingdemon"
+Spit :: #import "spit"
+
+EK_NONE :: 0;
+EK_OTHELLO :: 1;
+EK_BOUNCE :: 2;
+EK_SPIDER :: 3;
+EK_AFGHAN :: 4;
+EK_WHIST :: 5;
+EK_CANFIELD :: 6;
+EK_FREECELL :: 7;
+EK_RACINGDEMON :: 8;
+EK_SPIT :: 9;
+
+Note :: struct {
+    dst_id: s32;
+    text: Text;
+}
+
+GatherEngine :: struct {
+    kind: s32;
+    started: bool;
+    halted: bool;
+    suspended: Core.Set;
+    members: Core.Set;
+    watchers: Core.Set;
+    count: s32;
+    nmembers: s32;
+    title: Text;
+    invited: Vec(Text);
+    archive_members: Vec(Text);
+
+    othello: Othello.OthelloEngine;
+    bounce: Bounce.BounceEngine;
+    spider: Spider.SpiderEngine;
+    afghan: Afghan.AfghanEngine;
+    whist: Whist.WhistEngine;
+    canfield: Canfield.CanfieldEngine;
+    freecell: FreeCell.FreeCellEngine;
+    racingdemon: RacingDemon.RacingDemonEngine;
+    spit: Spit.SpitEngine;
+}
+
+PushNote :: (notes: *Vec(Note), dst_id: s32, msg: string) {
+    if dst_id < 0 { return }
+    idx := notes.count;
+    unused VecResize(<<notes, idx + 1);
+    (<<notes)[idx].dst_id = dst_id;
+    Core.SetText(*(<<notes)[idx].text, msg);
+}
+
+ParseEngineKind :: (name: string) -> s32 {
+    if name == "othello" { return EK_OTHELLO }
+    if name == "bounce" { return EK_BOUNCE }
+    if name == "spider" { return EK_SPIDER }
+    if name == "afghan" { return EK_AFGHAN }
+    if name == "whist" { return EK_WHIST }
+    if name == "canfield" { return EK_CANFIELD }
+    if name == "freecell" { return EK_FREECELL }
+    if name == "racingdemon" { return EK_RACINGDEMON }
+    if name == "spit" { return EK_SPIT }
+    return EK_NONE;
+}
+
+ClientType :: (k: s32) -> string {
+    if k == EK_OTHELLO { return Othello.ClientType() }
+    if k == EK_BOUNCE { return Bounce.ClientType() }
+    if k == EK_SPIDER { return Spider.ClientType() }
+    if k == EK_AFGHAN { return Afghan.ClientType() }
+    if k == EK_WHIST { return Whist.ClientType() }
+    if k == EK_CANFIELD { return Canfield.ClientType() }
+    if k == EK_FREECELL { return FreeCell.ClientType() }
+    if k == EK_RACINGDEMON { return RacingDemon.ClientType() }
+    if k == EK_SPIT { return Spit.ClientType() }
+    return "unknown";
+}
+
+MaxMembers :: (k: s32) -> s32 {
+    if k == EK_OTHELLO { return Othello.MaxMembers() }
+    if k == EK_BOUNCE { return Bounce.MaxMembers() }
+    if k == EK_SPIDER { return Spider.MaxMembers() }
+    if k == EK_AFGHAN { return Afghan.MaxMembers() }
+    if k == EK_WHIST { return Whist.MaxMembers() }
+    if k == EK_CANFIELD { return Canfield.MaxMembers() }
+    if k == EK_FREECELL { return FreeCell.MaxMembers() }
+    if k == EK_RACINGDEMON { return RacingDemon.MaxMembers() }
+    if k == EK_SPIT { return Spit.MaxMembers() }
+    return 0;
+}
+
+ProposeEngine :: (k: s32, n: s32) -> string {
+    if k == EK_OTHELLO { return Othello.Propose(n) }
+    if k == EK_BOUNCE { return Bounce.Propose(n) }
+    if k == EK_SPIDER { return Spider.Propose(n) }
+    if k == EK_AFGHAN { return Afghan.Propose(n) }
+    if k == EK_WHIST { return Whist.Propose(n) }
+    if k == EK_CANFIELD { return Canfield.Propose(n) }
+    if k == EK_FREECELL { return FreeCell.Propose(n) }
+    if k == EK_RACINGDEMON { return RacingDemon.Propose(n) }
+    if k == EK_SPIT { return Spit.Propose(n) }
+    return "bad engine";
+}
+
+ParseInt :: (s: string) -> (v: s32, ok: bool) {
+    if s.count == 0 { return 0, false }
+    neg := false;
+    p: s64 = 0;
+    if s[0] == 45 { neg = true; p = 1 }
+    if p >= s.count { return 0, false }
+    v: s32 = 0;
+    while p < s.count {
+        c := s[p];
+        if c < 48 || c > 57 { return 0, false }
+        v = v * 10 + cast(s32)(c - 48);
+        p += 1;
+    }
+    return (ifx neg then -v else v), true;
+}
+
+AddInvited :: (g: *GatherEngine, name: string) {
+    idx := g.invited.count;
+    unused VecResize(g.invited, idx + 1);
+    Core.SetText(*g.invited[idx], name);
+}
+
+IsInvited :: (g: *GatherEngine, name: string) -> bool {
+    for i: 0..g.invited.count-1 {
+        s := TextView(g.invited[i]);
+        if s == name || s == "all" { return true }
+    }
+    return false;
+}
+
+RemoveInvited :: (g: *GatherEngine, name: string) {
+    w: s64 = 0;
+    for i: 0..g.invited.count-1 {
+        if TextView(g.invited[i]) != name {
+            if w != i {
+                VecSwap(g.invited[w].bytes, g.invited[i].bytes);
+            }
+            w += 1;
+        }
+    }
+    unused VecResize(g.invited, w);
+}
+
+// argv = ["gather", "<count>", "<engine>", ...opts]
+Init :: (g: *GatherEngine, c: *Core.Clique, argv: []Text, arch_members: []Text, out_notes: *Vec(Note), out_err: *Text) -> bool {
+    Core.SetText(out_err, "");
+    g.started = false;
+    g.halted = false;
+    g.suspended = Core.SetNone();
+    g.members = Core.SetNone();
+    g.watchers = Core.SetNone();
+    g.nmembers = 0;
+    unused VecResize(g.invited, 0);
+    unused VecResize(g.archive_members, 0);
+
+    if argv.count < 3 {
+        Core.SetText(out_err, "bad init options");
+        return false;
+    }
+    cnt, ok := ParseInt(TextView(argv[1]));
+    if !ok || (cnt != -1 && cnt <= 0) {
+        Core.SetText(out_err, "bad gather count");
+        return false;
+    }
+    g.count = cnt;
+    if cast(s64)g.count < arch_members.count && g.count != -1 {
+        g.count = cast(s32)arch_members.count;
+    }
+    g.kind = ParseEngineKind(TextView(argv[2]));
+    if g.kind == EK_NONE {
+        Core.SetText(out_err, "bad module");
+        return false;
+    }
+
+    // Build title from argv[2..]
+    unused VecResize(g.title.bytes, 0);
+    for i: 2..argv.count-1 {
+        if i > 2 { unused BuilderAppend(g.title.bytes, " ") }
+        unused BuilderAppend(g.title.bytes, TextView(argv[i]));
+    }
+
+    if g.kind == EK_BOUNCE {
+        Bounce.Init(*g.bounce, c);
+    }
+
+    if arch_members.count > 0 {
+        for i: 0..arch_members.count-1 {
+            idx := g.archive_members.count;
+            unused VecResize(g.archive_members, idx + 1);
+            Core.SetText(*g.archive_members[idx], TextView(arch_members[i]));
+            AddInvited(g, TextView(arch_members[i]));
+        }
+    } else {
+        AddInvited(g, TextView(c.owner));
+    }
+
+    for i: 0..g.invited.count-1 {
+        msg: Text;
+        unused BuilderAppend(msg.bytes, "invite ");
+        unused BuilderAppend(msg.bytes, TextView(g.invited[i]));
+        PushNote(out_notes, c.parent_id, TextView(msg));
+    }
+    tmsg: Text;
+    unused BuilderAppend(tmsg.bytes, "title (");
+    unused BuilderAppend(tmsg.bytes, TextView(g.title));
+    unused BuilderAppend(tmsg.bytes, ")");
+    PushNote(out_notes, c.parent_id, TextView(tmsg));
+    return true;
+}
+
+StartClique :: (g: *GatherEngine, c: *Core.Clique, out_notes: *Vec(Note), out_err: *Text) -> bool {
+    Core.SetText(out_err, "");
+    mids: Vec(s32);
+    for i: 0..c.members.count-1 {
+        if c.members[i].alive && Core.SetHolds(g.members, cast(s32)i) {
+            unused VecPush(mids, cast(s32)i);
+        }
+    }
+    perr := ProposeEngine(g.kind, cast(s32)mids.count);
+    if perr.count > 0 {
+        Core.SetText(out_err, perr);
+        return false;
+    }
+
+    ct: Text;
+    unused BuilderAppend(ct.bytes, "clienttype ");
+    unused BuilderAppend(ct.bytes, ClientType(g.kind));
+    Core.CliqueActionSimple(c, TextView(ct), Core.SetAll());
+    Core.CliqueBreakMsg(c, Core.SetAll());
+
+    archived := g.archive_members.count > 0;
+    if g.kind == EK_OTHELLO {
+        Othello.Start(*g.othello, c, mids[0], mids[1], archived);
+    } else if g.kind == EK_BOUNCE {
+        Bounce.Start(*g.bounce, c, mids[:]);
+    } else if g.kind == EK_SPIDER {
+        Spider.Start(*g.spider, c, mids[0]);
+    } else if g.kind == EK_AFGHAN {
+        Afghan.Start(*g.afghan, c, mids[0]);
+    } else if g.kind == EK_WHIST {
+        Whist.Start(*g.whist, c, mids[:]);
+    } else if g.kind == EK_CANFIELD {
+        Canfield.Start(*g.canfield, c, mids[0]);
+    } else if g.kind == EK_FREECELL {
+        FreeCell.Start(*g.freecell, c, mids[0]);
+    } else if g.kind == EK_RACINGDEMON {
+        RacingDemon.Start(*g.racingdemon, c, mids[:]);
+    } else if g.kind == EK_SPIT {
+        Spit.Start(*g.spit, c, mids[0], mids[1]);
+    }
+
+    Core.CliqueStart(c);
+    g.started = true;
+    PushNote(out_notes, c.parent_id, "started");
+    tmsg: Text;
+    unused BuilderAppend(tmsg.bytes, "title ");
+    unused BuilderAppend(tmsg.bytes, TextView(g.title));
+    PushNote(out_notes, c.parent_id, TextView(tmsg));
+    return true;
+}
+
+Join :: (g: *GatherEngine, c: *Core.Clique, member_id: s32, cmd: string, susp: bool, out_notes: *Vec(Note), out_err: *Text) -> bool {
+    Core.SetText(out_err, "");
+    if member_id < 0 || cast(s64)member_id >= c.members.count {
+        Core.SetText(out_err, "bad member");
+        return false;
+    }
+    pname := TextView(c.members[member_id].name);
+    pset := Core.SetSingleton(member_id);
+
+    // Strip trailing newline/spaces
+    trimmed := cmd;
+    while trimmed.count > 0 && (trimmed[trimmed.count - 1] == 10 || trimmed[trimmed.count - 1] == 13 || trimmed[trimmed.count - 1] == 32) {
+        trimmed = trimmed[0:trimmed.count - 1];
+    }
+
+    if trimmed == "join" {
+        if g.started {
+            if !susp || !g.halted {
+                Core.SetText(out_err, "clique has already started");
+                return false;
+            }
+            g.suspended = Core.SetDel(g.suspended, member_id);
+            if Core.SetEq(g.suspended, Core.SetNone()) {
+                g.halted = false;
+            }
+            ct: Text;
+            unused BuilderAppend(ct.bytes, "clienttype ");
+            unused BuilderAppend(ct.bytes, ClientType(g.kind));
+            Core.CliqueActionSimple(c, TextView(ct), pset);
+            Core.CliqueBreakMsg(c, pset);
+            return true;
+        }
+        if !IsInvited(g, pname) {
+            Core.SetText(out_err, "you have not been invited");
+            return false;
+        }
+        if g.nmembers >= MaxMembers(g.kind) || (g.count != -1 && g.nmembers >= g.count) {
+            Core.SetText(out_err, "too many members already");
+            return false;
+        }
+        if g.archive_members.count > 0 {
+            found := false;
+            for i: 0..g.archive_members.count-1 {
+                if TextView(g.archive_members[i]) == pname { found = true; break }
+            }
+            if !found {
+                Core.SetText(out_err, "you are not part of that clique");
+                return false;
+            }
+        }
+        g.nmembers += 1;
+        g.members = Core.SetAdd(g.members, member_id);
+        jnote: Text;
+        unused BuilderAppend(jnote.bytes, "join ");
+        unused BuilderAppend(jnote.bytes, pname);
+        PushNote(out_notes, c.parent_id, TextView(jnote));
+
+        if MaxMembers(g.kind) == 1 {
+            return StartClique(g, c, out_notes, out_err);
+        }
+        Core.CliqueActionSimple(c, "clienttype gather", pset);
+        Core.CliqueBreakMsg(c, pset);
+        tact: Text;
+        unused BuilderAppend(tact.bytes, "title ");
+        unused BuilderAppend(tact.bytes, TextView(g.title));
+        Core.CliqueActionSimple(c, TextView(tact), pset);
+        jact: Text;
+        unused BuilderAppend(jact.bytes, "join ");
+        unused BuilderAppend(jact.bytes, pname);
+        Core.CliqueActionSimple(c, TextView(jact), Core.SetAll());
+        return true;
+    }
+
+    if trimmed == "watch" {
+        if susp {
+            Core.SetText(out_err, "you cannot watch if you are playing");
+            return false;
+        }
+        g.watchers = Core.SetAdd(g.watchers, member_id);
+        if g.started {
+            ct: Text;
+            unused BuilderAppend(ct.bytes, "clienttype ");
+            unused BuilderAppend(ct.bytes, ClientType(g.kind));
+            Core.CliqueActionSimple(c, TextView(ct), pset);
+        } else {
+            Core.CliqueActionSimple(c, "clienttype gather", pset);
+        }
+        Core.CliqueBreakMsg(c, pset);
+        if !g.started {
+            wact: Text;
+            unused BuilderAppend(wact.bytes, "watch ");
+            unused BuilderAppend(wact.bytes, pname);
+            Core.CliqueActionSimple(c, TextView(wact), Core.SetAll());
+        }
+        return true;
+    }
+
+    Core.SetText(out_err, "unknown join request");
+    return false;
+}
+
+// Returns true if member should be deleted, false if suspended.
+// Sets *need_archive = true if all members suspended and clique should be archived & hung up.
+Leave :: (g: *GatherEngine, c: *Core.Clique, member_id: s32, out_notes: *Vec(Note), need_archive: *bool) -> bool {
+    <<need_archive = false;
+    if member_id < 0 || cast(s64)member_id >= c.members.count { return true }
+    pname := TextView(c.members[member_id].name);
+    if Core.SetHolds(g.members, member_id) {
+        if g.started {
+            g.suspended = Core.SetAdd(g.suspended, member_id);
+            if Core.SetEq(g.suspended, g.members) {
+                if g.kind == EK_OTHELLO { Othello.Archive(*g.othello, c) }
+                <<need_archive = true;
+                return true;
+            }
+            g.halted = true;
+            return false;
+        }
+        g.members = Core.SetDel(g.members, member_id);
+        g.nmembers -= 1;
+        lnote: Text;
+        unused BuilderAppend(lnote.bytes, "leave ");
+        unused BuilderAppend(lnote.bytes, pname);
+        PushNote(out_notes, c.parent_id, TextView(lnote));
+        if g.nmembers == 0 {
+            c.hungup = true;
+        }
+    } else {
+        g.watchers = Core.SetDel(g.watchers, member_id);
+        uact: Text;
+        unused BuilderAppend(uact.bytes, "unwatch ");
+        unused BuilderAppend(uact.bytes, pname);
+        Core.CliqueActionSimple(c, TextView(uact), Core.SetAll());
+    }
+    return true;
+}
+
+Notify :: (g: *GatherEngine, note: string) {
+    // "invite <name>" or "uninvite <name>"
+    sp: s64 = -1;
+    for i: 0..note.count-1 {
+        if note[i] == 32 { sp = i; break }
+    }
+    if sp <= 0 || sp + 1 >= note.count { return }
+    verb := note[0:sp];
+    arg := note[sp + 1:];
+    if verb == "invite" {
+        AddInvited(g, arg);
+    } else if verb == "uninvite" {
+        RemoveInvited(g, arg);
+    }
+}
+
+Command :: (g: *GatherEngine, c: *Core.Clique, member_id: s32, cmd: string, now_ms: s64, out_notes: *Vec(Note), out_err: *Text) -> bool {
+    Core.SetText(out_err, "");
+    if g.halted {
+        Core.SetText(out_err, "clique is halted for the time being");
+        return false;
+    }
+    if g.started {
+        if !Core.SetHolds(g.members, member_id) {
+            Core.SetText(out_err, "you are only watching");
+            return false;
+        }
+        err := "";
+        if g.kind == EK_OTHELLO { err = Othello.Command(*g.othello, c, member_id, cmd) }
+        else if g.kind == EK_BOUNCE { err = Bounce.Command(*g.bounce, c, member_id, cmd, now_ms) }
+        else if g.kind == EK_SPIDER { err = Spider.Command(*g.spider, c, member_id, cmd) }
+        else if g.kind == EK_AFGHAN { err = Afghan.Command(*g.afghan, c, member_id, cmd) }
+        else if g.kind == EK_WHIST { err = Whist.Command(*g.whist, c, member_id, cmd) }
+        else if g.kind == EK_CANFIELD { err = Canfield.Command(*g.canfield, c, member_id, cmd) }
+        else if g.kind == EK_FREECELL { err = FreeCell.Command(*g.freecell, c, member_id, cmd) }
+        else if g.kind == EK_RACINGDEMON { err = RacingDemon.Command(*g.racingdemon, c, member_id, cmd) }
+        else if g.kind == EK_SPIT { err = Spit.Command(*g.spit, c, member_id, cmd) }
+        if err.count > 0 {
+            Core.SetText(out_err, err);
+            return false;
+        }
+        return true;
+    }
+
+    // Pre-start gather commands: "start", "chat <msg>"
+    s := cmd;
+    while s.count > 0 && (s[s.count - 1] == 10 || s[s.count - 1] == 13) {
+        s = s[0:s.count - 1];
+    }
+    p: s64 = 0;
+    while p < s.count && s[p] == 32 { p += 1 }
+    if p >= s.count {
+        Core.SetText(out_err, "bad command");
+        return false;
+    }
+    end := p;
+    while end < s.count && s[end] != 32 { end += 1 }
+    verb := s[p:end];
+    rest := ifx end < s.count then s[end + 1:] else "";
+
+    if verb == "start" {
+        if g.archive_members.count == 0 && TextView(c.members[member_id].name) != TextView(c.owner) {
+            Core.SetText(out_err, "only the owner can start a clique");
+            return false;
+        }
+        if g.count != -1 && g.nmembers != g.count {
+            Core.SetText(out_err, "need more members");
+            return false;
+        }
+        return StartClique(g, c, out_notes, out_err);
+    }
+    if verb == "chat" {
+        msg: Text;
+        unused BuilderAppend(msg.bytes, "chat ");
+        unused BuilderAppend(msg.bytes, TextView(c.members[member_id].name));
+        if rest.count > 0 {
+            unused BuilderAppend(msg.bytes, " ");
+            unused BuilderAppend(msg.bytes, rest);
+        }
+        Core.CliqueActionSimple(c, TextView(msg), Core.SetAll());
+        return true;
+    }
+    Core.SetText(out_err, "unknown command");
+    return false;
+}
