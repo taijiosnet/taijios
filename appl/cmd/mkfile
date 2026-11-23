@@ -57,7 +57,6 @@ TARG=\
 	du.dis\
 	ed.dis\
 	emuinit.dis\
-	env.dis\
 	fc.dis\
 	fcp.dis\
 	fmt.dis\
@@ -198,7 +197,7 @@ SYSMODULES=\
 
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
-ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh
+ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh env
 ZXCOMMANDS=$ZXCOMMANDS export mntgen
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -264,6 +263,9 @@ ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 
 mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
+
+env.zx: env.zi taijios_stat.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry env:main -o $target env.zi
 
 # Only package-aware ZX targets resolve the Tcl/Tk dependencies.
 $TCLZX:Ppython3 ziran_package_inputs.py check tcl: ziran_package_inputs.py

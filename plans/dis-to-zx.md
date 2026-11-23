@@ -257,7 +257,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/du.dis | appl/cmd/du.b |  | - |  |
 | dis/ed.dis | appl/cmd/ed.b |  | - |  |
 | dis/emuinit.dis | appl/cmd/emuinit.b |  | - |  |
-| dis/env.dis | appl/cmd/env.b | module/env.m | - |  |
 | dis/fc.dis | appl/cmd/fc.b |  | - |  |
 | dis/fcp.dis | appl/cmd/fcp.b |  | - |  |
 | dis/fmt.dis | appl/cmd/fmt.b |  | - |  |
