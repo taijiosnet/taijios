@@ -1,0 +1,125 @@
+// Pure protocol parser and message formatting for spree/clients/gather,
+// ported from appl/spree/clients/gather.b.
+#import "std/vec"
+
+CLIENTDIR :: "/dis/spree/clients";
+MAX_EXTRA :: 8;
+
+UpdateKind :: enum s32 {
+    None :: 0;
+    Chat :: 1;
+    Title :: 2;
+    Event :: 3;
+    ClientType :: 4;
+    Unknown :: 5;
+}
+
+ParsedUpdate :: struct {
+    kind: UpdateKind;
+    text: Text;
+    client_type: Text;
+    extra: [MAX_EXTRA]Text;
+    extra_count: s32;
+}
+
+SplitFirst :: (s: string) -> (head: string, rest: string) {
+    i: s64 = 0;
+    while i < s.count && (s[i] == 32 || s[i] == 9) { i += 1 }
+    start := i;
+    while i < s.count && s[i] != 32 && s[i] != 9 { i += 1 }
+    head := s[start:i];
+    while i < s.count && (s[i] == 32 || s[i] == 9) { i += 1 }
+    return head, s[i:];
+}
+
+ParseUpdateLine :: (line: string, out: *ParsedUpdate) -> bool {
+    out.kind = .None;
+    unused VecResize(out.text.bytes, 0);
+    unused VecResize(out.client_type.bytes, 0);
+    out.extra_count = 0;
+
+    verb, rest := SplitFirst(line);
+    if verb.count == 0 { return false }
+
+    if verb == "clienttype" {
+        ctype, rem := SplitFirst(rest);
+        if ctype.count == 0 { return false }
+        // Reject path traversal
+        for c: ctype {
+            if c == 47 || c == 92 { return false }
+        }
+        out.kind = .ClientType;
+        unused BuilderAppend(out.client_type.bytes, ctype);
+        unused BuilderAppend(out.text.bytes, "starting ");
+        unused BuilderAppend(out.text.bytes, ctype);
+        unused BuilderAppend(out.text.bytes, " session...\n");
+        cur := rem;
+        while cur.count > 0 && out.extra_count < MAX_EXTRA {
+            tok, next := SplitFirst(cur);
+            if tok.count == 0 { break }
+            unused VecResize(out.extra[out.extra_count].bytes, 0);
+            unused BuilderAppend(out.extra[out.extra_count].bytes, tok);
+            out.extra_count += 1;
+            cur = next;
+        }
+        return true;
+    }
+
+    if verb == "chat" {
+        who, msg := SplitFirst(rest);
+        out.kind = .Chat;
+        unused BuilderAppend(out.text.bytes, who);
+        unused BuilderAppend(out.text.bytes, ": ");
+        unused BuilderAppend(out.text.bytes, msg);
+        unused BuilderAppend(out.text.bytes, "\n");
+        return true;
+    }
+
+    if verb == "title" {
+        out.kind = .Title;
+        unused BuilderAppend(out.text.bytes, "Gather ");
+        unused BuilderAppend(out.text.bytes, rest);
+        return true;
+    }
+
+    if verb == "join" || verb == "leave" || verb == "watch" || verb == "unwatch" {
+        out.kind = .Event;
+        unused BuilderAppend(out.text.bytes, line);
+        unused BuilderAppend(out.text.bytes, "\n");
+        return true;
+    }
+
+    out.kind = .Unknown;
+    unused BuilderAppend(out.text.bytes, "unknown update: ");
+    unused BuilderAppend(out.text.bytes, line);
+    unused BuilderAppend(out.text.bytes, "\n");
+    return true;
+}
+
+EscapeTk :: (s: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    for c: s {
+        if c == 123 || c == 125 || c == 92 { unused VecPush(out.bytes, 92) }
+        unused VecPush(out.bytes, c);
+    }
+}
+
+GATHER_UI :: #string END_UI
+frame .top
+button .top.b -text {Start} -command {gather_act start}
+pack .top.b -side left -padx 2 -pady 2
+frame .chat
+scrollbar .chat.scroll -command {.chat.t yview}
+text .chat.t -yscrollcommand {.chat.scroll set} -height 240
+pack .chat.scroll -side left -fill y
+pack .chat.t -fill both -expand 1
+frame .in
+entry .in.e
+button .in.send -text {Send} -command {gather_act send}
+pack .in.e -side left -fill x -expand 1 -padx 2
+pack .in.send -side left -padx 2
+pack .top -side top -fill x
+pack .chat -side top -fill both -expand 1
+pack .in -side top -fill x -pady 2
+bind .in.e <Key-\n> {gather_act send}
+END_UI;

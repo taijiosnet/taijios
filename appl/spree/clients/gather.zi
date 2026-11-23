@@ -1,0 +1,146 @@
+// Spree Gather Tk client, ported from appl/spree/clients/gather.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Proc :: #import "taijios_process"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Model :: #import "gather_model"
+
+mnt_dir: Text;
+clique_dir: Text;
+line_buf: Text;
+pending_act: s32 = 0; // 1=start, 2=send
+
+AppendChat :: (tcl: *Tcl.Interpreter, msg: string) {
+    esc: Text;
+    Model.EscapeTk(msg, *esc);
+    cmd: Text;
+    unused BuilderAppend(cmd.bytes, ".chat.t insert end {");
+    unused BuilderAppend(cmd.bytes, TextView(esc));
+    unused BuilderAppend(cmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(cmd));
+}
+
+CliqueCmd :: (tcl: *Tcl.Interpreter, s: string) {
+    if IO.Write(0, s) < 0 {
+        AppendChat(tcl, "command failed\n");
+    }
+}
+
+LaunchClient :: (tcl: *Tcl.Interpreter, upd: *Model.ParsedUpdate) -> bool {
+    path: Text;
+    unused BuilderAppend(path.bytes, Model.CLIENTDIR);
+    unused BuilderAppend(path.bytes, "/");
+    unused BuilderAppend(path.bytes, TextView(upd.client_type));
+    unused BuilderAppend(path.bytes, ".zx");
+    meta: [12]u8;
+    if IO.Stat(TextView(path), meta[:]) != 0 {
+        unused VecResize(path.bytes, 0);
+        unused BuilderAppend(path.bytes, Model.CLIENTDIR);
+        unused BuilderAppend(path.bytes, "/");
+        unused BuilderAppend(path.bytes, TextView(upd.client_type));
+        unused BuilderAppend(path.bytes, ".dis");
+    }
+    ops: [Model.MAX_EXTRA + 2]string;
+    ops[0] = TextView(mnt_dir);
+    ops[1] = TextView(clique_dir);
+    for k: 0..cast(s64)upd.extra_count-1 {
+        ops[2 + k] = TextView(upd.extra[k]);
+    }
+    launch := Proc.StartWith(TextView(path), ops[:2 + upd.extra_count], 0, -1, -1);
+    if launch.id <= 0 {
+        AppendChat(tcl, "could not load client\nbye bye\n");
+        return false;
+    }
+    unused Window.Execute(tcl, "destroy .");
+    return true;
+}
+
+GatherCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 { result.code = .Error; return }
+    v := TextView(args[0]);
+    if v == "start" { pending_act = 1 }
+    else if v == "send" { pending_act = 2 }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    changed := false;
+    if pending_act != 0 {
+        act := pending_act;
+        pending_act = 0;
+        if act == 1 {
+            CliqueCmd(tcl, "start");
+            changed = true;
+        } else if act == 2 {
+            res := Tcl.Eval(tcl, ".in.e get");
+            if res.code == .OK && res.value.bytes.count > 0 {
+                msg: Text;
+                unused BuilderAppend(msg.bytes, "chat ");
+                unused BuilderAppend(msg.bytes, TextView(res.value));
+                CliqueCmd(tcl, TextView(msg));
+                unused Window.Execute(tcl, ".in.e delete 0 end");
+                changed = true;
+            }
+        }
+    }
+
+    buf: [4096]u8;
+    n := IO.PollRead(0, buf[:]);
+    if n > 0 {
+        unused BuilderAppend(line_buf.bytes, TextView(buf[:n]));
+        rem: Text;
+        consumed := false;
+        handoff := false;
+        {
+            s := TextView(line_buf);
+            pos: s64 = 0;
+            while pos < s.count {
+                nl := pos;
+                while nl < s.count && s[nl] != 10 { nl += 1 }
+                if nl >= s.count { break }
+                line := s[pos:nl];
+                pos = nl + 1;
+                if line.count == 0 { continue }
+                upd: Model.ParsedUpdate;
+                if Model.ParseUpdateLine(line, *upd) {
+                    if upd.kind == .Title {
+                        unused Surface.SetWindowTitle(TextView(upd.text));
+                    } else if upd.kind == .ClientType {
+                        AppendChat(tcl, TextView(upd.text));
+                        if LaunchClient(tcl, *upd) { handoff = true; break }
+                    } else {
+                        AppendChat(tcl, TextView(upd.text));
+                    }
+                    changed = true;
+                }
+            }
+            if pos > 0 {
+                consumed = true;
+                if pos < s.count { unused BuilderAppend(rem.bytes, s[pos:]) }
+            }
+        }
+        if consumed {
+            unused VecResize(line_buf.bytes, 0);
+            unused BuilderAppend(line_buf.bytes, TextView(rem));
+        }
+        if handoff { return .Changed }
+    }
+
+    return ifx changed then .Changed else .Idle;
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() >= 2 {
+        unused BuilderAppend(mnt_dir.bytes, Args.Operand(0));
+        unused BuilderAppend(clique_dir.bytes, Args.Operand(1));
+    }
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "gather_act", GatherCmd) { return 1 }
+    return Window.RunPolled(*tcl, Model.GATHER_UI, "Gathering", 420, 320, Start, Tick, 50);
+}

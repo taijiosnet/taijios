@@ -1,0 +1,39 @@
+// Table-driven unit + Tk UI tests for appl/spree/clients/gather_model.zi.
+#import "std/vec"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Model :: #import "gather_model"
+
+failures: s32;
+
+NoopCmd :: (_: s64, args: []Text, result: *T.Result) {}
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    u: Model.ParsedUpdate;
+    Expect(Model.ParseUpdateLine("chat Alice hello world", *u) && u.kind == .Chat && TextView(u.text) == "Alice: hello world\n", "chat");
+    Expect(Model.ParseUpdateLine("title Othello Room", *u) && u.kind == .Title && TextView(u.text) == "Gather Othello Room", "title");
+    Expect(Model.ParseUpdateLine("join Bob", *u) && u.kind == .Event && TextView(u.text) == "join Bob\n", "join");
+    Expect(Model.ParseUpdateLine("leave Bob", *u) && u.kind == .Event && TextView(u.text) == "leave Bob\n", "leave");
+    Expect(Model.ParseUpdateLine("clienttype othello arg1 arg2", *u) && u.kind == .ClientType && TextView(u.client_type) == "othello" && u.extra_count == 2 && TextView(u.extra[0]) == "arg1" && TextView(u.extra[1]) == "arg2", "clienttype");
+    Expect(!Model.ParseUpdateLine("clienttype ../evil", *u), "reject path traversal");
+    Expect(Model.ParseUpdateLine("bogus xyz", *u) && u.kind == .Unknown && TextView(u.text) == "unknown update: bogus xyz\n", "unknown");
+
+    tcl: Tcl.Interpreter;
+    Expect(Tk.Attach(*tcl), "Tk.Attach");
+    Expect(Tcl.RegisterCommand(*tcl, "gather_act", NoopCmd), "reg gather_act");
+    res := Tcl.Eval(*tcl, Model.GATHER_UI);
+    Expect(res.code == .OK, TextView(res.value));
+    Tk.Layout(420, 320);
+    Expect(Tk.Find(".top.b") >= 0 && Tk.Find(".chat.t") >= 0 && Tk.Find(".in.e") >= 0, "widgets exist");
+
+    if failures == 0 { print("gather_client_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}
