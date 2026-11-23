@@ -16,6 +16,7 @@
 #include "zxrunt.h"
 #include "drawif.h"
 #include "zxmod.h"
+#include "zxkeyring.h"
 #ifdef __linux__
 #include <pthread.h>
 #include "zxwindow.h"
@@ -3327,6 +3328,10 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			   strcmp(abi.function, "MountAsync") == 0 || strcmp(abi.function, "MountDone") == 0 ||
 			   strcmp(abi.function, "Export") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxnamespace, command};
+			continue;
+		}
+		if(zxmodule(abi.module, "taijios_keyring")){
+			bindings[count++] = (HostBinding){abi.module, abi.function, zxkeyring, nil};
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_dial")){

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Give ZX programs the Keyring cryptography: digests, HMAC, AES-CBC, big integers, and RSA, DSA and ElGamal keys and signatures.
+
 - Let ZX programs dial, announce and listen on the guest network, export part of their namespace, and serve a file2chan file.
 
 - Let ZX programs create pipes, mount 9P servers, bind and unmount names, fork their namespace, start children on chosen streams, and poll any handle without waiting.

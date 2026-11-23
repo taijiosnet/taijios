@@ -66,6 +66,12 @@ client on a handle. `appl/cmd/taijios_file2chan.zi` builds on these to give a
 program a file whose reads and writes it answers itself, like Sys
 `file2chan`. `appl/cmd/taijios_dial.zi` provides `Dial`, `Announce`,
 `Listen` and `Accept` for guest network connections.
+`appl/cmd/taijios_keyring.zi` gives ZX programs the cryptography behind the
+Limbo Keyring module, from the emulator's libsec and libmp: MD4, MD5 and the
+SHA-1 and SHA-2 digests, HMAC, AES in CBC mode, random bytes, big integer
+arithmetic and primes, and RSA, DSA and ElGamal keys and signatures. Big
+integers pass as hexadecimal text, and calls that return several numbers
+write one per line.
 
 Build the direct ZX window manager with `(cd appl/wm && mk native_wm.zx)`.
 To run an existing ZX GUI app under it with the current Linux build, use

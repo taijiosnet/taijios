@@ -1,0 +1,179 @@
+// Check taijios_keyring against values the Limbo Keyring module printed for
+// the same inputs (digests, HMAC, AES-CBC and IPint arithmetic), and check
+// that generated RSA, DSA and ElGamal keys sign and verify.
+Args :: #import "taijios_args";
+K :: #import "taijios_keyring";
+
+Fox :: "The quick brown fox jumps over the lazy dog";
+A :: "123456789ABCDEF0123456789ABCDEF";
+B :: "FEDCBA9876543210";
+M :: "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF61";
+
+Fail :: (message: string) -> s32 {
+    unused Args.SetFailure(message);
+    return 1;
+}
+
+Same :: (bytes: []u8, text: string) -> bool {
+    if bytes.count != text.count { return false }
+    for i: 0 .. text.count - 1 { if bytes[i] != text[i] { return false } }
+    return true;
+}
+
+// Compare bytes with their lowercase hexadecimal text.
+IsHex :: (bytes: []u8, text: string) -> bool {
+    digits := "0123456789abcdef";
+    if text.count != bytes.count * 2 { return false }
+    for i: 0 .. bytes.count - 1 {
+        if text[i * 2] != digits[bytes[i] >> 4] || text[i * 2 + 1] != digits[bytes[i] & 15] { return false }
+    }
+    return true;
+}
+
+Digests :: (algorithm: s32, expected: string) -> bool {
+    digest: [64]u8;
+    count := K.Digest(algorithm, Fox, digest[:]);
+    return count == K.DigestBytes(algorithm) && IsHex(digest[:count], expected);
+}
+
+Computes :: (operation: s32, a: string, b: string, c: string, expected: string) -> bool {
+    out: [256]u8;
+    count := K.Big(operation, a, b, c, out[:]);
+    return count > 0 && count == expected.count && Same(out[:count], expected);
+}
+
+// The text of one line of a reply.
+Line :: (reply: []u8, index: s64) -> string {
+    start: s64 = 0;
+    line: s64 = 0;
+    for i: 0 .. reply.count {
+        if i == reply.count || reply[i] == 10 {
+            if line == index { return TextView(reply[start:i]) }
+            line += 1;
+            start = i + 1;
+        }
+    }
+    return "";
+}
+
+main :: () -> s32 {
+    if !Digests(K.MD4, "1bee69a46ba811185c194762abaeae90") || !Digests(K.MD5, "9e107d9d372bb6826bd81d3542a419d6") ||
+       !Digests(K.SHA1, "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12") ||
+       !Digests(K.SHA224, "730e109bd7a8a32b1cb9d9a09aa2325d2430587ddbc0c38bad911525") ||
+       !Digests(K.SHA256, "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592") ||
+       !Digests(K.SHA384, "ca737f1014a48f4c0b6dd43cb177b0afd9e5169367544c494011e3317dbf9a509cb1e5dc1e85a941bbee3d7f2afbc9b1") ||
+       !Digests(K.SHA512, "07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb642e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6") {
+        return Fail("digests");
+    }
+    digest: [64]u8;
+    state: K.DigestState;
+    if K.DigestAdd(K.SHA1, *state, Fox[:10]) != 0 || K.DigestAdd(K.SHA1, *state, Fox[10:]) != 0 ||
+       K.DigestEnd(K.SHA1, *state, digest[:]) != 20 || !IsHex(digest[:20], "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12") {
+        return Fail("digest in parts");
+    }
+    if K.Hmac(K.SHA1, "key", Fox, digest[:]) != 20 || !IsHex(digest[:20], "de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9") ||
+       K.Hmac(K.MD5, "key", Fox, digest[:]) != 16 || !IsHex(digest[:16], "80070713463e7749b90c2dc24911e275") ||
+       K.Hmac(K.SHA256, "key", Fox, digest[:]) != -1 || K.Digest(K.SHA1, Fox, digest[:8]) != -1 {
+        return Fail("keyed digests");
+    }
+
+    key: [16]u8;
+    vector: [16]u8;
+    for i: 0 .. 15 { key[i] = cast(u8)i; vector[i] = cast(u8)(16 + i) }
+    plain := "0123456789abcdef0123456789abcdefTAIL!";
+    cipher: [64]u8;
+    next: [16]u8;
+    expected := "eb9e5ba41b902db8252982aa1a23f4be916765b29ca3a2e2728e432e670f496d90619581c7";
+    if K.AesCbc(TextView(key[:]), TextView(vector[:]), plain, true, cipher[:], next[:]) != 37 ||
+       !IsHex(cipher[:37], expected) { return Fail("AES-CBC encryption") }
+    // Two parts give the same bytes when the first is whole blocks.
+    parts: [64]u8;
+    if K.AesCbc(TextView(key[:]), TextView(vector[:]), plain[:32], true, parts[:], next[:]) != 32 ||
+       K.AesCbc(TextView(key[:]), TextView(next[:]), plain[32:], true, parts[32:], next[:]) != 5 ||
+       !IsHex(parts[:37], expected) { return Fail("AES-CBC in parts") }
+    clear: [64]u8;
+    if K.AesCbc(TextView(key[:]), TextView(vector[:]), TextView(cipher[:37]), false, clear[:], next[:]) != 37 ||
+       !Same(clear[:37], plain) || K.AesCbc("short", TextView(vector[:]), plain, true, cipher[:], next[:]) != -1 {
+        return Fail("AES-CBC decryption");
+    }
+
+    if !Computes(K.Add, A, B, "", "123456789ABCDEFFFFFFFFFFFFFFFFF") ||
+       !Computes(K.Subtract, B, A, "", "-123456789ABCDEE02468ACF13579BDF") ||
+       !Computes(K.Multiply, A, B, "", "121FA00AD77D7422358D29092D964322236D88FE5618CF0") ||
+       !Computes(K.Divide, A, B, "", "124924924924923") || !Computes(K.Modulo, A, B, "", "7F598F328CC265BF") ||
+       !Computes(K.PowerModulo, A, B, M, "C3EA803E35D6838CA2AA82C12144158B") ||
+       !Computes(K.Invert, B, M, "", "BCA9C8F1A60C136B83AABACA2AFF22BA") ||
+       !Computes(K.ShiftLeft, A, "D", "", "2468ACF13579BDE02468ACF13579BDE000") ||
+       !Computes(K.ShiftRight, A, "D", "", "91A2B3C4D5E6F78091A2B3C4D5E") ||
+       !Computes(K.Negate, A, "", "", "-123456789ABCDEF0123456789ABCDEF") ||
+       !Computes(K.PowerModulo, "3", "5", "", "F3") { return Fail("big integer arithmetic") }
+    out: [8192]u8;
+    if K.BigBits(A) != 121 || K.BigCompare(A, B) != 1 || K.BigCompare(B, A) != -1 || K.BigCompare(A, A) != 0 ||
+       K.BigCompare(A, "xyz") != -2 { return Fail("big integer comparison") }
+    count := K.BigConvert(A, 16, 10, out[:]);
+    if count <= 0 || !Same(out[:count], "1512366075204170929049582354406559215") { return Fail("base 10") }
+    count = K.BigConvert(A, 16, 64, out[:]);
+    if count <= 0 || !Same(out[:count], "ASNFZ4mrze8BI0VniavN7w==") { return Fail("base 64") }
+    count = K.BigConvert("ASNFZ4mrze8BI0VniavN7w==", 64, 16, out[:]);
+    if count <= 0 || !Same(out[:count], A) { return Fail("from base 64") }
+    if K.Big(K.Divide, A, "0", "", out[:]) != -1 || K.Big(K.Add, A, "not hex", "", out[:]) != -1 ||
+       K.Big(K.Multiply, A, B, "", out[:4]) != -1 || K.Big(99, A, B, "", out[:]) != -1 ||
+       K.Big(K.PowerModulo, A, "FFFFFFFF", "", out[:]) != -1 { return Fail("refused arithmetic") }
+
+    random: [16]u8;
+    count = K.BigPrime(128, 8, out[:]);
+    if count <= 0 || K.BigBits(TextView(out[:count])) != 128 || !K.BigIsPrime(TextView(out[:count]), 8) ||
+       K.BigIsPrime("F", 8) || K.Random(random[:]) != 16 { return Fail("primes and random bytes") }
+    count = K.BigRandom(100, out[:]);
+    if count <= 0 || K.BigBits(TextView(out[:count])) > 100 { return Fail("random number") }
+
+    // RSA: what the public exponent does, the private one undoes.
+    rsa: [2048]u8;
+    count = K.RsaGenerate(512, 17, 4, rsa[:]);
+    if count <= 0 || Line(rsa[:count], 7) == "" || Line(rsa[:count], 8) != "" { return Fail("RSA key") }
+    n := Line(rsa[:count], 0);
+    sealed: [256]u8;
+    opened: [256]u8;
+    sealed_count := K.Big(K.PowerModulo, A, Line(rsa[:count], 1), n, sealed[:]);
+    // libsec, like the Limbo Keyring, can give the modulus a bit more or less than asked.
+    bits := K.BigBits(n);
+    if bits < 511 || bits > 513 || sealed_count <= 0 || Same(sealed[:sealed_count], A) { return Fail("RSA encryption") }
+    opened_count := K.Big(K.PowerModulo, TextView(sealed[:sealed_count]), Line(rsa[:count], 2), n, opened[:]);
+    if opened_count <= 0 || !Same(opened[:opened_count], A) { return Fail("RSA decryption") }
+
+    // DSA and ElGamal: a signature verifies for its message and key only.
+    dsa: [2048]u8;
+    signature: [1024]u8;
+    count = K.DsaGenerate("", "", "", dsa[:]);
+    if count <= 0 || Line(dsa[:count], 4) == "" { return Fail("DSA key") }
+    p := Line(dsa[:count], 0);
+    q := Line(dsa[:count], 1);
+    alpha := Line(dsa[:count], 2);
+    signed := K.DsaSign(p, q, alpha, Line(dsa[:count], 4), B, signature[:]);
+    if signed <= 0 { return Fail("DSA signature") }
+    r := Line(signature[:signed], 0);
+    s := Line(signature[:signed], 1);
+    if !K.DsaVerify(p, q, alpha, Line(dsa[:count], 3), r, s, B) || K.DsaVerify(p, q, alpha, Line(dsa[:count], 3), r, s, A) ||
+       K.DsaVerify(p, q, alpha, alpha, r, s, B) { return Fail("DSA verification") }
+    // A second key in the same group.
+    again: [2048]u8;
+    again_count := K.DsaGenerate(p, q, alpha, again[:]);
+    if again_count <= 0 || Line(again[:again_count], 0) != p || Line(again[:again_count], 3) == Line(dsa[:count], 3) {
+        return Fail("DSA key in a given group");
+    }
+
+    eg: [2048]u8;
+    count = K.EgGenerate(256, 4, eg[:]);
+    if count <= 0 || Line(eg[:count], 3) == "" { return Fail("ElGamal key") }
+    p = Line(eg[:count], 0);
+    alpha = Line(eg[:count], 1);
+    signed = K.EgSign(p, alpha, Line(eg[:count], 3), B, signature[:]);
+    if signed <= 0 { return Fail("ElGamal signature") }
+    r = Line(signature[:signed], 0);
+    s = Line(signature[:signed], 1);
+    if !K.EgVerify(p, alpha, Line(eg[:count], 2), r, s, B) || K.EgVerify(p, alpha, Line(eg[:count], 2), r, s, A) {
+        return Fail("ElGamal verification");
+    }
+    print("ZX_KEYRING_OK\n");
+    return 0;
+}

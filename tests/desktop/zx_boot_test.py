@@ -529,6 +529,20 @@ def check_services(root, env, boot):
           'file2chan file, and took a TCP call from another child')
 
 
+def check_keyring(root, env, boot):
+    """Compare taijios_keyring with values the Limbo Keyring module printed, and sign with new keys."""
+    source = Path(__file__).with_name('zx_keyring_probe.zi')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
+        '--bind-host', 'taijios_args', '--bind-host', 'taijios_keyring', '--entry', 'zx_keyring_probe:main',
+        '-o', root / 'keyring.zx', source,
+    ], env=env, check=True, timeout=60)
+    result = boot('/keyring.zx', timeout=120)
+    assert result.returncode == 0 and 'ZX_KEYRING_OK' in result.stdout and not result.stderr, result
+    print('Without Dis, digests, HMAC, AES-CBC and big integer arithmetic matched the Limbo Keyring module, '
+          'and new RSA, DSA and ElGamal keys encrypted, signed and verified')
+
+
 def catalog_programs(catalog):
     """Map each graphical entry the menu shows to the guest program it starts."""
     programs = {}
@@ -697,11 +711,11 @@ def main():
         ], env=env, check=True, timeout=60)
         assert not any(root.rglob('*.dis'))
 
-        def boot(*args, stdin='', **overrides):
+        def boot(*args, stdin='', timeout=15, **overrides):
             return subprocess.run(
                 [emulator, '-v', '-r', root, *args], env=env | overrides,
                 input=stdin, capture_output=True, text=True,
-                start_new_session=True, timeout=15,
+                start_new_session=True, timeout=timeout,
             )
 
         operands = ('-test', 'café 猫', '')
@@ -753,6 +767,7 @@ def main():
         print('Without Dis, the task list showed running ZX processes and terminated one through the kill path')
         check_namespace(root, env, boot)
         check_services(root, env, boot)
+        check_keyring(root, env, boot)
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)

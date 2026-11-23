@@ -1,0 +1,93 @@
+// Cryptography for ZX guests over libsec and libmp, the libraries behind the
+// Limbo Keyring module: digests, HMAC, AES in CBC mode, big integers, and
+// RSA, DSA and ElGamal keys and signatures.
+//
+// Bytes go in as strings (use TextView on a byte slice) and come out in byte
+// slices. A big integer is hexadecimal text with an optional minus sign.
+// A call that returns several numbers writes them as lines. Unless stated
+// otherwise a call returns the bytes it wrote, or -1.
+host_api :: #system_library "host_api";
+
+#scope_export
+// Digest algorithms and the length of each digest in bytes.
+MD4 :: 1;
+MD5 :: 2;
+SHA1 :: 3;
+SHA224 :: 4;
+SHA256 :: 5;
+SHA384 :: 6;
+SHA512 :: 7;
+DigestBytes :: (algorithm: s32) -> s32 {
+    lengths: [8]s32 = .{0, 16, 16, 20, 28, 32, 48, 64};
+    return ifx algorithm > 0 && algorithm < 8 then lengths[algorithm] else 0;
+}
+
+// Hash all of `data`.
+Digest :: (algorithm: s32, data: string, digest: []u8) -> s32 #foreign host_api;
+
+// Hash data that arrives in parts. Keep a zeroed DigestState, add each part,
+// then finish. DigestAdd returns 0 or -1.
+StateBytes :: 512;
+DigestState :: struct { bytes: [StateBytes]u8; }
+DigestAdd :: (algorithm: s32, state: *DigestState, data: string) -> s32 {
+    return DigestUpdate(algorithm, TextView(state.bytes[:]), data, state.bytes[:]);
+}
+DigestEnd :: (algorithm: s32, state: *DigestState, digest: []u8) -> s32 {
+    return DigestFinish(algorithm, TextView(state.bytes[:]), digest);
+}
+DigestUpdate :: (algorithm: s32, state: string, data: string, next: []u8) -> s32 #foreign host_api;
+DigestFinish :: (algorithm: s32, state: string, digest: []u8) -> s32 #foreign host_api;
+
+// A keyed digest of `data`. The algorithm is MD5 or SHA1.
+Hmac :: (algorithm: s32, key: string, data: string, digest: []u8) -> s32 #foreign host_api;
+
+// Encrypt or decrypt with AES in CBC mode. The key is 16, 24 or 32 bytes and
+// the vector 16. `out` receives as many bytes as `data` holds and `next` the
+// vector to pass with the following part. Give every part but the last a
+// multiple of 16 bytes.
+AesCbc :: (key: string, vector: string, data: string, encrypt: bool, out: []u8, next: []u8) -> s32 #foreign host_api;
+
+// Fill a slice with random bytes, up to 256 a call. Returns the count.
+Random :: (out: []u8) -> s32 #foreign host_api;
+
+// Big integer arithmetic. `c` is the modulus of PowerModulo; empty gives the
+// plain power. Invert gives the inverse of `a` modulo `b`. The shifts take
+// their distance in `b`. Divide truncates and Modulo is never negative.
+Add :: 1;
+Subtract :: 2;
+Multiply :: 3;
+Divide :: 4;
+Modulo :: 5;
+PowerModulo :: 6;
+Invert :: 7;
+ShiftLeft :: 8;
+ShiftRight :: 9;
+Negate :: 10;
+Big :: (operation: s32, a: string, b: string, c: string, out: []u8) -> s32 #foreign host_api;
+// -1, 0 or 1 as `a` is less than, equal to or greater than `b`; -2 if either is not a number.
+BigCompare :: (a: string, b: string) -> s32 #foreign host_api;
+// The number of significant bits, or -1.
+BigBits :: (a: string) -> s32 #foreign host_api;
+// Rewrite a number between bases 10, 16, 32 and 64.
+BigConvert :: (text: string, from: s32, to: s32, out: []u8) -> s32 #foreign host_api;
+BigRandom :: (bits: s32, out: []u8) -> s32 #foreign host_api;
+// A probable prime of that many bits, checked with `accuracy` Miller-Rabin rounds.
+BigPrime :: (bits: s32, accuracy: s32, out: []u8) -> s32 #foreign host_api;
+BigIsPrime :: (a: string, rounds: s32) -> bool #foreign host_api;
+
+// RSA. The key lines are n, e, d, p, q, d mod (p-1), d mod (q-1) and the CRT
+// coefficient. Encrypt or verify with Big(PowerModulo, m, e, n), and decrypt
+// or sign with Big(PowerModulo, c, d, n).
+RsaGenerate :: (bits: s32, exponent_bits: s32, rounds: s32, out: []u8) -> s32 #foreign host_api;
+
+// DSA. The key lines are p, q, alpha, key and secret. An empty `p` makes a
+// new group; otherwise the key is made in the given one. A signature is the
+// lines r and s. `m` is the digest to sign, as a number.
+DsaGenerate :: (p: string, q: string, alpha: string, out: []u8) -> s32 #foreign host_api;
+DsaSign :: (p: string, q: string, alpha: string, secret: string, m: string, out: []u8) -> s32 #foreign host_api;
+DsaVerify :: (p: string, q: string, alpha: string, key: string, r: string, s: string, m: string) -> bool #foreign host_api;
+
+// ElGamal. The key lines are p, alpha, key and secret; a signature is r and s.
+EgGenerate :: (bits: s32, rounds: s32, out: []u8) -> s32 #foreign host_api;
+EgSign :: (p: string, alpha: string, secret: string, m: string, out: []u8) -> s32 #foreign host_api;
+EgVerify :: (p: string, alpha: string, key: string, r: string, s: string, m: string) -> bool #foreign host_api;
