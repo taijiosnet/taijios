@@ -1,0 +1,655 @@
+// Palm SLP/CMP/PADP serial link server over /chan/palmsrv (replaces appl/cmd/palm/palmsrv.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+IO :: #import "taijios_io";
+Clock :: #import "taijios_clock";
+F2C :: #import "taijios_file2chan";
+#import "std/format"
+#import "std/vec"
+
+DATALIM :: 1024
+SLPHDRLEN :: 10
+PADPHDRLEN :: 4
+CMPHDRLEN :: 10
+SLP_MTU :: 1038
+
+SLP_System :: 0
+SLP_Unused :: 1
+SLP_PAD :: 2
+SLP_Loop :: 3
+
+Cmajor :: 1
+Cminor :: 2
+InitBaud :: 9600
+
+Cwake :: 1
+Cinit :: 2
+Cabort :: 3
+Cextended :: 4
+
+ChangeBaud :: 0x80
+WrongVersion :: 0x80
+
+FIRST :: 0x80
+LAST :: 0x40
+MEMERROR :: 0x20
+
+Pdata :: 1
+Pack :: 2
+Ptickle :: 4
+Pabort :: 8
+
+RetryInterval :: 4000
+MaxRetries :: 14
+
+debug: s32;
+
+Xact :: struct {
+    used: bool;
+    fid: s32;
+    reply: Vec(u8);
+    err: Vec(u8);
+}
+
+Sblock :: struct {
+    valid: bool;
+    src: u8;
+    dst: u8;
+    proto: u8;
+    xid: u8;
+    data: Vec(u8);
+}
+
+Pchan :: struct {
+    started: bool;
+    shutdown: bool;
+    protocol: u8;
+    lport: u8;
+    rport: u8;
+    fd: s32;
+    cfd: s32;
+    baud: s32;
+    maxbaud: s32;
+    lastid: s32;
+    has_reply: bool;
+    reply: Sblock;
+    rxbuf: [2076]u8;
+    rxrd: s64;
+    rxwr: s64;
+}
+
+WriteErr :: (s: string) {
+    if s.count > 0 { unused IO.Write(2, s) }
+}
+
+WriteOut :: (s: string) {
+    if s.count > 0 { unused IO.Write(1, s) }
+}
+
+Usage :: () -> s32 {
+    WriteErr("usage: palm/palmsrv [-d /dev/eia0] [-s 57600]\n");
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+Fail :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "palmsrv: %\n", msg);
+    WriteErr(TextView(out[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+ParseInt :: (s: string) -> s32 {
+    val: s32 = 0;
+    for i: 0..s.count - 1 {
+        c := cast(u8)s[i];
+        if c < 48 || c > 57 { break }
+        val = val * 10 + cast(s32)(c - 48);
+    }
+    return val;
+}
+
+Get2 :: (b: []u8, off: s64) -> s32 {
+    return (cast(s32)b[off] << 8) | cast(s32)b[off + 1];
+}
+
+Get4 :: (b: []u8, off: s64) -> s32 {
+    return (cast(s32)b[off] << 24) | (cast(s32)b[off + 1] << 16) |
+           (cast(s32)b[off + 2] << 8) | cast(s32)b[off + 3];
+}
+
+Put2 :: (b: []u8, off: s64, v: s32) {
+    b[off] = cast(u8)((v >> 8) & 0xFF);
+    b[off + 1] = cast(u8)(v & 0xFF);
+}
+
+Put4 :: (b: []u8, off: s64, v: s32) {
+    b[off] = cast(u8)((v >> 24) & 0xFF);
+    b[off + 1] = cast(u8)((v >> 16) & 0xFF);
+    b[off + 2] = cast(u8)((v >> 8) & 0xFF);
+    b[off + 3] = cast(u8)(v & 0xFF);
+}
+
+Crc16 :: (buf: []u8, init_crc: u32) -> u32 {
+    crc := init_crc;
+    for j: 0..buf.count - 1 {
+        crc = crc ^ (cast(u32)buf[j] << 8);
+        for _: 0..7 {
+            if (crc & 0x8000) != 0 {
+                crc = (crc << 1) ^ 0x1021;
+            } else {
+                crc = crc << 1;
+            }
+        }
+    }
+    return crc & 0xFFFF;
+}
+
+Ctl :: (p: *Pchan, s: string) {
+    if p.cfd >= 0 { unused IO.Write(p.cfd, s) }
+}
+
+SleepMs :: (ms: s64) {
+    if ms <= 0 { return }
+    deadline := Clock.Millis() + ms;
+    while Clock.Millis() < deadline {
+        // spin-wait on monotonic clock
+    }
+}
+
+SetBaud :: (p: *Pchan, baud: s32) {
+    if p.baud != baud {
+        p.baud = baud;
+        cmd: Vec(u8);
+        BuilderPrint(*cmd, "b%", cast(s64)baud);
+        Ctl(p, TextView(cmd[:]));
+        SleepMs(200);
+    }
+}
+
+NextSeq :: (p: *Pchan) -> s32 {
+    n := p.lastid + 1;
+    if n >= 0xFF { n = 1 }
+    p.lastid = n;
+    return n;
+}
+
+SlpWrite :: (p: *Pchan, xid: s32, b: []u8) -> bool {
+    d: [10]u8;
+    cb: [2]u8;
+    nb := cast(s32)b.count;
+    d[0] = 0xBE;
+    d[1] = 0xEF;
+    d[2] = 0xED;
+    d[3] = p.rport;
+    d[4] = p.lport;
+    d[5] = p.protocol;
+    d[6] = cast(u8)((nb >> 8) & 0xFF);
+    d[7] = cast(u8)(nb & 0xFF);
+    d[8] = cast(u8)(xid & 0xFF);
+    d[9] = 0;
+    sum: u32 = 0;
+    for i: 0..8 { sum += cast(u32)d[i] }
+    d[9] = cast(u8)(sum & 0xFF);
+    crc := Crc16(d[:], 0);
+    crc = Crc16(b, crc);
+    Put2(cb[:], 0, cast(s32)crc);
+
+    if IO.Write(p.fd, TextView(d[:])) != SLPHDRLEN { return false }
+    if b.count > 0 && IO.Write(p.fd, TextView(b)) != cast(s32)b.count { return false }
+    if IO.Write(p.fd, TextView(cb[:])) != 2 { return false }
+    return true;
+}
+
+FillUntil :: (p: *Pchan, need: s64, deadline: s64) -> s32 {
+    // Returns 1 if ready, 0 on timeout, -1 on EOF/error.
+    while p.rxwr - p.rxrd < need {
+        if p.rxrd > 0 {
+            rem := p.rxwr - p.rxrd;
+            for i: 0..rem - 1 { p.rxbuf[i] = p.rxbuf[p.rxrd + i] }
+            p.rxrd = 0;
+            p.rxwr = rem;
+        }
+        if p.rxwr >= p.rxbuf.count { return -1 }
+        n := IO.PollRead(p.fd, p.rxbuf[p.rxwr:]);
+        if n > 0 {
+            p.rxwr += cast(s64)n;
+        } else if n == -2 {
+            if Clock.Millis() >= deadline { return 0 }
+        } else {
+            return -1;
+        }
+    }
+    return 1;
+}
+
+SlpRead :: (p: *Pchan, timeout_ms: s64, out_sb: *Sblock) -> (ok: bool, err: string) {
+    deadline := Clock.Millis() + timeout_ms;
+    out_sb.valid = false;
+    VecClear(out_sb.data);
+
+    while true {
+        st := FillUntil(p, SLPHDRLEN, deadline);
+        if st == 0 { return false, "SLP: timeout" }
+        if st < 0 { return false, "SLP: eof" }
+
+        if p.rxbuf[p.rxrd] != 0xBE || p.rxbuf[p.rxrd + 1] != 0xEF || p.rxbuf[p.rxrd + 2] != 0xED {
+            p.rxrd += 1;
+            continue;
+        }
+        sum: u32 = 0;
+        for i: 0..SLPHDRLEN - 2 { sum += cast(u32)p.rxbuf[p.rxrd + i] }
+        if (sum & 0xFF) != cast(u32)p.rxbuf[p.rxrd + 9] {
+            p.rxrd += 3;
+            continue;
+        }
+        hdr_off := p.rxrd;
+        dst := p.rxbuf[hdr_off + 3];
+        src := p.rxbuf[hdr_off + 4];
+        proto := p.rxbuf[hdr_off + 5];
+        size := (cast(s64)p.rxbuf[hdr_off + 6] << 8) | cast(s64)p.rxbuf[hdr_off + 7];
+        xid := p.rxbuf[hdr_off + 8];
+        crc := Crc16(p.rxbuf[hdr_off:hdr_off + SLPHDRLEN], 0);
+        p.rxrd += SLPHDRLEN;
+
+        st2 := FillUntil(p, size + 2, deadline);
+        if st2 == 0 { return false, "SLP: timeout" }
+        if st2 < 0 { return false, "SLP: eof" }
+
+        crc = Crc16(p.rxbuf[p.rxrd:p.rxrd + size], crc);
+        wire_crc := cast(u32)Get2(p.rxbuf[:], p.rxrd + size);
+        if crc != wire_crc {
+            while p.rxrd < p.rxwr && p.rxbuf[p.rxrd] != 0xBE { p.rxrd += 1 }
+            continue;
+        }
+
+        if proto == SLP_Loop {
+            p.rxrd += size + 2;
+            continue;
+        }
+
+        out_sb.valid = true;
+        out_sb.dst = dst;
+        out_sb.src = src;
+        out_sb.proto = proto;
+        out_sb.xid = xid;
+        VecClear(out_sb.data);
+        for i: 0..size - 1 { VecPush(out_sb.data, p.rxbuf[p.rxrd + i]) }
+        p.rxrd += size + 2;
+        if p.rxrd == p.rxwr {
+            p.rxrd = 0;
+            p.rxwr = 0;
+        }
+        return true, "";
+    }
+    return false, "SLP: timeout";
+}
+
+CopySblock :: (dst: *Sblock, src: *Sblock) {
+    dst.valid = src.valid;
+    dst.src = src.src;
+    dst.dst = src.dst;
+    dst.proto = src.proto;
+    dst.xid = src.xid;
+    VecClear(dst.data);
+    for i: 0..src.data.count - 1 { VecPush(dst.data, src.data[i]) }
+}
+
+PadpWrite :: (p: *Pchan, buf: []u8, xid: s32) -> string {
+    count := buf.count;
+    if count >= 65536 { return "padp: write too big" }
+    p.has_reply = false;
+    flags: u8 = FIRST;
+    offset: s64 = 0;
+    ob: Vec(u8);
+    ib: Sblock;
+    while count > 0 {
+        n := count;
+        if n > DATALIM {
+            n = DATALIM;
+        } else {
+            flags = flags | LAST;
+        }
+        VecClear(ob);
+        VecResize(ob, PADPHDRLEN + n);
+        ob[0] = Pdata;
+        ob[1] = flags;
+        l: s32 = cast(s32)offset;
+        if (flags & FIRST) != 0 { l = cast(s32)count }
+        Put2(ob[:], 2, l);
+        for i: 0..n - 1 { ob[PADPHDRLEN + i] = buf[offset + i] }
+
+        unused SlpWrite(p, xid, ob[:]);
+        retries: s32 = 0;
+        while true {
+            ok, err := SlpRead(p, RetryInterval, *ib);
+            unused err;
+            if !ok {
+                retries += 1;
+                if retries > MaxRetries { return "PADP: no response" }
+                unused SlpWrite(p, xid, ob[:]);
+                continue;
+            }
+            if ib.proto != SLP_PAD || ib.data.count < PADPHDRLEN || (cast(s32)ib.xid != xid && ib.xid != 0xFF) {
+                continue;
+            }
+            if ib.xid == 0xFF {
+                if ib.data[0] == Ptickle { continue }
+                if ib.data[0] == Pabort {
+                    p.shutdown = true;
+                    return "device cancelled operation";
+                }
+            }
+            if ib.data[0] != Pack {
+                if ib.data[0] == Ptickle { continue }
+                if ib.data[0] == Pdata && (flags & LAST) != 0 && (ib.data[1] & FIRST) != 0 {
+                    CopySblock(*p.reply, *ib);
+                    p.has_reply = true;
+                    break;
+                }
+                continue;
+            }
+            if (ib.data[1] & MEMERROR) != 0 { return "padp: pilot out of memory" }
+            if (flags & (FIRST | LAST)) != (ib.data[1] & (FIRST | LAST)) || Get2(ib.data[:], 2) != Get2(ob[:], 2) {
+                continue;
+            }
+            break;
+        }
+        count -= n;
+        offset += n;
+        flags = flags & ~cast(u8)FIRST;
+    }
+    return "";
+}
+
+PadpRead :: (p: *Pchan, xid: s32, timeout_in: s64, out_buf: *Vec(u8)) -> string {
+    VecClear(out_buf.*);
+    timeout := timeout_in;
+    offset: s64 = 0;
+    ready := false;
+    retries: s32 = 0;
+    ack: [4]u8;
+    b: Sblock;
+
+    while true {
+        if p.has_reply {
+            CopySblock(*b, *p.reply);
+            p.has_reply = false;
+        } else {
+            ok, err := SlpRead(p, timeout, *b);
+            if !ok {
+                retries += 1;
+                if retries <= 5 { continue }
+                return err;
+            }
+            retries = 0;
+        }
+        if b.data.count < PADPHDRLEN { continue }
+        if b.proto != SLP_PAD { continue }
+        if b.data[0] == Pabort && b.xid == 0xFF {
+            p.shutdown = true;
+            return "device cancelled transaction";
+        }
+        if b.data[0] != Pdata || (xid != 0 && cast(s32)b.xid != xid) { continue }
+
+        f := b.data[1];
+        o := cast(s64)Get2(b.data[:], 2);
+        if (f & FIRST) != 0 {
+            VecClear(out_buf.*);
+            VecResize(out_buf.*, o);
+            ready = true;
+            offset = 0;
+            o = 0;
+            timeout = 4000;
+        }
+        if !ready || o != offset { continue }
+        n := b.data.count - PADPHDRLEN;
+        if offset + n > out_buf.count { continue }
+        for i: 0..n - 1 { out_buf.*[offset + i] = b.data[PADPHDRLEN + i] }
+        offset += n;
+        ack[0] = Pack;
+        ack[1] = b.data[1];
+        ack[2] = b.data[2];
+        ack[3] = b.data[3];
+        unused SlpWrite(p, cast(s32)b.xid, ack[:]);
+        if (f & LAST) != 0 { break }
+    }
+    if offset < out_buf.count {
+        VecResize(out_buf.*, offset);
+    }
+    return "";
+}
+
+PadpXchg :: (p: *Pchan, msg: []u8, timeout_ms: s64, out_buf: *Vec(u8)) -> string {
+    xid := NextSeq(p);
+    err := PadpWrite(p, msg, xid);
+    if err.count > 0 { return err }
+    return PadpRead(p, xid, timeout_ms, out_buf);
+}
+
+CmpWrite :: (p: *Pchan, op: u8, flag: u8, major: u8, minor: u8, baud: s32) -> string {
+    cmpbuf: [10]u8;
+    cmpbuf[0] = op;
+    cmpbuf[1] = flag;
+    cmpbuf[2] = major;
+    cmpbuf[3] = minor;
+    cmpbuf[4] = 0;
+    cmpbuf[5] = 0;
+    Put4(cmpbuf[:], 6, baud);
+    if op == Cwake { return PadpWrite(p, cmpbuf[:], 0xFF) }
+    xid := NextSeq(p);
+    return PadpWrite(p, cmpbuf[:], xid);
+}
+
+Accept :: (p: *Pchan, maxbaud: s32) -> string {
+    c: Vec(u8);
+    err := PadpRead(p, 0, 20000, *c);
+    if err.count > 0 { return err }
+    if c.count != CMPHDRLEN { return "CMP: bad response" }
+    major := c[2];
+    minor := c[3];
+    baud := Get4(c[:], 6);
+    if major != 1 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "palmsrv: comm version mismatch: %.%\n", cast(s64)major, cast(s64)minor);
+        WriteErr(TextView(msg[:]));
+        unused CmpWrite(p, Cabort, WrongVersion, Cmajor, 0, 0);
+        return "comm version mismatch";
+    }
+    if baud > maxbaud { baud = maxbaud }
+    flag: u8 = 0;
+    if baud != InitBaud { flag = ChangeBaud }
+    err = CmpWrite(p, Cinit, flag, Cmajor, Cminor, baud);
+    if err.count > 0 { return err }
+    SetBaud(p, baud);
+    return "";
+}
+
+PchanStart :: (p: *Pchan) -> string {
+    if p.started { return "" }
+    p.shutdown = false;
+    p.baud = InitBaud;
+    p.has_reply = false;
+    p.rxrd = 0;
+    p.rxwr = 0;
+    Ctl(p, "f");
+    Ctl(p, "d1");
+    Ctl(p, "r1");
+    Ctl(p, "i8");
+    Ctl(p, "q8192");
+    cmd: Vec(u8);
+    BuilderPrint(*cmd, "b%", InitBaud);
+    Ctl(p, TextView(cmd[:]));
+    p.started = true;
+    err := Accept(p, p.maxbaud);
+    if err.count > 0 { p.started = false }
+    return err;
+}
+
+PchanStop :: (p: *Pchan) {
+    p.shutdown = false;
+    if !p.started { return }
+    p.has_reply = false;
+    p.started = false;
+}
+
+FindXact :: (xacts: []Xact, fid: s32) -> s64 {
+    for i: 0..xacts.count - 1 {
+        if xacts[i].used && xacts[i].fid == fid { return i }
+    }
+    return -1;
+}
+
+DelXact :: (xacts: []Xact, fid: s32) {
+    for i: 0..xacts.count - 1 {
+        if xacts[i].used && xacts[i].fid == fid {
+            xacts[i].used = false;
+            VecClear(xacts[i].reply);
+            VecClear(xacts[i].err);
+        }
+    }
+}
+
+AllocXact :: (xacts: []Xact, fid: s32) -> s64 {
+    DelXact(xacts, fid);
+    for i: 0..xacts.count - 1 {
+        if !xacts[i].used {
+            xacts[i].used = true;
+            xacts[i].fid = fid;
+            return i;
+        }
+    }
+    return -1;
+}
+
+main :: () -> s32 {
+    device: string = "/dev/eia0";
+    speed: string = "57600";
+
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 68 {
+            debug += 1;
+        } else if c == 100 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Usage() }
+            device = v;
+        } else if c == 115 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Usage() }
+            speed = v;
+        } else {
+            return Usage();
+        }
+    }
+
+    dfd := IO.Open(device, 2); // ORDWR
+    if dfd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", device, IO.Error());
+        return Fail(TextView(msg[:]));
+    }
+    ctlpath: Vec(u8);
+    BuilderPrint(*ctlpath, "%ctl", device);
+    cfd := IO.Open(TextView(ctlpath[:]), 1); // OWRITE (optional)
+
+    srv: F2C.File;
+    if !F2C.Create(*srv, "/chan", "palmsrv") {
+        unused IO.Close(dfd);
+        if cfd >= 0 { unused IO.Close(cfd) }
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't create channel /chan/palmsrv: %", IO.Error());
+        return Fail(TextView(msg[:]));
+    }
+
+    p: Pchan;
+    p.fd = dfd;
+    p.cfd = cfd;
+    p.baud = InitBaud;
+    p.maxbaud = ParseInt(speed);
+    if p.maxbaud <= 0 { p.maxbaud = 57600 }
+    p.protocol = SLP_PAD;
+    p.rport = 3;
+    p.lport = 3;
+
+    xacts: [32]Xact;
+    nuser: s32 = 0;
+    req: F2C.Request;
+
+    while true {
+        st := F2C.Next(*srv, *req, true);
+        if st <= 0 { break }
+        if req.kind == F2C.Close {
+            DelXact(xacts[:], req.fid);
+            nuser -= 1;
+            if nuser <= 0 {
+                nuser = 0;
+                PchanStop(*p);
+            }
+        } else if req.kind == F2C.Read {
+            idx := FindXact(xacts[:], req.fid);
+            if idx < 0 {
+                unused F2C.ReplyError(*srv, *req, "no transaction in progress");
+                continue;
+            }
+            if p.shutdown {
+                DelXact(xacts[:], req.fid);
+                unused F2C.ReplyError(*srv, *req, "link shut down");
+            } else if xacts[idx].err.count > 0 {
+                emsg: Vec(u8);
+                for i: 0..xacts[idx].err.count - 1 { VecPush(emsg, xacts[idx].err[i]) }
+                DelXact(xacts[:], req.fid);
+                unused F2C.ReplyError(*srv, *req, TextView(emsg[:]));
+            } else if xacts[idx].reply.count > 0 {
+                rbuf: Vec(u8);
+                for i: 0..xacts[idx].reply.count - 1 { VecPush(rbuf, xacts[idx].reply[i]) }
+                DelXact(xacts[:], req.fid);
+                unused F2C.ReplyRead(*srv, *req, rbuf[:]);
+            } else {
+                DelXact(xacts[:], req.fid);
+                unused F2C.ReplyError(*srv, *req, "no reply");
+            }
+        } else if req.kind == F2C.Write {
+            DelXact(xacts[:], req.fid);
+            data := req.data[:req.count];
+            if req.count == 4 && TextView(data) == "exit" {
+                PchanStop(*p);
+                unused F2C.ReplyWrite(*srv, *req, req.count);
+                break;
+            }
+            if p.shutdown {
+                unused F2C.ReplyError(*srv, *req, "link shut down");
+                continue;
+            }
+            if !p.started {
+                err := PchanStart(*p);
+                if err.count > 0 {
+                    msg: Vec(u8);
+                    BuilderPrint(*msg, "can't start protocol: %", err);
+                    unused F2C.ReplyError(*srv, *req, TextView(msg[:]));
+                    continue;
+                }
+                nuser += 1;
+            }
+            res: Vec(u8);
+            err := PadpXchg(*p, data, 20000, *res);
+            if err.count > 0 {
+                unused F2C.ReplyError(*srv, *req, err);
+                continue;
+            }
+            slot := AllocXact(xacts[:], req.fid);
+            if slot >= 0 {
+                for i: 0..res.count - 1 { VecPush(xacts[slot].reply, res[i]) }
+            }
+            unused F2C.ReplyWrite(*srv, *req, req.count);
+        }
+    }
+
+    F2C.Remove(*srv);
+    unused IO.Close(dfd);
+    if cfd >= 0 { unused IO.Close(cfd) }
+    return 0;
+}

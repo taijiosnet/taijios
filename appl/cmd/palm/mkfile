@@ -1,7 +1,6 @@
 <../../../mkconfig
 
-TARG=\
-	palmsrv.dis\
+TARG=
 
 MODULES=\
 
@@ -12,10 +11,13 @@ DISBIN=$ROOT/dis/palm
 
 <$ROOT/mkfiles/mkdis
 
-ZXCOMMANDS=connex
-ZXUTIL=palm_proto.zi desklink.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi
+ZXCOMMANDS=connex palmsrv
+ZXUTIL=palm_proto.zi desklink.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi ../taijios_namespace.zi ../taijios_file2chan.zi ../taijios_clock.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+palmsrv.zx: palmsrv.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_clock --entry palmsrv:main -o $target palmsrv.zi
 
 &.zx: &.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi

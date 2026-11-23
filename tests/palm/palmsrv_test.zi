@@ -1,0 +1,101 @@
+// Guest live test for palm/palmsrv.zx:
+// Starts /dis/palm/palmsrv.zx on a dummy serial device file, verifies /chan/palmsrv
+// is mounted, verifies "no transaction in progress" error on bare read, and verifies
+// clean shutdown on writing "exit" to /chan/palmsrv.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/palm tests/palm/palmsrv_test.zi -- [EMU] [CMD]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/palmsrv";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    cmd := ifx argc > 2 then TextFromCString(argv[2]) else "/dis/palm/palmsrv.zx";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/palmsrv/work") ||
+        !CreateDirectory("build/dis-legacy-math/palmsrv/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Create a dummy device file so palmsrv can open it ORDWR
+    unused WriteEntireFile("build/dis-legacy-math/palmsrv/work/fake_eia0", "");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. Bad option -> usage error
+    BuilderPrint(*script, "% -Z > ../result/usage.out >[2] ../result/usage.err\n", cmd);
+    BuilderPrint(*script, "echo $status > ../result/usage.st\n");
+    // 2. Missing device -> error
+    BuilderPrint(*script, "% -d /nonexistent_palm_dev > ../result/nodev.out >[2] ../result/nodev.err\n", cmd);
+    BuilderPrint(*script, "echo $status > ../result/nodev.st\n");
+    // 3. Bind #s on /chan, start palmsrv in background serving /chan/palmsrv, read -> error, write "exit" -> clean stop
+    BuilderPrint(*script, "bind '#s' /chan\n");
+    BuilderPrint(*script, "% -d /%/work/fake_eia0 > ../result/srv.out >[2] ../result/srv.err &\n", cmd, WORK);
+    BuilderPrint(*script, "sleep 1\n");
+    BuilderPrint(*script, "ls /chan/palmsrv > ../result/ls.out >[2] ../result/ls.err\n");
+    BuilderPrint(*script, "cat /chan/palmsrv > ../result/rd.out >[2] ../result/rd.err\n");
+    BuilderPrint(*script, "echo -n exit > /chan/palmsrv >[2] ../result/exit.err\n");
+    BuilderPrint(*script, "echo $status > ../result/exit.st\n");
+    unused WriteEntireFile("build/dis-legacy-math/palmsrv/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Contains(Result("usage.err"), "usage: palm/palmsrv"), "usage stderr");
+    Expect(Result("usage.st") != "\n", "usage non-empty status");
+    Expect(Contains(Result("nodev.err"), "palmsrv: can't open /nonexistent_palm_dev"), "missing device stderr");
+    Expect(Result("nodev.st") != "\n", "missing device non-empty status");
+    Expect(Contains(Result("ls.out"), "/chan/palmsrv"), "/chan/palmsrv mounted");
+    Expect(Contains(Result("rd.err"), "no transaction in progress"), "bare read returns protocol error");
+    Expect(Result("exit.st") == "\n", "exit write succeeded");
+    Expect(Result("exit.err") == "", "exit write no stderr");
+
+    if failures != 0 {
+        print("palmsrv_test: % failures\n", failures);
+        return 1;
+    }
+    print("palmsrv_test: all checks passed\n");
+    return 0;
+}
