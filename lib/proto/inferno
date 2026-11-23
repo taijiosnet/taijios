@@ -865,7 +865,7 @@ appl
 		arg.b
 		asn1.b
 		attrdb.b
-		attrhash.b
+		attrhash.zi
 		auth.b
 		auth9.b
 		bloomfilter.zi
@@ -924,7 +924,7 @@ appl
 			x509.b
 		csv.zi
 		daytime.b
-		dbm.b
+		dbm.zi
 		debug.b
 		deflate.b
 		dhcpclient.b
@@ -1028,7 +1028,6 @@ appl
 			mkfile
 			readstrokes.b
 			strokes.b
-			writestrokes.b
 		styxconv
 			mkfile
 			ostyx.b
@@ -1511,7 +1510,6 @@ dis
 		arg.dis
 		asn1.dis
 		attrdb.dis
-		attrhash.dis
 		auth.dis
 		auth9.dis
 		bufio.dis
@@ -1524,7 +1522,6 @@ dis
 		crypt
 			+
 		daytime.dis
-		dbm.dis
 		debug.dis
 		deflate.dis
 		dhcpclient.dis
@@ -2131,7 +2128,6 @@ module
 	css.m
 	cvsimages.m
 	daytime.m
-	dbm.m
 	debug.m
 	dhcp.m
 	dial.m

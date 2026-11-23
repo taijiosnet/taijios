@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **778** open rows = **756** on-disk `dis/` files (**148** top-level `dis/*.dis` + **608** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **773** open rows = **751** on-disk `dis/` files (**148** top-level `dis/*.dis` + **603** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -43,7 +43,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 ## Next ready order (independent, boot-ordered)
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
-2. Non-boot libraries (152 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+2. Non-boot libraries (149 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (73 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (15), demo (14), ebook (10), math (22).
@@ -61,7 +61,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/zxrun.dis | appl/cmd/zxrun.b | module/zxrun.m | P2 | untracked gitignored local build of tracked appl/cmd/zxrun.b |
 | dis/lib/winplace.dis | unknown |  | - | zx-twin; Limbo source removed; untracked local artifact (not gitignored) |
 
-### 2. Libraries - dis/lib/** (boot-loaded rows first) - 159 rows
+### 2. Libraries - dis/lib/** (boot-loaded rows first) - 156 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -74,7 +74,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/tkclient.dis | appl/lib/tkclient.b | module/tkclient.m | P2 |  |
 | dis/lib/asn1.dis | appl/lib/asn1.b | module/asn1.m | - |  |
 | dis/lib/attrdb.dis | appl/lib/attrdb.b | module/attrdb.m | - |  |
-| dis/lib/attrhash.dis | appl/lib/attrhash.b |  | - |  |
 | dis/lib/auth.dis | appl/lib/auth.b |  | - |  |
 | dis/lib/auth9.dis | appl/lib/auth9.b | module/auth9.m | - |  |
 | dis/lib/bufio.dis | appl/lib/bufio.b | module/bufio.m | - |  |
@@ -100,7 +99,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/crypt/sslsession.dis | appl/lib/crypt/sslsession.b | module/sslsession.m | - |  |
 | dis/lib/crypt/x509.dis | appl/lib/crypt/x509.b | module/x509.m | - |  |
 | dis/lib/daytime.dis | appl/lib/daytime.b | module/daytime.m | - |  |
-| dis/lib/dbm.dis | appl/lib/dbm.b | module/dbm.m | - |  |
 | dis/lib/debug.dis | appl/lib/debug.b | module/debug.m | - |  |
 | dis/lib/deflate.dis | appl/lib/deflate.b |  | - |  |
 | dis/lib/dhcpclient.dis | appl/lib/dhcpclient.b |  | - |  |
@@ -188,7 +186,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/strokes/buildstrokes.dis | appl/lib/strokes/buildstrokes.b |  | - |  |
 | dis/lib/strokes/readstrokes.dis | appl/lib/strokes/readstrokes.b |  | - |  |
 | dis/lib/strokes/strokes.dis | appl/lib/strokes/strokes.b | module/strokes.m | - |  |
-| dis/lib/strokes/writestrokes.dis | appl/lib/strokes/writestrokes.b |  | - |  |
 | dis/lib/styx.dis | appl/lib/styx.b | module/styx.m | - |  |
 | dis/lib/styxconv/new2old.dis | appl/lib/styxconv/new2old.b |  | - |  |
 | dis/lib/styxconv/old2new.dis | appl/lib/styxconv/old2new.b |  | - |  |

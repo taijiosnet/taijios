@@ -16,7 +16,6 @@ TARG=\
 	arg.dis\
 	asn1.dis\
 	attrdb.dis\
-	attrhash.dis\
 	auth.dis\
 	auth9.dis\
 	bufio.dis\
@@ -25,7 +24,6 @@ TARG=\
 	chanfill.dis\
 	crc.dis\
 	daytime.dis\
-	dbm.dis\
 	debug.dis\
 	deflate.dis\
 	dhcpclient.dis\
@@ -185,14 +183,13 @@ plumber.dis:N: plumbing.m
 
 ip.dis: $ROOT/module/ip.m
 ether.dis:	$ROOT/module/ether.m
-attrdb.dis attrhash.dis:	$ROOT/module/attrdb.m
+attrdb.dis:	$ROOT/module/attrdb.m
 ipattr.dis:	$ROOT/module/attrdb.m $ROOT/module/ip.m $ROOT/module/ipattr.m
 registries.dis:	$ROOT/module/registries.m
 keyset.dis:	$ROOT/module/keyset.m
 auth9.dis: $ROOT/module/auth9.m
 factotum.dis:	$ROOT/module/factotum.m
 sexprs.dis:	$ROOT/module/sexprs.m
-dbm.dis: $ROOT/module/dbm.m
 disks.dis: $ROOT/module/disks.m
 dhcpclient.dis:	$ROOT/module/dhcp.m
 secstore.dis:	$ROOT/module/secstore.m

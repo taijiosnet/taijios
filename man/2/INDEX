@@ -29,9 +29,6 @@ string2tm daytime
 text daytime
 time daytime
 tm2epoch daytime
-dbf dbm
-dbm dbm
-init dbm
 debug debug
 applycfg dhcpclient
 bootconf dhcpclient
