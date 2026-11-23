@@ -31,17 +31,22 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 
 ## Ownership
 
-- Desktop core (wm, zxrun, toolbar/panel, winplace): implementation exclusively owned by `claude-taijios-zx-graphical-dis-port`; its sources, defaults, tests and build outputs are not edited elsewhere.
+- Desktop core (wm, zxrun, toolbar/panel, winplace) and the dis/wm applications: `claude-taijios-zx-graphical-dis-port`; its sources, defaults, tests and build outputs are not edited elsewhere.
 - Live Rill install: owned by `root2498`. Standalone pointer-index prerequisite: handled by the existing e18 compiler.
-- All other families are open; take one family per tested commit, boot order first.
+- Section 3 top-level commands, except sh, dis/sh, dis/tiny, mash, the Limbo developer tools and the window commands: `glm-taijios-dis-commands-a-l` and `glm-taijios-dis-commands-m-z`.
+- Sections 13 (math) and 14 (legacy misc): `agy-taijios-dis-legacy-math`.
+- Sections 9 (spree), 10 (grid), 11 (demo) and 12 (ebook): `agy-taijios-dis-app-families`.
+- Section 2 (dis/lib), section 4 (services) and the mash command with its library: `claude-taijios-taijios-dis-commands-libs`.
+- The shell (sh, dis/sh, dis/tiny) is its own milestone. Acme, charon and alphabet are not assigned yet.
+- One family per tested commit. Several tasks edit this file: commit only your own rows and counts.
 
 ## Next ready order (independent, boot-ordered)
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (163 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
-4. Legacy misc (95 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
+4. Legacy misc (73 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
+5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (15), demo (14), ebook (10), math (22).
 6. WM apps with zx-twins (5 rows) and the rest of dis/wm (57 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
@@ -724,7 +729,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/spree/lib/tricks.dis | appl/spree/lib/tricks.b |  | - |  |
 | dis/spree/spree.dis | appl/spree/spree.b |  | - |  |
 
-### 10. Grid - computing grid family - 17 rows
+### 10. Grid - computing grid family - 15 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -805,7 +810,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/math/primes.dis | appl/math/primes.b |  | - |  |
 | dis/math/sieve.dis | appl/math/sieve.b |  | - |  |
 
-### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 95 rows
+### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 73 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -911,3 +916,12 @@ Tracked `.dis` helper binaries installed outside `dis/` by the acme build (mkfil
 | acme/mail/Mail.dis | appl/acme/acme/mail/src/Mail.b |  | - |  |
 | acme/mail/Mailpop3.dis | appl/acme/acme/mail/src/Mailpop3.b |  | - |  |
 | acme/mail/mkbox.dis | appl/acme/acme/mail/mkbox.b |  | - | mkfile source in appl/acme/acme/mail/, not src/ |
+
+### 16. Native kernel configurations - open item, no `.dis` rows
+
+The `os/*/` kernel configuration files and `os/init/*.b` still name Dis files that are gone. Point each entry at its `.zx` replacement or drop it; the hosted tests do not build these kernels.
+
+- `/dis/cat.dis`, `/dis/echo.dis`, `/dis/ls.dis`: `os/cerf1110/cerf`, `os/cerf250/cerf`, `os/cerf405/cerf`, `os/gum/gum`, `os/ipaq1110/ipaq`, `os/manga/manga`, `os/pc/pc`, `os/pc/pc4e`, `os/pc/pcdisk`, `os/pc/pix`.
+- `/dis/cp.dis`, `/dis/mkdir.dis`, `/dis/pcmcia.dis`: `os/cerf1110/cerf`, `os/cerf250/cerf`, `os/gum/gum`, `os/ipaq1110/ipaq`.
+- `/dis/disk/kfscmd.dis`: `os/ipaq1110/ipaq`.
+- `/dis/lib/srv.dis`: `os/init/reminit.b`. `/dis/mux/mux.dis`: `os/init/init.b`.
