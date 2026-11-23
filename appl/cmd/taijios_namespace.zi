@@ -20,6 +20,19 @@ Pipe :: (ends: []s32) -> s32 #foreign host_api;
 // server has to run in another process. Returns 0 or -1.
 Mount :: (fd: s32, afd: s32, old: string, flags: s32, aname: string) -> s32 #foreign host_api;
 
+// Start Mount beside the caller and return a positive ticket, or -1. A file
+// server uses this to attach its own tree: it answers the version and attach
+// requests on the other end of the pipe itself. The handles may be closed
+// right away. MountDone returns -2 while the mount is still waiting for the
+// server, or waits for it to finish if asked; 0 or -1 retires the ticket.
+MountAsync :: (fd: s32, afd: s32, old: string, flags: s32, aname: string) -> s32 #foreign host_api;
+MountDone :: (ticket: s32, wait: bool) -> s32 #foreign host_api;
+
+// Serve the names under `dir` to the 9P client on a handle, as Sys export
+// does. With `wait` the call returns when the client is gone; without it the
+// service runs beside the caller. Returns 0 or -1.
+Export :: (fd: s32, dir: string, wait: bool) -> s32 #foreign host_api;
+
 // Make the file or directory `new` appear at `old`. Returns 0 or -1.
 Bind :: (new: string, old: string, flags: s32) -> s32 #foreign host_api;
 

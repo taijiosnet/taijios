@@ -1,0 +1,165 @@
+// In a guest without Dis: export part of the namespace over a pipe, serve a
+// file2chan file to a child, and carry a call between two processes over TCP.
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Namespace :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+Served :: #import "taijios_file2chan";
+Dial :: #import "taijios_dial";
+
+Self :: "/services.zx";
+
+Fail :: (message: string) -> s32 {
+    unused Args.SetFailure(message);
+    return 1;
+}
+
+Same :: (bytes: []u8, text: string) -> bool {
+    if bytes.count != text.count { return false }
+    for i: 0 .. text.count - 1 { if bytes[i] != text[i] { return false } }
+    return true;
+}
+
+ReadFull :: (handle: s32, buffer: []u8) -> bool {
+    done: s64 = 0;
+    while done < buffer.count {
+        n := IO.Read(handle, buffer[done:]);
+        if n <= 0 { return false }
+        done += n;
+    }
+    return true;
+}
+
+// Read a whole small file and compare it.
+Holds :: (path: string, text: string) -> bool {
+    handle := IO.Open(path, 0);
+    if handle < 0 { return false }
+    bytes: [64]u8;
+    count := IO.Read(handle, bytes[:]);
+    ok := count == text.count && Same(bytes[:count], text) && IO.Read(handle, bytes[:]) == 0;
+    return IO.Close(handle) == 0 && ok;
+}
+
+// The text before the first NUL of a buffer the host filled.
+Text :: (bytes: []u8) -> string {
+    n: s64 = 0;
+    while n < bytes.count && bytes[n] != 0 { n += 1 }
+    return TextView(bytes[:n]);
+}
+
+// Copy two texts into a buffer and view them as one.
+Join :: (buffer: []u8, first: string, second: string) -> string {
+    used: s64 = 0;
+    for c: first { if c == 0 || c == 10 { break } buffer[used] = c; used += 1 }
+    for c: second { buffer[used] = c; used += 1 }
+    return TextView(buffer[:used]);
+}
+
+Finished :: (id: s32) -> bool {
+    outcome := Process.Wait(id);
+    return outcome.status >= 0 && outcome.value == 0;
+}
+
+Child :: (mode: string, operand: string) -> s32 {
+    operands: [2]string = .{mode, operand};
+    return Process.Start(Self, operands[:]).id;
+}
+
+// The file2chan client: write, have a write refused, then read the answer back.
+Client :: () -> s32 {
+    writer := IO.Open("/n/chan/echo", 1);
+    if writer < 0 || IO.Write(writer, "ping") != 4 { return 20 }
+    if IO.Write(writer, "fail") != -1 || IO.Error() != "refused" { return 21 }
+    if IO.Close(writer) != 0 { return 22 }
+    // The directory's own files stay visible beside the served one.
+    if !Holds("/n/chan/plain", "plain\n") { return 23 }
+    // The server stops answering after this second close.
+    return ifx Holds("/n/chan/echo", "PING") then 0 else 24;
+}
+
+Caller :: (address: string) -> s32 {
+    handles: [2]s32;
+    directory: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(address, "", handles[:], directory[:]) != 0 || handles[0] < 3 || directory[0] != #char "/" { return 30 }
+    answer: [5]u8;
+    if IO.Write(handles[0], "hello") != 5 || !ReadFull(handles[0], answer[:]) || !Same(answer[:], "HELLO") { return 31 }
+    return ifx IO.Close(handles[0]) == 0 && IO.Close(handles[1]) == 0 then 0 else 32;
+}
+
+main :: () -> s32 {
+    mode := ifx Args.OperandCount() > 0 then Args.Operand(0) else "";
+    if mode == "client" { return Client() }
+    if mode == "call" { return Caller(Args.Operand(1)) }
+
+    // Export: the kernel serves /n/source on one end of a pipe.
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 || Namespace.Export(ends[0], "/n/source", false) != 0 || IO.Close(ends[0]) != 0 {
+        return Fail("export a directory on a pipe");
+    }
+    if Namespace.Mount(ends[1], -1, "/n/exported", Namespace.Replace, "") != 0 || IO.Close(ends[1]) != 0 ||
+       !Holds("/n/exported/note", "exported note\n") { return Fail("read an exported file") }
+    if Namespace.Unmount("", "/n/exported") != 0 || Namespace.Export(99, "/n/source", false) != -1 {
+        return Fail("unmount the export");
+    }
+
+    // file2chan: this process answers the reads and writes of /n/chan/echo.
+    file: Served.File;
+    request: Served.Request;
+    if !Served.Create(*file, "/n/chan", "echo") || Served.Next(*file, *request, false) != 0 {
+        return Fail("create a served file");
+    }
+    client := Child("client", "");
+    if client <= 0 { return Fail("start the file client") }
+    kept: [16]u8;
+    kept_count: s64 = 0;
+    closes: s32 = 0;
+    while closes < 2 {
+        if Served.Next(*file, *request, true) != 1 { return Fail("served file request") }
+        if request.kind == Served.Close { closes += 1 }
+        else if request.kind == Served.Write {
+            if Same(request.data[:request.count], "fail") {
+                if !Served.ReplyError(*file, *request, "refused") { return Fail("refuse a write") }
+            } else {
+                kept_count = request.count;
+                for i: 0 .. kept_count - 1 { kept[i] = request.data[i] - 32 }
+                if !Served.ReplyWrite(*file, *request, request.count) { return Fail("answer a write") }
+            }
+        } else {
+            first := ifx request.offset < kept_count then request.offset else kept_count;
+            if !Served.ReplyRead(*file, *request, kept[first:kept_count]) { return Fail("answer a read") }
+        }
+    }
+    if !Finished(client) { return Fail("file client") }
+    Served.Remove(*file);
+    if Namespace.Unmount("", "/n/chan") != 0 || !Holds("/n/chan/plain", "plain\n") { return Fail("remove the served file") }
+
+    // Network: announce on a free port, let a child call it, and answer.
+    handles: [2]s32;
+    announced: [Dial.DirectoryBytes]u8;
+    if Dial.Announce("tcp!127.0.0.1!0", handles[:], announced[:]) != 0 || handles[0] != -1 || handles[1] < 3 {
+        return Fail("announce a TCP port");
+    }
+    path: [96]u8;
+    local: [64]u8;
+    file_handle := IO.Open(Join(path[:], Text(announced[:]), "/local"), 0);
+    count := ifx file_handle < 0 then -1 else IO.Read(file_handle, local[:]);
+    if count <= 0 || IO.Close(file_handle) != 0 { return Fail("read the announced address") }
+    address: [96]u8;
+    caller := Child("call", Join(address[:], "tcp!", TextView(local[:count])));
+    call: [2]s32;
+    incoming: [Dial.DirectoryBytes]u8;
+    if caller <= 0 || Dial.Listen(Text(announced[:]), call[:], incoming[:]) != 0 || call[1] < 3 {
+        return Fail("listen for a call");
+    }
+    data := Dial.Accept(Text(incoming[:]));
+    greeting: [5]u8;
+    if data < 0 || !ReadFull(data, greeting[:]) || !Same(greeting[:], "hello") || IO.Write(data, "HELLO") != 5 {
+        return Fail("answer a call");
+    }
+    if !Finished(caller) || IO.Close(data) != 0 || IO.Close(call[1]) != 0 || IO.Close(handles[1]) != 0 {
+        return Fail("finish the call");
+    }
+    if Dial.Dial("tcp!127.0.0.1!1", "", call[:], incoming[:]) != -1 || IO.Error() == "" { return Fail("dial a closed port") }
+    print("ZX_SERVICES_OK\n");
+    return 0;
+}

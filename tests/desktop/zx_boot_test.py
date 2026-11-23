@@ -509,6 +509,26 @@ def check_namespace(root, env, boot):
           'read, bound and unmounted the tree, forked a namespace, and polled a pipe')
 
 
+def check_services(root, env, boot):
+    """Export a directory, serve a file2chan file to a child, and carry a TCP call."""
+    source = Path(__file__).with_name('zx_services_probe.zi')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
+        '--bind-host', 'taijios_args', '--bind-host', 'taijios_io', '--bind-host', 'taijios_namespace',
+        '--bind-host', 'taijios_process', '--bind-host', 'taijios_dial', '--entry', 'zx_services_probe:main',
+        '-o', root / 'services.zx', source,
+    ], env=env, check=True, timeout=60)
+    for name in ('n/source', 'n/exported', 'n/chan', 'net'):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    (root / 'n/source/note').write_text('exported note\n', encoding='ascii')
+    (root / 'n/chan/plain').write_text('plain\n', encoding='ascii')
+    result = boot('/services.zx')
+    assert result.returncode == 0 and 'ZX_SERVICES_OK' in result.stdout and not result.stderr, result
+    assert 'Initial Dis:' not in result.stdout, result
+    print('Without Dis, a ZX process read a directory it exported over a pipe, answered a child through a '
+          'file2chan file, and took a TCP call from another child')
+
+
 def catalog_programs(catalog):
     """Map each graphical entry the menu shows to the guest program it starts."""
     programs = {}
@@ -732,6 +752,7 @@ def main():
         assert tasks.returncode == 0 and 'ZX_TASKS_OK' in tasks.stdout and not tasks.stderr, tasks
         print('Without Dis, the task list showed running ZX processes and terminated one through the kill path')
         check_namespace(root, env, boot)
+        check_services(root, env, boot)
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)

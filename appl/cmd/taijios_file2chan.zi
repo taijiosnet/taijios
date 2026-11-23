@@ -1,0 +1,321 @@
+// A file that the calling process serves, as Sys file2chan gives a Limbo
+// program: other processes open, read and write `directory/name`, and each
+// read or write waits until this process answers it.
+//
+// The file is a one-file 9P tree on a pipe, mounted before the directory's
+// other contents. The process that serves it must not read or write the
+// file itself.
+IO :: #import "taijios_io";
+Namespace :: #import "taijios_namespace";
+
+#scope_export
+// Request kinds. A Close reports that a reader or writer closed the file; it
+// needs no reply.
+Read :: 1;
+Write :: 2;
+Close :: 3;
+
+// The most bytes one read or write carries.
+DataBytes :: 8168;
+
+Request :: struct {
+    kind: s32;
+    fid: s32;     // Identifies one open of the file across its requests.
+    offset: s64;
+    count: s32;   // Bytes wanted by a Read, or bytes carried by a Write.
+    data: [DataBytes]u8;
+    tag: u64;
+}
+
+File :: struct {
+    connection: s32;
+    name: [64]u8;
+    name_count: s64;
+    fid: [32]s64;   // -1 marks a free slot.
+    node: [32]s32;
+    open: [32]bool;
+    header: [4]u8;
+    header_count: s64;
+    attached: bool;
+    message: [8192]u8;
+    reply: [8192]u8;
+    used: s64;
+}
+
+// Make `directory/name` appear and serve it. The directory must exist.
+Create :: (file: *File, directory: string, name: string) -> bool {
+    if name.count == 0 || name.count > file.name.count { return false }
+    for i: 0 .. name.count - 1 { file.name[i] = name[i] }
+    file.name_count = name.count;
+    for i: 0 .. file.fid.count - 1 { file.fid[i] = -1 }
+    file.header_count = 0;
+    file.attached = false;
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 { return false }
+    file.connection = ends[0];
+    ticket := Namespace.MountAsync(ends[1], -1, directory, Namespace.Before, "");
+    unused IO.Close(ends[1]);
+    request: Request;
+    // The mount asks for the protocol version and the root, and then finishes.
+    while ticket > 0 && !file.attached {
+        if Step(file, *request, true) < 0 { break }
+    }
+    if ticket > 0 && file.attached && Namespace.MountDone(ticket, true) == 0 { return true }
+    unused IO.Close(file.connection);
+    file.connection = -1;
+    return false;
+}
+
+// Fetch the next request. Returns 1 with the request filled in, 0 when
+// `wait` is false and none has arrived, or -1 when the file is gone.
+Next :: (file: *File, request: *Request, wait: bool) -> s32 {
+    while true {
+        status := Step(file, request, wait);
+        if status != 0 { return ifx status == 2 then 0 else status }
+    }
+    return -1;
+}
+
+// Answer a Read with up to request.count bytes. No bytes means end of file.
+ReplyRead :: (file: *File, request: *Request, data: []u8) -> bool {
+    count := ifx data.count > cast(s64)request.count then cast(s64)request.count else data.count;
+    Begin(file, 117, request.tag);
+    Put(file, cast(u64)count, 4);
+    for i: 0 .. count - 1 { file.reply[file.used] = data[i]; file.used += 1 }
+    return Send(file);
+}
+
+// Answer a Write with the number of bytes accepted.
+ReplyWrite :: (file: *File, request: *Request, count: s32) -> bool {
+    Begin(file, 119, request.tag);
+    Put(file, cast(u64)count, 4);
+    return Send(file);
+}
+
+// Fail a Read or Write with a message the caller sees as its error.
+ReplyError :: (file: *File, request: *Request, message: string) -> bool {
+    Refuse(file, request.tag, message);
+    return Send(file);
+}
+
+// Stop serving. The name stays until the directory is unmounted.
+Remove :: (file: *File) {
+    if file.connection >= 0 { unused IO.Close(file.connection) }
+    file.connection = -1;
+}
+
+#scope_file
+
+Root :: 0;
+Served :: 1;
+
+ReadFull :: (handle: s32, buffer: []u8) -> bool {
+    done: s64 = 0;
+    while done < buffer.count {
+        n := IO.Read(handle, buffer[done:]);
+        if n <= 0 { return false }
+        done += n;
+    }
+    return true;
+}
+
+Put :: (file: *File, value: u64, width: s64) {
+    for i: 0 .. width - 1 {
+        file.reply[file.used] = cast(u8)((value >> cast(u64)(8 * i)) & 255);
+        file.used += 1;
+    }
+}
+
+PutAt :: (file: *File, at: s64, value: u64, width: s64) {
+    end := file.used;
+    file.used = at;
+    Put(file, value, width);
+    file.used = end;
+}
+
+PutText :: (file: *File, text: string) {
+    Put(file, cast(u64)text.count, 2);
+    for c: text { file.reply[file.used] = c; file.used += 1 }
+}
+
+PutQid :: (file: *File, node: s32) {
+    Put(file, ifx node == Root then 128 else 0, 1);
+    Put(file, 0, 4);
+    Put(file, cast(u64)node, 8);
+}
+
+// A stat record: its own size, then type, device, qid, mode, times, length and names.
+PutStat :: (file: *File, node: s32) {
+    start := file.used;
+    file.used += 2;
+    Put(file, 0, 2);
+    Put(file, 0, 4);
+    PutQid(file, node);
+    Put(file, ifx node == Root then 0x800001ed else 0x1b6, 4);
+    Put(file, 0, 4);
+    Put(file, 0, 4);
+    Put(file, 0, 8);
+    if node == Root { PutText(file, "/") } else { PutText(file, TextView(file.name[:file.name_count])) }
+    PutText(file, "zx");
+    PutText(file, "zx");
+    PutText(file, "zx");
+    PutAt(file, start, cast(u64)(file.used - start - 2), 2);
+}
+
+Get :: (bytes: []u8, at: s64, width: s64) -> u64 {
+    value: u64 = 0;
+    for i: 0 .. width - 1 { value |= cast(u64)bytes[at + i] << cast(u64)(8 * i) }
+    return value;
+}
+
+Begin :: (file: *File, kind: u64, tag: u64) {
+    file.used = 4;
+    Put(file, kind, 1);
+    Put(file, tag, 2);
+}
+
+Refuse :: (file: *File, tag: u64, message: string) {
+    Begin(file, 107, tag);
+    PutText(file, message);
+}
+
+Send :: (file: *File) -> bool {
+    size := file.used;
+    PutAt(file, 0, cast(u64)size, 4);
+    done: s64 = 0;
+    while done < size {
+        n := IO.Write(file.connection, TextView(file.reply[done:size]));
+        if n <= 0 { return false }
+        done += n;
+    }
+    return true;
+}
+
+Slot :: (file: *File, fid: s64) -> s64 {
+    for i: 0 .. file.fid.count - 1 { if file.fid[i] == fid { return i } }
+    return -1;
+}
+
+Assign :: (file: *File, fid: s64, node: s32) -> bool {
+    slot := Slot(file, fid);
+    if slot < 0 { slot = Slot(file, -1) }
+    if slot < 0 { return false }
+    file.fid[slot] = fid;
+    file.node[slot] = node;
+    file.open[slot] = false;
+    return true;
+}
+
+Named :: (file: *File, bytes: []u8) -> bool {
+    if bytes.count != file.name_count { return false }
+    for i: 0 .. bytes.count - 1 { if bytes[i] != file.name[i] { return false } }
+    return true;
+}
+
+// Handle one 9P message. Returns 1 when it is a request for the caller, 0
+// when it was answered here, 2 when `wait` is false and no whole message has
+// arrived, or -1 when the connection ended.
+Step :: (file: *File, request: *Request, wait: bool) -> s32 {
+    if file.connection < 0 { return -1 }
+    while file.header_count < 4 {
+        n: s32;
+        if wait { n = IO.Read(file.connection, file.header[file.header_count:]) }
+        else { n = IO.PollRead(file.connection, file.header[file.header_count:]) }
+        if n == -2 { return 2 }
+        if n <= 0 { return -1 }
+        file.header_count += n;
+    }
+    file.header_count = 0;
+    size := cast(s64)Get(file.header[:], 0, 4);
+    // The rest of a message follows its size at once.
+    if size < 7 || size > file.message.count || !ReadFull(file.connection, file.message[4:size]) { return -1 }
+    message := file.message[:size];
+    kind := Get(message, 4, 1);
+    tag := Get(message, 5, 2);
+    fid := ifx size >= 11 then cast(s64)Get(message, 7, 4) else -1;
+    slot := Slot(file, fid);
+    if kind == 100 {
+        limit := Get(message, 7, 4);
+        Begin(file, 101, tag);
+        Put(file, ifx limit > 8192 then 8192 else limit, 4);
+        PutText(file, "9P2000");
+    } else if kind == 104 {
+        if !Assign(file, fid, Root) { return -1 }
+        file.attached = true;
+        Begin(file, 105, tag);
+        PutQid(file, Root);
+    } else if kind == 108 {
+        Begin(file, 109, tag);
+    } else if slot < 0 {
+        Refuse(file, tag, "unknown fid");
+    } else if kind == 110 {
+        target := cast(s64)Get(message, 11, 4);
+        names := Get(message, 15, 2);
+        found := file.node[slot];
+        if names == 1 {
+            length := cast(s64)Get(message, 17, 2);
+            name := message[19:19 + length];
+            if length == 2 && name[0] == 46 && name[1] == 46 { found = Root }
+            else if found == Root && Named(file, name) { found = Served }
+            else { found = -1 }
+        }
+        if names > 1 || found < 0 { Refuse(file, tag, "file does not exist") }
+        else if !Assign(file, target, found) { Refuse(file, tag, "too many open files") }
+        else {
+            Begin(file, 111, tag);
+            Put(file, names, 2);
+            if names == 1 { PutQid(file, found) }
+        }
+    } else if kind == 112 {
+        file.open[slot] = file.node[slot] == Served;
+        Begin(file, 113, tag);
+        PutQid(file, file.node[slot]);
+        Put(file, 0, 4);
+    } else if kind == 116 || kind == 118 {
+        offset := cast(s64)Get(message, 11, 8);
+        count := cast(s64)Get(message, 19, 4);
+        if file.node[slot] == Served {
+            if count > DataBytes { count = DataBytes }
+            request.kind = ifx kind == 116 then Read else Write;
+            request.fid = cast(s32)fid;
+            request.offset = offset;
+            request.count = cast(s32)count;
+            request.tag = tag;
+            if kind == 118 { for i: 0 .. count - 1 { request.data[i] = message[23 + i] } }
+            return 1;
+        }
+        if kind == 118 { Refuse(file, tag, "permission denied") }
+        else {
+            // The directory holds the one file.
+            Begin(file, 117, tag);
+            body := file.used;
+            file.used += 4;
+            if offset == 0 { PutStat(file, Served) }
+            PutAt(file, body, cast(u64)(file.used - body - 4), 4);
+        }
+    } else if kind == 120 {
+        closing := file.open[slot];
+        file.fid[slot] = -1;
+        Begin(file, 121, tag);
+        if !Send(file) { return -1 }
+        if closing {
+            request.kind = Close;
+            request.fid = cast(s32)fid;
+            request.offset = 0;
+            request.count = 0;
+            return 1;
+        }
+        return 0;
+    } else if kind == 124 {
+        Begin(file, 125, tag);
+        body := file.used;
+        file.used += 2;
+        PutStat(file, file.node[slot]);
+        PutAt(file, body, cast(u64)(file.used - body - 2), 2);
+    } else if kind == 126 {
+        Begin(file, 127, tag);
+    } else {
+        Refuse(file, tag, "not supported");
+    }
+    return ifx Send(file) then 0 else -1;
+}

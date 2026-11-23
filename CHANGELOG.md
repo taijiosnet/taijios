@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let ZX programs dial, announce and listen on the guest network, export part of their namespace, and serve a file2chan file.
+
 - Let ZX programs create pipes, mount 9P servers, bind and unmount names, fork their namespace, start children on chosen streams, and poll any handle without waiting.
 
 - Ship Clock and Stopwatch only as ZX and remove their Dis versions.

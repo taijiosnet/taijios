@@ -896,6 +896,7 @@ struct ZxTask {
 typedef struct ZxCommand ZxCommand;
 typedef struct ZxProcess ZxProcess;
 typedef struct ZxStdinPump ZxStdinPump;
+typedef struct ZxMount ZxMount;
 struct ZxResult {
 	long long value;
 	int status;
@@ -927,6 +928,8 @@ struct ZxCommand {
 	ZxRunControl *control;
 	Lock runlock;
 	Proc *runner;
+	ZxMount *mounts;
+	int mountid;
 #ifdef __linux__
 	ZxProcess *children;
 	ZxNativeWindow *window;
@@ -2093,6 +2096,86 @@ zxio(void *context, const char *module, const char *function,
 	return count < 0 ? zxioerror(command, result, nil) : zxs32(result, count);
 }
 
+/* Give a kernel descriptor a taijios_io handle, or close it and return -1. */
+static int
+zxiohandle(ZxCommand *command, int fd)
+{
+	int slot = zxioslot(command);
+
+	if(slot < 0){
+		kclose(fd);
+		return -1;
+	}
+	command->fd[slot] = fd;
+	return slot + 3;
+}
+
+/* A mount running beside its caller, which may be the file server itself.
+ * status is -2 until the server has answered version and attach. */
+struct ZxMount {
+	Ref ref;
+	Lock l;
+	Rendez done;
+	ZxMount *next;
+	Proc *worker;
+	int id, fd, afd, flags, status;
+	char old[ZxGuestPathBytes + 1], spec[ZxGuestPathBytes + 1], err[ERRMAX];
+};
+
+static void
+zxmountrelease(ZxMount *mount)
+{
+	if(decref(&mount->ref) == 0)
+		free(mount);
+}
+
+static int
+zxmountdone(void *arg)
+{
+	ZxMount *mount = arg;
+
+	return mount->status != -2;
+}
+
+static void
+zxmountworker(void *arg)
+{
+	ZxMount *mount = arg;
+	int status;
+
+	lock(&mount->l);
+	mount->worker = up;
+	unlock(&mount->l);
+	status = kmount(mount->fd, mount->afd, mount->old, mount->flags, mount->spec);
+	lock(&mount->l);
+	if(status < 0)
+		kgerrstr(mount->err, sizeof(mount->err));
+	mount->status = status < 0 ? -1 : 0;
+	mount->worker = nil;
+	unlock(&mount->l);
+	Wakeup(&mount->done);
+	kclose(mount->fd);
+	if(mount->afd >= 0)
+		kclose(mount->afd);
+	zxmountrelease(mount);
+}
+
+/* Interrupt the mounts a finished command left waiting. */
+static void
+zxmountforget(ZxCommand *command)
+{
+	ZxMount *mount;
+
+	while((mount = command->mounts) != nil){
+		command->mounts = mount->next;
+		lock(&mount->l);
+		if(mount->worker != nil)
+			swiproc(mount->worker, 0);
+		unlock(&mount->l);
+		zxmountrelease(mount);
+	}
+}
+
 /* Namespace calls for ZX file servers and the programs that mount them. */
 static int
 zxnamespace(void *context, const char *module, const char *function,
@@ -2101,7 +2184,8 @@ zxnamespace(void *context, const char *module, const char *function,
 	ZxCommand *command = context;
 	char first[ZxGuestPathBytes + 1], second[ZxGuestPathBytes + 1];
 	Pgrp *copy, *shared;
-	int ends[2], slots[2], fd, afd, binding;
+	ZxMount *mount, **link;
+	int ends[2], handles[2], fd, afd, binding, status;
 
 	USED(module);
 	if(strcmp(function, "Error") == 0){
@@ -2136,23 +2220,22 @@ zxnamespace(void *context, const char *module, const char *function,
 			return 0;
 		if(kpipe(ends) < 0)
 			return zxioerror(command, result, nil);
-		slots[0] = zxioslot(command);
-		if(slots[0] >= 0)
-			command->fd[slots[0]] = ends[0];
-		slots[1] = slots[0] < 0 ? -1 : zxioslot(command);
-		if(slots[1] < 0){
-			if(slots[0] >= 0)
-				command->fd[slots[0]] = -1;
-			kclose(ends[0]);
-			kclose(ends[1]);
+		handles[0] = zxiohandle(command, ends[0]);
+		handles[1] = handles[0] < 0 ? -1 : zxiohandle(command, ends[1]);
+		if(handles[1] < 0){
+			if(handles[0] < 0)
+				kclose(ends[1]);
+			else{
+				command->fd[handles[0] - 3] = -1;
+				kclose(ends[0]);
+			}
 			return zxioerror(command, result, "too many open ZX files");
 		}
-		command->fd[slots[1]] = ends[1];
-		args[0].elements[0].integer = slots[0] + 3;
-		args[0].elements[1].integer = slots[1] + 3;
+		args[0].elements[0].integer = handles[0];
+		args[0].elements[1].integer = handles[1];
 		return zxs32(result, 0);
 	}
-	if(strcmp(function, "Mount") == 0){
+	if(strcmp(function, "Mount") == 0 || strcmp(function, "MountAsync") == 0){
 		if(n != 5 || !zxisindex(args) || !zxisindex(args+1) || args[2].kind != HOST_STRING ||
 		   !zxisindex(args+3) || args[4].kind != HOST_STRING)
 			return 0;
@@ -2162,10 +2245,79 @@ zxnamespace(void *context, const char *module, const char *function,
 			return zxioerror(command, result, "invalid ZX file handle");
 		if(!zxiopath(args+2, first) || first[0] == 0 || !zxiopath(args+4, second))
 			return zxioerror(command, result, "invalid file name");
-		/* The server answers version and attach from another process meanwhile. */
-		if(kmount(fd, afd, first, args[3].integer, second) < 0)
+		if(function[5] == 0){
+			/* The server answers version and attach from another process meanwhile. */
+			if(kmount(fd, afd, first, args[3].integer, second) < 0)
+				return zxioerror(command, result, nil);
+			return zxs32(result, 0);
+		}
+		/* The worker mounts through its own descriptors, so the caller may close its handles. */
+		mount = calloc(1, sizeof(*mount));
+		if(mount == nil || command->mountid == INT32_MAX){
+			free(mount);
+			return zxioerror(command, result, "cannot start a ZX mount");
+		}
+		mount->fd = kdup(fd, -1);
+		mount->afd = afd < 0 ? -1 : kdup(afd, -1);
+		if(mount->fd < 0 || (afd >= 0 && mount->afd < 0) || waserror()){
+			zxioerrstr(command, nil);
+			if(mount->fd >= 0)
+				kclose(mount->fd);
+			if(mount->afd >= 0)
+				kclose(mount->afd);
+			free(mount);
+			return zxs32(result, -1);
+		}
+		mount->ref.ref = 2;
+		mount->status = -2;
+		mount->flags = args[3].integer;
+		mount->id = ++command->mountid;
+		strcpy(mount->old, first);
+		strcpy(mount->spec, second);
+		kproc("ZX mount", zxmountworker, mount, KPDUPPG|KPDUPFDG|KPDUPENVG);
+		poperror();
+		mount->next = command->mounts;
+		command->mounts = mount;
+		return zxs32(result, mount->id);
+	}
+	if(strcmp(function, "MountDone") == 0){
+		if(n != 2 || !zxisindex(args) || args[1].kind != HOST_INTEGER)
+			return 0;
+		for(link = &command->mounts; (mount = *link) != nil; link = &mount->next)
+			if(mount->id == args[0].integer)
+				break;
+		if(mount == nil)
+			return zxioerror(command, result, "unknown ZX mount");
+		if(args[1].integer != 0){
+			if(waserror())
+				return zxioerror(command, result, nil);
+			Sleep(&mount->done, zxmountdone, mount);
+			poperror();
+		}
+		lock(&mount->l);
+		status = mount->status;
+		if(status == -1)
+			snprint(command->err, sizeof(command->err), "%s", mount->err);
+		unlock(&mount->l);
+		if(status != -2){
+			*link = mount->next;
+			zxmountrelease(mount);
+		}
+		return zxs32(result, status);
+	}
+	if(strcmp(function, "Export") == 0){
+		if(n != 3 || !zxisindex(args) || args[1].kind != HOST_STRING || args[2].kind != HOST_INTEGER)
+			return 0;
+		fd = zxhandlefd(command, args[0].integer);
+		if(fd < 0)
+			return zxioerror(command, result, "invalid ZX file handle");
+		if(!zxiopath(args+1, first) || first[0] == 0)
+			return zxioerror(command, result, "invalid file name");
+		if(waserror())
 			return zxioerror(command, result, nil);
-		return zxs32(result, 0);
+		status = export(fd, first, args[2].integer == 0);
+		poperror();
+		return status < 0 ? zxioerror(command, result, nil) : zxs32(result, 0);
 	}
 	binding = strcmp(function, "Bind") == 0;
 	if(!binding && strcmp(function, "Unmount") != 0)
@@ -2177,6 +2329,58 @@ zxnamespace(void *context, const char *module, const char *function,
 		return zxioerror(command, result, "invalid file name");
 	if((binding ? kbind(first, second, args[2].integer) : kunmount(first, second)) < 0)
 		return zxioerror(command, result, nil);
+	return zxs32(result, 0);
+}
+
+/* Network calls, as Sys dial, announce and listen. Each fills a data and a
+ * control handle, -1 where the call gives none, and the connection directory. */
+static int
+zxdial(void *context, const char *module, const char *function,
+	const HostValue *args, int n, HostValue *result)
+{
+	ZxCommand *command = context;
+	char first[ZxGuestPathBytes + 1], second[ZxGuestPathBytes + 1], dir[NETPATHLEN + 1];
+	const HostValue *handles, *out;
+	int fds[2] = {-1, -1}, dialing, i, length;
+
+	USED(module);
+	dialing = strcmp(function, "Dial") == 0;
+	if(!dialing && strcmp(function, "Announce") != 0 && strcmp(function, "Listen") != 0)
+		return 0;
+	if(n != (dialing ? 4 : 3) || args[0].kind != HOST_STRING || (dialing && args[1].kind != HOST_STRING))
+		return 0;
+	handles = args + (dialing ? 2 : 1);
+	out = handles + 1;
+	if(handles->kind != HOST_SLICE || handles->type == nil || strcmp(handles->type, "[]s32") != 0 ||
+	   handles->length < 2 || handles->elements == nil || !zxioslice(out) || out->length <= NETPATHLEN)
+		return 0;
+	if(!zxiopath(args, first) || first[0] == 0 || (dialing && !zxiopath(args+1, second)))
+		return zxioerror(command, result, "invalid network address");
+	memset(dir, 0, sizeof(dir));
+	if(dialing)
+		fds[0] = kdial(first, second[0] != 0 ? second : nil, dir, &fds[1]);
+	else if(function[0] == 'A')
+		fds[1] = kannounce(first, dir);
+	else
+		fds[1] = klisten(first, dir);
+	if(fds[dialing ? 0 : 1] < 0)
+		return zxioerror(command, result, nil);
+	for(i = 0; i < 2; i++){
+		if(fds[i] >= 0 && (fds[i] = zxiohandle(command, fds[i])) < 0){
+			/* The table is full: give back what this call opened. */
+			if(i == 0)
+				kclose(fds[1]);
+			else if(fds[0] >= 0){
+				kclose(command->fd[fds[0] - 3]);
+				command->fd[fds[0] - 3] = -1;
+			}
+			return zxioerror(command, result, "too many open ZX files");
+		}
+		handles->elements[i].integer = fds[i];
+	}
+	length = strlen(dir);
+	for(i = 0; i <= length; i++)
+		out->elements[i].bits = (uchar)dir[i];
 	return zxs32(result, 0);
 }
 
@@ -3119,8 +3323,16 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		if(zxmodule(abi.module, "taijios_namespace")){
 			if(strcmp(abi.function, "Pipe") == 0 || strcmp(abi.function, "Mount") == 0 ||
 			   strcmp(abi.function, "Bind") == 0 || strcmp(abi.function, "Unmount") == 0 ||
-			   strcmp(abi.function, "Fork") == 0 || strcmp(abi.function, "Error") == 0)
+			   strcmp(abi.function, "Fork") == 0 || strcmp(abi.function, "Error") == 0 ||
+			   strcmp(abi.function, "MountAsync") == 0 || strcmp(abi.function, "MountDone") == 0 ||
+			   strcmp(abi.function, "Export") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxnamespace, command};
+			continue;
+		}
+		if(zxmodule(abi.module, "taijios_dial")){
+			if(strcmp(abi.function, "Dial") == 0 || strcmp(abi.function, "Announce") == 0 ||
+			   strcmp(abi.function, "Listen") == 0)
+				bindings[count++] = (HostBinding){abi.module, abi.function, zxdial, command};
 			continue;
 		}
 		if(zxmodule(abi.module, "taijios_io")){
@@ -3456,6 +3668,7 @@ zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 	for(i = 0; i < command->nfd; i++)
 		if(command->fd[i] >= 0)
 			kclose(command->fd[i]);
+	zxmountforget(command);
 	free(command->fd);
 	free(command->fdpath);
 	free(command->tasks);

@@ -1,0 +1,33 @@
+// Guest network connections, as Sys dial, announce and listen. Addresses are
+// Inferno network addresses such as "tcp!127.0.0.1!564". Handles are
+// taijios_io handles. A call that returns -1 leaves its reason in
+// taijios_io.Error.
+IO :: #import "taijios_io";
+host_api :: #system_library "host_api";
+
+#scope_export
+// Bytes a connection directory name needs, such as "/net/tcp/3".
+DirectoryBytes :: 64;
+
+// Connect to an address, optionally from a local address. Stores the data
+// handle and the control handle, and the NUL-terminated connection directory.
+Dial :: (address: string, local: string, handles: []s32, directory: []u8) -> s32 #foreign host_api;
+
+// Prepare to receive calls on an address. Stores -1 and the control handle,
+// and the directory to pass to Listen. "tcp!*!0" picks a free port; read the
+// directory's `local` file to learn it.
+Announce :: (address: string, handles: []s32, directory: []u8) -> s32 #foreign host_api;
+
+// Wait for the next call on an announced directory. Stores -1 and the call's
+// control handle, and the call's own directory.
+Listen :: (announced: string, handles: []s32, directory: []u8) -> s32 #foreign host_api;
+
+// Accept a call returned by Listen: open its data file for reading and
+// writing. Returns the data handle or -1.
+Accept :: (directory: string) -> s32 {
+    path: [DirectoryBytes + 8]u8;
+    used: s64;
+    for c: directory { if c == 0 || used >= DirectoryBytes { break } path[used] = c; used += 1 }
+    for c: "/data" { path[used] = c; used += 1 }
+    return IO.Open(TextView(path[:used]), 2);
+}
