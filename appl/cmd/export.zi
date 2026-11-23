@@ -1,0 +1,49 @@
+// export [-a] dir [connection]: serves the names under dir to the 9P
+// client on the connection, a file opened for reading and writing, or
+// on standard input. It returns when the client is gone; with -a it
+// returns at once and the service goes on.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Namespace :: #import "taijios_namespace";
+using Cli :: #import "zx_cli";
+
+Fail :: (message: string, detail: string, status: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "export: %", message);
+    if detail.count > 0 { BuilderPrint(*out, ": %", detail) }
+    VecPush(out, #char "\n");
+    unused Cli.WriteAll(2, TextView(out[:]));
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+main :: () -> s32 {
+    wait := true;
+    first: s32 = 0;
+    // Every leading word that starts with - is a group of flags.
+    while first < Args.OperandCount() {
+        word := Args.Operand(first);
+        if word.count == 0 || word[0] != #char "-" { break }
+        for word[1:] {
+            if it != #char "a" { return Cli.Usage("Usage: export [-a] dir [connection]\n") }
+            wait = false;
+        }
+        first += 1;
+    }
+    count := Args.OperandCount() - first;
+    if count < 1 || count > 2 { return Cli.Usage("Usage: export [-a] dir [connection]\n") }
+    connection: s32 = 0;
+    if count == 2 {
+        path := Args.Operand(first + 1);
+        connection = Io.Open(path, 2);
+        if connection < 0 {
+            message: Vec(u8);
+            BuilderPrint(*message, "can't open %", path);
+            return Fail(TextView(message[:]), Io.Error(), "open");
+        }
+    }
+    if Namespace.Export(connection, Args.Operand(first), wait) < 0 {
+        return Fail("can't export", Namespace.Error(), "export");
+    }
+    return 0;
+}

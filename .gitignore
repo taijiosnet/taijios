@@ -39,6 +39,7 @@ y.debug
 /appl/cmd/test.zx
 /appl/cmd/ls.zx
 /appl/cmd/mkdir.zx
+/appl/cmd/export.zx
 /appl/wm/clock.zx
 /appl/wm/colors.zx
 /appl/wm/counter.zx
@@ -70,6 +71,7 @@ y.debug
 /dis/test.zx
 /dis/ls.zx
 /dis/mkdir.zx
+/dis/export.zx
 /dis/coffee.zx
 /dis/tclsh.zx
 /dis/tcltk.zx

@@ -438,7 +438,7 @@ appl
 		ed.b
 		emuinit.b
 		env.b
-		export.b
+		export.zi
 		fc.b
 		fcp.b
 		fmt.b
@@ -1470,7 +1470,7 @@ dis
 	ed.dis
 	emuinit.dis
 	env.dis
-	export.dis
+	export.zx
 	fc.dis
 	fcp.dis
 	fmt.dis

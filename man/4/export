@@ -47,7 +47,7 @@ Start a background process to serve the name space on the serial port.
 Although useful when bootstrapping a system, this is unsafe
 unless a transport protocol is run on the connection.
 .SH SOURCE
-.B /appl/cmd/export.b
+.B /appl/cmd/export.zi
 .SH SEE ALSO
 .IR cpu (1),
 .IR listen (1),
