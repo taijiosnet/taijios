@@ -1,0 +1,434 @@
+// Grid file browser GUI (with Shell, Refresh, Open/Edit/Save, Run, OK, and
+// .bit/.jpg plumbing to wm/view.zx), ported from appl/grid/lib/fbrowse.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Namespace :: #import "taijios_namespace"
+using Proc :: #import "taijios_process"
+using Stat :: #import "taijios_stat"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Br :: #import "browser"
+
+FBROWSE_UI :: #string END_UI
+frame .f
+frame .f.ftop
+button .f.ftop.bs -text {Shell} -command {fb_act shell}
+button .f.ftop.br -text {Refresh} -command {fb_act refresh}
+button .f.ftop.bu -text {Up} -command {fb_act up}
+button .f.ftop.bo -text {Open} -command {fb_act open} -state disabled
+button .f.ftop.bx -text {Run} -command {fb_act run} -state disabled
+button .f.ftop.bw -text {Save} -command {fb_act save} -state disabled
+button .f.ftop.ok -text {OK} -command {fb_act ok}
+pack .f.ftop.bs .f.ftop.br .f.ftop.bu .f.ftop.bo .f.ftop.bx .f.ftop.bw .f.ftop.ok -side left -padx 2
+label .f.path -text {/}
+frame .f.flb
+scrollbar .f.flb.sb -command {.f.flb.c yview}
+canvas .f.flb.c -relief sunken -borderwidth 2 -bg #ffffff -width 460 -height 180 -yscrollcommand {.f.flb.sb set}
+.f.flb.c bind all <Button-1> {fb_sel}
+.f.flb.c bind all <Double-Button-1> {fb_act double}
+pack .f.flb.sb -side left -fill y
+pack .f.flb.c -fill both -expand 1
+frame .f.fview
+scrollbar .f.fview.sb -command {.f.fview.t yview}
+text .f.fview.t -yscrollcommand {.f.fview.sb set} -height 120
+pack .f.fview.sb -side left -fill y
+pack .f.fview.t -fill both -expand 1
+label .f.status -text {}
+pack .f.ftop -side top -fill x -pady 2
+pack .f.path -side top -fill x
+pack .f.flb -side top -fill both -expand 1
+pack .f.fview -side top -fill both -expand 1
+pack .f.status -side top -fill x
+pack .f -fill both -expand 1
+fb_draw
+END_UI;
+
+SELECTED_COLOR :: 0x0000cc;
+MAX_ENTRIES :: 256;
+
+DirEntry :: struct {
+    name: Text;
+    mode: u32;
+    is_dir: bool;
+}
+
+br: Br.BrowseState;
+entries: [MAX_ENTRIES]DirEntry;
+entry_count: s32 = 0;
+selected_idx: s32 = -1;
+cur_dir: Text;
+opened_file: Text;
+opened_mode: u32 = 0;
+opened_writeable: bool = false;
+status_msg: Text;
+pending_act: s32 = 0; // 1=shell, 2=refresh, 3=up, 4=open, 5=run, 6=save, 7=ok, 8=double
+
+GetExt :: (file: string) -> string {
+    last_dot: s64 = -1;
+    for i: 0..file.count-1 {
+        if file[i] == 46 { last_dot = i }
+        else if file[i] == 47 { last_dot = -1 }
+    }
+    if last_dot < 0 || last_dot + 1 >= file.count { return "" }
+    return file[last_dot + 1:];
+}
+
+GetPlumb :: (ext: string) -> string {
+    if ext == "bit" || ext == "jpg" { return "/dis/wm/view.zx" }
+    return "";
+}
+
+IsRunnable :: (name: string, mode: u32) -> bool {
+    if (mode & 0x49) != 0 { return true } // 0o111
+    if name.count > 4 {
+        ext := name[name.count - 4:];
+        if ext == ".dis" { return true }
+    }
+    if name.count > 3 && name[name.count - 3:] == ".zx" { return true }
+    return false;
+}
+
+EscapeTkBraces :: (src: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    for c: src {
+        if c == 123 || c == 125 || c == 92 { unused VecPush(out.bytes, 92) }
+        unused VecPush(out.bytes, c);
+    }
+}
+
+ListCanvas :: () -> *Canvas.State {
+    return *Tk.widgets[Tk.Find(".f.flb.c")].canvas;
+}
+
+RenderEntries :: () {
+    canvas := ListCanvas();
+    Canvas.DeleteAll(canvas);
+    y: s32 = 12;
+    for i: 0..cast(s64)entry_count-1 {
+        row: Text;
+        if entries[i].is_dir { unused BuilderAppend(row.bytes, "[+] ") }
+        unused BuilderAppend(row.bytes, TextView(entries[i].name));
+        fill := ifx cast(s32)i == selected_idx then SELECTED_COLOR else Canvas.BLACK;
+        unused Canvas.AddText(canvas, 8, y, .West, TextView(row), cast(s32)fill);
+        y += 18;
+    }
+    w := ifx canvas.viewport.width > 0 then canvas.viewport.width else 460;
+    canvas.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)(y + 8) * Canvas.FRACTION};
+    canvas.viewport.y = 0;
+    Canvas.ClampViewport(*canvas.viewport);
+    canvas.viewport.resized = true;
+}
+
+StringLess :: (a: string, b: string) -> bool {
+    n := ifx a.count < b.count then a.count else b.count;
+    for k: 0..n-1 {
+        if a[k] != b[k] { return a[k] < b[k] }
+    }
+    return a.count < b.count;
+}
+
+SwapEntries :: (i: s64, j: s64) {
+    ta: Text; tb: Text;
+    unused BuilderAppend(ta.bytes, TextView(entries[i].name));
+    unused BuilderAppend(tb.bytes, TextView(entries[j].name));
+    ma := entries[i].mode; da := entries[i].is_dir;
+    entries[i].mode = entries[j].mode; entries[i].is_dir = entries[j].is_dir;
+    entries[j].mode = ma; entries[j].is_dir = da;
+    unused VecResize(entries[i].name.bytes, 0);
+    unused BuilderAppend(entries[i].name.bytes, TextView(tb));
+    unused VecResize(entries[j].name.bytes, 0);
+    unused BuilderAppend(entries[j].name.bytes, TextView(ta));
+}
+
+LoadDirectory :: (dir_path: string) {
+    entry_count = 0;
+    fd := IO.Open(dir_path, 0);
+    if fd < 0 { return }
+    raw: Vec(u8);
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    data := VecSlice(raw, 0, raw.count);
+    off: s64 = 0;
+    while off < data.count && entry_count < MAX_ENTRIES {
+        info := Stat.Decode(data[off:]);
+        if info.size <= 0 { break }
+        unused VecResize(entries[entry_count].name.bytes, 0);
+        unused BuilderAppend(entries[entry_count].name.bytes, info.name);
+        entries[entry_count].mode = info.mode;
+        entries[entry_count].is_dir = (info.mode & cast(u32)Stat.Directory) != 0;
+        entry_count += 1;
+        off += info.size;
+    }
+    if entry_count > 1 {
+        for i: 0..cast(s64)entry_count-2 {
+            for j: i+1..cast(s64)entry_count-1 {
+                if StringLess(TextView(entries[j].name), TextView(entries[i].name)) {
+                    SwapEntries(i, j);
+                }
+            }
+        }
+    }
+}
+
+SelectedFullPath :: (out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    if selected_idx < 0 || selected_idx >= entry_count { return false }
+    unused BuilderAppend(out.bytes, TextView(cur_dir));
+    unused BuilderAppend(out.bytes, TextView(entries[selected_idx].name));
+    if entries[selected_idx].is_dir { unused BuilderAppend(out.bytes, "/") }
+    return true;
+}
+
+UpdateActionButtons :: (tcl: *Tcl.Interpreter) {
+    can_open := false;
+    can_run := false;
+    if selected_idx >= 0 && selected_idx < entry_count && !entries[selected_idx].is_dir {
+        m := entries[selected_idx].mode;
+        can_open = (m & 0x1b6) != 0; // readable or writeable (0o666)
+        can_run = IsRunnable(TextView(entries[selected_idx].name), m);
+    }
+    c1: Text;
+    unused BuilderAppend(c1.bytes, ".f.ftop.bo configure -state ");
+    unused BuilderAppend(c1.bytes, ifx can_open then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c1));
+
+    c2: Text;
+    unused BuilderAppend(c2.bytes, ".f.ftop.bx configure -state ");
+    unused BuilderAppend(c2.bytes, ifx can_run then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c2));
+
+    c3: Text;
+    unused BuilderAppend(c3.bytes, ".f.ftop.bw configure -state ");
+    unused BuilderAppend(c3.bytes, ifx opened_writeable then "normal" else "disabled");
+    unused Window.Execute(tcl, TextView(c3));
+}
+
+RefreshView :: (tcl: *Tcl.Interpreter) {
+    LoadDirectory(TextView(cur_dir));
+    selected_idx = ifx entry_count > 0 then 0 else -1;
+    RenderEntries();
+    pcmd: Text;
+    unused BuilderAppend(pcmd.bytes, ".f.path configure -text {");
+    unused BuilderAppend(pcmd.bytes, TextView(cur_dir));
+    unused BuilderAppend(pcmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(pcmd));
+    scmd: Text;
+    unused BuilderAppend(scmd.bytes, ".f.status configure -text {");
+    unused BuilderAppend(scmd.bytes, TextView(status_msg));
+    unused BuilderAppend(scmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(scmd));
+    UpdateActionButtons(tcl);
+}
+
+OpenSelectedFile :: (tcl: *Tcl.Interpreter) {
+    if selected_idx < 0 || selected_idx >= entry_count || entries[selected_idx].is_dir { return }
+    full: Text;
+    if !SelectedFullPath(*full) { return }
+    plumb := GetPlumb(GetExt(TextView(full)));
+    if plumb.count > 0 {
+        ops: [1]string = .[TextView(full)];
+        unused Proc.Start(plumb, ops[:]);
+        return;
+    }
+    fd := IO.Open(TextView(full), 0);
+    if fd < 0 {
+        unused VecResize(status_msg.bytes, 0);
+        unused BuilderAppend(status_msg.bytes, "Cannot open file");
+        return;
+    }
+    raw: Text;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        if raw.bytes.count + cast(s64)n > 262144 { break }
+        unused BuilderAppend(raw.bytes, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+
+    unused VecResize(opened_file.bytes, 0);
+    unused BuilderAppend(opened_file.bytes, TextView(full));
+    opened_mode = entries[selected_idx].mode;
+    opened_writeable = (opened_mode & 0x92) != 0; // 0o222
+
+    escaped: Text;
+    EscapeTkBraces(TextView(raw), *escaped);
+    unused Window.Execute(tcl, ".f.fview.t delete 1.0 end");
+    icmd: Text;
+    unused BuilderAppend(icmd.bytes, ".f.fview.t insert end {");
+    unused BuilderAppend(icmd.bytes, TextView(escaped));
+    unused BuilderAppend(icmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(icmd));
+    unused VecResize(status_msg.bytes, 0);
+    unused BuilderAppend(status_msg.bytes, "Opened ");
+    unused BuilderAppend(status_msg.bytes, TextView(full));
+}
+
+FbDraw :: (_: s64, args: []Text, result: *T.Result) {
+    RenderEntries();
+}
+
+FbSel :: (_: s64, args: []Text, result: *T.Result) {
+    canvas := ListCanvas();
+    row := cast(s32)(canvas.current - 1);
+    if row >= 0 && row < entry_count {
+        selected_idx = row;
+        full: Text;
+        if SelectedFullPath(*full) {
+            Br.BrowseSelectFile(*br, 1, Br.SELECT, TextView(full), "");
+        }
+        RenderEntries();
+        pending_act = 9; // update buttons
+    }
+}
+
+FbCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 { result.code = .Error; return }
+    v := TextView(args[0]);
+    if v == "shell" { pending_act = 1 }
+    else if v == "refresh" { pending_act = 2 }
+    else if v == "up" { pending_act = 3 }
+    else if v == "open" { pending_act = 4 }
+    else if v == "run" { pending_act = 5 }
+    else if v == "save" { pending_act = 6 }
+    else if v == "ok" { pending_act = 7 }
+    else if v == "double" { pending_act = 8 }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    if pending_act == 0 { return .Idle }
+    act := pending_act;
+    pending_act = 0;
+    if act == 9 {
+        UpdateActionButtons(tcl);
+        return .Changed;
+    }
+    if act == 1 {
+        ops: [0]string;
+        unused Proc.Start("/dis/wm/sh.dis", ops[:]);
+        return .Idle;
+    }
+    if act == 2 {
+        RefreshView(tcl);
+        return .Changed;
+    }
+    if act == 3 {
+        parent: Text;
+        Br.PrevPath(TextView(cur_dir), *parent);
+        if TextView(parent).count >= TextView(br.root).count {
+            unused VecResize(cur_dir.bytes, 0);
+            unused BuilderAppend(cur_dir.bytes, TextView(parent));
+            RefreshView(tcl);
+            return .Changed;
+        }
+        return .Idle;
+    }
+    if act == 4 {
+        OpenSelectedFile(tcl);
+        UpdateActionButtons(tcl);
+        scmd: Text;
+        unused BuilderAppend(scmd.bytes, ".f.status configure -text {");
+        unused BuilderAppend(scmd.bytes, TextView(status_msg));
+        unused BuilderAppend(scmd.bytes, "}");
+        unused Window.Execute(tcl, TextView(scmd));
+        return .Changed;
+    }
+    if act == 5 {
+        full: Text;
+        if SelectedFullPath(*full) && !entries[selected_idx].is_dir {
+            ops: [0]string;
+            unused Proc.Start(TextView(full), ops[:]);
+        }
+        return .Idle;
+    }
+    if act == 6 {
+        if opened_writeable && opened_file.bytes.count > 0 {
+            res := Tcl.Eval(tcl, ".f.fview.t get 1.0 end");
+            if res.code == .OK {
+                fd := IO.Create(TextView(opened_file), 1, cast(s32)(opened_mode & 0x1ff));
+                if fd >= 0 {
+                    unused IO.Write(fd, TextView(res.value));
+                    unused IO.Close(fd);
+                    unused VecResize(status_msg.bytes, 0);
+                    unused BuilderAppend(status_msg.bytes, "Saved ");
+                    unused BuilderAppend(status_msg.bytes, TextView(opened_file));
+                }
+            }
+            scmd: Text;
+            unused BuilderAppend(scmd.bytes, ".f.status configure -text {");
+            unused BuilderAppend(scmd.bytes, TextView(status_msg));
+            unused BuilderAppend(scmd.bytes, "}");
+            unused Window.Execute(tcl, TextView(scmd));
+            return .Changed;
+        }
+        return .Idle;
+    }
+    if act == 7 {
+        full: Text;
+        if SelectedFullPath(*full) {
+            print("%\n", TextView(full));
+        }
+        unused Window.Execute(tcl, "destroy .");
+        return .Changed;
+    }
+    if act == 8 {
+        if selected_idx >= 0 && selected_idx < entry_count {
+            if entries[selected_idx].is_dir {
+                unused BuilderAppend(cur_dir.bytes, TextView(entries[selected_idx].name));
+                unused BuilderAppend(cur_dir.bytes, "/");
+                RefreshView(tcl);
+                return .Changed;
+            } else if IsRunnable(TextView(entries[selected_idx].name), entries[selected_idx].mode) {
+                full: Text;
+                if SelectedFullPath(*full) {
+                    ops: [0]string;
+                    unused Proc.Start(TextView(full), ops[:]);
+                }
+            } else {
+                OpenSelectedFile(tcl);
+                UpdateActionButtons(tcl);
+                return .Changed;
+            }
+        }
+        return .Idle;
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    title := "File Browser";
+    root := "/";
+    start_dir := "/";
+    if Args.OperandCount() >= 1 { title = Args.Operand(0) }
+    if Args.OperandCount() >= 2 { root = Args.Operand(1) }
+    if Args.OperandCount() >= 3 { start_dir = Args.Operand(2) } else { start_dir = root }
+
+    unused Br.BrowseInit(*br, root, root, 2);
+    Br.EnsureTrailingSlash(start_dir, *cur_dir);
+    LoadDirectory(TextView(cur_dir));
+    selected_idx = ifx entry_count > 0 then 0 else -1;
+
+    script: Text;
+    unused BuilderAppend(script.bytes, FBROWSE_UI);
+    unused BuilderAppend(script.bytes, "\n.f.path configure -text {");
+    unused BuilderAppend(script.bytes, TextView(cur_dir));
+    unused BuilderAppend(script.bytes, "}\n");
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "fb_act", FbCmd) ||
+       !Tcl.RegisterCommand(*tcl, "fb_sel", FbSel) ||
+       !Tcl.RegisterCommand(*tcl, "fb_draw", FbDraw) { return 1 }
+    return Window.RunPolled(*tcl, TextView(script), title, 520, 420, Start, Tick, 50);
+}

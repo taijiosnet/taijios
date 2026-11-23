@@ -68,6 +68,7 @@ def main():
         'query': 'zxrun -w /dis/grid/query.zx',
         'find': 'zxrun -w /dis/grid/find.zx -a resource demo Open echo',
         'blurdemo': 'zxrun -w /dis/grid/blurdemo.zx /icons/inferno.bit',
+        'fbrowse': 'zxrun -w /dis/grid/lib/fbrowse.zx Files / /icons',
     }
     for app in apps:
         run_app(app, specs[app])

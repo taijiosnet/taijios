@@ -1,0 +1,55 @@
+// Table-driven unit tests for appl/grid/lib/browser.zi and fbrowse Tk UI.
+#import "std/vec"
+using Br :: #import "browser"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    p: Text;
+    Br.PrevPath("/a/b/c/", *p);
+    Expect(TextView(p) == "/a/b/", "PrevPath dir");
+    Br.PrevPath("/a/b/file.txt", *p);
+    Expect(TextView(p) == "/a/b/", "PrevPath file");
+    Br.EnsureTrailingSlash("/tmp", *p);
+    Expect(TextView(p) == "/tmp/", "EnsureTrailingSlash");
+
+    b: Br.BrowseState;
+    Expect(Br.BrowseInit(*b, "/tmp", "Tmp", 2), "BrowseInit");
+    Expect(Br.BrowseIsOpened(*b, "/tmp/", ""), "root opened");
+    Br.BrowseAddOpened(*b, "/tmp/sub/", "7", true);
+    Expect(Br.BrowseIsOpened(*b, "/tmp/sub/", "7"), "sub opened");
+    Br.BrowseAddOpened(*b, "/tmp/sub/", "7", false);
+    Expect(!Br.BrowseIsOpened(*b, "/tmp/sub/", "7"), "sub closed");
+
+    Br.BrowseSelectFile(*b, 1, Br.SELECT, "/tmp/a.bit", "");
+    Expect(TextView(b.selected[1].path) == "/tmp/a.bit", "select file");
+    Br.BrowseSelectFile(*b, 1, Br.TOGGLE, "/tmp/a.bit", "");
+    Expect(TextView(b.selected[1].path) == "", "toggle deselect");
+    Br.BrowseChangeView(*b, 1);
+    Expect(b.nopanes == 1, "changeview 1");
+    Br.BrowseShowPath(*b, false);
+    Expect(!b.showpathlabel, "showpath false");
+
+    s: Br.SelectState;
+    Br.SelectInit(*s);
+    Expect(Br.SelectAddFrame(*s, "image", "Select image"), "AddFrame");
+    Expect(Br.SelectShowFrame(*s, "image"), "ShowFrame");
+    idx := Br.SelectAddSelection(*s, "image", "/img/a.bit", false);
+    Expect(idx == 0, "AddSelection");
+    Expect(Br.SelectAddSelection(*s, "image", "/img/a.bit", false) == 0, "dedup selection");
+    sel_out: Text;
+    Br.SelectSet(*s, "image", 0, Br.SELECT);
+    Expect(Br.SelectGetSelected(*s, "image", *sel_out) && TextView(sel_out) == "/img/a.bit", "GetSelected");
+    Expect(Br.SelectDelSelection(*s, "image", 0), "DelSelection");
+    Expect(!Br.SelectGetSelected(*s, "image", *sel_out), "GetSelected after del");
+
+    if failures == 0 { print("fbrowse_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

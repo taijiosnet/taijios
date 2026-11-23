@@ -1,18 +1,13 @@
 <../../../mkconfig
 
 TARG=	announce.dis\
-		browser.dis\
-		fbrowse.dis\
 
 MODULES=\
 
 SYSMODULES= \
 	draw.m\
 	grid/announce.m\
-	grid/browser.m\
-	grid/fbrowse.m\
 	grid/pathreader.m\
-	grid/srvbrowse.m\
 	readdir.m\
 	registries.m\
 	sh.m\
@@ -24,3 +19,13 @@ SYSMODULES= \
 DISBIN=$ROOT/dis/grid/lib
 
 <$ROOT/mkfiles/mkdis
+
+fbrowse.zx: fbrowse.zi browser.zi ../../cmd/tcltk/tcltk.zi ../../cmd/tcltk/zx_surface.zi ../../cmd/taijios_files.zi ../../cmd/taijios_stdin.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi ../../cmd/taijios_process.zi ../../cmd/taijios_stat.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process --bind-host taijios_stat --entry fbrowse:main -o $target fbrowse.zi
+
+$DISBIN/fbrowse.zx: fbrowse.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 fbrowse.zx "$staged" && mv "$staged" "$target"
+
+install:V: $DISBIN/fbrowse.zx
