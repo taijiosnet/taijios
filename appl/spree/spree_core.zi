@@ -1,0 +1,529 @@
+// Core Spree object tree, visibility sets, member external-ID mapping, and
+// update-protocol queue, ported from appl/spree/spree.b and spree.m.
+#import "std/vec"
+#import "std/number_text"
+
+MAXPLAYERS :: 100;
+
+// Co-finite bitset over non-negative member IDs (matching Inferno Sets->Set).
+// For id < 128, bit (id) in (lo, hi) is 1 iff id is in the set.
+// For id >= 128, membership equals msb.
+Set :: struct {
+    lo: u64;
+    hi: u64;
+    msb: bool;
+}
+
+SetNone :: () -> Set { return .{lo = 0, hi = 0, msb = false} }
+SetAll :: () -> Set { return .{lo = 0xffffffffffffffff, hi = 0xffffffffffffffff, msb = true} }
+
+SetHolds :: (s: Set, id: s32) -> bool {
+    if id < 0 { return false }
+    if id < 64 { return ((s.lo >> cast(u64)id) & 1) != 0 }
+    if id < 128 { return ((s.hi >> cast(u64)(id - 64)) & 1) != 0 }
+    return s.msb;
+}
+
+SetAdd :: (s: Set, id: s32) -> Set {
+    r := s;
+    if id < 0 { return r }
+    if id < 64 { r.lo = r.lo | (cast(u64)1 << cast(u64)id) }
+    else if id < 128 { r.hi = r.hi | (cast(u64)1 << cast(u64)(id - 64)) }
+    return r;
+}
+
+SetDel :: (s: Set, id: s32) -> Set {
+    r := s;
+    if id < 0 { return r }
+    if id < 64 { r.lo = r.lo & ~(cast(u64)1 << cast(u64)id) }
+    else if id < 128 { r.hi = r.hi & ~(cast(u64)1 << cast(u64)(id - 64)) }
+    return r;
+}
+
+SetSingleton :: (id: s32) -> Set { return SetAdd(SetNone(), id) }
+SetUnion :: (a: Set, b: Set) -> Set { return .{lo = a.lo | b.lo, hi = a.hi | b.hi, msb = a.msb || b.msb} }
+SetIntersect :: (a: Set, b: Set) -> Set { return .{lo = a.lo & b.lo, hi = a.hi & b.hi, msb = a.msb && b.msb} }
+SetInvert :: (a: Set) -> Set { return .{lo = ~a.lo, hi = ~a.hi, msb = !a.msb} }
+SetDiff :: (a: Set, b: Set) -> Set { return .{lo = a.lo & ~b.lo, hi = a.hi & ~b.hi, msb = a.msb && !b.msb} }
+SetEq :: (a: Set, b: Set) -> bool { return a.lo == b.lo && a.hi == b.hi && a.msb == b.msb }
+
+// Encode Set in Inferno Sets->Set.str() format: "<msb>:<hex>" (e.g. "0:", "1:", "0:5").
+SetToStr :: (s: Set, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused VecPush(out.bytes, ifx s.msb then cast(u8)49 else cast(u8)48);
+    unused VecPush(out.bytes, 58); // ':'
+    // Find highest bit differing from msb
+    top: s32 = -1;
+    for i: 0..127 {
+        if SetHolds(s, cast(s32)i) != s.msb { top = cast(s32)i }
+    }
+    if top < 0 { return }
+    nibbles := (top / 4) + 1;
+    hex := "0123456789abcdef";
+    n := nibbles - 1;
+    while n >= 0 {
+        val: u32 = 0;
+        for b: 0..3 {
+            bit := n * 4 + cast(s32)b;
+            if SetHolds(s, bit) { val = val | (cast(u32)1 << cast(u32)b) }
+        }
+        unused VecPush(out.bytes, hex[val]);
+        n -= 1;
+    }
+}
+
+StrToSet :: (s: string) -> Set {
+    if s.count < 2 || s[1] != 58 { return SetNone() }
+    msb := s[0] == 49;
+    r := ifx msb then SetAll() else SetNone();
+    if s.count == 2 { return r }
+    // Clear bits below hex length, then set according to hex nibbles.
+    hex_len := s.count - 2;
+    bit_idx: s32 = 0;
+    p := s.count - 1;
+    while p >= 2 {
+        c := s[p];
+        v: u32 = 0;
+        if c >= 48 && c <= 57 { v = cast(u32)(c - 48) }
+        else if c >= 97 && c <= 102 { v = cast(u32)(c - 87) }
+        else if c >= 65 && c <= 70 { v = cast(u32)(c - 55) }
+        for b: 0..3 {
+            if ((v >> cast(u32)b) & 1) != 0 { r = SetAdd(r, bit_idx) }
+            else { r = SetDel(r, bit_idx) }
+            bit_idx += 1;
+        }
+        p -= 1;
+    }
+    return r;
+}
+
+Attribute :: struct {
+    name: Text;
+    val: Text;
+    visibility: Set;
+    need_update: Set;
+    deleted: bool;
+}
+
+Object :: struct {
+    id: s32;
+    alive: bool;
+    parent_id: s32;
+    visibility: Set;
+    objtype: Text;
+    attrs: Vec(Attribute);
+    children: Vec(s32);
+}
+
+Member :: struct {
+    id: s32;
+    alive: bool;
+    suspended: bool;
+    name: Text;
+    obj2ext: Vec(s32); // indexed by internal obj id -> ext id (-1 if not visible)
+    ext2obj: Vec(s32); // indexed by ext id -> internal obj id (-1 if free)
+    outq: Text;        // queued wire protocol lines for this member
+}
+
+Clique :: struct {
+    id: s32;
+    parent_id: s32;
+    started: bool;
+    hungup: bool;
+    fname: Text;
+    owner: Text;
+    objects: Vec(Object);
+    members: Vec(Member);
+    memberids: Set;
+    archive_argv: Vec(Text);
+    rng_state: u64;
+}
+
+SetText :: (dst: *Text, src: string) {
+    unused VecResize(dst.bytes, 0);
+    unused BuilderAppend(dst.bytes, src);
+}
+
+AppendInt :: (out: *Text, v: s64) {
+    buf: [24]u8;
+    unused BuilderAppend(out.bytes, FormatInteger(v, buf[:]));
+}
+
+CliqueInit :: (c: *Clique, id: s32, parent_id: s32, owner: string) {
+    c.id = id;
+    c.parent_id = parent_id;
+    c.started = false;
+    c.hungup = false;
+    SetText(*c.owner, owner);
+    c.memberids = SetNone();
+    if c.rng_state == 0 { c.rng_state = 0x9e3779b97f4a7c15 }
+    // Create root object 0
+    unused VecResize(c.objects, 1);
+    c.objects[0].id = 0;
+    c.objects[0].alive = true;
+    c.objects[0].parent_id = -1;
+    c.objects[0].visibility = SetAll();
+    SetText(*c.objects[0].objtype, "root");
+}
+
+CliqueRand :: (c: *Clique, n: s32) -> s32 {
+    if n <= 1 { return 0 }
+    // xorshift64*
+    x := c.rng_state;
+    if x == 0 { x = 0x9e3779b97f4a7c15 }
+    x = x ^ (x >> 12);
+    x = x ^ (x << 25);
+    x = x ^ (x >> 27);
+    c.rng_state = x;
+    return cast(s32)((x * 0x2545f4914f6cdd1d) % cast(u64)n);
+}
+
+MemberEnsureObjSlot :: (m: *Member, obj_id: s32) {
+    need := cast(s64)obj_id + 1;
+    if m.obj2ext.count < need {
+        old := m.obj2ext.count;
+        unused VecResize(m.obj2ext, need);
+        for i: old..need-1 { m.obj2ext[i] = -1 }
+    }
+}
+
+MemberExt :: (m: *Member, obj_id: s32) -> s32 {
+    if obj_id < 0 || cast(s64)obj_id >= m.obj2ext.count { return -1 }
+    return m.obj2ext[obj_id];
+}
+
+MemberObj :: (m: *Member, ext_id: s32) -> s32 {
+    if ext_id < 0 || cast(s64)ext_id >= m.ext2obj.count { return -1 }
+    return m.ext2obj[ext_id];
+}
+
+MemberAllocExt :: (m: *Member, obj_id: s32) -> s32 {
+    MemberEnsureObjSlot(m, obj_id);
+    if m.obj2ext[obj_id] >= 0 { return m.obj2ext[obj_id] }
+    ext_id: s32 = -1;
+    for i: 0..m.ext2obj.count-1 {
+        if m.ext2obj[i] == -1 { ext_id = cast(s32)i; break }
+    }
+    if ext_id < 0 {
+        ext_id = cast(s32)m.ext2obj.count;
+        unused VecPush(m.ext2obj, obj_id);
+    } else {
+        m.ext2obj[ext_id] = obj_id;
+    }
+    m.obj2ext[obj_id] = ext_id;
+    return ext_id;
+}
+
+MemberFreeExt :: (m: *Member, obj_id: s32) -> s32 {
+    if obj_id < 0 || cast(s64)obj_id >= m.obj2ext.count { return -1 }
+    ext_id := m.obj2ext[obj_id];
+    if ext_id >= 0 {
+        m.obj2ext[obj_id] = -1;
+        if cast(s64)ext_id < m.ext2obj.count { m.ext2obj[ext_id] = -1 }
+    }
+    return ext_id;
+}
+
+CliqueAddMember :: (c: *Clique, name: string) -> s32 {
+    id: s32 = -1;
+    for i: 0..c.members.count-1 {
+        if !c.members[i].alive { id = cast(s32)i; break }
+    }
+    if id < 0 {
+        id = cast(s32)c.members.count;
+        unused VecResize(c.members, cast(s64)id + 1);
+    }
+    m := *c.members[id];
+    m.id = id;
+    m.alive = true;
+    m.suspended = false;
+    SetText(*m.name, name);
+    unused VecResize(m.obj2ext, 0);
+    unused VecResize(m.ext2obj, 0);
+    unused VecResize(m.outq.bytes, 0);
+    // Root object 0 is always ext 0
+    unused MemberAllocExt(m, 0);
+    c.memberids = SetAdd(c.memberids, id);
+    return id;
+}
+
+CliqueDelMember :: (c: *Clique, id: s32, suspend: bool) {
+    if id < 0 || cast(s64)id >= c.members.count { return }
+    if suspend {
+        c.members[id].suspended = true;
+    } else {
+        c.members[id].alive = false;
+        c.members[id].suspended = false;
+        c.memberids = SetDel(c.memberids, id);
+    }
+}
+
+CliqueMemberNamed :: (c: *Clique, name: string) -> s32 {
+    for i: 0..c.members.count-1 {
+        if c.members[i].alive && TextView(c.members[i].name) == name {
+            return cast(s32)i;
+        }
+    }
+    return -1;
+}
+
+EmitCreateForMember :: (c: *Clique, m: *Member, obj_id: s32) {
+    if obj_id <= 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive { return }
+    o := *c.objects[obj_id];
+    if !SetHolds(o.visibility, m.id) { return }
+    ext_id := MemberAllocExt(m, obj_id);
+    parent_ext := ifx o.parent_id >= 0 then MemberExt(m, o.parent_id) else -1;
+    unused BuilderAppend(m.outq.bytes, "create ");
+    AppendInt(*m.outq, cast(s64)ext_id);
+    unused BuilderAppend(m.outq.bytes, " ");
+    AppendInt(*m.outq, cast(s64)parent_ext);
+    unused BuilderAppend(m.outq.bytes, " 1 ");
+    unused BuilderAppend(m.outq.bytes, TextView(o.objtype));
+    unused BuilderAppend(m.outq.bytes, "\n");
+    for i: 0..o.attrs.count-1 {
+        if !o.attrs[i].deleted && SetHolds(o.attrs[i].visibility, m.id) {
+            unused BuilderAppend(m.outq.bytes, "set ");
+            AppendInt(*m.outq, cast(s64)ext_id);
+            unused BuilderAppend(m.outq.bytes, " ");
+            unused BuilderAppend(m.outq.bytes, TextView(o.attrs[i].name));
+            unused BuilderAppend(m.outq.bytes, " ");
+            unused BuilderAppend(m.outq.bytes, TextView(o.attrs[i].val));
+            unused BuilderAppend(m.outq.bytes, "\n");
+        }
+    }
+    for i: 0..o.children.count-1 {
+        EmitCreateForMember(c, m, o.children[i]);
+    }
+}
+
+CliqueShow :: (c: *Clique, member_id: s32) {
+    if member_id < 0 || cast(s64)member_id >= c.members.count { return }
+    m := *c.members[member_id];
+    if !m.alive { return }
+    root := *c.objects[0];
+    for i: 0..root.children.count-1 {
+        EmitCreateForMember(c, m, root.children[i]);
+    }
+}
+
+CliqueNewObject :: (c: *Clique, parent_id: s32, vis: Set, objtype: string) -> s32 {
+    pid := ifx parent_id < 0 then cast(s32)0 else parent_id;
+    id: s32 = -1;
+    for i: 1..c.objects.count-1 {
+        if !c.objects[i].alive { id = cast(s32)i; break }
+    }
+    if id < 0 {
+        id = cast(s32)c.objects.count;
+        unused VecResize(c.objects, cast(s64)id + 1);
+    }
+    o := *c.objects[id];
+    o.id = id;
+    o.alive = true;
+    o.parent_id = pid;
+    o.visibility = vis;
+    SetText(*o.objtype, objtype);
+    unused VecResize(o.attrs, 0);
+    unused VecResize(o.children, 0);
+    if cast(s64)pid < c.objects.count {
+        unused VecPush(c.objects[pid].children, id);
+    }
+    if c.started {
+        for mi: 0..c.members.count-1 {
+            if c.members[mi].alive && !c.members[mi].suspended && SetHolds(vis, cast(s32)mi) {
+                EmitCreateForMember(c, *c.members[mi], id);
+            }
+        }
+    }
+    return id;
+}
+
+ObjSetAttr :: (c: *Clique, obj_id: s32, name: string, val: string, vis: Set) {
+    if obj_id < 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive { return }
+    o := *c.objects[obj_id];
+    aidx: s64 = -1;
+    for i: 0..o.attrs.count-1 {
+        if TextView(o.attrs[i].name) == name { aidx = i; break }
+    }
+    if aidx < 0 {
+        aidx = o.attrs.count;
+        unused VecResize(o.attrs, aidx + 1);
+        SetText(*o.attrs[aidx].name, name);
+    }
+    a := *o.attrs[aidx];
+    SetText(*a.val, val);
+    a.visibility = vis;
+    a.deleted = val.count == 0;
+    if c.started {
+        for mi: 0..c.members.count-1 {
+            m := *c.members[mi];
+            if !m.alive || m.suspended { continue }
+            ext_id := MemberExt(m, obj_id);
+            if ext_id >= 0 && SetHolds(vis, m.id) {
+                unused BuilderAppend(m.outq.bytes, "set ");
+                AppendInt(*m.outq, cast(s64)ext_id);
+                unused BuilderAppend(m.outq.bytes, " ");
+                unused BuilderAppend(m.outq.bytes, name);
+                unused BuilderAppend(m.outq.bytes, " ");
+                unused BuilderAppend(m.outq.bytes, val);
+                unused BuilderAppend(m.outq.bytes, "\n");
+            }
+        }
+    }
+}
+
+ObjGetAttr :: (c: *Clique, obj_id: s32, name: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    if obj_id < 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive { return false }
+    o := *c.objects[obj_id];
+    for i: 0..o.attrs.count-1 {
+        if !o.attrs[i].deleted && TextView(o.attrs[i].name) == name {
+            unused BuilderAppend(out.bytes, TextView(o.attrs[i].val));
+            return true;
+        }
+    }
+    return false;
+}
+
+ObjSetVisibility :: (c: *Clique, obj_id: s32, vis: Set) {
+    if obj_id <= 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive { return }
+    o := *c.objects[obj_id];
+    old := o.visibility;
+    o.visibility = vis;
+    if !c.started { return }
+    for mi: 0..c.members.count-1 {
+        m := *c.members[mi];
+        if !m.alive || m.suspended { continue }
+        was := SetHolds(old, m.id);
+        now := SetHolds(vis, m.id);
+        if !was && now {
+            EmitCreateForMember(c, m, obj_id);
+        } else if was && !now {
+            ext_id := MemberFreeExt(m, obj_id);
+            if ext_id >= 0 {
+                pext := ifx o.parent_id >= 0 then MemberExt(m, o.parent_id) else 0;
+                unused BuilderAppend(m.outq.bytes, "del ");
+                AppendInt(*m.outq, cast(s64)pext);
+                unused BuilderAppend(m.outq.bytes, " 0 0 ");
+                AppendInt(*m.outq, cast(s64)ext_id);
+                unused BuilderAppend(m.outq.bytes, "\n");
+            }
+        }
+    }
+}
+
+ObjDelete :: (c: *Clique, obj_id: s32) {
+    if obj_id <= 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive { return }
+    // Delete children first
+    while c.objects[obj_id].children.count > 0 {
+        ch := c.objects[obj_id].children[c.objects[obj_id].children.count - 1];
+        ObjDelete(c, ch);
+    }
+    pid := c.objects[obj_id].parent_id;
+    // Remove from parent's children list
+    if pid >= 0 && cast(s64)pid < c.objects.count {
+        p := *c.objects[pid];
+        for i: 0..p.children.count-1 {
+            if p.children[i] == obj_id {
+                for j: i..p.children.count-2 { p.children[j] = p.children[j + 1] }
+                unused VecResize(p.children, p.children.count - 1);
+                break;
+            }
+        }
+    }
+    if c.started {
+        for mi: 0..c.members.count-1 {
+            m := *c.members[mi];
+            if !m.alive || m.suspended { continue }
+            ext_id := MemberFreeExt(m, obj_id);
+            if ext_id >= 0 {
+                pext := ifx pid >= 0 then MemberExt(m, pid) else 0;
+                unused BuilderAppend(m.outq.bytes, "del ");
+                AppendInt(*m.outq, cast(s64)pext);
+                unused BuilderAppend(m.outq.bytes, " 0 1 ");
+                AppendInt(*m.outq, cast(s64)ext_id);
+                unused BuilderAppend(m.outq.bytes, "\n");
+            }
+        }
+    }
+    c.objects[obj_id].alive = false;
+    unused VecResize(c.objects[obj_id].attrs, 0);
+    unused VecResize(c.objects[obj_id].children, 0);
+}
+
+ObjTransfer :: (c: *Clique, src_id: s32, start: s32, end: s32, dst_id: s32, dst_idx: s32) {
+    if src_id < 0 || dst_id < 0 || cast(s64)src_id >= c.objects.count || cast(s64)dst_id >= c.objects.count { return }
+    if start < 0 || end < start || cast(s64)end > c.objects[src_id].children.count { return }
+    count := cast(s64)(end - start);
+    if count == 0 { return }
+
+    moved: Vec(s32);
+    unused VecResize(moved, count);
+    for i: 0..count-1 {
+        moved[i] = c.objects[src_id].children[cast(s64)start + i];
+    }
+    // Remove [start, end) from src
+    src_len := c.objects[src_id].children.count;
+    for i: cast(s64)end..src_len-1 {
+        c.objects[src_id].children[i - count] = c.objects[src_id].children[i];
+    }
+    unused VecResize(c.objects[src_id].children, src_len - count);
+
+    // Insert into dst at ins_idx
+    dst_len := c.objects[dst_id].children.count;
+    ins := cast(s64)dst_idx;
+    if ins < 0 { ins = 0 }
+    if ins > dst_len { ins = dst_len }
+    unused VecResize(c.objects[dst_id].children, dst_len + count);
+    k := dst_len - 1;
+    while k >= ins {
+        c.objects[dst_id].children[k + count] = c.objects[dst_id].children[k];
+        k -= 1;
+    }
+    for i: 0..count-1 {
+        cid := moved[i];
+        c.objects[dst_id].children[ins + i] = cid;
+        c.objects[cid].parent_id = dst_id;
+    }
+
+    if c.started {
+        for mi: 0..c.members.count-1 {
+            m := *c.members[mi];
+            if !m.alive || m.suspended { continue }
+            sext := MemberExt(m, src_id);
+            dext := MemberExt(m, dst_id);
+            if sext >= 0 && dext >= 0 {
+                unused BuilderAppend(m.outq.bytes, "tx ");
+                AppendInt(*m.outq, cast(s64)sext);
+                unused BuilderAppend(m.outq.bytes, " ");
+                AppendInt(*m.outq, cast(s64)start);
+                unused BuilderAppend(m.outq.bytes, " ");
+                AppendInt(*m.outq, cast(s64)end);
+                unused BuilderAppend(m.outq.bytes, " ");
+                AppendInt(*m.outq, cast(s64)dext);
+                unused BuilderAppend(m.outq.bytes, " ");
+                AppendInt(*m.outq, ins);
+                unused BuilderAppend(m.outq.bytes, "\n");
+            }
+        }
+    }
+}
+
+CliqueAction :: (c: *Clique, cmd: string, objs: []s32, rest: string, whoto: Set) {
+    for mi: 0..c.members.count-1 {
+        m := *c.members[mi];
+        if !m.alive || m.suspended || !SetHolds(whoto, m.id) { continue }
+        unused BuilderAppend(m.outq.bytes, cmd);
+        for oid: objs {
+            ext := MemberExt(m, oid);
+            if ext >= 0 {
+                unused BuilderAppend(m.outq.bytes, " ");
+                AppendInt(*m.outq, cast(s64)ext);
+            }
+        }
+        if rest.count > 0 {
+            unused BuilderAppend(m.outq.bytes, " ");
+            unused BuilderAppend(m.outq.bytes, rest);
+        }
+        unused BuilderAppend(m.outq.bytes, "\n");
+    }
+}

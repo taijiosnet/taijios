@@ -1,0 +1,203 @@
+// Spree engine command-permission matcher, ported from appl/spree/lib/allow.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+
+ILLEGALNAME :: "/";
+
+Action :: struct {
+    tag: s32;
+    member_id: s32; // -1 means any member
+    pattern: Text;
+}
+
+AllowList :: struct {
+    actions: Vec(Action);
+}
+
+Add :: (al: *AllowList, tag: s32, member_id: s32, pat: string) {
+    idx := al.actions.count;
+    unused VecResize(al.actions, idx + 1);
+    al.actions[idx].tag = tag;
+    al.actions[idx].member_id = member_id;
+    Core.SetText(*al.actions[idx].pattern, pat);
+}
+
+Del :: (al: *AllowList, tag: s32, member_id: s32) {
+    w: s64 = 0;
+    for i: 0..al.actions.count-1 {
+        a := *al.actions[i];
+        if a.tag == tag && (member_id < 0 || a.member_id == member_id) { continue }
+        if w != i {
+            al.actions[w].tag = a.tag;
+            al.actions[w].member_id = a.member_id;
+            tmp: Text;
+            unused BuilderAppend(tmp.bytes, TextView(a.pattern));
+            Core.SetText(*al.actions[w].pattern, TextView(tmp));
+        }
+        w += 1;
+    }
+    unused VecResize(al.actions, w);
+}
+
+IsNum :: (s: string) -> bool {
+    if s.count == 0 { return false }
+    c := s[0];
+    return (c >= 48 && c <= 57) || c == 45;
+}
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    neg := false;
+    i: s64 = 0;
+    if s.count > 0 && s[0] == 45 { neg = true; i = 1 }
+    while i < s.count {
+        c := s[i];
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        else { break }
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+CheckFormat :: (c: *Core.Clique, member_id: s32, fmt: u8, w: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    if !IsNum(w) { return false }
+    n := ParseInt(w);
+    if fmt == 111 { // 'o': object ext id -> internal id
+        if member_id < 0 || cast(s64)member_id >= c.members.count { return false }
+        oid := Core.MemberObj(*c.members[member_id], n);
+        if oid < 0 { return false }
+        Core.AppendInt(out, cast(s64)oid);
+        return true;
+    }
+    if fmt == 100 { // 'd': integer
+        unused BuilderAppend(out.bytes, w);
+        return true;
+    }
+    if fmt == 112 { // 'p': member id
+        if n >= 0 && cast(s64)n < c.members.count && c.members[n].alive {
+            unused BuilderAppend(out.bytes, w);
+            return true;
+        }
+    }
+    return false;
+}
+
+Match :: (c: *Core.Clique, member_id: s32, pat_in: string, cmd_in: string, out_toks: *Vec(Text)) -> (matched: bool, err: string) {
+    unused VecResize(<<out_toks, 0);
+    pat := pat_in;
+    na := cmd_in.count;
+    if na > 0 && cmd_in[na - 1] == 10 { na -= 1 }
+    cmd := cmd_in[:na];
+
+    i: s64 = 0;
+    j: s64 = 0;
+    while true {
+        while i < pat.count && pat[i] == 32 { i += 1 }
+        while j < cmd.count && cmd[j] == 32 { j += 1 }
+        i1 := i;
+        while i1 < pat.count && pat[i1] != 32 { i1 += 1 }
+        j1 := j;
+        while j1 < cmd.count && cmd[j1] != 32 { j1 += 1 }
+        if i == i1 {
+            if j == j1 { return true, "" }
+            return false, "";
+        }
+        if j == j1 {
+            if pat == "&" { return true, "" }
+            return false, "";
+        }
+        pw := pat[i:i1];
+        w := cmd[j:j1];
+        idx := out_toks.count;
+        if pw[0] == 42 { // '*'
+            unused VecResize(<<out_toks, idx + 1);
+            Core.SetText(*out_toks.*[idx], w);
+        } else if pw[0] == 38 { // '&'
+            unused VecResize(<<out_toks, idx + 1);
+            Core.SetText(*out_toks.*[idx], w);
+            pat = "&";
+            i1 = 0;
+        } else if pw[0] == 37 && pw.count >= 2 { // '%'
+            nw: Text;
+            if !CheckFormat(c, member_id, pw[1], w, *nw) {
+                return false, "invalid field value";
+            }
+            unused VecResize(<<out_toks, idx + 1);
+            Core.SetText(*out_toks.*[idx], TextView(nw));
+        } else {
+            if w != pw { return false, "" }
+            unused VecResize(<<out_toks, idx + 1);
+            Core.SetText(*out_toks.*[idx], w);
+        }
+        i = i1;
+        j = j1;
+    }
+    return false, "";
+}
+
+CheckAction :: (al: *AllowList, c: *Core.Clique, member_id: s32, cmd: string, out_toks: *Vec(Text)) -> (tag: s32, err: string) {
+    // Search in reverse (most recently added first, matching allow.b list prepend).
+    i := al.actions.count - 1;
+    while i >= 0 {
+        a := *al.actions[i];
+        if a.member_id < 0 || a.member_id == member_id {
+            ok, err := Match(c, member_id, TextView(a.pattern), cmd, out_toks);
+            if err.count > 0 { return a.tag, err }
+            if ok { return a.tag, "" }
+        }
+        i -= 1;
+    }
+    return -1, "you can't do that";
+}
+
+Archive :: (al: *AllowList, c: *Core.Clique, archive_obj: s32) {
+    for i: 0..al.actions.count-1 {
+        a := *al.actions[i];
+        key: Text;
+        unused BuilderAppend(key.bytes, "allow");
+        Core.AppendInt(*key, i);
+        val: Text;
+        Core.AppendInt(*val, cast(s64)a.tag);
+        unused BuilderAppend(val.bytes, " ");
+        if a.member_id >= 0 && cast(s64)a.member_id < c.members.count {
+            unused BuilderAppend(val.bytes, TextView(c.members[a.member_id].name));
+        } else {
+            unused BuilderAppend(val.bytes, ILLEGALNAME);
+        }
+        unused BuilderAppend(val.bytes, " ");
+        unused BuilderAppend(val.bytes, TextView(a.pattern));
+        Core.ObjSetAttr(c, archive_obj, TextView(key), TextView(val), Core.SetNone());
+    }
+}
+
+Unarchive :: (al: *AllowList, c: *Core.Clique, archive_obj: s32) {
+    unused VecResize(al.actions, 0);
+    i: s64 = 0;
+    while true {
+        key: Text;
+        unused BuilderAppend(key.bytes, "allow");
+        Core.AppendInt(*key, i);
+        val: Text;
+        if !Core.ObjGetAttr(c, archive_obj, TextView(key), *val) { break }
+        s := TextView(val);
+        // tag pname pattern...
+        p: s64 = 0;
+        while p < s.count && s[p] != 32 { p += 1 }
+        tag := ParseInt(s[:p]);
+        while p < s.count && s[p] == 32 { p += 1 }
+        p2 := p;
+        while p2 < s.count && s[p2] != 32 { p2 += 1 }
+        pname := s[p:p2];
+        while p2 < s.count && s[p2] == 32 { p2 += 1 }
+        pat := s[p2:];
+        mid: s32 = -1;
+        if pname != ILLEGALNAME {
+            mid = Core.CliqueMemberNamed(c, pname);
+            if mid < 0 { i += 1; continue }
+        }
+        Add(al, tag, mid, pat);
+        i += 1;
+    }
+}

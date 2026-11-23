@@ -1,0 +1,294 @@
+// Spree clique archive serializer and parser, ported from appl/spree/archives.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+
+ArchiveInfo :: struct {
+    key: Text;
+    val: Text;
+}
+
+Archive :: struct {
+    argv: Vec(Text);
+    members: Vec(Text);
+    info: Vec(ArchiveInfo);
+    clique: Core.Clique;
+}
+
+NeedsQuote :: (s: string) -> bool {
+    if s.count == 0 { return true }
+    for c: s {
+        if c == 32 || c == 9 || c == 10 || c == 39 || c == 123 || c == 125 || c == 61 {
+            return true;
+        }
+    }
+    return false;
+}
+
+AppendQuoted :: (out: *Text, s: string) {
+    if !NeedsQuote(s) {
+        unused BuilderAppend(out.bytes, s);
+        return;
+    }
+    unused VecPush(out.bytes, 39);
+    for c: s {
+        if c == 39 { unused VecPush(out.bytes, 39) }
+        unused VecPush(out.bytes, c);
+    }
+    unused VecPush(out.bytes, 39);
+}
+
+RemapSet :: (s: Core.Set, idmap: []s32, limit: s32) -> Core.Set {
+    r := Core.SetNone();
+    for i: 0..cast(s64)limit-1 {
+        if idmap[i] >= 0 && (s.msb == !Core.SetHolds(s, cast(s32)i)) {
+            r = Core.SetAdd(r, idmap[i]);
+        }
+    }
+    if s.msb { r = Core.SetDiff(Core.SetAll(), r) }
+    return r;
+}
+
+StrLess :: (a: string, b: string) -> bool {
+    n := ifx a.count < b.count then a.count else b.count;
+    for k: 0..n-1 {
+        if a[k] != b[k] { return a[k] < b[k] }
+    }
+    return a.count < b.count;
+}
+
+WriteObject :: (c: *Core.Clique, obj_id: s32, depth: s32, idmap: []s32, limit: s32, out: *Text) {
+    if obj_id < 0 || cast(s64)obj_id >= c.objects.count || !c.objects[obj_id].alive { return }
+    for _: 0..cast(s64)depth-1 { unused VecPush(out.bytes, 9) }
+    o := *c.objects[obj_id];
+    AppendQuoted(out, TextView(o.objtype));
+    unused VecPush(out.bytes, 32);
+    vstr: Text;
+    Core.SetToStr(RemapSet(o.visibility, idmap, limit), *vstr);
+    unused BuilderAppend(out.bytes, TextView(vstr));
+
+    // Write sorted attributes
+    nattrs := o.attrs.count;
+    order: Vec(s64);
+    for i: 0..nattrs-1 {
+        if !o.attrs[i].deleted { unused VecPush(order, i) }
+    }
+    // Insertion sort by attr name
+    for i: 1..order.count-1 {
+        j := i;
+        while j > 0 {
+            if !StrLess(TextView(o.attrs[order[j]].name), TextView(o.attrs[order[j - 1]].name)) { break }
+            tmp := order[j - 1];
+            order[j - 1] = order[j];
+            order[j] = tmp;
+            j -= 1;
+        }
+    }
+    for i: 0..order.count-1 {
+        a := *o.attrs[order[i]];
+        unused VecPush(out.bytes, 32);
+        AppendQuoted(out, TextView(a.name));
+        avis := RemapSet(a.visibility, idmap, limit);
+        if !Core.SetEq(avis, Core.SetAll()) {
+            unused VecPush(out.bytes, 123);
+            Core.SetToStr(avis, *vstr);
+            unused BuilderAppend(out.bytes, TextView(vstr));
+            unused VecPush(out.bytes, 125);
+        }
+        unused VecPush(out.bytes, 61);
+        AppendQuoted(out, TextView(a.val));
+    }
+
+    if o.children.count > 0 {
+        unused BuilderAppend(out.bytes, " {\n");
+        for i: 0..o.children.count-1 {
+            WriteObject(c, o.children[i], depth + 1, idmap, limit, out);
+        }
+        for _: 0..cast(s64)depth-1 { unused VecPush(out.bytes, 9) }
+        unused BuilderAppend(out.bytes, "}\n");
+    } else {
+        unused VecPush(out.bytes, 10);
+    }
+}
+
+// Serialize a clique to Spree archive text format (matching archives.b write()).
+SerializeArchive :: (c: *Core.Clique, info: []ArchiveInfo, memberids: Core.Set, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    // Build idmap for selected members
+    limit := cast(s32)c.members.count;
+    idmap: [Core.MAXPLAYERS]s32;
+    for i: 0..Core.MAXPLAYERS-1 { idmap[i] = -1 }
+
+    // session line
+    unused BuilderAppend(out.bytes, "session");
+    for i: 0..c.archive_argv.count-1 {
+        unused VecPush(out.bytes, 32);
+        AppendQuoted(out, TextView(c.archive_argv[i]));
+    }
+    unused VecPush(out.bytes, 10);
+
+    // members line (in member id order)
+    unused BuilderAppend(out.bytes, "members");
+    next_id: s32 = 0;
+    for i: 0..c.members.count-1 {
+        if c.members[i].alive && Core.SetHolds(memberids, cast(s32)i) {
+            idmap[i] = next_id;
+            next_id += 1;
+            unused VecPush(out.bytes, 32);
+            AppendQuoted(out, TextView(c.members[i].name));
+        }
+    }
+    unused VecPush(out.bytes, 10);
+
+    // info line
+    unused BuilderAppend(out.bytes, "info");
+    for i: 0..info.count-1 {
+        unused VecPush(out.bytes, 32);
+        AppendQuoted(out, TextView(info[i].key));
+        unused VecPush(out.bytes, 32);
+        AppendQuoted(out, TextView(info[i].val));
+    }
+    unused VecPush(out.bytes, 10);
+
+    WriteObject(c, 0, 0, idmap[:], limit, out);
+}
+
+// Tokenizer for Spree archive text format.
+TOK_EOF :: -1;
+TOK_WORD :: 255;
+
+Parser :: struct {
+    src: string;
+    pos: s64;
+    line: s32;
+}
+
+NextTok :: (p: *Parser, out: *Text) -> s32 {
+    unused VecResize(out.bytes, 0);
+    while p.pos < p.src.count && (p.src[p.pos] == 32 || p.src[p.pos] == 9 || p.src[p.pos] == 13) {
+        p.pos += 1;
+    }
+    if p.pos >= p.src.count { return TOK_EOF }
+    c := p.src[p.pos];
+    p.pos += 1;
+    if c == 10 { p.line += 1; return 10 }
+    if c == 123 || c == 125 || c == 61 { return cast(s32)c }
+    if c == 39 {
+        while p.pos < p.src.count {
+            nc := p.src[p.pos];
+            p.pos += 1;
+            if nc == 39 {
+                if p.pos < p.src.count && p.src[p.pos] == 39 {
+                    p.pos += 1;
+                    unused VecPush(out.bytes, 39);
+                    continue;
+                }
+                return TOK_WORD;
+            }
+            if nc == 10 { p.line += 1 }
+            unused VecPush(out.bytes, nc);
+        }
+        return TOK_EOF;
+    }
+    unused VecPush(out.bytes, c);
+    while p.pos < p.src.count {
+        nc := p.src[p.pos];
+        if nc == 32 || nc == 9 || nc == 10 || nc == 13 || nc == 123 || nc == 125 || nc == 61 {
+            break;
+        }
+        p.pos += 1;
+        unused VecPush(out.bytes, nc);
+    }
+    return TOK_WORD;
+}
+
+ParseLine :: (p: *Parser, out: *Vec(Text)) -> bool {
+    unused VecResize(<<out, 0);
+    tok: Text;
+    while true {
+        t := NextTok(p, *tok);
+        if t == 10 { return true }
+        if t != TOK_WORD { return false }
+        idx := out.count;
+        unused VecResize(<<out, idx + 1);
+        unused BuilderAppend(out.*[idx].bytes, TextView(tok));
+    }
+    return false;
+}
+
+ParseObject :: (p: *Parser, c: *Core.Clique, parent_id: s32, is_root: bool) -> s32 {
+    tok: Text;
+    t := NextTok(p, *tok);
+    if t == TOK_EOF || t == 125 { return -1 }
+    if t != TOK_WORD { return -2 }
+    otype: Text;
+    unused BuilderAppend(otype.bytes, TextView(tok));
+
+    if NextTok(p, *tok) != TOK_WORD { return -2 }
+    vis := Core.StrToSet(TextView(tok));
+
+    oid: s32 = 0;
+    if is_root {
+        c.objects[0].visibility = vis;
+        Core.SetText(*c.objects[0].objtype, TextView(otype));
+    } else {
+        oid = Core.CliqueNewObject(c, parent_id, vis, TextView(otype));
+    }
+
+    while true {
+        t = NextTok(p, *tok);
+        if t == 10 { break }
+        if t == 123 {
+            if NextTok(p, *tok) != 10 { return -2 }
+            while true {
+                cid := ParseObject(p, c, oid, false);
+                if cid == -1 { break }
+                if cid == -2 { return -2 }
+            }
+            if NextTok(p, *tok) != 10 { return -2 }
+            break;
+        }
+        if t != TOK_WORD { return -2 }
+        aname: Text;
+        unused BuilderAppend(aname.bytes, TextView(tok));
+        avis := Core.SetAll();
+        t2 := NextTok(p, *tok);
+        if t2 == 123 {
+            if NextTok(p, *tok) != TOK_WORD { return -2 }
+            avis = Core.StrToSet(TextView(tok));
+            if NextTok(p, *tok) != 125 { return -2 }
+            if NextTok(p, *tok) != 61 { return -2 }
+        } else if t2 != 61 {
+            return -2;
+        }
+        if NextTok(p, *tok) != TOK_WORD { return -2 }
+        Core.ObjSetAttr(c, oid, TextView(aname), TextView(tok), avis);
+    }
+    return oid;
+}
+
+// Parse Spree archive header (and optionally full object tree).
+ParseArchive :: (text: string, header_only: bool, arch: *Archive) -> bool {
+    p := Parser.{src = text, pos = 0, line = 1};
+    words: Vec(Text);
+    // session line
+    if !ParseLine(*p, *words) || words.count < 2 || TextView(words[0]) != "session" { return false }
+    unused VecResize(arch.argv, words.count - 1);
+    for i: 1..words.count-1 { Core.SetText(*arch.argv[i - 1], TextView(words[i])) }
+    // members line
+    if !ParseLine(*p, *words) || words.count < 2 || TextView(words[0]) != "members" { return false }
+    unused VecResize(arch.members, words.count - 1);
+    for i: 1..words.count-1 { Core.SetText(*arch.members[i - 1], TextView(words[i])) }
+    // info line
+    if !ParseLine(*p, *words) || words.count < 1 || TextView(words[0]) != "info" { return false }
+    if ((words.count - 1) % 2) != 0 { return false }
+    ninfo := (words.count - 1) / 2;
+    unused VecResize(arch.info, ninfo);
+    for i: 0..ninfo-1 {
+        Core.SetText(*arch.info[i].key, TextView(words[1 + i * 2]));
+        Core.SetText(*arch.info[i].val, TextView(words[2 + i * 2]));
+    }
+    if header_only { return true }
+    Core.CliqueInit(*arch.clique, 0, -1, "");
+    return ParseObject(*p, *arch.clique, -1, true) == 0;
+}

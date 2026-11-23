@@ -1,0 +1,54 @@
+// Spree archive object-name registry, ported from appl/spree/lib/objstore.b.
+#import "std/vec"
+using Core :: #import "spree_core"
+
+Entry :: struct {
+    name: Text;
+    obj_id: s32;
+}
+
+Store :: struct {
+    entries: Vec(Entry);
+}
+
+SetName :: (c: *Core.Clique, obj_id: s32, name: string) {
+    cur: Text;
+    if Core.ObjGetAttr(c, obj_id, "§", *cur) && cur.bytes.count > 0 {
+        unused BuilderAppend(cur.bytes, " ");
+        unused BuilderAppend(cur.bytes, name);
+    } else {
+        unused BuilderAppend(cur.bytes, name);
+    }
+    Core.ObjSetAttr(c, obj_id, "§", TextView(cur), Core.SetNone());
+}
+
+Unarchive :: (st: *Store, c: *Core.Clique) {
+    unused VecResize(st.entries, 0);
+    for i: 0..c.objects.count-1 {
+        if !c.objects[i].alive { continue }
+        nm: Text;
+        if Core.ObjGetAttr(c, cast(s32)i, "§", *nm) && nm.bytes.count > 0 {
+            s := TextView(nm);
+            pos: s64 = 0;
+            while pos < s.count {
+                while pos < s.count && s[pos] == 32 { pos += 1 }
+                start := pos;
+                while pos < s.count && s[pos] != 32 { pos += 1 }
+                if pos > start {
+                    idx := st.entries.count;
+                    unused VecResize(st.entries, idx + 1);
+                    Core.SetText(*st.entries[idx].name, s[start:pos]);
+                    st.entries[idx].obj_id = cast(s32)i;
+                }
+            }
+            Core.ObjSetAttr(c, cast(s32)i, "§", "", Core.SetNone());
+        }
+    }
+}
+
+Get :: (st: *Store, name: string) -> s32 {
+    for i: 0..st.entries.count-1 {
+        if TextView(st.entries[i].name) == name { return st.entries[i].obj_id }
+    }
+    return -1;
+}

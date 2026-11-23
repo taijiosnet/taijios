@@ -1,0 +1,79 @@
+// Table-driven unit tests for spree_core, archives, objstore, allow, and engines/othello.
+#import "std/vec"
+using Core :: #import "spree_core"
+using Arch :: #import "archives"
+using ObjStore :: #import "objstore"
+using Allow :: #import "allow"
+using Oth :: #import "othello"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    // 1. Co-finite Set tests
+    s0 := Core.SetNone();
+    s1 := Core.SetAdd(Core.SetAdd(s0, 0), 2); // bits 0,2 -> "0:5"
+    str: Text;
+    Core.SetToStr(s1, *str);
+    Expect(TextView(str) == "0:5", "SetToStr 0:5");
+    Expect(Core.SetEq(Core.StrToSet("0:5"), s1), "StrToSet 0:5");
+    Core.SetToStr(Core.SetAll(), *str);
+    Expect(TextView(str) == "1:", "SetToStr All");
+    Expect(Core.SetEq(Core.StrToSet("1:"), Core.SetAll()), "StrToSet All");
+
+    // 2. Clique + Othello engine gameplay + archive round-trip
+    c: Core.Clique;
+    Core.CliqueInit(*c, 1, 0, "Alice");
+    unused VecResize(c.archive_argv, 1);
+    Core.SetText(*c.archive_argv[0], "othello");
+    m0 := Core.CliqueAddMember(*c, "Alice");
+    m1 := Core.CliqueAddMember(*c, "Bob");
+    c.started = true;
+
+    eng: Oth.OthelloEngine;
+    Oth.Start(*eng, *c, m0, m1, false);
+    Expect(eng.pieces[0] == 2 && eng.pieces[1] == 2, "initial 2-2 pieces");
+    Expect(Oth.Command(*eng, *c, m1, "move 2 4") == "it is not your turn", "reject wrong turn");
+    Expect(Oth.Command(*eng, *c, m0, "move 2 4") == "", "Black valid move (2,4)");
+    Expect(eng.pieces[0] == 4 && eng.pieces[1] == 1, "Black flipped (3,4) -> 4-1");
+    Expect(eng.turn == Oth.WHITE, "now White turn");
+
+    // Archive round-trip
+    Oth.Archive(*eng, *c);
+    arch_txt: Text;
+    info: [1]Arch.ArchiveInfo;
+    Core.SetText(*info[0].key, "title");
+    Core.SetText(*info[0].val, "Othello Match");
+    Arch.SerializeArchive(*c, info[:], c.memberids, *arch_txt);
+
+    parsed: Arch.Archive;
+    Expect(Arch.ParseArchive(TextView(arch_txt), false, *parsed), "ParseArchive");
+    Expect(parsed.members.count == 2 && TextView(parsed.members[0]) == "Alice", "archive members");
+    Expect(parsed.info.count == 1 && TextView(parsed.info[0].val) == "Othello Match", "archive info");
+
+    eng2: Oth.OthelloEngine;
+    Oth.Start(*eng2, *parsed.clique, 0, 1, true);
+    Expect(eng2.pieces[0] == 4 && eng2.pieces[1] == 1 && eng2.turn == Oth.WHITE, "Othello unarchive state matches");
+
+    // 3. Allow list matching
+    al: Allow.AllowList;
+    Allow.Add(*al, 10, m0, "play %o %d");
+    Allow.Add(*al, 20, -1, "say &");
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*al, *c, m0, "say hello world", *toks);
+    Expect(tag == 20 && err == "" && toks.count == 3, "allow & match");
+    tag2, err2 := Allow.CheckAction(*al, *c, m1, "play 1 0", *toks);
+    Expect(tag2 == -1 && err2 == "you can't do that", "allow rejects wrong member");
+    Allow.Del(*al, 20, -1);
+    tag3, _ := Allow.CheckAction(*al, *c, m0, "say hi", *toks);
+    Expect(tag3 == -1, "allow Del works");
+
+    if failures == 0 { print("spree_core_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

@@ -1,0 +1,198 @@
+// Spree Othello game engine, ported from appl/spree/engines/othello.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using ObjStore :: #import "objstore"
+
+BLACK :: 0;
+WHITE :: 1;
+NOCOLOUR :: 2;
+N :: 8;
+
+OthelloEngine :: struct {
+    board_obj: s32;
+    board: [64]s32;
+    pieces: [2]s32;
+    turn: s32;
+    members: [2]s32;
+    store: ObjStore.Store;
+}
+
+ClientType :: () -> string { return "othello" }
+MaxMembers :: () -> s32 { return 2 }
+
+Propose :: (member_count: s32) -> string {
+    if member_count != 2 { return "need exactly two members" }
+    return "";
+}
+
+Pt2Attr :: (x: s32, y: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused VecPush(out.bytes, cast(u8)(97 + x));
+    unused VecPush(out.bytes, cast(u8)(97 + y));
+}
+
+Reverse :: (col: s32) -> s32 {
+    if col == NOCOLOUR { return NOCOLOUR }
+    return ifx col == BLACK then WHITE else BLACK;
+}
+
+SetPiece :: (e: *OthelloEngine, c: *Core.Clique, col: s32, x: s32, y: s32) {
+    v := e.board[y * N + x];
+    if v == BLACK || v == WHITE { e.pieces[v] -= 1 }
+    e.board[y * N + x] = col;
+    if col == BLACK || col == WHITE { e.pieces[col] += 1 }
+    attr: Text;
+    Pt2Attr(x, y, *attr);
+    buf: [16]u8;
+    Core.ObjSetAttr(c, e.board_obj, TextView(attr), FormatInteger(cast(s64)col, buf[:]), Core.SetAll());
+}
+
+Winner :: (e: *OthelloEngine) -> s32 {
+    if e.pieces[WHITE] > e.pieces[BLACK] { return WHITE }
+    if e.pieces[BLACK] > e.pieces[WHITE] { return BLACK }
+    return NOCOLOUR;
+}
+
+NewMove :: (e: *OthelloEngine, c: *Core.Clique, col: s32, mx: s32, my: s32, apply: bool) -> bool {
+    dxs: [8]s32 = .[0, 1, 1, 1, 0, -1, -1, -1];
+    dys: [8]s32 = .[1, 1, 0, -1, -1, -1, 0, 1];
+    tot: s32 = 0;
+    for di: 0..7 {
+        dx := dxs[di];
+        dy := dys[di];
+        n: s32 = 0;
+        px := mx + dx;
+        py := my + dy;
+        while px >= 0 && px < N && py >= 0 && py < N {
+            n += 1;
+            cell := e.board[py * N + px];
+            if cell == col || cell == NOCOLOUR { break }
+            px += dx;
+            py += dy;
+        }
+        if px >= 0 && px < N && py >= 0 && py < N && e.board[py * N + px] == col && n > 1 {
+            if !apply { return true }
+            tot += n - 1;
+            fx := mx + dx;
+            fy := my + dy;
+            rem := n - 1;
+            while rem > 0 {
+                SetPiece(e, c, Reverse(e.board[fy * N + fx]), fx, fy);
+                fx += dx;
+                fy += dy;
+                rem -= 1;
+            }
+        }
+    }
+    if tot > 0 {
+        SetPiece(e, c, col, mx, my);
+        return true;
+    }
+    return false;
+}
+
+CanPlay :: (e: *OthelloEngine, c: *Core.Clique) -> bool {
+    for y: 0..N-1 {
+        for x: 0..N-1 {
+            if e.board[y * N + x] == NOCOLOUR && NewMove(e, c, e.turn, cast(s32)x, cast(s32)y, false) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Start :: (e: *OthelloEngine, c: *Core.Clique, m0: s32, m1: s32, archived: bool) {
+    e.members[0] = m0;
+    e.members[1] = m1;
+    for i: 0..63 { e.board[i] = NOCOLOUR }
+    e.pieces[0] = 0;
+    e.pieces[1] = 0;
+    if archived {
+        ObjStore.Unarchive(*e.store, c);
+        e.board_obj = ObjStore.Get(*e.store, "board");
+        for y: 0..N-1 {
+            for x: 0..N-1 {
+                attr: Text;
+                Pt2Attr(cast(s32)x, cast(s32)y, *attr);
+                val: Text;
+                if Core.ObjGetAttr(c, e.board_obj, TextView(attr), *val) && val.bytes.count > 0 {
+                    p := cast(s32)(val.bytes[0] - 48);
+                    e.board[y * N + x] = p;
+                    if p == BLACK || p == WHITE { e.pieces[p] += 1 }
+                }
+            }
+        }
+        tv: Text;
+        if Core.ObjGetAttr(c, e.board_obj, "turn", *tv) && tv.bytes.count > 0 {
+            e.turn = cast(s32)(tv.bytes[0] - 48);
+        }
+    } else {
+        e.board_obj = Core.CliqueNewObject(c, 0, Core.SetAll(), "");
+        names: Text;
+        unused BuilderAppend(names.bytes, TextView(c.members[m0].name));
+        unused BuilderAppend(names.bytes, " ");
+        unused BuilderAppend(names.bytes, TextView(c.members[m1].name));
+        Core.ObjSetAttr(c, e.board_obj, "members", TextView(names), Core.SetAll());
+        SetPiece(e, c, BLACK, 3, 3);
+        SetPiece(e, c, BLACK, 4, 4);
+        SetPiece(e, c, WHITE, 3, 4);
+        SetPiece(e, c, WHITE, 4, 3);
+        e.turn = BLACK;
+        Core.ObjSetAttr(c, e.board_obj, "turn", "0", Core.SetAll());
+    }
+}
+
+Archive :: (e: *OthelloEngine, c: *Core.Clique) {
+    ObjStore.SetName(c, e.board_obj, "board");
+}
+
+ParseCoord :: (s: string) -> (v: s32, ok: bool) {
+    if s.count == 0 { return 0, false }
+    v: s32 = 0;
+    for ch: s {
+        if ch < 48 || ch > 57 { return 0, false }
+        v = v * 10 + cast(s32)(ch - 48);
+    }
+    return v, true;
+}
+
+Command :: (e: *OthelloEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    // Tokenize on spaces/newlines
+    toks: [8]string;
+    nt: s32 = 0;
+    i: s64 = 0;
+    while i < cmd.count && nt < 8 {
+        while i < cmd.count && (cmd[i] == 32 || cmd[i] == 10 || cmd[i] == 13) { i += 1 }
+        if i >= cmd.count { break }
+        start := i;
+        while i < cmd.count && cmd[i] != 32 && cmd[i] != 10 && cmd[i] != 13 { i += 1 }
+        toks[nt] = cmd[start:i];
+        nt += 1;
+    }
+    if nt == 0 { return "unknown command" }
+    if toks[0] != "move" { return "who knows" }
+    if nt != 3 { return "bad command usage" }
+    if e.turn == NOCOLOUR { return "clique has finished" }
+    if member_id != e.members[BLACK] && member_id != e.members[WHITE] { return "you are not playing" }
+    if member_id != e.members[e.turn] { return "it is not your turn" }
+    px, okx := ParseCoord(toks[1]);
+    py, oky := ParseCoord(toks[2]);
+    if !okx || !oky || px < 0 || px >= N || py < 0 || py >= N { return "invalid move position" }
+    if e.board[py * N + px] != NOCOLOUR { return "position is already occupied" }
+    if !NewMove(e, c, e.turn, px, py, true) { return "cannot move there" }
+
+    e.turn = Reverse(e.turn);
+    if !CanPlay(e, c) {
+        e.turn = Reverse(e.turn);
+        if !CanPlay(e, c) {
+            e.turn = NOCOLOUR;
+            wb: [16]u8;
+            Core.ObjSetAttr(c, e.board_obj, "winner", FormatInteger(cast(s64)Winner(e), wb[:]), Core.SetAll());
+        }
+    }
+    tb: [16]u8;
+    Core.ObjSetAttr(c, e.board_obj, "turn", FormatInteger(cast(s64)e.turn, tb[:]), Core.SetAll());
+    return "";
+}
