@@ -47,7 +47,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (48 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (10), demo (3), ebook (0), math (9).
+5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (10), demo (3), ebook (0), math (0).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
@@ -720,19 +720,10 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/ebook/table.dis | appl/ebook/table.b |  | - |  |
 | dis/ebook/units.dis | appl/ebook/units.b |  | - |  |
 
-### 13. Math - numeric modules - 9 rows
+### 13. Math - numeric modules - 0 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/math/ffts.dis | appl/math/ffts.b | module/ffts.m | - |  |
-| dis/math/geodesy.dis | appl/math/geodesy.b | module/math/geodesy.m | - |  |
-| dis/math/gr.dis | appl/math/gr.b | module/gr.m | - |  |
-| dis/math/graph0.dis | appl/math/graph0.b |  | - | zx-twin |
-| dis/math/hist0.dis | appl/math/hist0.b |  | - |  |
-| dis/math/linalg.dis | appl/math/linalg.b | module/linalg.m | - |  |
-| dis/math/linbench.dis | appl/math/linbench.b |  | - | zx-twin |
-| dis/math/polyfill.dis | appl/math/polyfill.b | module/math/polyfill.m | - |  |
-| dis/math/polyhedra.dis | appl/math/polyhedra.b | module/math/polyhedra.m | - |  |
 
 ### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 48 rows
 

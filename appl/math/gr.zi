@@ -1,0 +1,493 @@
+// 2D scientific plotting and automatic tick selection (replaces appl/math/gr.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+GRAPH :: 0;
+TEXT :: 1;
+PEN :: 2;
+
+SOLID :: 100;
+DASHED :: 101;
+DOTTED :: 102;
+CIRCLE :: 103;
+CROSS :: 104;
+REFERENCE :: 105;
+INVIS :: 106;
+
+LJUST :: 0;
+CENTER :: 1;
+RJUST :: 2;
+HIGH :: 0;
+MED :: 8;
+BASE :: 16;
+LOW :: 24;
+UP :: 64;
+
+TKY :: 630.0;
+
+Op :: struct {
+    code: s32;
+    n: s32;
+    x: Vec(float64);
+    y: Vec(float64);
+    t: Text;
+}
+
+Plot :: struct {
+    ops: Vec(Op);
+    xmin: float64;
+    xmax: float64;
+    ymin: float64;
+    ymax: float64;
+    textsize: float64;
+    title: Text;
+    ax: float64;
+    bx: float64;
+    ay: float64;
+    by: float64;
+    nseg: s32;
+    pendown: bool;
+    cur_line: Vec(u8);
+}
+
+MakeText :: (s: string) -> Text {
+    t: Text;
+    unused BuilderAppend(t.bytes, s);
+    return t;
+}
+
+Open :: (title: string, p: *Plot) {
+    VecClear(p.ops);
+    p.xmin = Util.INFINITY;
+    p.xmax = -Util.INFINITY;
+    p.ymin = Util.INFINITY;
+    p.ymax = -Util.INFINITY;
+    p.textsize = 8.0;
+    VecClear(p.title.bytes);
+    unused BuilderAppend(p.title.bytes, title);
+    p.ax = 1.0;
+    p.bx = 0.0;
+    p.ay = 1.0;
+    p.by = 0.0;
+    p.nseg = 0;
+    p.pendown = false;
+    VecClear(p.cur_line);
+}
+
+EqualXY :: (p: *Plot) {
+    r: float64 = 0.0;
+    if r < p.xmax - p.xmin { r = p.xmax - p.xmin }
+    if r < p.ymax - p.ymin { r = p.ymax - p.ymin }
+    m := (p.xmax + p.xmin) / 2.0;
+    p.xmax = m + r / 2.0;
+    p.xmin = m - r / 2.0;
+    m = (p.ymax + p.ymin) / 2.0;
+    p.ymax = m + r / 2.0;
+    p.ymin = m - r / 2.0;
+}
+
+Graph :: (p: *Plot, x: []float64, y: []float64) {
+    n := x.count;
+    if y.count < n { n = y.count }
+    op: Op;
+    op.code = GRAPH;
+    op.n = cast(s32)n;
+    for i: 0..n - 1 {
+        tx := x[i];
+        VecPush(op.x, tx);
+        if tx < p.xmin { p.xmin = tx }
+        if tx > p.xmax { p.xmax = tx }
+        ty := y[i];
+        VecPush(op.y, ty);
+        if ty < p.ymin { p.ymin = ty }
+        if ty > p.ymax { p.ymax = ty }
+    }
+    VecPush(p.ops, op);
+}
+
+TextOp :: (p: *Plot, justify: s32, s: string, x: float64, y: float64) {
+    op: Op;
+    op.code = TEXT;
+    op.n = justify;
+    VecPush(op.x, x);
+    VecPush(op.y, y);
+    op.t = MakeText(s);
+    VecPush(p.ops, op);
+}
+
+Pen :: (p: *Plot, nib: s32) {
+    op: Op;
+    op.code = PEN;
+    op.n = nib;
+    VecPush(p.ops, op);
+}
+
+AppendOneDec :: (out: *Vec(u8), v: float64) {
+    neg := v < 0.0;
+    av := Util.AbsF64(v);
+    tenths := cast(s64)(av * 10.0 + 0.5);
+    if neg && tenths > 0 { VecPush(out.*, 45) }
+    BuilderPrint(out, "%.%", tenths / 10, tenths % 10);
+}
+
+Mv :: (p: *Plot, x: float64, y: float64) {
+    VecClear(p.cur_line);
+    unused BuilderAppend(p.cur_line, ".fc.c create line ");
+    AppendOneDec(*p.cur_line, p.ax * x + p.bx);
+    VecPush(p.cur_line, 32);
+    AppendOneDec(*p.cur_line, TKY - (p.ay * y + p.by));
+}
+
+Stroke :: (p: *Plot, cmds: *Vec(u8)) {
+    if p.pendown {
+        unused BuilderAppend(p.cur_line, " -width 3\n");
+        unused BuilderAppend(cmds.*, TextView(p.cur_line[:]));
+        VecClear(p.cur_line);
+        p.pendown = false;
+        p.nseg = 0;
+    }
+}
+
+VecTo :: (p: *Plot, x: float64, y: float64, cmds: *Vec(u8)) {
+    VecPush(p.cur_line, 32);
+    AppendOneDec(*p.cur_line, p.ax * x + p.bx);
+    VecPush(p.cur_line, 32);
+    AppendOneDec(*p.cur_line, TKY - (p.ay * y + p.by));
+    p.pendown = true;
+    p.nseg += 1;
+    if p.nseg > 1000 {
+        Stroke(p, cmds);
+        Mv(p, x, y);
+    }
+}
+
+Circle :: (p: *Plot, u: float64, v: float64, radius: float64, cmds: *Vec(u8)) {
+    x := p.ax * u + p.bx;
+    y := TKY - (p.ay * v + p.by);
+    r := radius * (p.ax + p.ay) / 2.0;
+    unused BuilderAppend(cmds.*, ".fc.c create oval ");
+    AppendOneDec(cmds, x - r);
+    VecPush(cmds.*, 32);
+    AppendOneDec(cmds, y - r);
+    VecPush(cmds.*, 32);
+    AppendOneDec(cmds, x + r);
+    VecPush(cmds.*, 32);
+    AppendOneDec(cmds, y + r);
+    unused BuilderAppend(cmds.*, " -width 3\n");
+}
+
+EmitText :: (p: *Plot, s: string, x: float64, y: float64, xoff: string, yoff: string, cmds: *Vec(u8)) {
+    unused BuilderAppend(cmds.*, ".fc.c create text ");
+    AppendOneDec(cmds, p.ax * x + p.bx);
+    VecPush(cmds.*, 32);
+    AppendOneDec(cmds, TKY - (p.ay * y + p.by));
+    VecPush(cmds.*, 32);
+    if yoff.count > 0 || xoff.count > 0 {
+        unused BuilderAppend(cmds.*, "-anchor ");
+        unused BuilderAppend(cmds.*, yoff);
+        unused BuilderAppend(cmds.*, xoff);
+        VecPush(cmds.*, 32);
+    }
+    BuilderPrint(cmds, "-text '%\n", s);
+}
+
+DataRange :: (xmin: float64, xmax: float64, margin: float64) -> (x0: float64, x1: float64) {
+    r: float64 = 1.0e-30;
+    if r < 0.001 * Util.AbsF64(xmin) { r = 0.001 * Util.AbsF64(xmin) }
+    if r < 0.001 * Util.AbsF64(xmax) { r = 0.001 * Util.AbsF64(xmax) }
+    if r < xmax - xmin { r = xmax - xmin }
+    r *= 1.0 + 2.0 * margin;
+    x0 := (xmin + xmax) / 2.0 - r / 2.0;
+    return x0, x0 + r;
+}
+
+Dashed :: (p: *Plot, ndash: s32, x: []float64, y: []float64, cmds: *Vec(u8)) {
+    n := x.count;
+    if n != y.count || n <= 0 { return }
+    s: float64 = 0.0;
+    for i: 0..n - 2 {
+        u := x[i + 1] - x[i];
+        v := y[i + 1] - y[i];
+        s += Util.Sqrt(u * u + v * v);
+    }
+    ii := cast(s32)Util.Floor(cast(float64)ndash * s);
+    if ii < 2 { ii = 2 }
+    dashlen := s / cast(float64)(2 * ii - 1);
+    t := dashlen;
+    ink := true;
+    Mv(p, x[0], y[0]);
+    cx := x[0];
+    cy := y[0];
+    for i: 0..n - 2 {
+        u := x[i + 1] - x[i];
+        v := y[i + 1] - y[i];
+        d := Util.Sqrt(u * u + v * v);
+        if d > 0.0 {
+            u /= d;
+            v /= d;
+            while t <= d {
+                cx += t * u;
+                cy += t * v;
+                if ink {
+                    VecTo(p, cx, cy, cmds);
+                    Stroke(p, cmds);
+                } else {
+                    Mv(p, cx, cy);
+                }
+                d -= t;
+                t = dashlen;
+                ink = !ink;
+            }
+            cx = x[i + 1];
+            cy = y[i + 1];
+            if ink {
+                VecTo(p, cx, cy, cmds);
+            } else {
+                Mv(p, cx, cy);
+            }
+            t -= d;
+        }
+    }
+    Stroke(p, cmds);
+}
+
+LabFmt :: (x: float64, out: *Vec(u8)) {
+    VecClear(out.*);
+    if x == 0.0 {
+        VecPush(out.*, 48);
+        return;
+    }
+    tmp: Vec(u8);
+    Util.AppendF64(*tmp, x);
+    // Trim trailing zeroes after decimal point
+    end := tmp.count;
+    while end > 0 && tmp[end - 1] == 48 { end -= 1 }
+    if end > 0 && tmp[end - 1] == 46 { end -= 1 }
+    s := TextView(tmp[:end]);
+    if s.count > 2 && s[0] == 48 && s[1] == 46 {
+        s = s[1:];
+    } else if s.count > 3 && s[0] == 45 && s[1] == 48 && s[2] == 46 {
+        VecPush(out.*, 45);
+        s = s[2:];
+    }
+    unused BuilderAppend(out.*, s);
+}
+
+Max3 :: (a: float64, b: float64, c: float64) -> float64 {
+    r := a;
+    if r < b { r = b }
+    if r < c { r = c }
+    return r;
+}
+
+MyMod :: (i_in: s32, n: s32) -> s32 {
+    i := i_in;
+    while i < 0 { i += n }
+    while i >= n { i -= n }
+    return i;
+}
+
+MyTic :: (l: float64, h: float64) -> (lab1: s32, labn: s32, labinc: s32, k: s32, u: float64, s: float64) {
+    eps: float64 = 0.0001;
+    k := cast(s32)Util.Floor(Util.Log10((h - l) / (3.0 + eps)));
+    u := Util.Pow10(k);
+    t1 := cast(s32)Util.Ceil(l / u - eps);
+    tn := cast(s32)Util.Floor(h / u + eps);
+    lab1 := t1;
+    labn := tn;
+    labinc: s32 = 1;
+    nlab := labn - lab1 + 1;
+    if nlab > 5 {
+        lab1 = t1 + MyMod(-t1, 2);
+        labn = tn - MyMod(tn, 2);
+        labinc = 2;
+        nlab = (labn - lab1) / labinc + 1;
+        if nlab > 5 {
+            lab1 = t1 + MyMod(-t1, 5);
+            labn = tn - MyMod(tn, 5);
+            labinc = 5;
+            nlab = (labn - lab1) / labinc + 1;
+            if nlab > 5 {
+                u *= 10.0;
+                k += 1;
+                lab1 = cast(s32)Util.Ceil(l / u - eps);
+                labn = cast(s32)Util.Floor(h / u + eps);
+                nlab = labn - lab1 + 1;
+                labinc = 1;
+            } else if nlab < 3 {
+                lab1 = t1 + MyMod(-t1, 4);
+                labn = tn - MyMod(tn, 4);
+                labinc = 4;
+                nlab = (labn - lab1) / labinc + 1;
+            }
+        }
+    }
+    ndig := cast(s32)(1.0 + Util.Floor(Util.Log10(Max3(Util.AbsF64(cast(float64)lab1), Util.AbsF64(cast(float64)labn), 1.0e-30))));
+    s: float64 = 1.0;
+    if (k <= 0 && k >= -ndig) || (k < 0 && k >= -3) || (k > 0 && ndig + k <= 4) {
+        s = u;
+        k = 0;
+        u = 1.0;
+    } else if k > 0 {
+        s = 1.0;
+        j := ndig;
+        while k % 3 != 0 {
+            k -= 1;
+            u /= 10.0;
+            s *= 10.0;
+            j += 1;
+        }
+        if j - 3 > 0 {
+            k += 3;
+            u *= 1000.0;
+            s /= 1000.0;
+        }
+    } else {
+        s = 1.0;
+        j := ndig;
+        while k % 3 != 0 {
+            k += 1;
+            u *= 10.0;
+            s /= 10.0;
+            j -= 1;
+        }
+        if j < 0 {
+            k -= 3;
+            u /= 1000.0;
+            s *= 1000.0;
+        }
+    }
+    return lab1, labn, labinc, k, u, s;
+}
+
+Paint :: (p: *Plot, xlabel: string, xunit: string, ylabel: string, yunit: string, cmds: *Vec(u8)) {
+    VecClear(cmds.*);
+    margin: float64 = 0.075;
+    ticksize: float64 = 0.02;
+    sep := ticksize;
+    radius := 0.8 * p.textsize;
+    pen_mode: s32 = SOLID;
+    p.nseg = 0;
+    p.pendown = false;
+
+    x0, x1 := DataRange(p.xmin, p.xmax, margin);
+    p.ax = (400.0 - 2.0 * p.textsize) / ((x1 - x0) * (1.0 + 2.0 * sep));
+    p.bx = 506.0 - p.ax * x1;
+    y0, y1 := DataRange(p.ymin, p.ymax, margin);
+    p.ay = (400.0 - 2.0 * p.textsize) / ((y1 - y0) * (1.0 + 2.0 * sep));
+    p.by = 596.0 - p.ay * y1;
+
+    ticksize *= p.ax * (x1 - x0);
+    sep *= p.ax * (x1 - x0);
+
+    xoff_tab: [3]string = .["w", "", "e"];
+    yoff_tab: [4]string = .["n", "", "s", "s"];
+
+    for oi: 0..p.ops.count - 1 {
+        op := *p.ops[oi];
+        if op.code == GRAPH {
+            if pen_mode == DASHED {
+                Dashed(p, 17, op.x[:], op.y[:], cmds);
+            } else if pen_mode == DOTTED {
+                Dashed(p, 85, op.x[:], op.y[:], cmds);
+            } else {
+                for i: 0..op.x.count - 1 {
+                    xx := op.x[i];
+                    yy := op.y[i];
+                    if pen_mode == CIRCLE {
+                        Circle(p, xx, yy, radius / (p.ax + p.ay), cmds);
+                    } else if pen_mode == CROSS {
+                        Mv(p, xx - radius / p.ax, yy);
+                        VecTo(p, xx + radius / p.ax, yy, cmds);
+                        Stroke(p, cmds);
+                        Mv(p, xx, yy - radius / p.ay);
+                        VecTo(p, xx, yy + radius / p.ay, cmds);
+                        Stroke(p, cmds);
+                    } else if pen_mode == INVIS {
+                    } else {
+                        if i == 0 { Mv(p, xx, yy) }
+                        else { VecTo(p, xx, yy, cmds) }
+                    }
+                }
+                Stroke(p, cmds);
+            }
+        } else if op.code == TEXT {
+            xo := xoff_tab[op.n & 3];
+            yo := yoff_tab[(op.n >> 3) & 3];
+            EmitText(p, TextView(op.t), op.x[0], op.y[0], xo, yo, cmds);
+        } else if op.code == PEN {
+            pen_mode = op.n;
+        }
+    }
+
+    // Axes box
+    Mv(p, x0, y0);
+    VecTo(p, x1, y0, cmds);
+    VecTo(p, x1, y1, cmds);
+    VecTo(p, x0, y1, cmds);
+    VecTo(p, x0, y0, cmds);
+    Stroke(p, cmds);
+
+    // X ticks
+    lab1, labn, labinc, k, u, s := MyTic(x0, x1);
+    ti := lab1;
+    while ti <= labn {
+        r := cast(float64)ti * s * u;
+        Mv(p, r, y0);
+        VecTo(p, r, y0 + ticksize / p.ay, cmds);
+        Stroke(p, cmds);
+        Mv(p, r, y1);
+        VecTo(p, r, y1 - ticksize / p.ay, cmds);
+        Stroke(p, cmds);
+        lbl: Vec(u8);
+        LabFmt(cast(float64)ti * s, *lbl);
+        EmitText(p, TextView(lbl[:]), r, y0 - sep / p.ay, "", "n", cmds);
+        ti += labinc;
+    }
+    yy := y0 - (2.0 * sep + p.textsize) / p.ay;
+    xlbl: Vec(u8);
+    if xlabel.count > 0 { unused BuilderAppend(xlbl, xlabel) }
+    if k != 0 || xunit.count > 0 { unused BuilderAppend(xlbl, " /") }
+    if k != 0 { BuilderPrint(*xlbl, " 10^%", k) }
+    if xunit.count > 0 { BuilderPrint(*xlbl, " %", xunit) }
+    EmitText(p, TextView(xlbl[:]), (x0 + x1) / 2.0, yy, "", "n", cmds);
+
+    // Y ticks
+    lab1, labn, labinc, k, u, s = MyTic(y0, y1);
+    ti = lab1;
+    while ti <= labn {
+        r := cast(float64)ti * s * u;
+        Mv(p, x0, r);
+        VecTo(p, x0 + ticksize / p.ax, r, cmds);
+        Stroke(p, cmds);
+        Mv(p, x1, r);
+        VecTo(p, x1 - ticksize / p.ax, r, cmds);
+        Stroke(p, cmds);
+        lbl: Vec(u8);
+        LabFmt(cast(float64)ti * s, *lbl);
+        EmitText(p, TextView(lbl[:]), x0 - sep / p.ax, r, "e", "", cmds);
+        ti += labinc;
+    }
+    xx := x0 - (4.0 * sep + p.textsize) / p.ax;
+    ylbl: Vec(u8);
+    if ylabel.count > 0 { unused BuilderAppend(ylbl, ylabel) }
+    if k != 0 || yunit.count > 0 { unused BuilderAppend(ylbl, " /") }
+    if k != 0 { BuilderPrint(*ylbl, " 10^%", k) }
+    if yunit.count > 0 { BuilderPrint(*ylbl, " %", yunit) }
+    EmitText(p, TextView(ylbl[:]), xx, (y0 + y1) / 2.0, "e", "", cmds);
+    unused BuilderAppend(cmds.*, "update\n");
+}
+
+main :: () -> s32 {
+    p: Plot;
+    Open("gr", *p);
+    xs: [3]float64 = .[0.0, 1.0, 2.0];
+    ys: [3]float64 = .[0.0, 2.0, 4.0];
+    Graph(*p, xs[:], ys[:]);
+    cmds: Vec(u8);
+    Paint(*p, "x", "s", "y", "m", *cmds);
+    Util.WriteOut(TextView(cmds[:]));
+    return 0;
+}

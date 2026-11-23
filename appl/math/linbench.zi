@@ -1,0 +1,96 @@
+// LINPACK benchmark routines (replaces appl/math/linbench.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+LA :: #import "linalg";
+#import "std/format"
+#import "std/vec"
+
+MatGen :: (a: []float64, lda: s64, n: s64, b: []float64) -> float64 {
+    seed: s64 = 1325;
+    norma: float64 = 0.0;
+    for j: 0..n - 1 {
+        for i: 0..n - 1 {
+            seed = (3125 * seed) % 65536;
+            v := (cast(float64)seed - 32768.0) / 16384.0;
+            a[lda * j + i] = v;
+            if norma < v { norma = v }
+        }
+    }
+    for i: 0..n - 1 { b[i] = 0.0 }
+    for j: 0..n - 1 {
+        for i: 0..n - 1 {
+            b[i] += a[lda * j + i];
+        }
+    }
+    return norma;
+}
+
+Dmxpy :: (y: []float64, x: []float64, m: []float64, ldm: s64) {
+    n1 := y.count;
+    n2 := x.count;
+    for j: 0..n2 - 1 {
+        xj := x[j];
+        for i: 0..n1 - 1 {
+            y[i] += m[ldm * j + i] * xj;
+        }
+    }
+}
+
+Benchmark :: (n: s64) -> (mflops: float64, secs: float64, residn: float64) {
+    lda: s64 = 201;
+    if n > lda { lda = n }
+    a: Vec(float64);
+    b: Vec(float64);
+    x: Vec(float64);
+    ipvt: Vec(s32);
+    VecResize(a, lda * n);
+    VecResize(b, n);
+    VecResize(x, n);
+    VecResize(ipvt, n);
+    ops := (2 * n * n * n) / 3 + 2 * n * n;
+
+    norma := MatGen(a[:], lda, n, b[:]);
+    t0 := cast(float64)Util.Millisec() / 1000.0;
+    unused LA.Dgefa(a[:], lda, n, ipvt[:]);
+    time0 := (cast(float64)Util.Millisec() / 1000.0) - t0;
+    t1 := cast(float64)Util.Millisec() / 1000.0;
+    LA.Dgesl(a[:], lda, n, ipvt[:], b[:], 0);
+    time1 := (cast(float64)Util.Millisec() / 1000.0) - t1;
+    total := time0 + time1;
+
+    for i: 0..n - 1 { x[i] = b[i] }
+    norma = MatGen(a[:], lda, n, b[:]);
+    for i: 0..n - 1 { b[i] = -b[i] }
+    Dmxpy(b[:], x[:], a[:], lda);
+
+    resid: float64 = 0.0;
+    normx: float64 = 0.0;
+    for i: 0..n - 1 {
+        ab := Util.AbsF64(b[i]);
+        ax := Util.AbsF64(x[i]);
+        if resid < ab { resid = ab }
+        if normx < ax { normx = ax }
+    }
+    residn_res := cast(float64)n * norma * normx * Util.MACH_EPS;
+    if residn_res != 0.0 {
+        residn_res = resid / residn_res;
+    }
+    mflops_res: float64 = 0.0;
+    if total > 0.0 {
+        mflops_res = cast(float64)ops / (1.0e6 * total);
+    }
+    return mflops_res, total, residn_res;
+}
+
+main :: () -> s32 {
+    n: s64 = 50;
+    if Args.OperandCount() > 0 {
+        v := Util.ParseInt(Args.Operand(0));
+        if v > 0 { n = v }
+    }
+    _, _, residn := Benchmark(n);
+    out: Vec(u8);
+    BuilderPrint(*out, "n=% ok=%\n", n, ifx residn < Util.Sqrt(cast(float64)n) then 1 else 0);
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

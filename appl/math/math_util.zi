@@ -100,6 +100,124 @@ PowInt :: (x: float64, p: s64) -> float64 {
     return res;
 }
 
+PI :: 3.14159265358979323846;
+TWO_PI :: 6.28318530717958647692;
+HALF_PI :: 1.57079632679489661923;
+DEGREE :: 0.0174532925199432957692;
+INFINITY :: 1.0e300;
+MACH_EPS :: 2.2204460492503131e-16;
+
+Floor :: (x: float64) -> float64 {
+    i := cast(s64)x;
+    fi := cast(float64)i;
+    if fi > x { return fi - 1.0 }
+    return fi;
+}
+
+Ceil :: (x: float64) -> float64 {
+    i := cast(s64)x;
+    fi := cast(float64)i;
+    if fi < x { return fi + 1.0 }
+    return fi;
+}
+
+Fmin :: (a: float64, b: float64) -> float64 {
+    return ifx a < b then a else b;
+}
+
+Fmax :: (a: float64, b: float64) -> float64 {
+    return ifx a > b then a else b;
+}
+
+ReduceAngle :: (x: float64) -> float64 {
+    k := Floor((x + PI) / TWO_PI);
+    r := x - k * TWO_PI;
+    while r > PI { r -= TWO_PI }
+    while r < -PI { r += TWO_PI }
+    return r;
+}
+
+Sin :: (x: float64) -> float64 {
+    r := ReduceAngle(x);
+    sign: float64 = 1.0;
+    if r < 0.0 {
+        r = -r;
+        sign = -1.0;
+    }
+    if r > HALF_PI {
+        r = PI - r;
+    }
+    r2 := r * r;
+    term := r;
+    sum := r;
+    for k: 1..16 {
+        denom := cast(float64)(2 * k) * cast(float64)(2 * k + 1);
+        term = -term * r2 / denom;
+        sum += term;
+    }
+    return sign * sum;
+}
+
+Cos :: (x: float64) -> float64 {
+    return Sin(x + HALF_PI);
+}
+
+Tan :: (x: float64) -> float64 {
+    return Sin(x) / Cos(x);
+}
+
+Atan :: (x: float64) -> float64 {
+    if x < 0.0 { return -Atan(-x) }
+    if x > 1.0 { return HALF_PI - Atan(1.0 / x) }
+    offset: float64 = 0.0;
+    u := x;
+    // tan(pi/12) = 2 - sqrt(3)
+    if u > 0.26794919243112270647 {
+        sqrt3: float64 = 1.73205080756887729353;
+        u = (sqrt3 * u - 1.0) / (sqrt3 + u);
+        offset = 0.52359877559829887308; // pi/6
+    }
+    u2 := u * u;
+    term := u;
+    sum := u;
+    for k: 1..25 {
+        term = -term * u2;
+        sum += term / cast(float64)(2 * k + 1);
+    }
+    return offset + sum;
+}
+
+Atan2 :: (y: float64, x: float64) -> float64 {
+    if x > 0.0 { return Atan(y / x) }
+    if x < 0.0 {
+        if y >= 0.0 { return Atan(y / x) + PI }
+        return Atan(y / x) - PI;
+    }
+    if y > 0.0 { return HALF_PI }
+    if y < 0.0 { return -HALF_PI }
+    return 0.0;
+}
+
+Asin :: (x: float64) -> float64 {
+    if x >= 1.0 { return HALF_PI }
+    if x <= -1.0 { return -HALF_PI }
+    return Atan2(x, Sqrt(1.0 - x * x));
+}
+
+Acos :: (x: float64) -> float64 {
+    if x >= 1.0 { return 0.0 }
+    if x <= -1.0 { return PI }
+    return Atan2(Sqrt(1.0 - x * x), x);
+}
+
+Log10 :: (x: float64) -> float64 {
+    return Log(x) * 0.43429448190325182765;
+}
+
+Pow10 :: (k: s32) -> float64 {
+    return PowInt(10.0, cast(s64)k);
+}
+
 IsSpaceByte :: (b: u8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13;
 }

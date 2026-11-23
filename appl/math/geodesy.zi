@@ -1,0 +1,635 @@
+// Geodesy coordinate conversions, datums, Helmert transforms, and Mercator projections (replaces appl/math/geodesy.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+OSGB36 :: 0;
+Ireland65 :: 1;
+ED50 :: 2;
+WGS84 :: 3;
+ITRS2000 :: 4;
+ETRS89 :: 5;
+
+Natgrid :: 0;
+IrishNatgrid :: 1;
+UTMEur :: 2;
+UTM :: 3;
+
+Airy1830 :: 0;
+Airy1830m :: 1;
+Int1924 :: 2;
+GRS80 :: 3;
+
+NGRID :: 100000;
+EPSILON :: 0.000001;
+DELTA_T :: 16.0;
+
+Lalo :: struct {
+    la: float64;
+    lo: float64;
+}
+
+Eano :: struct {
+    e: float64;
+    n: float64;
+}
+
+Vector :: struct {
+    x: float64;
+    y: float64;
+    z: float64;
+}
+
+Ellipsoid :: struct {
+    a: float64;
+    b: float64;
+}
+
+Mercator :: struct {
+    f0: float64;
+    orig_str: string;
+    e0: float64;
+    n0: float64;
+    e: s32;
+}
+
+Helmert :: struct {
+    tx: float64;
+    ty: float64;
+    tz: float64;
+    s: float64;
+    rx: float64;
+    ry: float64;
+    rz: float64;
+}
+
+Mat3x4 :: struct {
+    m: [12]float64;
+}
+
+FormatState :: struct {
+    inited: bool;
+    dat: s32;
+    cdat: s32;
+    prj: s32;
+    tmp: Mercator;
+    orig: Lalo;
+    zone: s32;
+}
+
+hm_wgs84_osgb36: Mat3x4;
+hm_osgb36_wgs84: Mat3x4;
+hm_itrs2000_etrs89: Mat3x4;
+hm_etrs89_itrs2000: Mat3x4;
+hm_etrs89_osgb36: Mat3x4;
+hm_osgb36_etrs89: Mat3x4;
+hm_identity: Mat3x4;
+fmt: FormatState;
+
+GetEllipsoid :: (e: s32) -> Ellipsoid {
+    if e == Airy1830 { return .{a = 6377563.396, b = 6356256.910} }
+    if e == Airy1830m { return .{a = 6377340.189, b = 6356034.447} }
+    if e == Int1924 { return .{a = 6378388.000, b = 6356911.946} }
+    return .{a = 6378137.000, b = 6356752.3141};
+}
+
+DatumEllipsoid :: (d: s32) -> s32 {
+    if d == OSGB36 { return Airy1830 }
+    if d == Ireland65 { return Airy1830m }
+    if d == ED50 { return Int1924 }
+    return GRS80;
+}
+
+GetMercator :: (p: s32) -> Mercator {
+    if p == Natgrid {
+        return .{f0 = 0.9996012717, orig_str = "49:00:00N 02:00:00W", e0 = 400000.0, n0 = -100000.0, e = Airy1830};
+    }
+    if p == IrishNatgrid {
+        return .{f0 = 1.000035, orig_str = "53:30:00N 08:00:00W", e0 = 200000.0, n0 = 250000.0, e = Airy1830m};
+    }
+    if p == UTMEur {
+        return .{f0 = 0.9996, orig_str = "", e0 = 500000.0, n0 = 0.0, e = Int1924};
+    }
+    return .{f0 = 0.9996, orig_str = "", e0 = 500000.0, n0 = 0.0, e = GRS80};
+}
+
+Deg2Rad :: (d: float64) -> float64 { return d * Util.PI / 180.0 }
+Rad2Deg :: (r: float64) -> float64 { return r * 180.0 / Util.PI }
+Sec2Rad :: (s: float64) -> float64 { return Deg2Rad(s / 3600.0) }
+
+Norm :: (r_in: float64) -> float64 {
+    r := r_in;
+    while r > Util.PI { r -= 2.0 * Util.PI }
+    while r < -Util.PI { r += 2.0 * Util.PI }
+    return r;
+}
+
+Small :: (r: float64) -> bool {
+    return r > -EPSILON && r < EPSILON;
+}
+
+Trunc :: (r: float64) -> s32 {
+    i := cast(s32)r;
+    if cast(float64)i > r { i -= 1 }
+    return i;
+}
+
+MulMM :: (m1: *Mat3x4, m2: *Mat3x4, out: *Mat3x4) {
+    for i: 0..2 {
+        for j: 0..2 {
+            sum: float64 = 0.0;
+            for k: 0..2 {
+                sum += m1.m[i * 4 + k] * m2.m[k * 4 + j];
+            }
+            out.m[i * 4 + j] = sum;
+        }
+        sum_t: float64 = 0.0;
+        for k: 0..2 {
+            sum_t += m1.m[i * 4 + k] * m2.m[k * 4 + 3];
+        }
+        out.m[i * 4 + 3] = sum_t + m1.m[i * 4 + 3];
+    }
+}
+
+MulMV :: (m: *Mat3x4, v: Vector) -> Vector {
+    res: Vector;
+    res.x = m.m[0] * v.x + m.m[1] * v.y + m.m[2] * v.z + m.m[3];
+    res.y = m.m[4] * v.x + m.m[5] * v.y + m.m[6] * v.z + m.m[7];
+    res.z = m.m[8] * v.x + m.m[9] * v.y + m.m[10] * v.z + m.m[11];
+    return res;
+}
+
+InvMM :: (m: *Mat3x4, n: *Mat3x4) {
+    t00 := m.m[0]; t01 := m.m[1]; t02 := m.m[2];
+    t10 := m.m[4]; t11 := m.m[5]; t12 := m.m[6];
+    t20 := m.m[8]; t21 := m.m[9]; t22 := m.m[10];
+
+    n.m[0] = t11 * t22 - t12 * t21;
+    n.m[4] = t12 * t20 - t10 * t22;
+    n.m[8] = t10 * t21 - t11 * t20;
+    n.m[1] = t02 * t21 - t01 * t22;
+    n.m[5] = t00 * t22 - t02 * t20;
+    n.m[9] = t01 * t20 - t00 * t21;
+    n.m[2] = t01 * t12 - t02 * t11;
+    n.m[6] = t02 * t10 - t00 * t12;
+    n.m[10] = t00 * t11 - t01 * t10;
+
+    d := t00 * n.m[0] + t01 * n.m[4] + t02 * n.m[8];
+    for i: 0..2 {
+        for j: 0..2 {
+            n.m[i * 4 + j] /= d;
+        }
+        n.m[i * 4 + 3] = 0.0;
+    }
+    tv := MulMV(n, .{x = -m.m[3], y = -m.m[7], z = -m.m[11]});
+    n.m[3] = tv.x;
+    n.m[7] = tv.y;
+    n.m[11] = tv.z;
+}
+
+HelmInit :: (h: Helmert, fwd: *Mat3x4, inv_out: *Mat3x4) {
+    s := 1.0 + h.s / 1000000.0;
+    rx := Sec2Rad(h.rx);
+    ry := Sec2Rad(h.ry);
+    rz := Sec2Rad(h.rz);
+    fwd.m[0] = s;   fwd.m[1] = -rz; fwd.m[2] = ry;  fwd.m[3] = h.tx;
+    fwd.m[4] = rz;  fwd.m[5] = s;   fwd.m[6] = -rx; fwd.m[7] = h.ty;
+    fwd.m[8] = -ry; fwd.m[9] = rx;  fwd.m[10] = s;  fwd.m[11] = h.tz;
+    InvMM(fwd, inv_out);
+}
+
+HelmertInit :: () {
+    h1 := Helmert.{tx = -446.448, ty = 125.157, tz = -542.060, s = 20.4894, rx = -0.1502, ry = -0.2470, rz = -0.8421};
+    h2 := Helmert.{tx = 0.054, ty = 0.051, tz = -0.048, s = 0.0, rx = 0.000081 * DELTA_T, ry = 0.00049 * DELTA_T, rz = -0.000792 * DELTA_T};
+    HelmInit(h1, *hm_wgs84_osgb36, *hm_osgb36_wgs84);
+    HelmInit(h2, *hm_itrs2000_etrs89, *hm_etrs89_itrs2000);
+    MulMM(*hm_wgs84_osgb36, *hm_etrs89_itrs2000, *hm_etrs89_osgb36);
+    MulMM(*hm_itrs2000_etrs89, *hm_osgb36_wgs84, *hm_osgb36_etrs89);
+    for i: 0..11 { hm_identity.m[i] = 0.0 }
+    hm_identity.m[0] = 1.0;
+    hm_identity.m[5] = 1.0;
+    hm_identity.m[10] = 1.0;
+}
+
+TransMatrix :: (f: s32, t: s32) -> *Mat3x4 {
+    if f == WGS84 || f == ITRS2000 {
+        if t == OSGB36 { return *hm_wgs84_osgb36 }
+        if t == ETRS89 { return *hm_itrs2000_etrs89 }
+        return *hm_identity;
+    }
+    if f == OSGB36 {
+        if t == WGS84 || t == ITRS2000 { return *hm_osgb36_wgs84 }
+        if t == ETRS89 { return *hm_osgb36_etrs89 }
+        return *hm_identity;
+    }
+    if f == ETRS89 {
+        if t == WGS84 || t == ITRS2000 { return *hm_etrs89_itrs2000 }
+        if t == OSGB36 { return *hm_etrs89_osgb36 }
+        return *hm_identity;
+    }
+    return *hm_identity;
+}
+
+StrChr :: (s: string, c: u8) -> s64 {
+    for i: 0..s.count - 1 {
+        if cast(u8)s[i] == c { return i }
+    }
+    return -1;
+}
+
+StrChrs :: (s: string, t: string) -> s64 {
+    for i: 0..t.count - 1 {
+        p := StrChr(s, cast(u8)t[i]);
+        if p >= 0 { return p }
+    }
+    return -1;
+}
+
+Trim :: (s_in: string) -> string {
+    s := s_in;
+    while s.count > 0 && (s[0] == 32 || s[0] == 9 || s[0] == 10 || s[0] == 13) {
+        s = s[1:];
+    }
+    while s.count > 0 && (s[s.count - 1] == 32 || s[s.count - 1] == 9 || s[s.count - 1] == 10 || s[s.count - 1] == 13) {
+        s = s[:s.count - 1];
+    }
+    return s;
+}
+
+Str2LL :: (s: string, pos_c: u8, neg_c: u8) -> (ok: bool, val: float64) {
+    // Tokenize by ':', ' ', '\t'
+    toks_start: [4]s64;
+    toks_end: [4]s64;
+    nt: s64 = 0;
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && (s[i] == 58 || s[i] == 32 || s[i] == 9) { i += 1 }
+        if i >= s.count { break }
+        if nt >= 4 { return false, 0.0 }
+        toks_start[nt] = i;
+        while i < s.count && s[i] != 58 && s[i] != 32 && s[i] != 9 { i += 1 }
+        toks_end[nt] = i;
+        nt += 1;
+    }
+    if nt < 1 || nt > 3 { return false, 0.0 }
+    v := Util.ParseF64(s[toks_start[0]:toks_end[0]]);
+    if nt >= 2 {
+        v += Util.ParseF64(s[toks_start[1]:toks_end[1]]) / 60.0;
+    }
+    if nt >= 3 {
+        v += Util.ParseF64(s[toks_start[2]:toks_end[2]]) / 3600.0;
+    }
+    last_t := s[toks_start[nt - 1]:toks_end[nt - 1]];
+    c := cast(u8)last_t[last_t.count - 1];
+    if c == pos_c {
+    } else if c == neg_c {
+        v = -v;
+    } else {
+        return false, 0.0;
+    }
+    return true, Norm(Deg2Rad(v));
+}
+
+Str2Lalo :: (s_in: string) -> (ok: bool, lalo: Lalo) {
+    s := Trim(s_in);
+    p := StrChr(s, 78); // 'N'
+    if p < 0 { p = StrChr(s, 83) } // 'S'
+    if p < 0 { return false, .{la = 0.0, lo = 0.0} }
+    ok1, la := Str2LL(s[:p + 1], 78, 83);
+    ok2, lo := Str2LL(s[p + 1:], 69, 87);
+    if !ok1 || !ok2 || la < -Util.HALF_PI || la > Util.HALF_PI {
+        return false, .{la = 0.0, lo = 0.0};
+    }
+    return true, .{la = la, lo = lo};
+}
+
+UtmLaloz :: (zn: s32) -> Lalo {
+    return .{la = 0.0, lo = Deg2Rad(cast(float64)(6 * zn - 183))};
+}
+
+UtmZone :: (lalo: Lalo) -> (zla: s32, zlo: s32) {
+    la := Rad2Deg(lalo.la);
+    lo := Rad2Deg(lalo.lo);
+    zlo := Trunc(lo + 180.0) / 6 + 1;
+    zla: s32 = 66; // 'B'
+    if la < -80.0 {
+        zla = 66;
+    } else if la >= 84.0 {
+        zla = 89; // 'Y'
+    } else if la >= 72.0 {
+        zla = 88; // 'X'
+    } else {
+        zla = Trunc(la + 80.0) / 8 + 67; // 'C'
+        if zla >= 73 { zla += 1 } // 'I'
+        if zla >= 79 { zla += 1 } // 'O'
+    }
+    return zla, zlo;
+}
+
+UtmLalo :: (lalo: Lalo) -> Lalo {
+    _, zn := UtmZone(lalo);
+    return UtmLaloz(zn);
+}
+
+Format :: (d: s32, t: s32, z: s32) {
+    if !fmt.inited {
+        fmt.inited = true;
+        fmt.dat = WGS84;
+        fmt.cdat = 0;
+        fmt.prj = Natgrid;
+        fmt.zone = 30;
+    }
+    if d >= 0 && d <= ETRS89 { fmt.dat = d }
+    if t >= 0 && t <= UTM { fmt.prj = t }
+    if z >= 1 && z <= 60 { fmt.zone = z }
+    fmt.cdat = fmt.dat;
+    fmt.tmp = GetMercator(fmt.prj);
+    if fmt.tmp.orig_str.count == 0 {
+        fmt.orig = UtmLaloz(fmt.zone);
+    } else {
+        _, orig := Str2Lalo(fmt.tmp.orig_str);
+        fmt.orig = orig;
+    }
+    e := fmt.tmp.e;
+    if e != DatumEllipsoid(fmt.dat) {
+        for i: 0..ETRS89 {
+            if e == DatumEllipsoid(cast(s32)i) {
+                fmt.cdat = cast(s32)i;
+                break;
+            }
+        }
+    }
+}
+
+Init :: (d: s32, t: s32, z: s32) {
+    HelmertInit();
+    Format(d, t, z);
+}
+
+Laloh2Xyz :: (phi: float64, lam: float64, h: float64, e: s32) -> Vector {
+    el := GetEllipsoid(e);
+    ba := el.b / el.a;
+    e2 := 1.0 - ba * ba;
+    s := Util.Sin(phi);
+    c := Util.Cos(phi);
+    nu := el.a / Util.Sqrt(1.0 - e2 * s * s);
+    return .{
+        x = (nu + h) * c * Util.Cos(lam),
+        y = (nu + h) * c * Util.Sin(lam),
+        z = ((1.0 - e2) * nu + h) * s
+    };
+}
+
+Xyz2Laloh :: (v: Vector, e: s32) -> (phi: float64, lam: float64, h: float64) {
+    el := GetEllipsoid(e);
+    ba := el.b / el.a;
+    e2 := 1.0 - ba * ba;
+    lam := Util.Atan2(v.y, v.x);
+    p := Util.Sqrt(v.x * v.x + v.y * v.y);
+    phi1 := Util.Atan(v.z / (p * (1.0 - e2)));
+    phi := phi1;
+    nu: float64 = 0.0;
+    while true {
+        phi = phi1;
+        s := Util.Sin(phi);
+        nu = el.a / Util.Sqrt(1.0 - e2 * s * s);
+        phi1 = Util.Atan((v.z + e2 * nu * s) / p);
+        if Small(Util.AbsF64(phi - phi1)) { break }
+    }
+    phi = phi1;
+    h := p / Util.Cos(phi) - nu;
+    return phi, lam, h;
+}
+
+Datum2Datum :: (lalo: Lalo, f: s32, t: s32) -> Lalo {
+    if f == t { return lalo }
+    v := Laloh2Xyz(lalo.la, lalo.lo, 0.0, DatumEllipsoid(f));
+    v = MulMV(TransMatrix(f, t), v);
+    la, lo, _ := Xyz2Laloh(v, DatumEllipsoid(t));
+    return .{la = la, lo = lo};
+}
+
+Lalo2En :: (lalo_in: Lalo) -> Eano {
+    lalo := lalo_in;
+    if fmt.cdat != fmt.dat {
+        lalo = Datum2Datum(lalo, fmt.dat, fmt.cdat);
+    }
+    phi := lalo.la;
+    lam := lalo.lo;
+    s := Util.Sin(phi);
+    c := Util.Cos(phi);
+    tn := Util.Tan(phi);
+    t2 := tn * tn;
+
+    f0 := fmt.tmp.f0;
+    e0 := fmt.tmp.e0;
+    n0 := fmt.tmp.n0;
+    el := GetEllipsoid(fmt.tmp.e);
+    ba := el.b / el.a;
+    e2 := 1.0 - ba * ba;
+
+    orig := ifx fmt.tmp.orig_str.count == 0 then UtmLalo(lalo) else fmt.orig;
+    phi0 := orig.la;
+    lam0 := orig.lo;
+
+    n := (el.a - el.b) / (el.a + el.b);
+    nu := el.a * f0 / Util.Sqrt(1.0 - e2 * s * s);
+    rho := nu * (1.0 - e2) / (1.0 - e2 * s * s);
+    eta2 := nu / rho - 1.0;
+
+    phi1 := phi - phi0;
+    phi2 := phi + phi0;
+    m := el.b * f0 * ((1.0 + n * (1.0 + 1.25 * n * (1.0 + n))) * phi1
+        - (3.0 * n * (1.0 + n * (1.0 + 0.875 * n))) * Util.Sin(phi1) * Util.Cos(phi2)
+        + 1.875 * n * n * (1.0 + n) * Util.Sin(2.0 * phi1) * Util.Cos(2.0 * phi2)
+        - (35.0 / 24.0) * n * n * n * Util.Sin(3.0 * phi1) * Util.Cos(3.0 * phi2));
+
+    c3 := c * c * c;
+    c5 := c3 * c * c;
+    term_i := m + n0;
+    term_ii := nu * s * c / 2.0;
+    term_iii := nu * s * c3 * (5.0 - t2 + 9.0 * eta2) / 24.0;
+    term_iiia := nu * s * c5 * (61.0 + t2 * (t2 - 58.0)) / 720.0;
+    term_iv := nu * c;
+    term_v := nu * c3 * (nu / rho - t2) / 6.0;
+    term_vi := nu * c5 * (5.0 + 14.0 * eta2 + t2 * (t2 - 18.0 - 58.0 * eta2)) / 120.0;
+
+    dlam := lam - lam0;
+    dlam2 := dlam * dlam;
+    north := term_i + dlam2 * (term_ii + dlam2 * (term_iii + term_iiia * dlam2));
+    east := e0 + dlam * (term_iv + dlam2 * (term_v + term_vi * dlam2));
+    return .{e = east, n = north};
+}
+
+En2Lalo :: (en: Eano) -> Lalo {
+    east := en.e;
+    north := en.n;
+    f0 := fmt.tmp.f0;
+    e0 := fmt.tmp.e0;
+    n0 := fmt.tmp.n0;
+    el := GetEllipsoid(fmt.tmp.e);
+    ba := el.b / el.a;
+    e2 := 1.0 - ba * ba;
+    phi0 := fmt.orig.la;
+    lam0 := fmt.orig.lo;
+    n := (el.a - el.b) / (el.a + el.b);
+
+    m0 := 1.0 + n * (1.0 + 1.25 * n * (1.0 + n));
+    m1 := 3.0 * n * (1.0 + n * (1.0 + 0.875 * n));
+    m2 := 1.875 * n * n * (1.0 + n);
+    m3 := (35.0 / 24.0) * n * n * n;
+
+    north -= n0;
+    m: float64 = 0.0;
+    phi := phi0;
+    phi_old := phi0;
+    while true {
+        phi = (north - m) / (el.a * f0) + phi_old;
+        phi1 := phi - phi0;
+        phi2 := phi + phi0;
+        m = el.b * f0 * (m0 * phi1 - m1 * Util.Sin(phi1) * Util.Cos(phi2)
+            + m2 * Util.Sin(2.0 * phi1) * Util.Cos(2.0 * phi2)
+            - m3 * Util.Sin(3.0 * phi1) * Util.Cos(3.0 * phi2));
+        phi_old = phi;
+        if Util.AbsF64(north - m) < 0.01 { break }
+    }
+
+    s := Util.Sin(phi);
+    c := Util.Cos(phi);
+    t := Util.Tan(phi);
+    t2 := t * t;
+    nu := el.a * f0 / Util.Sqrt(1.0 - e2 * s * s);
+    rho := nu * (1.0 - e2) / (1.0 - e2 * s * s);
+    eta2 := nu / rho - 1.0;
+
+    nu2 := nu * nu;
+    nu4 := nu2 * nu2;
+    nu6 := nu4 * nu2;
+    vii := t / (2.0 * rho * nu);
+    viii := vii * (5.0 + eta2 + 3.0 * t2 * (1.0 - 3.0 * eta2)) / (12.0 * nu2);
+    ix := vii * (61.0 + 45.0 * t2 * (2.0 + t2)) / (360.0 * nu4);
+    x := 1.0 / (nu * c);
+    xi := x * (nu / rho + 2.0 * t2) / (6.0 * nu2);
+    xii := x * (5.0 + 4.0 * t2 * (7.0 + 6.0 * t2)) / (120.0 * nu4);
+    xiia := x * (61.0 + 2.0 * t2 * (331.0 + 60.0 * t2 * (11.0 + 6.0 * t2))) / (5040.0 * nu6);
+
+    east -= e0;
+    e_sq := east * east;
+    phi = phi - e_sq * (vii - e_sq * (viii - e_sq * ix));
+    lam := lam0 + east * (x - e_sq * (xi - e_sq * (xii - e_sq * xiia)));
+    res := Lalo.{la = phi, lo = lam};
+    if fmt.cdat != fmt.dat {
+        res = Datum2Datum(res, fmt.cdat, fmt.dat);
+    }
+    return res;
+}
+
+En2Os :: (p: Eano, out: *Vec(u8)) {
+    VecClear(out.*);
+    east := Trunc(p.e);
+    north := Trunc(p.n);
+    es := east / NGRID;
+    ns := north / NGRID;
+    e := east - NGRID * es;
+    n := north - NGRID * ns;
+    d1 := 5 * (4 - ns / 5) + es / 5 + 65 - 3;
+    d2 := 5 * (4 - (ns % 5)) + (es % 5) + 65;
+    if d1 >= 73 { d1 += 1 }
+    if d2 >= 73 { d2 += 1 }
+    VecPush(out.*, cast(u8)d1);
+    VecPush(out.*, cast(u8)d2);
+    Util.AppendZeroPad(out, cast(s64)e, 5);
+    Util.AppendZeroPad(out, cast(s64)n, 5);
+}
+
+Os2En :: (s_in: string) -> (ok: bool, en: Eano) {
+    s := Trim(s_in);
+    m := s.count;
+    if m != 4 && m != 6 && m != 8 && m != 10 && m != 12 {
+        return false, .{e = 0.0, n = 0.0};
+    }
+    m = m / 2 - 1;
+    p10: s64 = 1;
+    for _: 0..m - 1 { p10 *= 10 }
+    u := cast(s64)NGRID / p10;
+    d1 := cast(s32)cast(u8)s[0];
+    d2 := cast(s32)cast(u8)s[1];
+    if d1 < 65 || d2 < 65 || d1 > 90 || d2 > 90 {
+        e := u * Util.ParseInt(s[0:1 + m]);
+        n := u * Util.ParseInt(s[1 + m:2 + 2 * m]);
+        return true, .{e = cast(float64)e, n = cast(float64)n};
+    }
+    e := u * Util.ParseInt(s[2:2 + m]);
+    n := u * Util.ParseInt(s[2 + m:2 + 2 * m]);
+    if d1 >= 73 { d1 -= 1 }
+    if d2 >= 73 { d2 -= 1 }
+    d1 -= 65 - 3;
+    d2 -= 65;
+    es := cast(s64)(5 * (d1 % 5) + (d2 % 5));
+    ns := cast(s64)(5 * (4 - d1 / 5) + 4 - d2 / 5);
+    return true, .{e = cast(float64)(NGRID * es + e), n = cast(float64)(NGRID * ns + n)};
+}
+
+Str2En :: (s_in: string) -> (ok: bool, en: Eano) {
+    s := Trim(s_in);
+    if s.count == 0 { return false, .{e = 0.0, n = 0.0} }
+    is_os := (s[0] >= 65 && s[0] <= 90) || StrChrs(s, "NSEW:") < 0;
+    if is_os {
+        return Os2En(s);
+    }
+    ok, lalo := Str2Lalo(s);
+    if !ok { return false, .{e = 0.0, n = 0.0} }
+    return true, Lalo2En(lalo);
+}
+
+AppendLL :: (ll_in: s32, dir: string, out: *Vec(u8)) {
+    ll := ll_in;
+    d := ll / 360000;
+    ll -= 360000 * d;
+    m := ll / 6000;
+    ll -= 6000 * m;
+    s := ll / 100;
+    ll -= 100 * s;
+    Util.AppendZeroPad(out, cast(s64)d, 2);
+    VecPush(out.*, 58);
+    Util.AppendZeroPad(out, cast(s64)m, 2);
+    VecPush(out.*, 58);
+    Util.AppendZeroPad(out, cast(s64)s, 2);
+    VecPush(out.*, 46);
+    Util.AppendZeroPad(out, cast(s64)ll, 2);
+    unused BuilderAppend(out.*, dir);
+}
+
+Lalo2Str :: (lalo: Lalo, out: *Vec(u8)) {
+    VecClear(out.*);
+    la := cast(s32)(360000.0 * Rad2Deg(lalo.la));
+    lo := cast(s32)(360000.0 * Rad2Deg(lalo.lo));
+    lad := "N";
+    lod := "E";
+    if la < 0 { lad = "S"; la = -la }
+    if lo < 0 { lod = "W"; lo = -lo }
+    AppendLL(la, lad, out);
+    VecPush(out.*, 32);
+    AppendLL(lo, lod, out);
+}
+
+main :: () -> s32 {
+    Init(WGS84, Natgrid, 30);
+    q := ifx Args.OperandCount() > 0 then Args.Operand(0) else "SE6022552235";
+    ok, en := Str2En(q);
+    out: Vec(u8);
+    if !ok {
+        BuilderPrint(*out, "bad coord %\n", q);
+        Util.WriteOut(TextView(out[:]));
+        return 1;
+    }
+    os_b: Vec(u8);
+    En2Os(en, *os_b);
+    lalo := En2Lalo(en);
+    ll_b: Vec(u8);
+    Lalo2Str(lalo, *ll_b);
+    BuilderPrint(*out, "% -> E=% N=% ll=%\n", TextView(os_b[:]), cast(s64)en.e, cast(s64)en.n, TextView(ll_b[:]));
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

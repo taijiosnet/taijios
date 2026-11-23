@@ -1,0 +1,70 @@
+// Histogram plot from coordinate pairs file (replaces appl/math/hist0.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+GR :: #import "gr";
+#import "std/format"
+#import "std/vec"
+
+NextWord :: (s: string, pos: *s64) -> string {
+    while pos.* < s.count && Util.IsSpaceByte(cast(u8)s[pos.*]) { pos.* += 1 }
+    start := pos.*;
+    while pos.* < s.count && !Util.IsSpaceByte(cast(u8)s[pos.*]) { pos.* += 1 }
+    return s[start:pos.*];
+}
+
+PlotFile :: (filename: string, cmds_out: *Vec(u8)) -> bool {
+    raw: Vec(u8);
+    if !Util.ReadAllFile(filename, *raw) {
+        ob: Vec(u8);
+        BuilderPrint(*ob, "can't read %", filename);
+        Util.WriteOut(TextView(ob[:]));
+        return false;
+    }
+    s := TextView(raw[:]);
+    pos: s64 = 0;
+    x: Vec(float64);
+    y: Vec(float64);
+    while true {
+        xn := NextWord(s, *pos);
+        if xn.count == 0 { break }
+        yn := NextWord(s, *pos);
+        if yn.count == 0 {
+            ob: Vec(u8);
+            BuilderPrint(*ob, "after reading % pairs, saw singleton\n", x.count);
+            Util.WriteOut(TextView(ob[:]));
+            return false;
+        }
+        VecPush(x, Util.ParseF64(xn));
+        VecPush(y, Util.ParseF64(yn));
+    }
+    n := x.count;
+    if n == 0 {
+        Util.WriteOut("empty input\n");
+        return false;
+    }
+    p: GR.Plot;
+    GR.Open(filename, *p);
+    for i: 0..n - 1 {
+        h: float64 = 0.2;
+        if n > 1 {
+            if i == 0 { h *= x[i + 1] - x[i] }
+            else if i == n - 1 { h *= x[i] - x[i - 1] }
+            else { h *= Util.Fmin(x[i + 1] - x[i], x[i] - x[i - 1]) }
+        }
+        barx: [5]float64 = .[x[i] - h, x[i] - h, x[i] + h, x[i] + h, x[i] - h];
+        bary: [5]float64 = .[0.0, y[i], y[i], 0.0, 0.0];
+        GR.Graph(*p, barx[:], bary[:]);
+    }
+    GR.Paint(*p, "", "", "", "", cmds_out);
+    return true;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    if argc <= 0 { return 0 }
+    // hist0.b takes (tkargs, filename) when 2 operands are given, or filename when 1 operand is given
+    filename := ifx argc >= 2 then Args.Operand(1) else Args.Operand(0);
+    cmds: Vec(u8);
+    unused PlotFile(filename, *cmds);
+    return 0;
+}

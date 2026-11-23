@@ -1,0 +1,637 @@
+// Singleton mixed-radix Fast Fourier Transform (replaces appl/math/ffts.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+MAXP :: 209;
+
+Ffts :: (a: []float64, b: []float64, ntot_in: s32, n_in: s32, nspan_in: s32, isn_in: s32) {
+    ntot := cast(s64)ntot_in;
+    n := cast(s64)n_in;
+    nspan := cast(s64)nspan_in;
+    isn := cast(s64)isn_in;
+    if n < 2 { return }
+
+    nfac: [16]s64;
+    np: [MAXP]s64;
+    at: [23]float64;
+    ck: [23]float64;
+    bt: [23]float64;
+    sk: [23]float64;
+
+    maxf: s64 = 23;
+    inc := isn;
+    c72 := Util.Cos(72.0 * Util.DEGREE);
+    s72 := Util.Sin(72.0 * Util.DEGREE);
+    s120 := Util.Sin(120.0 * Util.DEGREE);
+    rad := 2.0 * Util.PI;
+    if isn < 0 {
+        s72 = -s72;
+        s120 = -s120;
+        rad = -rad;
+        inc = -inc;
+    }
+    nt := inc * ntot;
+    ks := inc * nspan;
+    kspan := ks;
+    nn := nt - inc;
+    jc := ks / n;
+    radf := rad * cast(float64)jc * 0.5;
+    i: s64 = 0;
+    jf: s64 = 0;
+
+    // Determine factors of n
+    m: s64 = 0;
+    k := n;
+    while k == (k / 16) * 16 {
+        m += 1;
+        nfac[m] = 4;
+        k /= 16;
+    }
+    j: s64 = 3;
+    jj: s64 = 9;
+    while true {
+        if k % jj == 0 {
+            m += 1;
+            nfac[m] = j;
+            k /= jj;
+        } else {
+            j += 2;
+            jj = j * j;
+            if jj > k { break }
+        }
+    }
+    kt: s64 = 0;
+    if k <= 4 {
+        kt = m;
+        nfac[m + 1] = k;
+        if k != 1 { m += 1 }
+    } else {
+        if k == (k / 4) * 4 {
+            m += 1;
+            nfac[m] = 2;
+            k /= 4;
+        }
+        kt = m;
+        j = 2;
+        while j <= k {
+            if k % j == 0 {
+                m += 1;
+                nfac[m] = j;
+                k /= j;
+            }
+            j = ((j + 1) / 2) * 2 + 1;
+        }
+    }
+    if kt != 0 {
+        j = kt;
+        while j != 0 {
+            m += 1;
+            nfac[m] = nfac[j];
+            j -= 1;
+        }
+    }
+
+    kspnn: s64 = 0;
+    c1: float64 = 0.0;
+    c2: float64 = 0.0;
+    c3: float64 = 0.0;
+    s1: float64 = 0.0;
+    s2: float64 = 0.0;
+    s3: float64 = 0.0;
+
+    // Compute Fourier transform
+    while true {
+        sd := radf / cast(float64)kspan;
+        cd := Util.Sin(sd);
+        cd = 2.0 * cd * cd;
+        sd = Util.Sin(sd + sd);
+        kk: s64 = 1;
+        i += 1;
+        if nfac[i] == 2 {
+            kspan /= 2;
+            k1 := kspan + 2;
+            while true {
+                k2 := kk + kspan;
+                ak := a[k2 - 1];
+                bk := b[k2 - 1];
+                a[k2 - 1] = a[kk - 1] - ak;
+                b[k2 - 1] = b[kk - 1] - bk;
+                a[kk - 1] = a[kk - 1] + ak;
+                b[kk - 1] = b[kk - 1] + bk;
+                kk = k2 + kspan;
+                if kk > nn {
+                    kk -= nn;
+                    if kk > jc { break }
+                }
+            }
+            if kk > kspan { break }
+            while true {
+                c1 = 1.0 - cd;
+                s1 = sd;
+                while true {
+                    k2 := kk + kspan;
+                    ak := a[kk - 1] - a[k2 - 1];
+                    bk := b[kk - 1] - b[k2 - 1];
+                    a[kk - 1] = a[kk - 1] + a[k2 - 1];
+                    b[kk - 1] = b[kk - 1] + b[k2 - 1];
+                    a[k2 - 1] = c1 * ak - s1 * bk;
+                    b[k2 - 1] = s1 * ak + c1 * bk;
+                    kk = k2 + kspan;
+                    if kk >= nt {
+                        k2 = kk - nt;
+                        c1 = -c1;
+                        kk = k1 - k2;
+                        if kk <= k2 {
+                            ak = c1 - (cd * c1 + sd * s1);
+                            s1 = (sd * c1 - cd * s1) + s1;
+                            c1 = 2.0 - (ak * ak + s1 * s1);
+                            s1 = c1 * s1;
+                            c1 = c1 * ak;
+                            kk += jc;
+                            if kk >= k2 { break }
+                        }
+                    }
+                }
+                k1 += inc + inc;
+                kk = (k1 - kspan) / 2 + jc;
+                if kk > jc + jc { break }
+            }
+        } else if nfac[i] != 4 {
+            k = nfac[i];
+            kspnn = kspan;
+            kspan /= k;
+            if k == 3 {
+                while true {
+                    k1 := kk + kspan;
+                    k2 := k1 + kspan;
+                    ak := a[kk - 1];
+                    bk := b[kk - 1];
+                    aj := a[k1 - 1] + a[k2 - 1];
+                    bj := b[k1 - 1] + b[k2 - 1];
+                    a[kk - 1] = ak + aj;
+                    b[kk - 1] = bk + bj;
+                    ak = -0.5 * aj + ak;
+                    bk = -0.5 * bj + bk;
+                    aj = (a[k1 - 1] - a[k2 - 1]) * s120;
+                    bj = (b[k1 - 1] - b[k2 - 1]) * s120;
+                    a[k1 - 1] = ak - bj;
+                    b[k1 - 1] = bk + aj;
+                    a[k2 - 1] = ak + bj;
+                    b[k2 - 1] = bk - aj;
+                    kk = k2 + kspan;
+                    if kk >= nn {
+                        kk -= nn;
+                        if kk > kspan { break }
+                    }
+                }
+            } else if k == 5 {
+                c2 = c72 * c72 - s72 * s72;
+                s2 = 2.0 * c72 * s72;
+                while true {
+                    k1 := kk + kspan;
+                    k2 := k1 + kspan;
+                    k3 := k2 + kspan;
+                    k4 := k3 + kspan;
+                    akp := a[k1 - 1] + a[k4 - 1];
+                    akm := a[k1 - 1] - a[k4 - 1];
+                    bkp := b[k1 - 1] + b[k4 - 1];
+                    bkm := b[k1 - 1] - b[k4 - 1];
+                    ajp := a[k2 - 1] + a[k3 - 1];
+                    ajm := a[k2 - 1] - a[k3 - 1];
+                    bjp := b[k2 - 1] + b[k3 - 1];
+                    bjm := b[k2 - 1] - b[k3 - 1];
+                    aa := a[kk - 1];
+                    bb := b[kk - 1];
+                    a[kk - 1] = aa + akp + ajp;
+                    b[kk - 1] = bb + bkp + bjp;
+                    ak := akp * c72 + ajp * c2 + aa;
+                    bk := bkp * c72 + bjp * c2 + bb;
+                    aj := akm * s72 + ajm * s2;
+                    bj := bkm * s72 + bjm * s2;
+                    a[k1 - 1] = ak - bj;
+                    a[k4 - 1] = ak + bj;
+                    b[k1 - 1] = bk + aj;
+                    b[k4 - 1] = bk - aj;
+                    ak = akp * c2 + ajp * c72 + aa;
+                    bk = bkp * c2 + bjp * c72 + bb;
+                    aj = akm * s2 - ajm * s72;
+                    bj = bkm * s2 - bjm * s72;
+                    a[k2 - 1] = ak - bj;
+                    a[k3 - 1] = ak + bj;
+                    b[k2 - 1] = bk + aj;
+                    b[k3 - 1] = bk - aj;
+                    kk = k4 + kspan;
+                    if kk >= nn {
+                        kk -= nn;
+                        if kk > kspan { break }
+                    }
+                }
+            } else {
+                if k != jf {
+                    jf = k;
+                    s1 = rad / cast(float64)k;
+                    c1 = Util.Cos(s1);
+                    s1 = Util.Sin(s1);
+                    if jf > maxf {
+                        Util.WriteErr("too many primes for fft");
+                        return;
+                    }
+                    ck[jf - 1] = 1.0;
+                    sk[jf - 1] = 0.0;
+                    j = 1;
+                    while j < k {
+                        ck[j - 1] = ck[k - 1] * c1 + sk[k - 1] * s1;
+                        sk[j - 1] = ck[k - 1] * s1 - sk[k - 1] * c1;
+                        k -= 1;
+                        ck[k - 1] = ck[j - 1];
+                        sk[k - 1] = -sk[j - 1];
+                        j += 1;
+                    }
+                }
+                while true {
+                    k1 := kk;
+                    k2 := kk + kspnn;
+                    aa := a[kk - 1];
+                    bb := b[kk - 1];
+                    ak := aa;
+                    bk := bb;
+                    j = 1;
+                    k1 += kspan;
+                    while k1 < k2 {
+                        k2 -= kspan;
+                        j += 1;
+                        at[j - 1] = a[k1 - 1] + a[k2 - 1];
+                        ak = at[j - 1] + ak;
+                        bt[j - 1] = b[k1 - 1] + b[k2 - 1];
+                        bk = bt[j - 1] + bk;
+                        j += 1;
+                        at[j - 1] = a[k1 - 1] - a[k2 - 1];
+                        bt[j - 1] = b[k1 - 1] - b[k2 - 1];
+                        k1 += kspan;
+                    }
+                    a[kk - 1] = ak;
+                    b[kk - 1] = bk;
+                    k1 = kk;
+                    k2 = kk + kspnn;
+                    j = 1;
+                    while true {
+                        k1 += kspan;
+                        k2 -= kspan;
+                        jj = j;
+                        ak = aa;
+                        bk = bb;
+                        aj := 0.0;
+                        bj := 0.0;
+                        k = 1;
+                        while k < jf {
+                            k += 1;
+                            ak = at[k - 1] * ck[jj - 1] + ak;
+                            bk = bt[k - 1] * ck[jj - 1] + bk;
+                            k += 1;
+                            aj = at[k - 1] * sk[jj - 1] + aj;
+                            bj = bt[k - 1] * sk[jj - 1] + bj;
+                            jj += j;
+                            if jj > jf { jj -= jf }
+                        }
+                        k = jf - j;
+                        a[k1 - 1] = ak - bj;
+                        b[k1 - 1] = bk + aj;
+                        a[k2 - 1] = ak + bj;
+                        b[k2 - 1] = bk - aj;
+                        j += 1;
+                        if j >= k { break }
+                    }
+                    kk += kspnn;
+                    if kk > nn {
+                        kk -= nn;
+                        if kk > kspan { break }
+                    }
+                }
+            }
+            if i == m { break }
+            kk = jc + 1;
+            while true {
+                c2 = 1.0 - cd;
+                s1 = sd;
+                while true {
+                    c1 = c2;
+                    s2 = s1;
+                    kk += kspan;
+                    while true {
+                        ak := a[kk - 1];
+                        a[kk - 1] = c2 * ak - s2 * b[kk - 1];
+                        b[kk - 1] = s2 * ak + c2 * b[kk - 1];
+                        kk += kspnn;
+                        if kk > nt {
+                            ak = s1 * s2;
+                            s2 = s1 * c2 + c1 * s2;
+                            c2 = c1 * c2 - ak;
+                            kk = kk - nt + kspan;
+                            if kk > kspnn { break }
+                        }
+                    }
+                    c2 = c1 - (cd * c1 + sd * s1);
+                    s1 = s1 + (sd * c1 - cd * s1);
+                    c1 = 2.0 - (c2 * c2 + s1 * s1);
+                    s1 = c1 * s1;
+                    c2 = c1 * c2;
+                    kk = kk - kspnn + jc;
+                    if kk > kspan { break }
+                }
+                kk = kk - kspan + jc + inc;
+                if kk > jc + jc { break }
+            }
+        } else {
+            kspnn = kspan;
+            kspan /= 4;
+            while true {
+                c1 = 1.0;
+                s1 = 0.0;
+                while true {
+                    k1 := kk + kspan;
+                    k2 := k1 + kspan;
+                    k3 := k2 + kspan;
+                    akp := a[kk - 1] + a[k2 - 1];
+                    akm := a[kk - 1] - a[k2 - 1];
+                    ajp := a[k1 - 1] + a[k3 - 1];
+                    ajm := a[k1 - 1] - a[k3 - 1];
+                    a[kk - 1] = akp + ajp;
+                    ajp = akp - ajp;
+                    bkp := b[kk - 1] + b[k2 - 1];
+                    bkm := b[kk - 1] - b[k2 - 1];
+                    bjp := b[k1 - 1] + b[k3 - 1];
+                    bjm := b[k1 - 1] - b[k3 - 1];
+                    b[kk - 1] = bkp + bjp;
+                    bjp = bkp - bjp;
+                    do10 := false;
+                    if isn < 0 {
+                        akp = akm + bjm;
+                        akm = akm - bjm;
+                        bkp = bkm - ajm;
+                        bkm = bkm + ajm;
+                        if s1 != 0.0 { do10 = true }
+                    } else {
+                        akp = akm - bjm;
+                        akm = akm + bjm;
+                        bkp = bkm + ajm;
+                        bkm = bkm - ajm;
+                        if s1 != 0.0 { do10 = true }
+                    }
+                    if do10 {
+                        a[k1 - 1] = akp * c1 - bkp * s1;
+                        b[k1 - 1] = akp * s1 + bkp * c1;
+                        a[k2 - 1] = ajp * c2 - bjp * s2;
+                        b[k2 - 1] = ajp * s2 + bjp * c2;
+                        a[k3 - 1] = akm * c3 - bkm * s3;
+                        b[k3 - 1] = akm * s3 + bkm * c3;
+                        kk = k3 + kspan;
+                        if kk <= nt { continue }
+                    } else {
+                        a[k1 - 1] = akp;
+                        b[k1 - 1] = bkp;
+                        a[k2 - 1] = ajp;
+                        b[k2 - 1] = bjp;
+                        a[k3 - 1] = akm;
+                        b[k3 - 1] = bkm;
+                        kk = k3 + kspan;
+                        if kk <= nt { continue }
+                    }
+                    c2 = c1 - (cd * c1 + sd * s1);
+                    s1 = (sd * c1 - cd * s1) + s1;
+                    c1 = 2.0 - (c2 * c2 + s1 * s1);
+                    s1 = c1 * s1;
+                    c1 = c1 * c2;
+                    c2 = c1 * c1 - s1 * s1;
+                    s2 = 2.0 * c1 * s1;
+                    c3 = c2 * c1 - s2 * s1;
+                    s3 = c2 * s1 + s2 * c1;
+                    kk = kk - nt + jc;
+                    if kk > kspan { break }
+                }
+                kk = kk - kspan + inc;
+                if kk > jc { break }
+            }
+            if kspan == jc { break }
+        }
+    }
+
+    // Permute results to normal order
+    np[0] = ks;
+    k3: s64 = 0;
+    if kt != 0 {
+        k = kt + kt + 1;
+        if m < k { k -= 1 }
+        j = 1;
+        np[k] = jc;
+        while j < k {
+            np[j] = np[j - 1] / nfac[j];
+            np[k - 1] = np[k] * nfac[j];
+            j += 1;
+            k -= 1;
+        }
+        k3 = np[k];
+        kspan = np[1];
+        kk := jc + 1;
+        k2 := kspan + 1;
+        j = 1;
+        if n != ntot {
+            done_mv := false;
+            while !done_mv {
+                k = kk + jc;
+                while kk < k {
+                    ak := a[kk - 1];
+                    a[kk - 1] = a[k2 - 1];
+                    a[k2 - 1] = ak;
+                    bk := b[kk - 1];
+                    b[kk - 1] = b[k2 - 1];
+                    b[k2 - 1] = bk;
+                    kk += inc;
+                    k2 += inc;
+                }
+                kk += ks - jc;
+                k2 += ks - jc;
+                if kk >= nt {
+                    k2 = k2 - nt + kspan;
+                    kk = kk - nt + jc;
+                    if k2 >= ks {
+                        while true {
+                            k2 -= np[j - 1];
+                            j += 1;
+                            k2 += np[j];
+                            if k2 <= np[j - 1] {
+                                j = 1;
+                                brk_p := false;
+                                while k2 < ks {
+                                    if kk < k2 { brk_p = true; break }
+                                    kk += jc;
+                                    k2 += kspan;
+                                }
+                                if brk_p { break }
+                                if kk >= ks { done_mv = true; break }
+                            }
+                        }
+                    }
+                }
+            }
+            jc = k3;
+        } else {
+            done_sv := false;
+            while !done_sv {
+                ak := a[kk - 1];
+                a[kk - 1] = a[k2 - 1];
+                a[k2 - 1] = ak;
+                bk := b[kk - 1];
+                b[kk - 1] = b[k2 - 1];
+                b[k2 - 1] = bk;
+                kk += inc;
+                k2 += kspan;
+                if k2 >= ks {
+                    while true {
+                        k2 -= np[j - 1];
+                        j += 1;
+                        k2 += np[j];
+                        if k2 <= np[j - 1] {
+                            j = 1;
+                            brk_s := false;
+                            while k2 < ks {
+                                if kk < k2 { brk_s = true; break }
+                                kk += inc;
+                                k2 += kspan;
+                            }
+                            if brk_s { break }
+                            if kk >= ks { done_sv = true; break }
+                        }
+                    }
+                }
+            }
+            jc = k3;
+        }
+    }
+    if 2 * kt + 1 >= m { return }
+    kspnn = np[kt];
+    j = m - kt;
+    nfac[j + 1] = 1;
+    while j != kt {
+        nfac[j] = nfac[j] * nfac[j + 1];
+        j -= 1;
+    }
+    kt += 1;
+    nn = nfac[kt] - 1;
+    if nn <= MAXP {
+        jj = 0;
+        j = 0;
+        while true {
+            k2 := nfac[kt];
+            k = kt + 1;
+            kk := nfac[k];
+            j += 1;
+            if j > nn { break }
+            while true {
+                jj += kk;
+                if jj < k2 { break }
+                jj -= k2;
+                k2 = kk;
+                k += 1;
+                kk = nfac[k];
+            }
+            np[j - 1] = jj;
+        }
+        j = 0;
+        while true {
+            j += 1;
+            kk := np[j - 1];
+            if kk >= 0 {
+                if kk == j {
+                    np[j - 1] = -j;
+                    if j == nn { break }
+                } else {
+                    while kk != j {
+                        k = kk;
+                        kk = np[k - 1];
+                        np[k - 1] = -kk;
+                    }
+                    k3 = kk;
+                }
+            }
+        }
+        maxf = inc * maxf;
+        while true {
+            j = k3 + 1;
+            nt -= kspnn;
+            ii := nt - inc + 1;
+            if nt < 0 { break }
+            while true {
+                j -= 1;
+                if np[j - 1] >= 0 {
+                    jj = jc;
+                    while jj != 0 {
+                        kspan = jj;
+                        if jj > maxf { kspan = maxf }
+                        jj -= kspan;
+                        k = np[j - 1];
+                        kk := jc * k + ii + jj;
+                        k1 := kk + kspan;
+                        k2: s64 = 0;
+                        while k1 != kk {
+                            k2 += 1;
+                            at[k2 - 1] = a[k1 - 1];
+                            bt[k2 - 1] = b[k1 - 1];
+                            k1 -= inc;
+                        }
+                        while k != j {
+                            k1 = kk + kspan;
+                            k2 = k1 - jc * (k + np[k - 1]);
+                            k = -np[k - 1];
+                            while k1 != kk {
+                                a[k1 - 1] = a[k2 - 1];
+                                b[k1 - 1] = b[k2 - 1];
+                                k1 -= inc;
+                                k2 -= inc;
+                            }
+                            kk = k2;
+                        }
+                        k1 = kk + kspan;
+                        k2 = 0;
+                        while k1 != kk {
+                            k2 += 1;
+                            a[k1 - 1] = at[k2 - 1];
+                            b[k1 - 1] = bt[k2 - 1];
+                            k1 -= inc;
+                        }
+                    }
+                    if j == 1 { break }
+                }
+            }
+        }
+    }
+}
+
+main :: () -> s32 {
+    n: s32 = 12;
+    if Args.OperandCount() > 0 {
+        v := cast(s32)Util.ParseInt(Args.Operand(0));
+        if v >= 2 { n = v }
+    }
+    a: Vec(float64);
+    b: Vec(float64);
+    VecResize(a, cast(s64)n);
+    VecResize(b, cast(s64)n);
+    for i: 0..cast(s64)n - 1 {
+        a[i] = cast(float64)(i + 1);
+        b[i] = 0.0;
+    }
+    Ffts(a[:], b[:], n, n, n, 1);
+    out: Vec(u8);
+    BuilderPrint(*out, "fft(%): a0=", n);
+    Util.AppendF64(*out, a[0]);
+    unused BuilderAppend(out, " b0=");
+    Util.AppendF64(*out, b[0]);
+    Ffts(a[:], b[:], n, n, n, -1);
+    unused BuilderAppend(out, " inv0=");
+    Util.AppendF64(*out, a[0] / cast(float64)n);
+    VecPush(out, 10);
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

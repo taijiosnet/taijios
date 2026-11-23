@@ -1,0 +1,58 @@
+// Scatter and line plot from coordinate pairs file (replaces appl/math/graph0.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+GR :: #import "gr";
+#import "std/format"
+#import "std/vec"
+
+NextWord :: (s: string, pos: *s64) -> string {
+    while pos.* < s.count && Util.IsSpaceByte(cast(u8)s[pos.*]) { pos.* += 1 }
+    start := pos.*;
+    while pos.* < s.count && !Util.IsSpaceByte(cast(u8)s[pos.*]) { pos.* += 1 }
+    return s[start:pos.*];
+}
+
+PlotFile :: (filename: string, cmds_out: *Vec(u8)) -> bool {
+    raw: Vec(u8);
+    if !Util.ReadAllFile(filename, *raw) {
+        ob: Vec(u8);
+        BuilderPrint(*ob, "can't read %", filename);
+        Util.WriteOut(TextView(ob[:]));
+        return false;
+    }
+    s := TextView(raw[:]);
+    pos: s64 = 0;
+    x: Vec(float64);
+    y: Vec(float64);
+    while true {
+        xn := NextWord(s, *pos);
+        if xn.count == 0 { break }
+        yn := NextWord(s, *pos);
+        if yn.count == 0 {
+            ob: Vec(u8);
+            BuilderPrint(*ob, "after reading % pairs, saw singleton\n", x.count);
+            Util.WriteOut(TextView(ob[:]));
+            return false;
+        }
+        VecPush(x, Util.ParseF64(xn));
+        VecPush(y, Util.ParseF64(yn));
+    }
+    if x.count == 0 {
+        Util.WriteOut("empty input\n");
+        return false;
+    }
+    p: GR.Plot;
+    GR.Open(filename, *p);
+    GR.Graph(*p, x[:], y[:]);
+    GR.Pen(*p, GR.CIRCLE);
+    GR.Graph(*p, x[:], y[:]);
+    GR.Paint(*p, "", "", "", "", cmds_out);
+    return true;
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() <= 0 { return 0 }
+    cmds: Vec(u8);
+    if !PlotFile(Args.Operand(0), *cmds) { return 0 }
+    return 0;
+}

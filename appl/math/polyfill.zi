@@ -1,0 +1,290 @@
+// Z-buffered polygon scan-conversion and filling (replaces appl/math/polyfill.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+INF :: 0x7FFFFFFF;
+
+Point :: struct {
+    x: s32;
+    y: s32;
+}
+
+Rect :: struct {
+    min: Point;
+    max: Point;
+}
+
+Zstate :: struct {
+    r: Rect;
+    xlen: s32;
+    ylen: s32;
+    xylen: s32;
+    zbuf0: Vec(s32);
+    zbuf1: Vec(s32);
+}
+
+Surface :: struct {
+    clipr: Rect;
+    pixels_filled: s64;
+    spans_filled: s64;
+}
+
+Seg :: struct {
+    p0: Point;
+    p1: Point;
+    num: s32;
+    den: s32;
+    dz: s32;
+    dzrem: s32;
+    z: s32;
+    zerr: s32;
+    d: s32;
+}
+
+AbsI :: (n: s32) -> s32 {
+    return ifx n < 0 then -n else n;
+}
+
+InitZbuf :: (r: Rect, s: *Zstate) {
+    s.r = r;
+    s.xlen = r.max.x - r.min.x;
+    s.ylen = r.max.y - r.min.y;
+    s.xylen = s.xlen * s.ylen;
+    VecResize(s.zbuf0, cast(s64)s.xylen);
+    VecResize(s.zbuf1, cast(s64)s.xylen);
+}
+
+ClearZbuf :: (s: *Zstate) {
+    SetZbuf(s, INF);
+}
+
+SetZbuf :: (s: *Zstate, zd: s32) {
+    n := cast(s64)s.xylen;
+    for i: 0..n - 1 {
+        s.zbuf0[i] = zd;
+        s.zbuf1[i] = zd;
+    }
+}
+
+Mod :: (x: s32, y: s32) -> s32 {
+    z := x % y;
+    if ((z ^ y) > 0) || z == 0 { return z }
+    return z + y;
+}
+
+Sdiv :: (x: s32, y: s32) -> s32 {
+    if ((x ^ y) >= 0) || x == 0 { return x / y }
+    return (x + ((y >> 30) | 1)) / y - 1;
+}
+
+Smuldivmod :: (x: s32, y: s32, z: s32) -> (quot: s32, rem: s32) {
+    if x == 0 || y == 0 { return 0, 0 }
+    vx := cast(s64)x * cast(s64)y;
+    zz := cast(s64)z;
+    m := vx % zz;
+    if m < 0 { m += zz }
+    if (vx < 0) == (zz < 0) {
+        return cast(s32)(vx / zz), cast(s32)m;
+    }
+    return cast(s32)(-(( -vx ) / zz)), cast(s32)m;
+}
+
+FillLine :: (dst: *Surface, left: s32, right: s32, y: s32) {
+    if right >= left {
+        dst.spans_filled += 1;
+        dst.pixels_filled += cast(s64)(right - left + 1);
+    }
+}
+
+FillLineZ :: (dst: *Surface, left: s32, right: s32, y: s32, z_in: s32, e: s32, dx: s32, k_in: s32, zstate: *Zstate) {
+    prevx: s32 = INF;
+    z := z_in;
+    k := cast(s64)k_in;
+    x := left;
+    while x <= right {
+        if z + e < zstate.zbuf0[k] || (z - e <= zstate.zbuf1[k] && x != right && prevx != INF) {
+            zstate.zbuf0[k] = z - e;
+            zstate.zbuf1[k] = z + e;
+            if prevx == INF { prevx = x }
+        } else if prevx != INF {
+            FillLine(dst, prevx, x - 1, y);
+            prevx = INF;
+        }
+        z += dx;
+        k += 1;
+        x += 1;
+    }
+    if prevx != INF {
+        FillLine(dst, prevx, right, y);
+    }
+}
+
+SortByY :: (seg: *Vec(Seg), n: s64) {
+    for i: 1..n - 1 {
+        j := i;
+        while j > 0 && seg.*[j].p0.y < seg.*[j - 1].p0.y {
+            tmp := seg.*[j];
+            seg.*[j] = seg.*[j - 1];
+            seg.*[j - 1] = tmp;
+            j -= 1;
+        }
+    }
+}
+
+SortByZ :: (seg: *Vec(Seg), n: s64) {
+    for i: 1..n - 1 {
+        j := i;
+        while j > 0 && seg.*[j].z < seg.*[j - 1].z {
+            tmp := seg.*[j];
+            seg.*[j] = seg.*[j - 1];
+            seg.*[j - 1] = tmp;
+            j -= 1;
+        }
+    }
+}
+
+FillPoly :: (dst: *Surface, vert: []Point, wind: s32, zstate: *Zstate, dc: s32, dx: s32, dy: s32) {
+    nvert := vert.count;
+    if nvert <= 0 { return }
+    fixshift: s32 = 1;
+    er := (AbsI(dx) + AbsI(dy) + 1) / 2;
+
+    all_segs: Vec(Seg);
+    p0 := vert[nvert - 1];
+    p0.x = p0.x << 1;
+    p0.y = p0.y << 1;
+    for i: 0..nvert - 1 {
+        p1 := vert[i];
+        p1.x = p1.x << 1;
+        p1.y = p1.y << 1;
+        if p0.y != p1.y {
+            sp: Seg;
+            if p0.y > p1.y {
+                sp.p0 = p1;
+                sp.p1 = p0;
+                sp.d = -1;
+            } else {
+                sp.p0 = p0;
+                sp.p1 = p1;
+                sp.d = 1;
+            }
+            sp.num = sp.p1.x - sp.p0.x;
+            sp.den = sp.p1.y - sp.p0.y;
+            sp.dz = Sdiv(sp.num, sp.den) << fixshift;
+            sp.dzrem = Mod(sp.num, sp.den) << fixshift;
+            sp.dz += Sdiv(sp.dzrem, sp.den);
+            sp.dzrem = Mod(sp.dzrem, sp.den);
+            sp.z = 0;
+            sp.zerr = 0;
+            VecPush(all_segs, sp);
+        }
+        p0 = p1;
+    }
+    if all_segs.count == 0 { return }
+    SortByY(*all_segs, all_segs.count);
+
+    onehalf: s32 = 1;
+    minx := dst.clipr.min.x;
+    maxx := dst.clipr.max.x;
+    y := all_segs[0].p0.y;
+    if y < (dst.clipr.min.y << fixshift) {
+        y = dst.clipr.min.y << fixshift;
+    }
+    iy := (y + onehalf) >> fixshift;
+    y = (iy << fixshift) + onehalf;
+    maxy := dst.clipr.max.y << fixshift;
+    zr := zstate.r;
+    xlen := zstate.xlen;
+    k := (iy - zr.min.y) * xlen;
+    zv := dc + iy * dy;
+
+    active: Vec(Seg);
+    next: s64 = 0;
+    while y < maxy {
+        q: s64 = 0;
+        for p: 0..active.count - 1 {
+            sp := active[p];
+            if sp.p1.y < y { continue }
+            sp.z += sp.dz;
+            sp.zerr += sp.dzrem;
+            if sp.zerr >= sp.den {
+                sp.z += 1;
+                sp.zerr -= sp.den;
+            }
+            active[q] = sp;
+            q += 1;
+        }
+        VecResize(active, q);
+
+        while next < all_segs.count {
+            sp := all_segs[next];
+            if sp.p0.y >= y { break }
+            next += 1;
+            if sp.p1.y < y { continue }
+            sp.z = sp.p0.x;
+            zinc, zerr := Smuldivmod(y - sp.p0.y, sp.num, sp.den);
+            sp.z += zinc;
+            sp.zerr = zerr;
+            VecPush(active, sp);
+        }
+
+        if active.count == 0 {
+            if next >= all_segs.count { break }
+            iy = (all_segs[next].p0.y + onehalf) >> fixshift;
+            y = (iy << fixshift) + onehalf;
+            k = (iy - zr.min.y) * xlen;
+            zv = dc + iy * dy;
+            continue;
+        }
+
+        SortByZ(*active, active.count);
+        p: s64 = 0;
+        while p < active.count {
+            sp := active[p];
+            cnt := sp.d;
+            ix := (sp.z + onehalf) >> fixshift;
+            if ix >= maxx { break }
+            if ix < minx { ix = minx }
+            p += 1;
+            while true {
+                if p >= active.count { return }
+                cnt += active[p].d;
+                if (cnt & wind) == 0 { break }
+                p += 1;
+            }
+            ix2 := (active[p].z + onehalf) >> fixshift;
+            p += 1;
+            if ix2 <= minx { continue }
+            if ix2 > maxx { ix2 = maxx }
+            FillLineZ(dst, ix, ix2, iy, zv + ix * dx, er, dx, k + ix - zr.min.x, zstate);
+        }
+        y += cast(s32)1 << fixshift;
+        iy += 1;
+        k += xlen;
+        zv += dy;
+    }
+}
+
+main :: () -> s32 {
+    r := Rect.{min = .{x = 0, y = 0}, max = .{x = 20, y = 20}};
+    zs: Zstate;
+    InitZbuf(r, *zs);
+    ClearZbuf(*zs);
+    surf: Surface;
+    surf.clipr = r;
+    surf.pixels_filled = 0;
+    surf.spans_filled = 0;
+    poly: [4]Point = .[
+        .{x = 2, y = 2},
+        .{x = 12, y = 2},
+        .{x = 12, y = 12},
+        .{x = 2, y = 12}
+    ];
+    FillPoly(*surf, poly[:], 1, *zs, 100, 0, 0);
+    out: Vec(u8);
+    BuilderPrint(*out, "xylen=% spans=% pixels=% z0=%\n", zs.xylen, surf.spans_filled, surf.pixels_filled, zs.zbuf0[2 * 20 + 2]);
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

@@ -1,0 +1,158 @@
+// Guest parity test for math batch 3: ffts, geodesy, linalg, linbench, gr, graph0, hist0, polyfill, polyhedra.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/math tests/math/math_batch3_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/math3";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".zx";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/math3/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Create sample data files for hist0/graph0
+    unused WriteEntireFile("build/dis-legacy-math/math3/empty.xy", "");
+    unused WriteEntireFile("build/dis-legacy-math/math3/odd.xy", "1.0 2.0 3.0\n");
+    unused WriteEntireFile("build/dis-legacy-math/math3/valid.xy", "1.0 2.0\n2.0 4.0\n3.0 6.0\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+
+    if suffix == ".dis" {
+        // Build a small Limbo harness to exercise the Dis library modules in headless emu
+        drv: Vec(u8);
+        BuilderPrint(*drv, "implement Drv;\n");
+        BuilderPrint(*drv, "include \"sys.m\"; sys: Sys;\n");
+        BuilderPrint(*drv, "include \"draw.m\";\n");
+        BuilderPrint(*drv, "include \"bufio.m\";\n");
+        BuilderPrint(*drv, "include \"ffts.m\"; ffts: FFTs;\n");
+        BuilderPrint(*drv, "include \"math/geodesy.m\"; geo: Geodesy;\n");
+        BuilderPrint(*drv, "include \"linalg.m\"; la: LinAlg;\n");
+        BuilderPrint(*drv, "include \"math/polyhedra.m\"; ph: Polyhedra;\n");
+        BuilderPrint(*drv, "Drv: module { init: fn(nil: ref Draw->Context, nil: list of string); };\n");
+        BuilderPrint(*drv, "init(nil: ref Draw->Context, nil: list of string) {\n");
+        BuilderPrint(*drv, "  sys = load Sys Sys->PATH;\n");
+        BuilderPrint(*drv, "  ffts = load FFTs FFTs->PATH;\n");
+        BuilderPrint(*drv, "  a := array[6] of real; b := array[6] of real;\n");
+        BuilderPrint(*drv, "  for(i:=0; i<6; i++){ a[i] = real(i+1); b[i] = 0.0; }\n");
+        BuilderPrint(*drv, "  ffts->ffts(a, b, 6, 6, 6, 1);\n");
+        BuilderPrint(*drv, "  a0 := a[0]; b0 := b[0];\n");
+        BuilderPrint(*drv, "  ffts->ffts(a, b, 6, 6, 6, -1);\n");
+        BuilderPrint(*drv, "  sys->print(\"fft(6): a0=%%.5f b0=%%.6f inv0=%%.6f\\n\", a0, b0, a[0]/6.0);\n");
+        BuilderPrint(*drv, "  geo = load Geodesy Geodesy->PATH;\n");
+        BuilderPrint(*drv, "  geo->init(Geodesy->WGS84, Geodesy->Natgrid, 30);\n");
+        BuilderPrint(*drv, "  (ok, en) := geo->str2en(\"SE6022552235\");\n");
+        BuilderPrint(*drv, "  os := geo->en2os(en);\n");
+        BuilderPrint(*drv, "  ll := geo->lalo2str(geo->en2lalo(en));\n");
+        BuilderPrint(*drv, "  sys->print(\"%%s -> E=%%d N=%%d ll=%%s\\n\", os, int en.e, int en.n, ll);\n");
+        BuilderPrint(*drv, "  la = load LinAlg LinAlg->PATH;\n");
+        BuilderPrint(*drv, "  m := array[] of {2.0, 4.0, -2.0, 1.0, -6.0, 7.0, 1.0, 0.0, 2.0};\n");
+        BuilderPrint(*drv, "  v := array[] of {8.0, -2.0, 9.0};\n");
+        BuilderPrint(*drv, "  ip := array[3] of int;\n");
+        BuilderPrint(*drv, "  inf := la->dgefa(m, 3, 3, ip);\n");
+        BuilderPrint(*drv, "  la->dgesl(m, 3, 3, ip, v, 0);\n");
+        BuilderPrint(*drv, "  sys->print(\"info=%%d x=%%.6f %%.6f %%.6f\\n\", inf, v[0], v[1], v[2]);\n");
+        BuilderPrint(*drv, "  ph = load Polyhedra Polyhedra->PATH;\n");
+        BuilderPrint(*drv, "  (np, p0, bio) := ph->scanpolyhedra(\"/lib/polyhedra\");\n");
+        BuilderPrint(*drv, "  ph->getpolyhedron(p0, bio);\n");
+        BuilderPrint(*drv, "  sys->print(\"count=%%d first=%%s V=%%d E=%%d F=%%d fv0_n=%%d\\n\", np, p0.name, p0.V, p0.E, p0.F, p0.fv[0][0]);\n");
+        BuilderPrint(*drv, "}\n");
+        unused WriteEntireFile("build/dis-legacy-math/math3/drv.b", BuilderFinish(drv));
+        limbo_cmd: [5]string = .["Linux/386/bin/limbo", "-Imodule", "-o", "build/dis-legacy-math/math3/drv.dis", "build/dis-legacy-math/math3/drv.b"];
+        lrun: ProcessRun;
+        Expect(RunProcess(.{arguments = limbo_cmd[:], capture_output = true}, *lrun), "compile limbo math3 driver");
+        BuilderPrint(*script, "/%/drv.dis > result/drv.out >[2] result/drv.err\n", WORK);
+    } else {
+        BuilderPrint(*script, "/dis/math/ffts.zx 6 > result/ffts.out\n");
+        BuilderPrint(*script, "/dis/math/geodesy.zx SE6022552235 > result/geodesy.out\n");
+        BuilderPrint(*script, "/dis/math/linalg.zx > result/linalg.out\n");
+        BuilderPrint(*script, "/dis/math/polyhedra.zx /lib/polyhedra > result/polyhedra.out\n");
+        BuilderPrint(*script, "/dis/math/polyfill.zx > result/polyfill.out\n");
+        BuilderPrint(*script, "/dis/math/gr.zx > result/gr.out\n");
+        BuilderPrint(*script, "/dis/math/hist0.zx /%/empty.xy > result/hist_empty.out\n", WORK);
+        BuilderPrint(*script, "/dis/math/hist0.zx /%/odd.xy > result/hist_odd.out\n", WORK);
+        BuilderPrint(*script, "/dis/math/hist0.zx /%/missing.xy > result/hist_missing.out\n", WORK);
+        BuilderPrint(*script, "/dis/math/hist0.zx /%/valid.xy > result/hist_valid.out\n", WORK);
+    }
+    BuilderPrint(*script, "echo halt > /dev/sysctl\n");
+
+    unused WriteEntireFile("build/dis-legacy-math/math3/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    if suffix == ".dis" {
+        dout := Result("drv.out");
+        derr := Result("drv.err");
+        if derr.count > 0 && derr != "<missing>" {
+            print("drv.err: %\n", derr);
+        }
+        Expect(Contains(dout, "fft(6): a0=21.00000 b0=0.000000 inv0=1.000000\n"), "dis ffts(6)");
+        Expect(Contains(dout, "SE6022552235 -> E=460225 N=452235 ll=53:57:45.7") && Contains(dout, "N 01:05:00.79W\n"), "dis geodesy");
+        Expect(Contains(dout, "info=0 x=3.250000 2.500000 -1.000000\n"), "dis linalg");
+        Expect(Contains(dout, "count=20 first=pentagonal prism V=10 E=15 F=7 fv0_n=4\n"), "dis polyhedra");
+    } else {
+        Expect(Result("ffts.out") == "fft(6): a0=21.000000 b0=0.000000 inv0=1.000000\n", "zx ffts(6)");
+        Expect(Result("geodesy.out") == "SE6022552235 -> E=460225 N=452235 ll=53:57:45.71N 01:05:00.79W\n", "zx geodesy");
+        Expect(Result("linalg.out") == "info=0 x=3.250000 2.500000 -1.000000\n", "zx linalg");
+        Expect(Result("polyhedra.out") == "count=20 first=pentagonal prism V=10 E=15 F=7 fv0_n=4\n", "zx polyhedra");
+        Expect(Result("polyfill.out") == "xylen=400 spans=10 pixels=110 z0=100\n", "zx polyfill");
+        Expect(Contains(Result("gr.out"), ".fc.c create line ") && Contains(Result("gr.out"), "update\n"), "zx gr");
+        Expect(Result("hist_empty.out") == "empty input\n", "zx hist0 empty");
+        Expect(Result("hist_odd.out") == "after reading 1 pairs, saw singleton\n", "zx hist0 singleton");
+        Expect(Contains(Result("hist_missing.out"), "can't read "), "zx hist0 missing");
+        Expect( Result("hist_valid.out") == "", "zx hist0 valid");
+    }
+
+    if failures != 0 {
+        print("math_batch3_test: % failures\n", failures);
+        return 1;
+    }
+    print("math_batch3_test: all checks passed\n");
+    return 0;
+}

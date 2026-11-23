@@ -1,30 +1,24 @@
 <../../mkconfig
 
-TARG=\
-	ffts.dis\
-	geodesy.dis\
-	graph0.dis\
-	gr.dis\
-	hist0.dis\
-	linalg.dis\
-	linbench.dis\
-	polyfill.dis\
-	polyhedra.dis\
+TARG=
 
 MODULES=
 
-SYSMODULES=\
-	math.m\
-	gr.m\
-	linalg.m\
-	draw.m\
-	sys.m\
-	tk.m\
-	wmlib.m\
-	bufio.m\
-	math/polyfill.m\
-	math/polyhedra.m\
+SYSMODULES=
 
 DISBIN=$ROOT/dis/math
 
 <$ROOT/mkfiles/mkdis
+
+ZXCOMMANDS=ack crackerbarrel factor ffts fibonacci fit genprimes geodesy gr hist0 linalg mersenne parts perms pi polyfill polyhedra powers primes sieve
+ZXUTIL=math_util.zi bigint.zi linalg.zi gr.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_files.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_files --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

@@ -1,0 +1,250 @@
+// Polyhedra file scanner and geometry loader (replaces appl/math/polyhedra.b).
+Args :: #import "taijios_args";
+Util :: #import "math_util";
+#import "std/format"
+#import "std/vec"
+
+Vector :: struct {
+    x: float64;
+    y: float64;
+    z: float64;
+}
+
+IntArray :: struct {
+    elems: Vec(s32);
+}
+
+Polyhedron :: struct {
+    name: Text;
+    dname: Text;
+    indx: s32;
+    V: s32;
+    E: s32;
+    F: s32;
+    anti: s32;
+    allf: s32;
+    adj: s32;
+    concave: s32;
+    inc: float64;
+    offset: s64;
+    v: Vec(Vector);
+    f: Vec(Vector);
+    fv: Vec(IntArray);
+    vf: Vec(IntArray);
+}
+
+PolyhedraList :: struct {
+    raw: Vec(u8);
+    items: Vec(Polyhedron);
+}
+
+MakeText :: (s: string) -> Text {
+    t: Text;
+    unused BuilderAppend(t.bytes, s);
+    return t;
+}
+
+ReadNonCommentLine :: (data: []u8, pos: *s64) -> (line: string, ok: bool) {
+    while pos.* < data.count {
+        start := pos.*;
+        while pos.* < data.count && data[pos.*] != 10 { pos.* += 1 }
+        end := pos.*;
+        if pos.* < data.count { pos.* += 1 }
+        s := TextView(data[start:end]);
+        if s.count > 0 && s[0] == 35 { continue } // '#'
+        return s, true;
+    }
+    return "", false;
+}
+
+SkipRawLine :: (data: []u8, pos: *s64) {
+    while pos.* < data.count && data[pos.*] != 10 { pos.* += 1 }
+    if pos.* < data.count { pos.* += 1 }
+}
+
+GetInt :: (s: string) -> (val: s32, rest: string) {
+    n := cast(s32)Util.ParseInt(s);
+    i: s64 = 0;
+    while i < s.count && s[i] == 32 { i += 1 }
+    while i < s.count {
+        if s[i] == 32 { return n, s[i + 1:] }
+        i += 1;
+    }
+    return n, "";
+}
+
+GetReal :: (s: string) -> (val: float64, rest: string) {
+    r := Util.ParseF64(s);
+    i: s64 = 0;
+    while i < s.count && s[i] == 32 { i += 1 }
+    while i < s.count {
+        if s[i] == 32 { return r, s[i + 1:] }
+        i += 1;
+    }
+    return r, "";
+}
+
+ScanVc :: (s_in: string) -> (af: s32, ad: s32) {
+    vftab: [11]s32 = .[0, 0, 0, 2, 3, 3, 5, 0, 3, 0, 3];
+    af: s32 = 0;
+    ad: s32 = 0;
+    fd: s32 = 1;
+    ld: s32 = 1;
+    s := s_in;
+    if s.count > 0 && s[0] == 40 { s = s[1:] }
+    while s.count > 0 && s[s.count - 1] != 41 {
+        s = s[:s.count - 1];
+    }
+    if s.count > 0 && s[s.count - 1] == 41 {
+        s = s[:s.count - 1];
+    }
+    pos: s64 = 0;
+    first := true;
+    while pos < s.count {
+        while pos < s.count && s[pos] == 46 { pos += 1 }
+        if pos >= s.count { break }
+        start := pos;
+        while pos < s.count && s[pos] != 46 { pos += 1 }
+        tok := s[start:pos];
+        slash: s64 = -1;
+        for k: 0..tok.count - 1 {
+            if tok[k] == 47 { slash = k; break }
+        }
+        n: s32 = 0;
+        d: s32 = 1;
+        if slash < 0 {
+            n = cast(s32)Util.ParseInt(tok);
+        } else {
+            n = cast(s32)Util.ParseInt(tok[:slash]);
+            d = cast(s32)Util.ParseInt(tok[slash + 1:]);
+        }
+        if d != 1 && n >= 0 && n <= 10 && d == vftab[n] {
+            af = 1;
+        }
+        if d == n - 1 { d = 1 }
+        if first {
+            fd = d;
+            first = false;
+        } else if ld != 1 && d != 1 {
+            ad = 1;
+        }
+        ld = d;
+    }
+    if ld != 1 && fd != 1 { ad = 1 }
+    return af, ad;
+}
+
+GetVector :: (data: []u8, pos: *s64) -> Vector {
+    s, _ := ReadNonCommentLine(data, pos);
+    x, s1 := GetReal(s);
+    y, s2 := GetReal(s1);
+    z, _ := GetReal(s2);
+    return .{x = x, y = y, z = z};
+}
+
+GetArray :: (data: []u8, pos: *s64, adj: s32, out: *IntArray) {
+    VecClear(out.elems);
+    s, _ := ReadNonCommentLine(data, pos);
+    n, rest := GetInt(s);
+    VecPush(out.elems, n);
+    cur := rest;
+    for _: 1..cast(s64)n {
+        v, r2 := GetInt(cur);
+        VecPush(out.elems, v);
+        cur = r2;
+    }
+    d, _ := GetInt(cur);
+    if d == 0 || d == n - 1 || adj != 0 { d = 1 }
+    VecPush(out.elems, d);
+}
+
+ScanPolyhedra :: (path: string, list: *PolyhedraList) -> s32 {
+    VecClear(list.raw);
+    VecClear(list.items);
+    if !Util.ReadAllFile(path, *list.raw) { return 0 }
+    data := list.raw[:];
+    pos: s64 = 0;
+    while true {
+        s, ok := ReadNonCommentLine(data, *pos);
+        if !ok { break }
+        p: Polyhedron;
+        p.name = MakeText(s);
+        dn, _ := ReadNonCommentLine(data, *pos);
+        p.dname = MakeText(dn);
+        SkipRawLine(data, *pos);
+        vc, _ := ReadNonCommentLine(data, *pos);
+        af, ad := ScanVc(vc);
+        p.allf = af;
+        p.adj = ad;
+        SkipRawLine(data, *pos);
+        SkipRawLine(data, *pos);
+        SkipRawLine(data, *pos);
+        l, _ := ReadNonCommentLine(data, *pos);
+        indx_val, l1 := GetInt(l);
+        v_val, l2 := GetInt(l1);
+        e_val, l3 := GetInt(l2);
+        f_val, l4 := GetInt(l3);
+        _, l5 := GetInt(l4);
+        d_val, l6 := GetInt(l5);
+        anti_val, _ := GetInt(l6);
+        p.indx = indx_val;
+        p.V = v_val;
+        p.E = e_val;
+        p.F = f_val;
+        p.anti = anti_val;
+        p.concave = ifx (d_val != 1 || p.allf != 0) then cast(s32)1 else cast(s32)0;
+        p.offset = pos;
+        tot := 2 * p.V + 2 * p.F;
+        for _: 0..cast(s64)tot - 1 {
+            SkipRawLine(data, *pos);
+        }
+        if p.indx < 58 || p.indx == 59 || p.indx == 66 || p.indx == 67 {
+            p.inc = 0.1;
+        } else {
+            p.inc = 0.0;
+        }
+        VecPush(list.items, p);
+    }
+    return cast(s32)list.items.count;
+}
+
+GetPolyhedron :: (list: *PolyhedraList, idx: s64) {
+    p := *list.items[idx];
+    if p.v.count > 0 { return }
+    pos := p.offset;
+    data := list.raw[:];
+    for _: 0..cast(s64)p.V - 1 {
+        VecPush(p.v, GetVector(data, *pos));
+    }
+    for _: 0..cast(s64)p.F - 1 {
+        VecPush(p.f, GetVector(data, *pos));
+    }
+    for _: 0..cast(s64)p.F - 1 {
+        ia: IntArray;
+        GetArray(data, *pos, p.adj, *ia);
+        VecPush(p.fv, ia);
+    }
+    for _: 0..cast(s64)p.V - 1 {
+        ia: IntArray;
+        GetArray(data, *pos, p.adj, *ia);
+        VecPush(p.vf, ia);
+    }
+}
+
+main :: () -> s32 {
+    path := ifx Args.OperandCount() > 0 then Args.Operand(0) else "/lib/polyhedra";
+    list: PolyhedraList;
+    n := ScanPolyhedra(path, *list);
+    out: Vec(u8);
+    if n <= 0 {
+        BuilderPrint(*out, "count=0\n");
+        Util.WriteOut(TextView(out[:]));
+        return 1;
+    }
+    GetPolyhedron(*list, 0);
+    p0 := *list.items[0];
+    BuilderPrint(*out, "count=% first=% V=% E=% F=% fv0_n=%\n",
+        n, TextView(p0.name), p0.V, p0.E, p0.F, p0.fv[0].elems[0]);
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}
