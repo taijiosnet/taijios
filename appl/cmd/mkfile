@@ -91,7 +91,6 @@ TARG=\
 	mprof.dis\
 	mv.dis\
 	netkey.dis\
-	netstat.dis\
 	ns.dis\
 	nsbuild.dis\
 	os.dis\
@@ -102,7 +101,6 @@ TARG=\
 	prof.dis\
 	puttar.dis\
 	ramfile.dis\
-	randpass.dis\
 	raw2iaf.dis\
 	rawdbfs.dis\
 	rcmd.dis\
@@ -182,6 +180,8 @@ SYSMODULES=\
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
 ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh env
+ZXCOMMANDS=$ZXCOMMANDS randpass
+ZXCOMMANDS=$ZXCOMMANDS netstat
 ZXCOMMANDS=$ZXCOMMANDS zeros
 ZXCOMMANDS=$ZXCOMMANDS touch
 ZXCOMMANDS=$ZXCOMMANDS strings
@@ -263,6 +263,10 @@ ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 
 mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
+randpass.zx: randpass.zi taijios_keyring.zi $UTILZX
+	zi2zx --root . --bind-host taijios_keyring --bind-host taijios_args --bind-host taijios_io --entry randpass:main -o $target randpass.zi
+netstat.zx: netstat.zi taijios_stat.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry netstat:main -o $target netstat.zi
 zeros.zx: zeros.zi taijios_keyring.zi $UTILZX
 	zi2zx --root . --bind-host taijios_keyring --bind-host taijios_args --bind-host taijios_io --entry zeros:main -o $target zeros.zi
 touch.zx: touch.zi zx_daytime.zi $UTILZX
@@ -391,6 +395,8 @@ $DISBIN/cp.zx: cp.zx mkfile
 $DISBIN/test.zx: test.zx mkfile
 $DISBIN/ls.zx: ls.zx mkfile
 $DISBIN/mkdir.zx: mkdir.zx mkfile
+$DISBIN/randpass.zx: randpass.zx mkfile
+$DISBIN/netstat.zx: netstat.zx mkfile
 $DISBIN/zeros.zx: zeros.zx mkfile
 $DISBIN/touch.zx: touch.zx mkfile
 $DISBIN/strings.zx: strings.zx mkfile

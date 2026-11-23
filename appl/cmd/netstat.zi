@@ -1,0 +1,112 @@
+// Report the guest network protocol connections, replacing the Limbo netstat.
+#import "std/vec"
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+
+// Left-justify a field, as Limbo's %-Ns did.
+Pad :: (out: *Vec(u8), text: string, width: s64) {
+    unused BuilderAppend(<<out, text);
+    for i: text.count..width-1 { unused BuilderAppend(<<out, " ") }
+}
+
+// Join a directory and a name with one slash.
+Path :: (name: string, suffix: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/%", name, suffix);
+    return BuilderFinish(path);
+}
+
+// Read a protocol file and drop one trailing newline, or "??" when unreadable.
+Field :: (path: string) -> string {
+    handle := Io.OpenFile(path, 0);
+    if handle < 0 { return "??" }
+    data: [64]u8;
+    got := Io.ReadBytes(handle, data[:]);
+    unused Io.CloseFile(handle);
+    if got <= 1 { return "??" }
+    if data[got-1] == cast(u8)10 { got -= 1 }
+    out: Vec(u8);
+    unused BuilderAppend(out, TextView(data[:got]));
+    return BuilderFinish(out);
+}
+
+// The first blank-separated word, as Limbo's tokenize skipped leading blanks.
+First :: (text: string) -> string {
+    start: s64 = 0;
+    while start < text.count && text[start] == cast(u8)32 { start += 1 }
+    for i: start..text.count-1 {
+        if text[i] == cast(u8)32 { return text[start:i] }
+    }
+    return text[start:];
+}
+
+Print :: (name: string, user: string) {
+    line: Vec(u8);
+    Pad(*line, name[5:], 10);
+    unused BuilderAppend(line, " ");
+    Pad(*line, user, 10);
+    unused BuilderAppend(line, " ");
+    Pad(*line, First(Field(Path(name, "status"))), 12);
+    unused BuilderAppend(line, " ");
+    Pad(*line, Field(Path(name, "local")), 20);
+    unused BuilderAppend(line, " ");
+    unused BuilderAppend(line, Field(Path(name, "remote")));
+    unused BuilderAppend(line, "\n");
+    unused Cli.WriteAll(1, BuilderFinish(line));
+}
+
+// List the numbered entries of one protocol directory.
+Protocol :: (path: string, whine: bool) {
+    handle := Io.OpenFile(path, 0);
+    if handle < 0 {
+        if whine {
+            unused Cli.WriteAll(2, "netstat: ");
+            unused Cli.WriteAll(2, path);
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, Io.LastError());
+            unused Cli.WriteAll(2, "\n");
+        }
+        return;
+    }
+    buffer: [Fs.BufferSize]u8;
+    info := Fs.DescriptorInfo(handle, buffer[:]);
+    if info.size == 0 {
+        unused Cli.WriteAll(2, "netstat: fstat ");
+        unused Cli.WriteAll(2, path);
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, Io.LastError());
+        unused Cli.WriteAll(2, "\n");
+        unused Io.CloseFile(handle);
+        return;
+    }
+    if (info.mode & Fs.Directory) == 0 {
+        unused Cli.WriteAll(2, "netstat: not a protocol directory: ");
+        unused Cli.WriteAll(2, path);
+        unused Cli.WriteAll(2, "\n");
+        unused Io.CloseFile(handle);
+        return;
+    }
+    while true {
+        size := Io.ReadBytes(handle, buffer[:]);
+        if size <= 0 { break }
+        offset: s64 = 0;
+        while offset < size {
+            entry := Fs.Decode(buffer[offset:size]);
+            if entry.size == 0 { break }
+            offset += entry.size;
+            if entry.name.count > 0 && entry.name[0] <= cast(u8)57 {
+                Print(Path(path, entry.name), entry.owner);
+            }
+        }
+    }
+    unused Io.CloseFile(handle);
+}
+
+#program_export
+main :: () -> s32 {
+    Protocol("/net/tcp", true);
+    Protocol("/net/udp", true);
+    Protocol("/net/il", false);
+    return 0;
+}

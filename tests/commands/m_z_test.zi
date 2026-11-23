@@ -26,7 +26,7 @@ WORK :: "build/tests/commands-m-z";
 ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 
-cases: [115]Case = Case.[
+cases: [127]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -95,6 +95,16 @@ cases: [115]Case = Case.[
     .{tool = "sum", args = "empty words bin", out = "2aa280dc      0 empty\n652bf7c4     25 words\n16ad4d37  10240 bin\n"},
     .{tool = "sum", args = "-", status = "error", err = "sum: cannot get status of -: '-' file does not exist\n"},
     .{tool = "sum", args = "a.txt a.txt", out = "78465aa6     25 a.txt\n78465aa6     25 a.txt\n"},
+    // randpass: a random base64 password, nine to 256 characters long.
+    .{args = "{ randpass | sed 's/./x/g' }", out = "xxxxxxxxxxxxxxxx\n"},
+    .{args = "{ randpass 9 | sed 's/./x/g' }", out = "xxxxxxxxx\n"},
+    .{args = "{ randpass 9 extra | sed 's/./x/g' }", out = "xxxxxxxxx\n"},
+    .{tool = "randpass", args = "8", status = "usage", err = "Usage: randpass [password-length(<256, default=16)]\n"},
+    .{tool = "randpass", args = "257", status = "usage", err = "Usage: randpass [password-length(<256, default=16)]\n"},
+    .{tool = "randpass", args = "abc", status = "usage", err = "Usage: randpass [password-length(<256, default=16)]\n"},
+    .{tool = "randpass", args = "0", status = "usage", err = "Usage: randpass [password-length(<256, default=16)]\n"},
+    .{tool = "randpass", args = "-1", status = "usage", err = "Usage: randpass [password-length(<256, default=16)]\n"},
+    .{args = "{ randpass 256 | wc -c }", out = "    257\n"},
     // zeros: one block of a byte value, or one random block, written n times.
     .{tool = "zeros", args = "-v 41 4 2", out = "AAAAAAAA"},
     .{tool = "zeros", args = "-v 41", out = "A"},
@@ -154,6 +164,10 @@ cases: [115]Case = Case.[
     .{tool = "unmount", args = "a b c", err = "Usage: unmount [source] target\n"},
     .{args = "{ bind fakeprog tree/sub; cat tree/sub/1/status; unmount tree/sub; cat tree/sub/1/status }", out = "proc1 one", status = "bad open", err = "cat: cannot open tree/sub/1/status: 'tree/sub/1' does not exist\n"},
     .{args = "{ bind fakeprog tree/sub; unmount fakeprog tree/sub; cat tree/sub/1/status }", status = "bad open", err = "cat: cannot open tree/sub/1/status: 'tree/sub/1' does not exist\n"},
+    // netstat: the numbered entries of each protocol directory.
+    .{tool = "netstat"},
+    .{tool = "netstat", args = "ignored"},
+    .{args = "{ bind fakenet /net/tcp; netstat; unmount /net/tcp }", out = "tcp/2      wao        Established  udp!0.0.0.0!53       udp!9.9.9.9!53\ntcp/1      wao        listen       tcp!1.2.3.4!80       tcp!5.6.7.8!1234\n"},
 ];
 
 failures: s32;
@@ -215,7 +229,8 @@ Prepare :: (binary: string) -> bool {
     if !CreateDirectory(WORK) || !Directory("work") || !Directory("result") ||
         !Directory("work/tree") || !Directory("work/tree/sub") || !Directory("work/fakeprog") ||
         !Directory("work/fakeprog/1") || !Directory("work/fakeprog/2") ||
-        !Directory("work/fakeprog/3") || !Directory("work/fakeprog/4") { return false }
+        !Directory("work/fakeprog/3") || !Directory("work/fakeprog/4") || !Directory("work/fakenet") ||
+        !Directory("work/fakenet/1") || !Directory("work/fakenet/2") { return false }
     one := S1()
     two := S2()
     // ps prints only the first 128 bytes of a status file.
@@ -225,7 +240,10 @@ Prepare :: (binary: string) -> bool {
         Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
         Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
         Write("fakeprog/1/status", "proc1 one") && Write("fakeprog/2/status", "proc2 two") &&
-        Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long))
+        Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long)) &&
+        Write("fakenet/1/status", "listen 0 0\n") && Write("fakenet/1/local", "tcp!1.2.3.4!80\n") &&
+        Write("fakenet/1/remote", "tcp!5.6.7.8!1234\n") && Write("fakenet/2/status", "Established x\n") &&
+        Write("fakenet/2/local", "udp!0.0.0.0!53\n") && Write("fakenet/2/remote", "udp!9.9.9.9!53\n")
 }
 
 // One guest shell script runs every case and keeps each result in a file.
