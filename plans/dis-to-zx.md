@@ -47,7 +47,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (32 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (10), demo (3), ebook (0), math (0).
+5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (0), grid (5), demo (6), ebook (0), math (0).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
@@ -660,10 +660,16 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - | blocked: needs Keyring->auth(fd, ai, setid=1) and Sh->run |
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - | blocked: needs Login->login (Keyring->auth) and Sh->run |
 
-### 11. Demo - demonstration apps - 0 rows
+### 11. Demo - demonstration apps - 6 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
+| dis/demo/lego/firmdl.dis | appl/demo/lego/firmdl.b |  | - | restored: ZX port was reduced (packet length/start in decimal, extra zero byte, checksum differed) |
+| dis/demo/lego/legolink.dis | appl/demo/lego/legolink.b |  | - | restored: ZX port lost the 250 ms poll empty message, POLLDO, and the 1500 ms re-settle |
+| dis/demo/lego/rcxsend.dis | appl/demo/lego/rcxsend.b |  | - | restored with legolink (shared poll loop) |
+| dis/demo/lego/timers.dis | appl/demo/lego/timers.b | module/timers.m | - | restored with legolink |
+| dis/demo/whiteboard/wbsrv.dis | appl/demo/whiteboard/wbsrv.b |  | - | restored: ZX port inverted CMAP8 (0=black, 255=white) and only saved inside the 9P read loop |
+| dis/demo/whiteboard/whiteboard.dis | appl/demo/whiteboard/whiteboard.b |  | - | restored client; runwb.sh now serves /dis/demo/whiteboard/whiteboard.dis |
 
 ### 12. Ebook - readers - 0 rows
 

@@ -1,14 +1,23 @@
 <../../../mkconfig
 
 TARG=\
+		firmdl.dis\
+		legolink.dis\
+		rcxsend.dis\
+		timers.dis\
 		styx.srec\
 
 SHTARG=\
 		clockreg.sh\
 
 MODULES=\
+	rcxsend.m\
 
 SYSMODULES= \
+	bufio.m\
+	draw.m\
+	sys.m\
+	timers.m\
 
 DISBIN=$ROOT/dis/demo/lego
 
@@ -25,24 +34,8 @@ $DISBIN/clockface.zx: clockface.zx
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 clockface.zx "$staged" && mv "$staged" "$target"
 
-firmdl.zx: firmdl.zi rcx_protocol.zi rcx_serial.zi ../../cmd/taijios_args.zi ../../cmd/taijios_clock.zi ../../cmd/taijios_io.zi mkfile
-	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_clock --bind-host taijios_io --entry firmdl:main -o $target firmdl.zi
-
-$DISBIN/firmdl.zx: firmdl.zx
-	staged=$(mktemp "$target.XXXXXX") &&
-	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 firmdl.zx "$staged" && mv "$staged" "$target"
-
-legolink.zx: legolink.zi rcx_protocol.zi rcx_serial.zi ../../cmd/taijios_args.zi ../../cmd/taijios_clock.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi ../../cmd/taijios_file2chan.zi mkfile
-	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_clock --bind-host taijios_io --bind-host taijios_namespace --entry legolink:main -o $target legolink.zi
-
-$DISBIN/legolink.zx: legolink.zx
-	staged=$(mktemp "$target.XXXXXX") &&
-	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 legolink.zx "$staged" && mv "$staged" "$target"
-
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES $DISBIN/clockface.zx $DISBIN/firmdl.zx $DISBIN/legolink.zx
+install:V:	$SHFILES $DISBIN/clockface.zx $DISBIN/firmdl.dis $DISBIN/legolink.dis $DISBIN/rcxsend.dis $DISBIN/timers.dis
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 
