@@ -1,6 +1,6 @@
-// Full OEB/HTML/CSS reader layout engine, table formatter, link/anchor index,
-// annotation store, and multi-page pagination model,
-// ported from appl/ebook/reader.b and appl/ebook/ebook.b.
+// Full OEB/HTML/CSS block/flow layout engine, CSS cascade, table layout,
+// image integration, link/anchor index, .i index cache, .annot codec,
+// and pixel-height pagination model, ported from appl/ebook/reader.b & ebook.b.
 #import "std/vec"
 #import "std/number_text"
 using Strmap :: #import "strmap"
@@ -19,16 +19,57 @@ MAX_ANNOTATIONS :: 128;
 MAX_TABLE_COLS :: 16;
 MAX_TABLE_ROWS :: 64;
 
+// Style property indices matching InitDefaultStylesheet
+ST_BG :: 0;
+ST_BORDER :: 1;
+ST_COLOR :: 2;
+ST_FONT_FAMILY :: 3;
+ST_FONT_SIZE :: 4;
+ST_FONT_STYLE :: 5;
+ST_FONT_WEIGHT :: 6;
+ST_LIST_STYLE :: 7;
+ST_MARGIN_BOTTOM :: 8;
+ST_MARGIN_LEFT :: 9;
+ST_MARGIN_TOP :: 10;
+ST_TEXT_ALIGN :: 11;
+
+LI_TEXT :: 0;
+LI_LINK :: 1;
+LI_RULE :: 2;
+LI_IMAGE :: 3;
+LI_TABLE_CELL :: 4;
+
+LayoutItem :: struct {
+    kind: s32;
+    page: s32;
+    x: s32;
+    y: s32; // page-relative y
+    w: s32;
+    h: s32;
+    color: s32;
+    bg_color: s32; // -1 if transparent
+    bold: bool;
+    underline: bool;
+    file_offset: s64;
+    text: Text;
+    href: Text;
+    img_src: Text;
+    img_w: s32;
+    img_h: s32;
+}
+
 PageSpan :: struct {
     start: s64;
     end: s64;
     file_offset: s64;
+    y_offset: s32;
 }
 
 Anchor :: struct {
     name: Text;
     body_offset: s64;
     file_offset: s64;
+    page: s32;
 }
 
 Link :: struct {
@@ -50,6 +91,7 @@ Bookmark :: struct {
 Document :: struct {
     title: Text;
     body: Text;
+    items: Vec(LayoutItem);
     pages: [MAX_PAGES]PageSpan;
     page_count: s32;
     current_page: s32;
@@ -80,6 +122,43 @@ TagEquals :: (tag: string, target: string) -> bool {
     return true;
 }
 
+HexDigit :: (c: u8) -> s32 {
+    if c >= 48 && c <= 57 { return cast(s32)(c - 48) }
+    if c >= 97 && c <= 102 { return cast(s32)(c - 87) }
+    if c >= 65 && c <= 70 { return cast(s32)(c - 55) }
+    return -1;
+}
+
+ParseCssColor :: (s: string, fallback: s32) -> s32 {
+    if s.count == 0 { return fallback }
+    if s[0] == 35 { // '#'
+        if s.count == 7 {
+            v: s32 = 0;
+            for i: 1..6 {
+                d := HexDigit(s[i]);
+                if d < 0 { return fallback }
+                v = (v << 4) | d;
+            }
+            return v;
+        }
+        if s.count == 4 {
+            r := HexDigit(s[1]); g := HexDigit(s[2]); b := HexDigit(s[3]);
+            if r < 0 || g < 0 || b < 0 { return fallback }
+            return ((r * 17) << 16) | ((g * 17) << 8) | (b * 17);
+        }
+    }
+    if TagEquals(s, "black") { return 0x000000 }
+    if TagEquals(s, "white") { return 0xffffff }
+    if TagEquals(s, "red") { return 0xcc0000 }
+    if TagEquals(s, "green") { return 0x007700 }
+    if TagEquals(s, "blue") { return 0x0000cc }
+    if TagEquals(s, "navy") { return 0x000080 }
+    if TagEquals(s, "maroon") { return 0x800000 }
+    if TagEquals(s, "gray") || TagEquals(s, "grey") { return 0x666666 }
+    if TagEquals(s, "yellow") { return 0xdddd00 }
+    return fallback;
+}
+
 AppendEntity :: (ent: string, out: *Text) {
     if ent == "amp" { unused BuilderAppend(out.bytes, "&") }
     else if ent == "lt" { unused BuilderAppend(out.bytes, "<") }
@@ -94,10 +173,8 @@ AppendEntity :: (ent: string, out: *Text) {
         code: s64 = 0;
         if ent.count > 2 && (ent[1] == 120 || ent[1] == 88) {
             for i: 2..ent.count-1 {
-                ch := ent[i];
-                if ch >= 48 && ch <= 57 { code = code * 16 + cast(s64)(ch - 48) }
-                else if ch >= 97 && ch <= 102 { code = code * 16 + cast(s64)(ch - 87) }
-                else if ch >= 65 && ch <= 70 { code = code * 16 + cast(s64)(ch - 55) }
+                d := HexDigit(ent[i]);
+                if d >= 0 { code = code * 16 + cast(s64)d }
             }
         } else {
             for i: 1..ent.count-1 {
@@ -147,16 +224,13 @@ AppendRoman :: (num: s32, upper: bool, out: *Text) {
 
 AppendListMarker :: (ordered: bool, index: s32, style_type: string, out: *Text) {
     if !ordered {
-        unused BuilderAppend(out.bytes, "  * ");
+        unused BuilderAppend(out.bytes, "* ");
         return;
     }
-    unused BuilderAppend(out.bytes, "  ");
     if style_type == "lower-alpha" {
-        c := 97 + ((index - 1) % 26);
-        unused VecPush(out.bytes, cast(u8)c);
+        unused VecPush(out.bytes, cast(u8)(97 + ((index - 1) % 26)));
     } else if style_type == "upper-alpha" {
-        c := 65 + ((index - 1) % 26);
-        unused VecPush(out.bytes, cast(u8)c);
+        unused VecPush(out.bytes, cast(u8)(65 + ((index - 1) % 26)));
     } else if style_type == "lower-roman" {
         AppendRoman(index, false, out);
     } else if style_type == "upper-roman" {
@@ -175,19 +249,27 @@ InitDefaultStylesheet :: (sheet: *Sheet.Sheet) {
         "margin-bottom", "margin-left", "margin-top", "text-align",
     ];
     Sheet.InitSheet(sheet, names[:]);
-    def_css := "h1 { font-size: xx-large; font-weight: bold; }";
+    def_css := #string END_CSS
+h1 { font-size: xx-large; font-weight: bold; color: #1a365d; margin-top: 12px; margin-bottom: 8px; }
+h2 { font-size: x-large; font-weight: bold; color: #2a4365; margin-top: 10px; margin-bottom: 6px; }
+h3 { font-size: large; font-weight: bold; color: #2c5282; margin-top: 8px; margin-bottom: 4px; }
+p { margin-top: 4px; margin-bottom: 6px; }
+blockquote { margin-left: 24px; color: #444444; }
+a { color: #0000cc; }
+END_CSS;
     rules: CSS.RuleList;
     CSS.Parse(def_css, *rules);
     Sheet.AddRules(sheet, *rules, Sheet.DEFAULT_ORIGIN);
 }
 
-RecordAnchor :: (doc: *Document, name: string, file_offset: s64) {
+RecordAnchor :: (doc: *Document, name: string, file_offset: s64, page: s32) {
     if name.count == 0 || doc.anchor_count >= MAX_ANCHORS { return }
     idx := doc.anchor_count;
     unused VecResize(doc.anchors[idx].name.bytes, 0);
     unused BuilderAppend(doc.anchors[idx].name.bytes, name);
     doc.anchors[idx].body_offset = doc.body.bytes.count;
     doc.anchors[idx].file_offset = file_offset;
+    doc.anchors[idx].page = page;
     doc.anchor_count += 1;
 }
 
@@ -197,48 +279,187 @@ RecordLink :: (doc: *Document, href: string, label: string, body_offset: s64) {
     unused VecResize(doc.links[idx].href.bytes, 0);
     unused BuilderAppend(doc.links[idx].href.bytes, href);
     unused VecResize(doc.links[idx].label.bytes, 0);
-    if label.count > 0 {
-        unused BuilderAppend(doc.links[idx].label.bytes, label);
-    } else {
-        unused BuilderAppend(doc.links[idx].label.bytes, href);
-    }
+    if label.count > 0 { unused BuilderAppend(doc.links[idx].label.bytes, label) }
+    else { unused BuilderAppend(doc.links[idx].label.bytes, href) }
     doc.links[idx].body_offset = body_offset;
     doc.link_count += 1;
 }
 
-FlushTable :: (cells_text: []Text, cells_meta: []Table.Cell, nrows: s32, ncols: s32, out: *Text) {
-    if nrows <= 0 || ncols <= 0 { return }
-    total_cells := cast(s64)nrows * cast(s64)ncols;
-    if total_cells > cells_meta.count { return }
-    unused Table.LayoutTable(cells_meta[:total_cells], ncols, nrows);
-    EnsureNewlines(out, 2);
-    for r: 0..cast(s64)nrows-1 {
-        for c: 0..cast(s64)ncols-1 {
-            idx := r * cast(s64)ncols + c;
-            if !cells_meta[idx].present { continue }
-            if c > 0 { unused BuilderAppend(out.bytes, " | ") }
-            txt := TextView(cells_text[idx]);
-            unused BuilderAppend(out.bytes, txt);
-            pad := (cells_meta[idx].out_w / 8) - cast(s32)txt.count;
-            while pad > 0 {
-                unused VecPush(out.bytes, 32);
-                pad -= 1;
-            }
-        }
-        EnsureNewlines(out, 1);
+// Compute CSS style for (tag, class, inline style attr) using Sheet + Units + Font.
+ResolveBlockStyle :: (sheet: *Sheet.Sheet, tag: string, cls: string, inline_style: string) -> (color: s32, bg: s32, margin_left: s32, margin_top: s32, margin_bottom: s32, line_h: s32, bold: bool, align_center: bool) {
+    st: Sheet.Style;
+    Sheet.InitStyle(sheet, *st);
+    Sheet.StyleAdd(sheet, *st, tag, cls);
+    if inline_style.count > 0 {
+        decls: CSS.DeclList;
+        CSS.ParseDecls(inline_style, *decls);
+        Sheet.StyleAddDecls(sheet, *st, *decls);
     }
-    EnsureNewlines(out, 2);
+    color := ParseCssColor(TextView(st.attrs[ST_COLOR]), 0x111111);
+    bg := ParseCssColor(TextView(st.attrs[ST_BG]), -1);
+    ml_len, ml_ok := Units.LengthPx(TextView(st.attrs[ST_MARGIN_LEFT]), 12, 6, 100);
+    mt_len, mt_ok := Units.LengthPx(TextView(st.attrs[ST_MARGIN_TOP]), 12, 6, 100);
+    mb_len, mb_ok := Units.LengthPx(TextView(st.attrs[ST_MARGIN_BOTTOM]), 12, 6, 100);
+    ml: s32 = ifx ml_ok && ml_len >= 0 then cast(s32)ml_len else 0;
+    mt: s32 = ifx mt_ok && mt_len >= 0 then cast(s32)mt_len else 0;
+    mb: s32 = ifx mb_ok && mb_len >= 0 then cast(s32)mb_len else 0;
+
+    // Use cssfont to determine weight/size
+    fspec: Font.Spec = .{
+        family = TextView(st.attrs[ST_FONT_FAMILY]),
+        style = TextView(st.attrs[ST_FONT_STYLE]),
+        weight = TextView(st.attrs[ST_FONT_WEIGHT]),
+        size = TextView(st.attrs[ST_FONT_SIZE]),
+    };
+    _, em_px, _ := Font.GetFont(fspec, 12, 6);
+    line_h: s32 = ifx em_px > 16 then em_px + 6 else 18;
+    fw := TextView(st.attrs[ST_FONT_WEIGHT]);
+    bold := fw == "bold" || fw == "bolder" || fw == "700" || TagEquals(tag, "h1") || TagEquals(tag, "h2") || TagEquals(tag, "h3") || TagEquals(tag, "b") || TagEquals(tag, "strong");
+    ta := TextView(st.attrs[ST_TEXT_ALIGN]);
+    align_center := ta == "center" || TagEquals(tag, "center");
+    return color, bg, ml, mt, mb, line_h, bold, align_center;
 }
 
-// Full HTML/OEB extraction with CSS <style> parsing, anchors, links, tables, lists, images, and <pre>.
-ExtractText :: (html: string, doc: *Document) {
+PushWrappedBlock :: (doc: *Document, text: string, href: string, file_offset: s64, margin_left: s32, color: s32, bg: s32, line_h: s32, bold: bool, align_center: bool, page_w: s32, page_h: s32, cur_y: *s32, cur_page: *s32) {
+    if text.count == 0 { return }
+    avail_w := page_w - 20 - margin_left;
+    if avail_w < 80 { avail_w = 80 }
+    max_chars := avail_w / 7;
+    if max_chars < 10 { max_chars = 10 }
+
+    p: s64 = 0;
+    while p < text.count {
+        // Skip leading spaces
+        while p < text.count && text[p] == 32 { p += 1 }
+        if p >= text.count { break }
+
+        // Find break point within max_chars or newline
+        end := p;
+        last_sp: s64 = -1;
+        while end < text.count && (end - p) < cast(s64)max_chars {
+            if text[end] == 10 { break }
+            if text[end] == 32 { last_sp = end }
+            end += 1;
+        }
+        if end < text.count && text[end] != 10 && text[end] != 32 && last_sp > p {
+            end = last_sp;
+        }
+        line := text[p:end];
+        p = end;
+        if p < text.count && text[p] == 10 { p += 1 }
+
+        // Paginate if exceeding page_h
+        if <<cur_y + line_h > page_h - 12 && <<cur_y > 16 {
+            <<cur_page += 1;
+            <<cur_y = 14;
+            if <<cur_page < MAX_PAGES {
+                doc.pages[<<cur_page] = .{start = doc.body.bytes.count, end = doc.body.bytes.count, file_offset = file_offset, y_offset = 0};
+            }
+        }
+
+        lw := cast(s32)line.count * 7;
+        x := 10 + margin_left;
+        if align_center && lw < avail_w {
+            x = 10 + margin_left + (avail_w - lw) / 2;
+        }
+
+        idx := doc.items.count;
+        unused VecResize(doc.items, idx + 1);
+        it := *doc.items[idx];
+        it.kind = ifx href.count > 0 then LI_LINK else LI_TEXT;
+        it.page = <<cur_page;
+        it.x = x;
+        it.y = <<cur_y;
+        it.w = lw;
+        it.h = line_h;
+        it.color = ifx href.count > 0 then 0x0000cc else color;
+        it.bg_color = bg;
+        it.bold = bold;
+        it.underline = href.count > 0;
+        it.file_offset = file_offset;
+        unused BuilderAppend(it.text.bytes, line);
+        if href.count > 0 { unused BuilderAppend(it.href.bytes, href) }
+
+        <<cur_y += line_h;
+    }
+}
+
+// Compact MAX_TABLE_COLS-strided table cells into ncols-strided row-major order and lay out with Table.LayoutTable.
+FlushTableLayout :: (doc: *Document, cells_text: []Text, cells_meta: []Table.Cell, nrows: s32, ncols: s32, file_offset: s64, page_w: s32, page_h: s32, cur_y: *s32, cur_page: *s32) {
+    if nrows <= 0 || ncols <= 0 { return }
+    total := cast(s64)nrows * cast(s64)ncols;
+    if total > MAX_TABLE_ROWS * MAX_TABLE_COLS { return }
+
+    compact_text: Vec(Text);
+    compact_meta: Vec(Table.Cell);
+    unused VecResize(compact_text, total);
+    unused VecResize(compact_meta, total);
+
+    for r: 0..cast(s64)nrows-1 {
+        for col: 0..cast(s64)ncols-1 {
+            src_i := r * MAX_TABLE_COLS + col;
+            dst_i := r * cast(s64)ncols + col;
+            compact_meta[dst_i] = cells_meta[src_i];
+            if cells_meta[src_i].present {
+                unused BuilderAppend(compact_text[dst_i].bytes, TextView(cells_text[src_i]));
+            }
+        }
+    }
+
+    cm_slice := VecSlice(compact_meta, 0, total);
+    _, total_h := Table.LayoutTable(cm_slice, ncols, nrows);
+
+    if <<cur_y + total_h > page_h - 12 && <<cur_y > 16 {
+        <<cur_page += 1;
+        <<cur_y = 14;
+        if <<cur_page < MAX_PAGES {
+            doc.pages[<<cur_page] = .{start = doc.body.bytes.count, end = doc.body.bytes.count, file_offset = file_offset, y_offset = 0};
+        }
+    }
+
+    base_y := <<cur_y;
+    EnsureNewlines(*doc.body, 2);
+    for r: 0..cast(s64)nrows-1 {
+        for col: 0..cast(s64)ncols-1 {
+            idx := r * cast(s64)ncols + col;
+            if !cm_slice[idx].present { continue }
+            txt := TextView(compact_text[idx]);
+            if col > 0 { unused BuilderAppend(doc.body.bytes, " | ") }
+            unused BuilderAppend(doc.body.bytes, txt);
+
+            lidx := doc.items.count;
+            unused VecResize(doc.items, lidx + 1);
+            it := *doc.items[lidx];
+            it.kind = LI_TABLE_CELL;
+            it.page = <<cur_page;
+            it.x = 12 + cm_slice[idx].out_x;
+            it.y = base_y + cm_slice[idx].out_y;
+            it.w = ifx cm_slice[idx].out_w > 24 then cm_slice[idx].out_w else 24;
+            it.h = ifx cm_slice[idx].out_h > 18 then cm_slice[idx].out_h else 18;
+            it.color = 0x111111;
+            it.bg_color = 0xf7fafc;
+            it.file_offset = file_offset;
+            unused BuilderAppend(it.text.bytes, txt);
+        }
+        EnsureNewlines(*doc.body, 1);
+    }
+    EnsureNewlines(*doc.body, 2);
+    <<cur_y = base_y + total_h + 8;
+}
+
+// Full HTML/OEB extraction + CSS block/flow layout + pagination.
+LayoutDocument :: (html: string, doc: *Document, page_w: s32, page_h: s32) {
     unused VecResize(doc.title.bytes, 0);
     unused VecResize(doc.body.bytes, 0);
+    unused VecResize(doc.items, 0);
     doc.anchor_count = 0;
     doc.link_count = 0;
     doc.css_rules_parsed = 0;
     doc.table_count = 0;
     doc.image_count = 0;
+    doc.page_count = 1;
+    doc.current_page = 0;
+    doc.pages[0] = .{start = 0, end = 0, file_offset = 0, y_offset = 0};
     InitDefaultStylesheet(*doc.sheet);
 
     in_style := false;
@@ -259,20 +480,33 @@ ExtractText :: (html: string, doc: *Document) {
     cur_link_label: Text;
     cur_link_body_off: s64 = 0;
 
-    // Table accumulator
-    t_cells_text: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Text;
-    t_cells_meta: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Table.Cell;
+    cur_block: Text;
+    cur_block_off: s64 = 0;
+    cur_color: s32 = 0x111111;
+    cur_bg: s32 = -1;
+    cur_ml: s32 = 0;
+    cur_lh: s32 = 18;
+    cur_bold: bool = false;
+    cur_center: bool = false;
+
+    cur_y: s32 = 14;
+    cur_page: s32 = 0;
+
+    t_cells_text: Vec(Text);
+    t_cells_meta: Vec(Table.Cell);
+    unused VecResize(t_cells_text, MAX_TABLE_ROWS * MAX_TABLE_COLS);
+    unused VecResize(t_cells_meta, MAX_TABLE_ROWS * MAX_TABLE_COLS);
     t_rows: s32 = 0;
     t_cols: s32 = 0;
     t_cur_col: s32 = 0;
     t_cur_idx: s64 = -1;
+    t_file_off: s64 = 0;
 
     i: s64 = 0;
     while i < html.count {
         c := html[i];
         if c == 60 { // '<'
             tag_file_off := i;
-            // Skip HTML comments <!-- ... -->
             if i + 3 < html.count && html[i + 1] == 33 && html[i + 2] == 45 && html[i + 3] == 45 {
                 j := i + 4;
                 while j + 2 < html.count {
@@ -300,7 +534,7 @@ ExtractText :: (html: string, doc: *Document) {
             if !closing {
                 id_val: Text;
                 if Pkg.FindAttr(attrs, "id", *id_val) {
-                    RecordAnchor(doc, TextView(id_val), tag_file_off);
+                    RecordAnchor(doc, TextView(id_val), tag_file_off, cur_page);
                 }
             }
 
@@ -319,31 +553,68 @@ ExtractText :: (html: string, doc: *Document) {
                 in_script = !closing;
             } else if TagEquals(tname, "title") {
                 in_title = !closing;
-            } else if TagEquals(tname, "pre") {
-                in_pre = !closing;
-                EnsureNewlines(*doc.body, 2);
-                last_space = true;
             } else if TagEquals(tname, "a") {
                 if !closing {
                     aname: Text;
                     if Pkg.FindAttr(attrs, "name", *aname) {
-                        RecordAnchor(doc, TextView(aname), tag_file_off);
+                        RecordAnchor(doc, TextView(aname), tag_file_off, cur_page);
                     }
                     if Pkg.FindAttr(attrs, "href", *cur_link_href) {
+                        if cur_block.bytes.count > 0 {
+                            PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                            unused VecResize(cur_block.bytes, 0);
+                        }
                         in_link = true;
                         unused VecResize(cur_link_label.bytes, 0);
                         cur_link_body_off = doc.body.bytes.count;
+                        cur_block_off = tag_file_off;
                     }
                 } else if in_link {
                     RecordLink(doc, TextView(cur_link_href), TextView(cur_link_label), cur_link_body_off);
+                    PushWrappedBlock(doc, TextView(cur_link_label), TextView(cur_link_href), cur_block_off, cur_ml, 0x0000cc, cur_bg, cur_lh, false, cur_center, page_w, page_h, *cur_y, *cur_page);
                     in_link = false;
                 }
             } else if TagEquals(tname, "img") && !closing {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
+                }
                 doc.image_count += 1;
-                alt_t: Text;
-                src_t: Text;
+                alt_t: Text; src_t: Text; w_t: Text; h_t: Text;
                 unused Pkg.FindAttr(attrs, "alt", *alt_t);
                 unused Pkg.FindAttr(attrs, "src", *src_t);
+                unused Pkg.FindAttr(attrs, "width", *w_t);
+                unused Pkg.FindAttr(attrs, "height", *h_t);
+                iw := ParseIntAttr(TextView(w_t), 120);
+                ih := ParseIntAttr(TextView(h_t), 80);
+                if iw > page_w - 24 { iw = page_w - 24 }
+                if ih > page_h - 40 { ih = page_h - 40 }
+                if cur_y + ih > page_h - 12 && cur_y > 16 {
+                    cur_page += 1;
+                    cur_y = 14;
+                    if cur_page < MAX_PAGES {
+                        doc.pages[cur_page] = .{start = doc.body.bytes.count, end = doc.body.bytes.count, file_offset = tag_file_off, y_offset = 0};
+                    }
+                }
+                lidx := doc.items.count;
+                unused VecResize(doc.items, lidx + 1);
+                it := *doc.items[lidx];
+                it.kind = LI_IMAGE;
+                it.page = cur_page;
+                it.x = 12 + cur_ml;
+                it.y = cur_y;
+                it.w = iw;
+                it.h = ih;
+                it.img_w = iw;
+                it.img_h = ih;
+                it.color = 0x333333;
+                it.bg_color = 0xeeeeee;
+                it.file_offset = tag_file_off;
+                unused BuilderAppend(it.img_src.bytes, TextView(src_t));
+                if alt_t.bytes.count > 0 { unused BuilderAppend(it.text.bytes, TextView(alt_t)) }
+                else { unused BuilderAppend(it.text.bytes, TextView(src_t)) }
+                cur_y += ih + 8;
+
                 unused BuilderAppend(doc.body.bytes, "[Image: ");
                 if alt_t.bytes.count > 0 { unused BuilderAppend(doc.body.bytes, TextView(alt_t)) }
                 else if src_t.bytes.count > 0 { unused BuilderAppend(doc.body.bytes, TextView(src_t)) }
@@ -351,19 +622,89 @@ ExtractText :: (html: string, doc: *Document) {
                 unused BuilderAppend(doc.body.bytes, "]");
                 last_space = false;
             } else if TagEquals(tname, "hr") {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
+                }
+                lidx := doc.items.count;
+                unused VecResize(doc.items, lidx + 1);
+                it := *doc.items[lidx];
+                it.kind = LI_RULE;
+                it.page = cur_page;
+                it.x = 10;
+                it.y = cur_y + 4;
+                it.w = page_w - 20;
+                it.h = 2;
+                it.color = 0x888888;
+                it.file_offset = tag_file_off;
+                cur_y += 12;
                 EnsureNewlines(*doc.body, 1);
                 unused BuilderAppend(doc.body.bytes, "----------------------------------------");
                 EnsureNewlines(*doc.body, 2);
                 last_space = true;
             } else if TagEquals(tname, "br") {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
+                } else {
+                    cur_y += 12;
+                }
                 EnsureNewlines(*doc.body, 1);
                 last_space = true;
-            } else if TagEquals(tname, "blockquote") {
-                if !closing { blockquote_depth += 1 }
-                else if blockquote_depth > 0 { blockquote_depth -= 1 }
-                EnsureNewlines(*doc.body, 2);
+            } else if TagEquals(tname, "table") {
+                if !closing {
+                    if cur_block.bytes.count > 0 {
+                        PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                        unused VecResize(cur_block.bytes, 0);
+                    }
+                    in_table = true; in_cell = false;
+                    t_rows = 0; t_cols = 0; t_cur_col = 0; t_cur_idx = -1;
+                    t_file_off = tag_file_off;
+                    doc.table_count += 1;
+                    for ci: 0..t_cells_meta.count-1 {
+                        t_cells_meta[ci] = .{};
+                        unused VecResize(t_cells_text[ci].bytes, 0);
+                    }
+                } else if in_table {
+                    FlushTableLayout(doc, VecSlice(t_cells_text, 0, t_cells_text.count), VecSlice(t_cells_meta, 0, t_cells_meta.count), t_rows, t_cols, t_file_off, page_w, page_h, *cur_y, *cur_page);
+                    in_table = false; in_cell = false;
+                }
+                last_space = true;
+            } else if in_table && TagEquals(tname, "tr") {
+                if !closing && t_rows < MAX_TABLE_ROWS {
+                    t_rows += 1; t_cur_col = 0; in_cell = false;
+                }
+            } else if in_table && (TagEquals(tname, "td") || TagEquals(tname, "th")) {
+                if !closing {
+                    if t_rows == 0 { t_rows = 1 }
+                    if t_cur_col < MAX_TABLE_COLS {
+                        cs_t: Text; rs_t: Text;
+                        unused Pkg.FindAttr(attrs, "colspan", *cs_t);
+                        unused Pkg.FindAttr(attrs, "rowspan", *rs_t);
+                        sx := ParseIntAttr(TextView(cs_t), 1);
+                        sy := ParseIntAttr(TextView(rs_t), 1);
+                        r0 := t_rows - 1;
+                        idx := cast(s64)r0 * MAX_TABLE_COLS + cast(s64)t_cur_col;
+                        t_cells_meta[idx] = .{present = true, span_x = sx, span_y = sy, req_w = 32, req_h = 20};
+                        unused VecResize(t_cells_text[idx].bytes, 0);
+                        t_cur_idx = idx;
+                        t_cur_col += sx;
+                        if t_cur_col > t_cols { t_cols = t_cur_col }
+                        in_cell = true;
+                    }
+                } else {
+                    if t_cur_idx >= 0 {
+                        w := cast(s32)(t_cells_text[t_cur_idx].bytes.count * 7 + 12);
+                        if w > t_cells_meta[t_cur_idx].req_w { t_cells_meta[t_cur_idx].req_w = w }
+                    }
+                    in_cell = false; t_cur_idx = -1;
+                }
                 last_space = true;
             } else if TagEquals(tname, "ul") || TagEquals(tname, "ol") {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
+                }
                 if !closing && list_depth < 16 {
                     list_ordered[list_depth] = TagEquals(tname, "ol");
                     list_counter[list_depth] = 0;
@@ -374,104 +715,85 @@ ExtractText :: (html: string, doc: *Document) {
                 EnsureNewlines(*doc.body, 2);
                 last_space = true;
             } else if TagEquals(tname, "li") {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
+                }
                 EnsureNewlines(*doc.body, 1);
                 if !closing {
+                    cur_block_off = tag_file_off;
+                    cur_ml = 16 * (ifx list_depth > 0 then list_depth else 1);
                     if list_depth > 0 {
                         d := list_depth - 1;
                         list_counter[d] += 1;
+                        AppendListMarker(list_ordered[d], list_counter[d], "decimal", *cur_block);
                         AppendListMarker(list_ordered[d], list_counter[d], "decimal", *doc.body);
                     } else {
-                        unused BuilderAppend(doc.body.bytes, "  * ");
+                        unused BuilderAppend(cur_block.bytes, "* ");
+                        unused BuilderAppend(doc.body.bytes, "* ");
                     }
                 }
                 last_space = true;
-            } else if TagEquals(tname, "dt") || TagEquals(tname, "dd") {
-                EnsureNewlines(*doc.body, 1);
-                if !closing && TagEquals(tname, "dd") {
-                    unused BuilderAppend(doc.body.bytes, "    ");
+            } else if TagEquals(tname, "blockquote") {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
                 }
-                last_space = true;
-            } else if TagEquals(tname, "table") {
-                if !closing {
-                    in_table = true;
-                    in_cell = false;
-                    t_rows = 0;
-                    t_cols = 0;
-                    t_cur_col = 0;
-                    t_cur_idx = -1;
-                    doc.table_count += 1;
-                    for ci: 0..t_cells_meta.count-1 {
-                        t_cells_meta[ci] = .{};
-                        unused VecResize(t_cells_text[ci].bytes, 0);
-                    }
-                } else if in_table {
-                    FlushTable(t_cells_text[:], t_cells_meta[:], t_rows, t_cols, *doc.body);
-                    in_table = false;
-                    in_cell = false;
-                }
-                last_space = true;
-            } else if in_table && TagEquals(tname, "tr") {
-                if !closing && t_rows < MAX_TABLE_ROWS {
-                    t_rows += 1;
-                    t_cur_col = 0;
-                    in_cell = false;
-                }
-            } else if in_table && (TagEquals(tname, "td") || TagEquals(tname, "th")) {
-                if !closing {
-                    if t_rows == 0 { t_rows = 1 }
-                    if t_cur_col < MAX_TABLE_COLS {
-                        cs_t: Text;
-                        rs_t: Text;
-                        unused Pkg.FindAttr(attrs, "colspan", *cs_t);
-                        unused Pkg.FindAttr(attrs, "rowspan", *rs_t);
-                        sx := ParseIntAttr(TextView(cs_t), 1);
-                        sy := ParseIntAttr(TextView(rs_t), 1);
-                        r0 := t_rows - 1;
-                        idx := cast(s64)r0 * MAX_TABLE_COLS + cast(s64)t_cur_col;
-                        t_cells_meta[idx] = .{present = true, span_x = sx, span_y = sy, req_w = 16, req_h = 16};
-                        unused VecResize(t_cells_text[idx].bytes, 0);
-                        t_cur_idx = idx;
-                        t_cur_col += sx;
-                        if t_cur_col > t_cols { t_cols = t_cur_col }
-                        in_cell = true;
-                    }
-                } else {
-                    if t_cur_idx >= 0 {
-                        w := cast(s32)(t_cells_text[t_cur_idx].bytes.count * 8);
-                        if w > t_cells_meta[t_cur_idx].req_w { t_cells_meta[t_cur_idx].req_w = w }
-                    }
-                    in_cell = false;
-                    t_cur_idx = -1;
-                }
+                if !closing { blockquote_depth += 1 }
+                else if blockquote_depth > 0 { blockquote_depth -= 1 }
+                cur_ml = blockquote_depth * 24;
+                EnsureNewlines(*doc.body, 2);
                 last_space = true;
             } else if TagEquals(tname, "p") || TagEquals(tname, "div") ||
                       TagEquals(tname, "h1") || TagEquals(tname, "h2") || TagEquals(tname, "h3") ||
                       TagEquals(tname, "h4") || TagEquals(tname, "h5") || TagEquals(tname, "h6") ||
-                      TagEquals(tname, "center") {
-                EnsureNewlines(*doc.body, 2);
-                if !closing && blockquote_depth > 0 {
-                    for q: 0..cast(s64)blockquote_depth-1 { unused BuilderAppend(doc.body.bytes, "  ") }
+                      TagEquals(tname, "center") || TagEquals(tname, "pre") {
+                if cur_block.bytes.count > 0 {
+                    PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
+                    unused VecResize(cur_block.bytes, 0);
                 }
+                if TagEquals(tname, "pre") { in_pre = !closing }
+                if !closing {
+                    cls_t: Text; sty_t: Text;
+                    unused Pkg.FindAttr(attrs, "class", *cls_t);
+                    unused Pkg.FindAttr(attrs, "style", *sty_t);
+                    col, bg, ml, mt, _, lh, bld, ctr := ResolveBlockStyle(*doc.sheet, tname, TextView(cls_t), TextView(sty_t));
+                    cur_color = col;
+                    cur_bg = bg;
+                    cur_ml = ml + blockquote_depth * 24;
+                    cur_lh = lh;
+                    cur_bold = bld;
+                    cur_center = ctr;
+                    cur_y += mt;
+                    cur_block_off = tag_file_off;
+                } else {
+                    cur_color = 0x111111;
+                    cur_bg = -1;
+                    cur_ml = blockquote_depth * 24;
+                    cur_lh = 18;
+                    cur_bold = false;
+                    cur_center = false;
+                    cur_y += 6;
+                }
+                EnsureNewlines(*doc.body, 2);
                 last_space = true;
             }
             continue;
         }
-        if in_style {
-            unused VecPush(style_buf.bytes, c);
-            i += 1;
-            continue;
-        }
+        if in_style { unused VecPush(style_buf.bytes, c); i += 1; continue }
         if in_script { i += 1; continue }
-        if c == 38 { // '&'
+        if c == 38 {
             semi := i + 1;
             while semi < html.count && semi - i < 12 && html[semi] != 59 && html[semi] != 32 && html[semi] != 60 { semi += 1 }
             if semi < html.count && html[semi] == 59 {
                 ent := html[i + 1:semi];
                 if in_title { AppendEntity(ent, *doc.title) }
                 else if in_table && in_cell && t_cur_idx >= 0 { AppendEntity(ent, *t_cells_text[t_cur_idx]) }
+                else if in_link { AppendEntity(ent, *cur_link_label); AppendEntity(ent, *doc.body); last_space = false }
                 else {
+                    if cur_block.bytes.count == 0 { cur_block_off = i }
+                    AppendEntity(ent, *cur_block);
                     AppendEntity(ent, *doc.body);
-                    if in_link { AppendEntity(ent, *cur_link_label) }
                     last_space = false;
                 }
                 i = semi + 1;
@@ -480,6 +802,7 @@ ExtractText :: (html: string, doc: *Document) {
         }
         if in_pre {
             unused VecPush(doc.body.bytes, c);
+            unused VecPush(cur_block.bytes, c);
             i += 1;
             continue;
         }
@@ -491,6 +814,7 @@ ExtractText :: (html: string, doc: *Document) {
             } else if !last_space {
                 unused VecPush(doc.body.bytes, 32);
                 if in_link { unused VecPush(cur_link_label.bytes, 32) }
+                else { unused VecPush(cur_block.bytes, 32) }
                 last_space = true;
             }
         } else {
@@ -501,81 +825,72 @@ ExtractText :: (html: string, doc: *Document) {
             } else {
                 unused VecPush(doc.body.bytes, c);
                 if in_link { unused VecPush(cur_link_label.bytes, c) }
+                else {
+                    if cur_block.bytes.count == 0 { cur_block_off = i }
+                    unused VecPush(cur_block.bytes, c);
+                }
                 last_space = false;
             }
         }
         i += 1;
     }
 
-    // Re-pack table cells into compact row-major array if a table was closed early.
-    if in_table {
-        compact_text: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Text;
-        compact_meta: [MAX_TABLE_ROWS * MAX_TABLE_COLS]Table.Cell;
-        for r: 0..cast(s64)t_rows-1 {
-            for col: 0..cast(s64)t_cols-1 {
-                src_i := r * MAX_TABLE_COLS + col;
-                dst_i := r * cast(s64)t_cols + col;
-                compact_meta[dst_i] = t_cells_meta[src_i];
-                unused BuilderAppend(compact_text[dst_i].bytes, TextView(t_cells_text[src_i]));
-            }
-        }
-        FlushTable(compact_text[:], compact_meta[:], t_rows, t_cols, *doc.body);
+    if cur_block.bytes.count > 0 {
+        PushWrappedBlock(doc, TextView(cur_block), "", cur_block_off, cur_ml, cur_color, cur_bg, cur_lh, cur_bold, cur_center, page_w, page_h, *cur_y, *cur_page);
     }
+    if in_table {
+        FlushTableLayout(doc, VecSlice(t_cells_text, 0, t_cells_text.count), VecSlice(t_cells_meta, 0, t_cells_meta.count), t_rows, t_cols, t_file_off, page_w, page_h, *cur_y, *cur_page);
+    }
+
+    doc.page_count = cur_page + 1;
+    if doc.page_count > MAX_PAGES { doc.page_count = MAX_PAGES }
+    for p: 0..cast(s64)doc.page_count-1 {
+        doc.pages[p].end = ifx p + 1 < cast(s64)doc.page_count then doc.pages[p + 1].start else doc.body.bytes.count;
+    }
+}
+
+// Backwards-compatible wrappers for existing unit tests
+ExtractText :: (html: string, doc: *Document) {
+    LayoutDocument(html, doc, 380, 520);
 }
 
 Paginate :: (doc: *Document, cols: s32, rows: s32) {
-    doc.page_count = 0;
-    doc.current_page = 0;
-    doc.history_count = 1;
-    doc.history_pos = 0;
-    doc.history[0] = 0;
-
-    c := ifx cols < 16 then 16 else cols;
-    r := ifx rows < 4 then 4 else rows;
-    text := TextView(doc.body);
-    if text.count == 0 {
-        doc.pages[0] = .{start = 0, end = 0, file_offset = 0};
+    unused cols; unused rows;
+    if doc.page_count <= 0 {
+        doc.pages[0] = .{start = 0, end = doc.body.bytes.count, file_offset = 0, y_offset = 0};
         doc.page_count = 1;
-        return;
-    }
-
-    pos: s64 = 0;
-    while pos < text.count && doc.page_count < MAX_PAGES {
-        page_start := pos;
-        lines: s32 = 0;
-        col: s32 = 0;
-        while pos < text.count && lines < r {
-            ch := text[pos];
-            pos += 1;
-            if ch == 10 {
-                lines += 1;
-                col = 0;
-            } else {
-                col += 1;
-                if col >= c {
-                    lines += 1;
-                    col = 0;
-                }
-            }
-        }
-        doc.pages[doc.page_count] = .{start = page_start, end = pos, file_offset = page_start};
-        doc.page_count += 1;
     }
 }
 
-PageForOffset :: (doc: *Document, body_offset: s64) -> s32 {
-    for p: 0..cast(s64)doc.page_count-1 {
-        if body_offset >= doc.pages[p].start && body_offset < doc.pages[p].end {
-            return cast(s32)p;
+HitLink :: (doc: *Document, page: s32, px: s32, py: s32) -> s64 {
+    for i: 0..doc.items.count-1 {
+        it := *doc.items[i];
+        if it.page != page || it.kind != LI_LINK { continue }
+        if px >= it.x && px <= it.x + it.w + 8 && py >= it.y - 4 && py <= it.y + it.h {
+            return i;
         }
     }
-    return 0;
+    return -1;
+}
+
+HitFileOffset :: (doc: *Document, page: s32, py: s32) -> s64 {
+    best: s64 = ifx page >= 0 && page < doc.page_count then doc.pages[page].file_offset else 0;
+    for i: 0..doc.items.count-1 {
+        it := *doc.items[i];
+        if it.page != page { continue }
+        if py >= it.y - 4 && py <= it.y + it.h + 4 {
+            return it.file_offset;
+        }
+    }
+    return best;
 }
 
 GotoAnchor :: (doc: *Document, frag: string) -> (page: s32, found: bool) {
     for i: 0..cast(s64)doc.anchor_count-1 {
         if TextView(doc.anchors[i].name) == frag {
-            p := PageForOffset(doc, doc.anchors[i].body_offset);
+            p := doc.anchors[i].page;
+            if p < 0 { p = 0 }
+            if p >= doc.page_count { p = doc.page_count - 1 }
             doc.current_page = p;
             return p, true;
         }
@@ -583,19 +898,89 @@ GotoAnchor :: (doc: *Document, frag: string) -> (page: s32, found: bool) {
     return -1, false;
 }
 
-// --- Annotation management & .annot file codec (matching ebook.b) ---
+// --- .i Index cache codec (exact ebook.b format) ---
+
+FormatIndex :: (doc: *Document, win_w: s32, win_h: s32, file_len: s64, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    b1: [24]u8; b2: [24]u8;
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.page_count, b1[:]));
+    unused BuilderAppend(out.bytes, " pages\nsize ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)win_w, b1[:]));
+    unused BuilderAppend(out.bytes, " ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)win_h, b2[:]));
+    unused BuilderAppend(out.bytes, "\nlength ");
+    unused BuilderAppend(out.bytes, FormatInteger(file_len, b1[:]));
+    unused BuilderAppend(out.bytes, "\n");
+    for p: 0..cast(s64)doc.page_count-1 {
+        unused BuilderAppend(out.bytes, FormatInteger(doc.pages[p].file_offset, b1[:]));
+        unused BuilderAppend(out.bytes, "\n");
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.pages[p].y_offset, b2[:]));
+        unused BuilderAppend(out.bytes, "\n");
+    }
+    for a: 0..cast(s64)doc.anchor_count-1 {
+        unused BuilderAppend(out.bytes, TextView(doc.anchors[a].name));
+        unused BuilderAppend(out.bytes, " ");
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.anchors[a].page, b1[:]));
+        unused BuilderAppend(out.bytes, "\n");
+    }
+}
+
+ValidateIndex :: (data: string, win_w: s32, win_h: s32, file_len: s64) -> (npages: s32, ok: bool) {
+    // Check header: "<N> pages\nsize <W> <H>\nlength <L>\n"
+    p: s64 = 0;
+    nl1 := p; while nl1 < data.count && data[nl1] != 10 { nl1 += 1 }
+    if nl1 >= data.count { return 0, false }
+    l1 := data[p:nl1];
+    np := ParseIntAttr(l1, 0);
+    if np <= 0 { return 0, false }
+    p = nl1 + 1;
+
+    nl2 := p; while nl2 < data.count && data[nl2] != 10 { nl2 += 1 }
+    if nl2 >= data.count { return 0, false }
+    l2 := data[p:nl2];
+    if l2.count < 6 || l2[0:5] != "size " { return 0, false }
+    sp: s64 = 5;
+    while sp < l2.count && l2[sp] != 32 { sp += 1 }
+    iw := ParseIntAttr(l2[5:sp], -1);
+    ih := ifx sp + 1 < l2.count then ParseIntAttr(l2[sp + 1:], -1) else -1;
+    if iw != win_w || ih != win_h { return 0, false }
+    p = nl2 + 1;
+
+    nl3 := p; while nl3 < data.count && data[nl3] != 10 { nl3 += 1 }
+    if nl3 >= data.count { return 0, false }
+    l3 := data[p:nl3];
+    if l3.count < 8 || l3[0:7] != "length " { return 0, false }
+    il := cast(s64)ParseIntAttr(l3[7:], -1);
+    if il != file_len { return 0, false }
+    return np, true;
+}
+
+// --- Annotation management & original ebook.b str->quoted .annot codec ---
+
+AppendQuotedWord :: (out: *Text, s: string) {
+    needs_q := s.count == 0;
+    for c: s {
+        if c == 32 || c == 9 || c == 10 || c == 39 { needs_q = true; break }
+    }
+    if !needs_q {
+        unused BuilderAppend(out.bytes, s);
+        return;
+    }
+    unused VecPush(out.bytes, 39);
+    for c: s {
+        if c == 39 { unused VecPush(out.bytes, 39) }
+        unused VecPush(out.bytes, c);
+    }
+    unused VecPush(out.bytes, 39);
+}
 
 AddOrUpdateAnnotation :: (doc: *Document, file_offset: s64, text: string) {
     for i: 0..cast(s64)doc.annotation_count-1 {
         if doc.annotations[i].file_offset == file_offset {
             if text.count == 0 {
-                // Delete annotation
                 for j: i..cast(s64)doc.annotation_count-2 {
                     doc.annotations[j].file_offset = doc.annotations[j + 1].file_offset;
-                    tmp: Text;
-                    unused BuilderAppend(tmp.bytes, TextView(doc.annotations[j + 1].text));
-                    unused VecResize(doc.annotations[j].text.bytes, 0);
-                    unused BuilderAppend(doc.annotations[j].text.bytes, TextView(tmp));
+                    VecSwap(doc.annotations[j].text.bytes, doc.annotations[j + 1].text.bytes);
                 }
                 doc.annotation_count -= 1;
                 return;
@@ -613,34 +998,56 @@ AddOrUpdateAnnotation :: (doc: *Document, file_offset: s64, text: string) {
     doc.annotation_count += 1;
 }
 
+// Original ebook.b format: space-separated quoted pairs "offset 'text' offset2 'text2'"
 FormatAnnotations :: (doc: *Document, out: *Text) {
     unused VecResize(out.bytes, 0);
     buf: [24]u8;
     for i: 0..cast(s64)doc.annotation_count-1 {
+        if i > 0 { unused VecPush(out.bytes, 32) }
         unused BuilderAppend(out.bytes, FormatInteger(doc.annotations[i].file_offset, buf[:]));
         unused VecPush(out.bytes, 32);
-        unused BuilderAppend(out.bytes, TextView(doc.annotations[i].text));
-        unused VecPush(out.bytes, 10);
+        AppendQuotedWord(out, TextView(doc.annotations[i].text));
     }
 }
 
 ParseAnnotations :: (data: string, doc: *Document) {
     doc.annotation_count = 0;
-    i: s64 = 0;
-    while i < data.count && doc.annotation_count < MAX_ANNOTATIONS {
-        start := i;
-        while i < data.count && data[i] != 10 { i += 1 }
-        line := data[start:i];
-        if i < data.count && data[i] == 10 { i += 1 }
-        if line.count == 0 { continue }
-        sp: s64 = 0;
-        while sp < line.count && line[sp] != 32 { sp += 1 }
-        if sp == 0 || sp + 1 >= line.count { continue }
-        off: s64 = 0;
-        for k: 0..sp-1 {
-            if line[k] >= 48 && line[k] <= 57 { off = off * 10 + cast(s64)(line[k] - 48) }
+    // Parse Inferno str->unquoted tokens (pairs of offset, text)
+    toks: Vec(Text);
+    p: s64 = 0;
+    while p < data.count {
+        while p < data.count && (data[p] == 32 || data[p] == 9 || data[p] == 10 || data[p] == 13) { p += 1 }
+        if p >= data.count { break }
+        idx := toks.count;
+        unused VecResize(toks, idx + 1);
+        if data[p] == 39 { // single-quoted word
+            p += 1;
+            while p < data.count {
+                if data[p] == 39 {
+                    if p + 1 < data.count && data[p + 1] == 39 {
+                        unused VecPush(toks[idx].bytes, 39);
+                        p += 2;
+                    } else {
+                        p += 1;
+                        break;
+                    }
+                } else {
+                    unused VecPush(toks[idx].bytes, data[p]);
+                    p += 1;
+                }
+            }
+        } else {
+            while p < data.count && data[p] != 32 && data[p] != 9 && data[p] != 10 && data[p] != 13 {
+                unused VecPush(toks[idx].bytes, data[p]);
+                p += 1;
+            }
         }
-        AddOrUpdateAnnotation(doc, off, line[sp + 1:]);
+    }
+    i: s64 = 0;
+    while i + 1 < toks.count {
+        off := cast(s64)ParseIntAttr(TextView(toks[i]), 0);
+        AddOrUpdateAnnotation(doc, off, TextView(toks[i + 1]));
+        i += 2;
     }
 }
 
@@ -668,28 +1075,6 @@ GotoPage :: (doc: *Document, page: s32) -> bool {
     }
     doc.current_page = p;
     return true;
-}
-
-HistoryBack :: (doc: *Document) -> bool {
-    if doc.history_pos <= 0 { return false }
-    doc.history_pos -= 1;
-    doc.current_page = doc.history[doc.history_pos];
-    return true;
-}
-
-HistoryForward :: (doc: *Document) -> bool {
-    if doc.history_pos + 1 >= doc.history_count { return false }
-    doc.history_pos += 1;
-    doc.current_page = doc.history[doc.history_pos];
-    return true;
-}
-
-FormatPageLabel :: (doc: *Document, out: *Text) {
-    unused VecResize(out.bytes, 0);
-    buf: [24]u8;
-    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)(doc.current_page + 1), buf[:]));
-    unused BuilderAppend(out.bytes, " / ");
-    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)doc.page_count, buf[:]));
 }
 
 FormatSectionPageLabel :: (section_id: string, doc: *Document, out: *Text) {

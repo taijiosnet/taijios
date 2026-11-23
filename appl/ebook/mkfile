@@ -1,36 +1,23 @@
 <../../mkconfig
 
-TARG=\
-	cssfont.dis\
-	cssparser.dis\
-	ebook.dis\
-	mimeimage.dis\
-	oebpackage.dis\
-	reader.dis\
-	strmap.dis\
-	stylesheet.dis\
-	table.dis\
-	units.dis\
-
-MODULES=\
-	cssfont.m\
-	cssparser.m\
-	mimeimage.m\
-	oebpackage.m\
-	reader.m\
-	strcache.m\
-	strmap.m\
-	stylesheet.m\
-	units.m\
-	table.m\
-
-SYSMODULES=\
-	css.m\
-	draw.m\
-	sys.m\
-	tk.m\
-	xml.m\
-
 DISBIN=$ROOT/dis/ebook
 
-<$ROOT/mkfiles/mkdis
+ALL=$DISBIN/ebook.zx
+
+all:V: ebook.zx
+
+ebook.zx: ebook.zi reader_model.zi oebpackage.zi mimeimage.zi cssparser.zi stylesheet.zi cssfont.zi table.zi units.zi strmap.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi mkfile
+	ziran bundle --project --root . --define TK_MENU --module-path . --module-path ../cmd/tcltk --module-path ../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --entry ebook:main -o $target ebook.zi
+
+$DISBIN/ebook.zx: ebook.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 ebook.zx "$staged" && mv "$staged" "$target"
+
+install:V: $ALL
+
+clean:V:
+	rm -f *.zx
+
+nuke:V: clean
+	rm -f $DISBIN/*.zx

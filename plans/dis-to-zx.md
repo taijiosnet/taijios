@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **693** open rows = **671** on-disk `dis/` files (**131** top-level `dis/*.dis` + **540** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **691** open rows = **669** on-disk `dis/` files (**129** top-level `dis/*.dis` + **540** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -23,7 +23,7 @@ Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window m
 
 Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
 
-Catalog applications that still need the legacy chain (38): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof qt readmail remotelogon reversi rmtdir rt sam sendmail sh sweeper telnet tetris unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
+Catalog applications that still need the legacy chain (36): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof qt readmail remotelogon reversi rmtdir rt sam sendmail sh telnet unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
 
 ## Column legend
 
@@ -222,11 +222,11 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 129 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 127 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh parity 83/84, gap: env isolation needs taijios_namespace ForkEnv; also open: ${pid} (Pid), pctl newns/newpgrp/nodevs. A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, sh/mload |
+| dis/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /dis/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh parity 85/86, gap: env isolation needs taijios_namespace ForkEnv; also open: ${pid} (Pid), pctl newns/newpgrp/nodevs. A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, sh/mload |
 | dis/9win.dis | appl/cmd/9win.b |  | - |  |
 | dis/B.dis | appl/cmd/B.b |  | - |  |
 | dis/acme.dis | appl/acme/acme.b |  | - |  |
@@ -290,7 +290,6 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/mprof.dis | appl/cmd/mprof.b |  | - |  |
 | dis/mv.dis | appl/cmd/mv.b |  | - |  |
 | dis/netkey.dis | appl/cmd/netkey.b |  | - |  |
-| dis/netstat.dis | appl/cmd/netstat.b |  | - |  |
 | dis/ns.dis | appl/cmd/ns.b |  | - |  |
 | dis/nsbuild.dis | appl/cmd/nsbuild.b |  | - |  |
 | dis/os.dis | appl/cmd/os.b |  | - |  |
@@ -299,7 +298,6 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/plumb.dis | appl/cmd/plumb.b |  | - |  |
 | dis/prof.dis | appl/cmd/prof.b |  | - |  |
 | dis/puttar.dis | appl/cmd/puttar.b |  | - |  |
-| dis/randpass.dis | appl/cmd/randpass.b |  | - |  |
 | dis/raw2iaf.dis | appl/cmd/raw2iaf.b |  | - |  |
 | dis/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
 | dis/rdp.dis | appl/cmd/rdp.b |  | - |  |
@@ -314,16 +312,16 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/sh/echo.dis | appl/cmd/sh/echo.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
 | dis/sh/expr.dis | appl/cmd/sh/expr.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_expr.zi); loaded only by sh.dis |
 | dis/sh/file2chan.dis | appl/cmd/sh/file2chan.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_file2chan.zi); loaded only by sh.dis |
-| dis/sh/mk.dis | appl/cmd/mk/mk.b |  | - |  |
-| dis/sh/mload.dis | appl/cmd/sh/mload.b |  | - |  |
-| dis/sh/mpexpr.dis | appl/cmd/sh/mpexpr.b |  | - |  |
+| dis/sh/mk.dis | appl/cmd/mk/mk.b |  | - | open: needs a Ziran mk (appl/cmd/mk/mk.b), the shell builtin form included |
+| dis/sh/mload.dis | appl/cmd/sh/mload.b |  | - | open: loads Dis modules as builtin namespaces; ZX has no loading of modules while running |
+| dis/sh/mpexpr.dis | appl/cmd/sh/mpexpr.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_mpexpr.zi, over taijios_keyring Big); loaded only by sh.dis |
 | dis/sh/regex.dis | appl/cmd/sh/regex.b | module/regex.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_regex.zi); loaded only by sh.dis |
 | dis/sh/sexprs.dis | appl/cmd/sh/sexprs.b | module/sexprs.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_sexprs.zi); loaded only by sh.dis |
 | dis/sh/sh.dis | appl/cmd/sh/sh.b | module/sh.m | - |  |
 | dis/sh/std.dis | appl/cmd/sh/std.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_std.zi); loaded only by sh.dis |
 | dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_string.zi); loaded only by sh.dis |
 | dis/sh/test.dis | appl/cmd/sh/test.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
-| dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - |  |
+| dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - | open: sh.zx has no Tk; the module needs a ZX Tk window API (lib/sh/win uses it) |
 | dis/sleep.dis | appl/cmd/sleep.b |  | - |  |
 | dis/sort.dis | appl/cmd/sort.b | module/sort.m | - |  |
 | dis/src.dis | appl/cmd/src.b |  | - |  |
@@ -457,7 +455,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 53 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 51 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -505,10 +503,8 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/wm/sendmail.dis | appl/wm/sendmail.b |  | - |  |
 | dis/wm/sh.dis | appl/wm/sh.b | module/sh.m | - |  |
 | dis/wm/smenu.dis | appl/wm/smenu.b |  | - |  |
-| dis/wm/sweeper.dis | appl/wm/sweeper.b |  | - |  |
 | dis/wm/task.dis | appl/wm/task.b |  | - |  |
 | dis/wm/telnet.dis | appl/wm/telnet.b |  | - |  |
-| dis/wm/tetris.dis | appl/wm/tetris.b |  | - |  |
 | dis/wm/unibrowse.dis | appl/wm/unibrowse.b |  | - |  |
 | dis/wm/view.dis | appl/wm/view.b |  | - | zx-twin |
 | dis/wm/vt.dis | appl/wm/vt.b |  | - |  |
@@ -662,31 +658,21 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/grid/cpupool.dis | appl/grid/cpupool.b |  | - |  |
-| dis/grid/lib/announce.dis | appl/grid/lib/announce.b | module/grid/announce.m | - |  |
-| dis/grid/reglisten.dis | appl/grid/reglisten.b |  | - |  |
-| dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |
-| dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
+| dis/grid/cpupool.dis | appl/grid/cpupool.b |  | - | blocked: multi-goroutine shared-state proxy/rcmd/file2chan + sh->run in ZX host API |
+| dis/grid/lib/announce.dis | appl/grid/lib/announce.b | module/grid/announce.m | - | ported to appl/grid/lib/announce.zi; kept until cpupool.dis is unblocked |
+| dis/grid/reglisten.dis | appl/grid/reglisten.b |  | - | blocked: needs Keyring->auth(fd, ai, setid) and Sh->run {script} with $user/$net |
+| dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - | blocked: needs Keyring->auth(fd, ai, setid=1) and Sh->run |
+| dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - | blocked: needs Login->login (Keyring->auth) and Sh->run |
 
 ### 11. Demo - demonstration apps - 0 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 
-### 12. Ebook - readers - 10 rows
+### 12. Ebook - readers - 0 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/ebook/cssfont.dis | appl/ebook/cssfont.b |  | - |  |
-| dis/ebook/cssparser.dis | appl/ebook/cssparser.b |  | - |  |
-| dis/ebook/ebook.dis | appl/ebook/ebook.b |  | - |  |
-| dis/ebook/mimeimage.dis | appl/ebook/mimeimage.b |  | - |  |
-| dis/ebook/oebpackage.dis | appl/ebook/oebpackage.b |  | - |  |
-| dis/ebook/reader.dis | appl/ebook/reader.b |  | - |  |
-| dis/ebook/strmap.dis | appl/ebook/strmap.b |  | - |  |
-| dis/ebook/stylesheet.dis | appl/ebook/stylesheet.b |  | - |  |
-| dis/ebook/table.dis | appl/ebook/table.b |  | - |  |
-| dis/ebook/units.dis | appl/ebook/units.b |  | - |  |
 
 ### 13. Math - numeric modules - 0 rows
 

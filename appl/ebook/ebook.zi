@@ -8,12 +8,11 @@ using IO :: #import "taijios_io"
 using Tcl :: #import "tcl/interpreter"
 using T :: #import "tcl/types"
 using Tk :: #import "tk/widgets"
-using View :: #import "tk/view"
+using Canvas :: #import "tk/canvas"
 using Surface :: #import "zx_surface"
 using Window :: #import "tcltk"
 using Pkg :: #import "oebpackage"
 using Reader :: #import "reader_model"
-using Units :: #import "units"
 using Mime :: #import "mimeimage"
 
 CONTROLS :: #string END_CONTROLS
@@ -34,13 +33,12 @@ pack .f.up -side right
 pack .f.next -side right
 pack .f.prev -side right
 frame .body
-scrollbar .body.sb -command {.body.t yview}
-text .body.t -yscrollcommand {.body.sb set}
-pack .body.sb -side left -fill y
-pack .body.t -fill both -expand 1
+canvas .body.c -width 380 -height 510 -bg #ffffff
+pack .body.c -fill both -expand 1
+bind .body.c <ButtonPress-1> {ebook_click %x %y}
 frame .annotbar
 label .annotbar.l -text {Note:}
-entry .annotbar.e -bg white
+entry .annotbar.e
 button .annotbar.save -text {Save} -command {ebook_nav saveannot}
 pack .annotbar.l -side left
 pack .annotbar.e -side left -fill x -expand 1
@@ -58,14 +56,18 @@ show_annotations: bool = true;
 debug_mode: bool = false;
 win_w: s32 = 400;
 win_h: s32 = 600;
+selected_offset: s64 = 0;
 
 hist: [Reader.MAX_HISTORY]Reader.Bookmark;
 hist_count: s32 = 0;
 fhist: [Reader.MAX_HISTORY]Reader.Bookmark;
 fhist_count: s32 = 0;
 
-nav_action: s32 = 0; // 0=none, 1=back, 2=forward, 3=up, 4=down, 5=goto, 6=annot, 7=saveannot, 8=editannot
+nav_action: s32 = 0; // 0=none, 1=back, 2=forward, 3=up, 4=down, 5=goto, 6=annot, 7=saveannot, 8=editannot, 9=click
 nav_arg: Text;
+click_x: s32 = 0;
+click_y: s32 = 0;
+first_render: bool = true;
 
 ReadWholeFile :: (path: string, out: *Text) -> bool {
     unused VecResize(out.bytes, 0);
@@ -96,17 +98,17 @@ WriteWholeFile :: (path: string, data: string) {
     unused IO.Close(fd);
 }
 
-AnnotFilePath :: (item_idx: s32, out: *Text) {
+SidecarPath :: (item_idx: s32, suffix: string, out: *Text) {
     unused VecResize(out.bytes, 0);
     if item_idx < 0 || item_idx >= pkg.manifest_count { return }
     unused BuilderAppend(out.bytes, TextView(pkg.manifest[item_idx].file));
-    unused BuilderAppend(out.bytes, ".annot");
+    unused BuilderAppend(out.bytes, suffix);
 }
 
 SaveAnnotations :: () {
     if current_item < 0 { return }
     apath: Text;
-    AnnotFilePath(current_item, *apath);
+    SidecarPath(current_item, ".annot", *apath);
     if apath.bytes.count == 0 { return }
     data: Text;
     Reader.FormatAnnotations(*doc, *data);
@@ -118,12 +120,26 @@ SaveAnnotations :: () {
 LoadAnnotations :: (item_idx: s32) {
     doc.annotation_count = 0;
     apath: Text;
-    AnnotFilePath(item_idx, *apath);
+    SidecarPath(item_idx, ".annot", *apath);
     if apath.bytes.count == 0 { return }
     raw: Text;
     if ReadWholeFile(TextView(apath), *raw) {
         Reader.ParseAnnotations(TextView(raw), *doc);
     }
+}
+
+UpdateIndexCache :: (item_idx: s32, file_len: s64) {
+    ipath: Text;
+    SidecarPath(item_idx, ".i", *ipath);
+    if ipath.bytes.count == 0 { return }
+    existing: Text;
+    if ReadWholeFile(TextView(ipath), *existing) {
+        _, valid := Reader.ValidateIndex(TextView(existing), win_w, win_h, file_len);
+        if valid { return }
+    }
+    idx_data: Text;
+    Reader.FormatIndex(*doc, win_w, win_h, file_len, *idx_data);
+    WriteWholeFile(TextView(ipath), TextView(idx_data));
 }
 
 AssignSectionIds :: () {
@@ -147,6 +163,18 @@ AssignSectionIds :: () {
     }
 }
 
+UpdateWindowTitle :: () {
+    t: Text;
+    if pkg.title.bytes.count > 0 { unused BuilderAppend(t.bytes, TextView(pkg.title)) }
+    else if doc.title.bytes.count > 0 { unused BuilderAppend(t.bytes, TextView(doc.title)) }
+    else { unused BuilderAppend(t.bytes, "Ebook") }
+    if doc.title.bytes.count > 0 && pkg.title.bytes.count > 0 && TextView(doc.title) != TextView(pkg.title) {
+        unused BuilderAppend(t.bytes, " - ");
+        unused BuilderAppend(t.bytes, TextView(doc.title));
+    }
+    unused Surface.SetWindowTitle(TextView(t));
+}
+
 LoadItem :: (item_idx: s32) -> bool {
     if item_idx < 0 || item_idx >= pkg.manifest_count { return false }
     if item_idx == current_item { return true }
@@ -154,7 +182,6 @@ LoadItem :: (item_idx: s32) -> bool {
     path := TextView(pkg.manifest[item_idx].file);
     raw: Text;
     if !ReadWholeFile(path, *raw) {
-        // Try fallback item if configured.
         fb := pkg.manifest[item_idx].fallback_idx;
         if fb >= 0 && fb < pkg.manifest_count {
             path = TextView(pkg.manifest[fb].file);
@@ -163,12 +190,11 @@ LoadItem :: (item_idx: s32) -> bool {
             return false;
         }
     }
-    Reader.ExtractText(TextView(raw), *doc);
-    cols := (win_w - 40) / 8;
-    rows := (win_h - 90) / 16;
-    Reader.Paginate(*doc, cols, rows);
+    Reader.LayoutDocument(TextView(raw), *doc, win_w - 20, win_h - 90);
     current_item = item_idx;
+    selected_offset = 0;
     LoadAnnotations(item_idx);
+    UpdateIndexCache(item_idx, raw.bytes.count);
     return true;
 }
 
@@ -194,6 +220,7 @@ BookForward :: () -> bool {
     if sp >= 0 && sp + 1 < pkg.spine_count {
         if LoadItem(pkg.spine[sp + 1]) {
             doc.current_page = 0;
+            UpdateWindowTitle();
             return true;
         }
     }
@@ -206,6 +233,7 @@ BookBack :: () -> bool {
     if sp > 0 {
         if LoadItem(pkg.spine[sp - 1]) {
             if doc.page_count > 0 { doc.current_page = doc.page_count - 1 }
+            UpdateWindowTitle();
             return true;
         }
     }
@@ -214,7 +242,6 @@ BookBack :: () -> bool {
 
 BookGotoLink :: (href: string) -> bool {
     if href.count == 0 { return false }
-    // Split path#frag
     hash_pos: s64 = -1;
     for i: 0..href.count-1 {
         if href[i] == 35 { hash_pos = i; break }
@@ -232,6 +259,7 @@ BookGotoLink :: (href: string) -> bool {
             for i: 0..cast(s64)pkg.manifest_count-1 {
                 if TextView(pkg.manifest[i].file) == rpath {
                     unused LoadItem(cast(s32)i);
+                    UpdateWindowTitle();
                     break;
                 }
             }
@@ -266,30 +294,111 @@ NavCmd :: (_: s64, args: []Text, result: *T.Result) {
     else if act == "editannot" { nav_action = 8 }
 }
 
-ShowCurrentPage :: (tcl: *Tcl.Interpreter) -> bool {
-    found := Tk.Find(".body.t");
-    if found < 0 { return false }
-    widget := *Tk.widgets[found];
-    unused VecResize(widget.text.bytes, 0);
-    if doc.page_count > 0 && doc.current_page >= 0 && doc.current_page < doc.page_count {
-        span := doc.pages[doc.current_page];
-        body := TextView(doc.body);
-        if span.end <= body.count && span.start <= span.end {
-            if !Tk.AppendText(widget, body[span.start:span.end]) { return false }
-        }
-        if show_annotations {
-            for a: 0..cast(s64)doc.annotation_count-1 {
-                off := doc.annotations[a].file_offset;
-                if off >= span.start && off <= span.end {
-                    unused Tk.AppendText(widget, "\n[Note: ");
-                    unused Tk.AppendText(widget, TextView(doc.annotations[a].text));
-                    unused Tk.AppendText(widget, "]\n");
+ClickCmd :: (_: s64, args: []Text, result: *T.Result) {
+    unused result;
+    if args.count < 2 { return }
+    click_x = Reader.ParseIntAttr(TextView(args[0]), 0);
+    click_y = Reader.ParseIntAttr(TextView(args[1]), 0);
+    nav_action = 9;
+}
+
+RenderImageItem :: (c: *Canvas.State, it: *Reader.LayoutItem) {
+    from_file := ifx current_item >= 0 then TextView(pkg.manifest[current_item].file) else TextView(pkg.file);
+    resolved: Text;
+    ok_res, _ := Pkg.ResolveLocalHref(from_file, TextView(it.img_src), *resolved);
+    raw: Text;
+    decoded := false;
+    info: Mime.ImageInfo;
+    if ok_res && ReadWholeFile(TextView(resolved), *raw) {
+        dok, _ := Mime.DecodeImage("", TextView(resolved), VecSlice(raw.bytes, 0, raw.bytes.count), *info);
+        decoded = dok;
+    }
+    draw_w := ifx decoded && info.width > 0 then info.width else it.w;
+    draw_h := ifx decoded && info.height > 0 then info.height else it.h;
+    if draw_w > win_w - 30 { draw_w = win_w - 30 }
+    if draw_h > 200 { draw_h = 200 }
+
+    unused Canvas.Add(c, .Rectangle, .{it.x, it.y, it.x + draw_w, it.y + draw_h}, 0xf0f4f8, 0x334455, .Center);
+    if decoded && info.rgba.count >= cast(s64)info.width * cast(s64)info.height * 4 {
+        // Render sampled RGBA pixel blocks directly on the canvas!
+        step_x := ifx info.width > 32 then info.width / 32 else 1;
+        step_y := ifx info.height > 24 then info.height / 24 else 1;
+        cell_w := ifx draw_w / (info.width / step_x) > 1 then draw_w / (info.width / step_x) else 1;
+        cell_h := ifx draw_h / (info.height / step_y) > 1 then draw_h / (info.height / step_y) else 1;
+        sy: s32 = 0;
+        while sy < info.height {
+            sx: s32 = 0;
+            while sx < info.width {
+                poff := (cast(s64)sy * cast(s64)info.width + cast(s64)sx) * 4;
+                if poff + 2 < info.rgba.count {
+                    col: s32 = (cast(s32)info.rgba[poff] << 16) | (cast(s32)info.rgba[poff + 1] << 8) | cast(s32)info.rgba[poff + 2];
+                    rx := it.x + (sx / step_x) * cell_w;
+                    ry := it.y + (sy / step_y) * cell_h;
+                    unused Canvas.Add(c, .Rectangle, .{rx, ry, rx + cell_w, ry + cell_h}, col, col, .Center);
                 }
+                sx += step_x;
+            }
+            sy += step_y;
+        }
+    } else {
+        unused Canvas.AddText(c, it.x + 6, it.y + 14, .West, TextView(it.text), 0x334455);
+    }
+}
+
+ShowCurrentPage :: (tcl: *Tcl.Interpreter) -> bool {
+    cid := Tk.Find(".body.c");
+    if cid < 0 { return false }
+    c := *Tk.widgets[cid].canvas;
+    Canvas.DeleteAll(c);
+
+    page := doc.current_page;
+    for i: 0..doc.items.count-1 {
+        it := *doc.items[i];
+        if it.page != page { continue }
+        if it.kind == Reader.LI_TEXT || it.kind == Reader.LI_LINK {
+            if it.bg_color >= 0 {
+                unused Canvas.Add(c, .Rectangle, .{it.x - 2, it.y - 2, it.x + it.w + 4, it.y + it.h - 2}, it.bg_color, it.bg_color, .Center);
+            }
+            unused Canvas.AddText(c, it.x, it.y + (it.h / 2), .West, TextView(it.text), it.color);
+            if it.underline {
+                unused Canvas.Add(c, .Line, .{it.x, it.y + it.h - 3, it.x + it.w, it.y + it.h - 3}, it.color, it.color, .Center);
+            }
+        } else if it.kind == Reader.LI_RULE {
+            unused Canvas.Add(c, .Line, .{it.x, it.y, it.x + it.w, it.y}, it.color, it.color, .Center);
+        } else if it.kind == Reader.LI_TABLE_CELL {
+            unused Canvas.Add(c, .Rectangle, .{it.x, it.y, it.x + it.w, it.y + it.h}, it.bg_color, 0x999999, .Center);
+            unused Canvas.AddText(c, it.x + 4, it.y + (it.h / 2), .West, TextView(it.text), it.color);
+        } else if it.kind == Reader.LI_IMAGE {
+            RenderImageItem(c, it);
+        }
+    }
+
+    // Draw yellow annotation markers for annotations on this page
+    if show_annotations && doc.page_count > 0 && page >= 0 && page < doc.page_count {
+        p_start := doc.pages[page].file_offset;
+        p_end := ifx page + 1 < doc.page_count then doc.pages[page + 1].file_offset else 0x7fffffff;
+        note_y: s32 = win_h - 130;
+        for a: 0..cast(s64)doc.annotation_count-1 {
+            off := doc.annotations[a].file_offset;
+            if off >= p_start && off < p_end {
+                // Find matching layout item y if present
+                ay := note_y;
+                for i: 0..doc.items.count-1 {
+                    if doc.items[i].page == page && doc.items[i].file_offset >= off {
+                        ay = doc.items[i].y;
+                        break;
+                    }
+                }
+                badge: Text;
+                unused BuilderAppend(badge.bytes, "[Note: ");
+                unused BuilderAppend(badge.bytes, TextView(doc.annotations[a].text));
+                unused BuilderAppend(badge.bytes, "]");
+                unused Canvas.Add(c, .Rectangle, .{win_w - 170, ay, win_w - 24, ay + 16}, 0xffee88, 0xcc9900, .Center);
+                unused Canvas.AddText(c, win_w - 166, ay + 8, .West, TextView(badge), 0x332200);
+                note_y -= 20;
             }
         }
     }
-    Tk.TextLayout(widget);
-    View.See(*widget.view, 0);
 
     sec := ifx current_item >= 0 then TextView(section_ids[current_item]) else "1";
     label_text: Text;
@@ -302,23 +411,17 @@ ShowCurrentPage :: (tcl: *Tcl.Interpreter) -> bool {
 }
 
 Start :: () -> bool {
-    found := Tk.Find(".body.t");
-    if found < 0 { return false }
-    widget := *Tk.widgets[found];
-    if doc.page_count > 0 {
-        span := doc.pages[0];
-        body := TextView(doc.body);
-        if span.end <= body.count {
-            if !Tk.AppendText(widget, body[span.start:span.end]) { return false }
-        }
-    }
-    Tk.TextLayout(widget);
-    View.See(*widget.view, 0);
+    UpdateWindowTitle();
     return true;
 }
 
 Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResult {
     changed := false;
+    if first_render {
+        first_render = false;
+        unused ShowCurrentPage(tcl);
+        return .Changed;
+    }
     if event.kind == Surface.Key {
         if event.key == Surface.LeftKey || event.key == Surface.PageUpKey { nav_action = 1 }
         else if event.key == Surface.RightKey || event.key == Surface.PageDownKey { nav_action = 2 }
@@ -340,6 +443,7 @@ Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResul
                 bm := hist[hist_count];
                 unused LoadItem(bm.item_idx);
                 doc.current_page = bm.page;
+                UpdateWindowTitle();
                 changed = true;
             }
         } else if act == 4 {
@@ -352,6 +456,7 @@ Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResul
                 bm := fhist[fhist_count];
                 unused LoadItem(bm.item_idx);
                 doc.current_page = bm.page;
+                UpdateWindowTitle();
                 changed = true;
             }
         } else if act == 5 {
@@ -362,13 +467,24 @@ Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResul
         } else if act == 7 {
             res := Tcl.Eval(tcl, ".annotbar.e get");
             if res.code == .OK && doc.page_count > 0 {
-                off := doc.pages[doc.current_page].file_offset;
+                off := ifx selected_offset > 0 then selected_offset else doc.pages[doc.current_page].file_offset;
                 Reader.AddOrUpdateAnnotation(*doc, off, TextView(res.value));
                 SaveAnnotations();
                 changed = true;
             }
         } else if act == 8 {
             unused Window.Execute(tcl, "focus .annotbar.e");
+        } else if act == 9 {
+            // Check clickable link first; otherwise select file_offset for annotation placement
+            lidx := Reader.HitLink(*doc, doc.current_page, click_x, click_y);
+            if lidx >= 0 {
+                href_copy: Text;
+                unused BuilderAppend(href_copy.bytes, TextView(doc.items[lidx].href));
+                changed = BookGotoLink(TextView(href_copy));
+            } else {
+                selected_offset = Reader.HitFileOffset(*doc, doc.current_page, click_y);
+                changed = true;
+            }
         }
         if changed {
             if !ShowCurrentPage(tcl) { return .Failed }
@@ -417,17 +533,11 @@ main :: () -> s32 {
 
     if pkg.spine_count > 0 {
         if !LoadItem(pkg.spine[0]) {
-            Reader.ExtractText(TextView(raw), *doc);
-            cols := (win_w - 40) / 8;
-            rows := (win_h - 90) / 16;
-            Reader.Paginate(*doc, cols, rows);
+            Reader.LayoutDocument(TextView(raw), *doc, win_w - 20, win_h - 90);
             current_item = 0;
         }
     } else {
-        Reader.ExtractText(TextView(raw), *doc);
-        cols := (win_w - 40) / 8;
-        rows := (win_h - 90) / 16;
-        Reader.Paginate(*doc, cols, rows);
+        Reader.LayoutDocument(TextView(raw), *doc, win_w - 20, win_h - 90);
         current_item = 0;
     }
 
@@ -457,7 +567,8 @@ main :: () -> s32 {
     unused BuilderAppend(script.bytes, "}\n");
 
     tcl: Tcl.Interpreter;
-    if !Tcl.RegisterCommand(*tcl, "ebook_nav", NavCmd) { return 1 }
+    if !Tcl.RegisterCommand(*tcl, "ebook_nav", NavCmd) ||
+       !Tcl.RegisterCommand(*tcl, "ebook_click", ClickCmd) { return 1 }
     rc := Window.RunPolled(*tcl, TextView(script), title, win_w, win_h, Start, Tick, 50);
     SaveAnnotations();
     return rc;
