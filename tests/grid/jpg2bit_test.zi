@@ -1,0 +1,44 @@
+// Table-driven unit test for appl/grid/jpg2bit_model.zi.
+#import "std/vec"
+using Model :: #import "jpg2bit_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+PathCase :: struct {
+    in_path: string;
+    expected: string;
+}
+
+main :: () -> s32 {
+    path_cases: [4]PathCase = PathCase.[
+        .{in_path = "photo.jpg", expected = "photo.bit"},
+        .{in_path = "/tmp/a/img.jpg", expected = "/tmp/a/img.bit"},
+        .{in_path = "abc", expected = ".bit"},
+        .{in_path = "abcd", expected = ".bit"},
+    ];
+    out: Text;
+    for path_cases {
+        Model.DefaultOutPath(it.in_path, *out);
+        Expect(TextView(out) == it.expected, it.in_path);
+    }
+
+    hdr: Text;
+    Model.FormatBitHeader(320, 240, *hdr);
+    Expect(TextView(hdr) == "     r8g8b8           0           0         320         240 ", "r8g8b8 header");
+    Expect(hdr.bytes.count == 60, "header length 60");
+
+    // Reject non-JPEG bytes
+    bad: [4]u8 = .[0, 1, 2, 3];
+    bit: Vec(u8);
+    Expect(!Model.ConvertJpegToBit(bad[:], *bit), "reject non-jpeg");
+
+    if failures == 0 { print("jpg2bit_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

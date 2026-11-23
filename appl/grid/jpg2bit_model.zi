@@ -1,0 +1,63 @@
+// Pure JPEG-to-Inferno-.bit conversion logic, ported from appl/grid/jpg2bit.b.
+#import "std/vec"
+#import "std/image"
+#import "std/number_text"
+JPEG :: #import "std/jpeg";
+
+DefaultOutPath :: (in_path: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if in_path.count > 3 {
+        unused BuilderAppend(out.bytes, in_path[:in_path.count - 4]);
+    }
+    unused BuilderAppend(out.bytes, ".bit");
+}
+
+AppendField11 :: (s: string, out: *Text) {
+    pad := 11 - s.count;
+    while pad > 0 {
+        unused VecPush(out.bytes, 32);
+        pad -= 1;
+    }
+    unused BuilderAppend(out.bytes, s);
+    unused VecPush(out.bytes, 32);
+}
+
+AppendInt11 :: (value: s64, out: *Text) {
+    buf: [24]u8;
+    AppendField11(FormatInteger(value, buf[:]), out);
+}
+
+// Inferno uncompressed 24-bit RGB image header: 5 fields of "%11s ".
+FormatBitHeader :: (width: s32, height: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    AppendField11("r8g8b8", out);
+    AppendInt11(0, out);
+    AppendInt11(0, out);
+    AppendInt11(cast(s64)width, out);
+    AppendInt11(cast(s64)height, out);
+}
+
+ConvertJpegToBit :: (jpeg_bytes: []u8, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    if jpeg_bytes.count < 4 || jpeg_bytes[0] != 255 || jpeg_bytes[1] != 216 { return false }
+    img := JPEG.ReadJPEG(jpeg_bytes);
+    if !ImageValid(*img) { return false }
+    w := img.width;
+    h := img.height;
+    if w <= 0 || h <= 0 { return false }
+
+    hdr: Text;
+    FormatBitHeader(cast(s32)w, cast(s32)h, *hdr);
+    unused BuilderAppend(<<out, TextView(hdr));
+
+    pixels := VecSlice(img.pixels, 0, img.pixels.count);
+    count := cast(s64)w * cast(s64)h;
+    if count * 4 > pixels.count { return false }
+    for i: 0..count-1 {
+        off := i * 4;
+        unused VecPush(<<out, pixels[off]);
+        unused VecPush(<<out, pixels[off + 1]);
+        unused VecPush(<<out, pixels[off + 2]);
+    }
+    return true;
+}

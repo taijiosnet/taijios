@@ -747,7 +747,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/grid/demo/block.dis | appl/grid/demo/block.b | module/grid/demo/block.m | - |  |
 | dis/grid/demo/blur.dis | appl/grid/demo/blur.b |  | - |  |
 | dis/grid/find.dis | appl/grid/find.b |  | - |  |
-| dis/grid/jpg2bit.dis | appl/grid/jpg2bit.b |  | - |  |
 | dis/grid/lib/announce.dis | appl/grid/lib/announce.b | module/grid/announce.m | - |  |
 | dis/grid/lib/browser.dis | appl/grid/lib/browser.b | module/grid/browser.m | - |  |
 | dis/grid/lib/fbrowse.dis | appl/grid/lib/fbrowse.b | module/grid/fbrowse.m | - |  |

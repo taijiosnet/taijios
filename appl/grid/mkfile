@@ -8,7 +8,6 @@ TARG=\
 		blurdemo.dis\
 		cpupool.dis\
 		find.dis\
-		jpg2bit.dis\
 		query.dis\
 		readjpg.dis\
 		register.dis\
@@ -50,4 +49,14 @@ DISBIN=$ROOT/dis/grid
 
 readjpg.dis:	readjpg.b $MODULE $SYS_MODULE
 	limbo $LIMBOFLAGS -c -gw readjpg.b
+
+jpg2bit.zx: jpg2bit.zi jpg2bit_model.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --entry jpg2bit:main -o $target jpg2bit.zi
+
+$DISBIN/jpg2bit.zx: jpg2bit.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 jpg2bit.zx "$staged" && mv "$staged" "$target"
+
+install:V: $DISBIN/jpg2bit.zx
 

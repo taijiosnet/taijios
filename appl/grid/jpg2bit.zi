@@ -1,0 +1,73 @@
+// Convert a JPEG image file to an Inferno .bit image file,
+// ported from appl/grid/jpg2bit.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Model :: #import "jpg2bit_model"
+
+OWRITE :: 1;
+PERM_666 :: 438;
+
+ReadWhole :: (path: string, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [8192]u8;
+    ok := true;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n < 0 { ok = false; break }
+        if n == 0 { break }
+        if out.count + cast(s64)n > 8388608 { ok = false; break }
+        unused BuilderAppend(<<out, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    return ok;
+}
+
+WriteAll :: (fd: s32, data: string) -> bool {
+    at: s64 = 0;
+    while at < data.count {
+        chunk := data.count - at;
+        if chunk > 8192 { chunk = 8192 }
+        n := IO.Write(fd, data[at:at + chunk]);
+        if n <= 0 { return false }
+        at += cast(s64)n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    if argc == 0 { return 0 }
+    in_path := Args.Operand(0);
+    out_buf: Text;
+    out_path := "";
+    if argc == 1 {
+        Model.DefaultOutPath(in_path, *out_buf);
+        out_path = TextView(out_buf);
+    } else {
+        out_path = Args.Operand(1);
+    }
+
+    jpeg_data: Vec(u8);
+    if !ReadWhole(in_path, *jpeg_data) {
+        print("jpg2bit: cannot read %: %\n", in_path, IO.Error());
+        return 1;
+    }
+
+    bit_data: Vec(u8);
+    if !Model.ConvertJpegToBit(VecSlice(jpeg_data, 0, jpeg_data.count), *bit_data) {
+        print("jpg2bit: invalid jpeg: %\n", in_path);
+        return 1;
+    }
+
+    fd := IO.Create(out_path, OWRITE, PERM_666);
+    if fd < 0 {
+        print("jpg2bit: cannot create %: %\n", out_path, IO.Error());
+        return 1;
+    }
+    ok := WriteAll(fd, TextView(VecSlice(bit_data, 0, bit_data.count)));
+    unused IO.Close(fd);
+    return ifx ok then 0 else 1;
+}
