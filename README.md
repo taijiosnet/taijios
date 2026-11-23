@@ -55,6 +55,11 @@ ZX programs can serve and attach file trees through `appl/cmd/taijios_namespace.
 `Pipe` creates a guest pipe, `Mount` attaches the 9P server answering on a
 handle, `Bind` and `Unmount` change the namespace, and `Fork` gives the
 calling process a private copy of its namespace, as `pctl FORKNS` does.
+`ForkEnv`, `NewNs` and `NoDevs` do what `pctl` FORKENV, NEWNS and NODEVS do;
+ZX children share their parent's environment until they call `ForkEnv`.
+`taijios_process.Pid` returns the caller's process id: the Dis process for a
+command run from Dis, otherwise 1 for the booted program and a child's Task
+Manager id. `NewPgrp` starts a process group led by the caller.
 A file server runs in its own process: start it with `StartWith` on one end
 of a pipe and mount the other end. `taijios_io.PollRead` reads from any
 handle without waiting and returns -2 while nothing has arrived, so one
@@ -102,6 +107,10 @@ while `/dis/wm/wm.dis` is installed. Use it for the catalog applications that
 exist only as Dis modules. A guest booted from a ZX bundle has the bundle's
 path in the `emuboot` environment variable, and the application catalog hides
 the entries whose program is a Dis module there.
+A Dis-booted emulator runs until its last Dis process ends, so a script that
+starts a server such as `ndb/cs` or a mounted export keeps it running. Start it
+with `-x`, as in `emu -x -r "$PWD" /dis/sh.dis -c 'ndb/cs; echo done'`, to end
+the emulator when the boot program ends.
 The default desktop continues to start Rill through the regular desktop runner.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including

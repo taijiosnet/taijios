@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add emu -x, which ends the emulator when its boot program ends, even while servers it started keep running.
+
+- Give ZX programs pctl's FORKENV, NEWNS, NODEVS and NEWPGRP and the process id, so ZX shells keep their variables apart.
+
 - Remove the QuickTime Player, a stale Dis binary that failed to load and whose source no longer built.
 
 - Ship Mine Sweeper and Tetris only as ZX and remove their Dis versions.

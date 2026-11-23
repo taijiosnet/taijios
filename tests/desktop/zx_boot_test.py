@@ -5,7 +5,6 @@ import io
 import os
 import select
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -529,24 +528,14 @@ def check_hosted_process(emulator, root, env):
     guest_mount = '/' + mount.relative_to(ROOT).as_posix()
     script = (f'zxrun -s {probe} hosted {probe}; zxrun -s {probe} mountout {probe} {guest_mount}; '
               f'cat {guest_mount}/hello; unmount {guest_mount}; echo HOSTED_DONE')
-    # The emulator keeps running after the shell script, so read up to its last line.
-    with subprocess.Popen([emulator, '-r', ROOT, '/dis/sh.dis', '-c', script], env=env, stdin=subprocess.DEVNULL,
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True) as shell:
-        output = bytearray()
-        deadline = time.monotonic() + 30
-        try:
-            while b'HOSTED_DONE\n' not in output:
-                assert time.monotonic() < deadline, bytes(output)
-                if select.select([shell.stdout], [], [], 0.2)[0]:
-                    data = shell.stdout.read1(4096)
-                    assert data, bytes(output)
-                    output.extend(data)
-        finally:
-            os.killpg(shell.pid, signal.SIGKILL)
-    lines = output.decode().splitlines()
-    assert lines == ['ZX_HOSTED_PROCESS_OK', 'hello from ZX', 'HOSTED_DONE'], bytes(output)
+    # The mounted server outlives the script; -x ends the emulator with the shell
+    # anyway. The emulator ends by killing its own process group.
+    result = subprocess.run([emulator, '-x', '-r', ROOT, '/dis/sh.dis', '-c', script], env=env,
+                            stdin=subprocess.DEVNULL, capture_output=True, timeout=30, start_new_session=True)
+    lines = result.stdout.decode().splitlines()
+    assert lines == ['ZX_HOSTED_PROCESS_OK', 'hello from ZX', 'HOSTED_DONE'], result
     print('Under the Dis shell, a ZX command started children on chosen streams, killed a blocked one, and left a '
-          'mounted server running after it exited')
+          'mounted server running after it exited; with -x the emulator still ended with the script')
 
 
 def check_services(root, env, boot):

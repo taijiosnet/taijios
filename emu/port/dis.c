@@ -995,6 +995,9 @@ startup(void)
 	osblock();
 }
 
+/* The boot program's process, which -x waits for. */
+static int bootpid;
+
 void
 progexit(void)
 {
@@ -1029,6 +1032,10 @@ progexit(void)
 	}
 
 	snprint(msg, sizeof(msg), "%d \"%s\":%s", r->pid, m->name, estr);
+
+	/* With -x the emulator ends with the command it was started with. */
+	if(xflag && r->pid == bootpid)
+		cleanexit(0);
 
 	if(up->env->debug != nil) {
 		dbgexit(r, broken, estr);
@@ -1197,6 +1204,7 @@ disinit(void *a)
 	}
 
 	p = schedmod(root);
+	bootpid = p->pid;
 
 	memmove(p->osenv, up->env, sizeof(Osenv));
 	o = p->osenv;

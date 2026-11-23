@@ -466,6 +466,7 @@ extern	Pool*	mainmem;
 extern	char	rootdir[MAXROOT];		/* inferno root */
 extern	Procs	procs;
 extern	int	sflag;
+extern	int	xflag;
 extern	int	xtblbit;
 extern	int	globfs;
 extern	int	greyscale;

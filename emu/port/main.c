@@ -28,6 +28,7 @@ extern	int	mflag;
 	int	Ysize	= 480;
 	int	bflag = 1;
 	int	sflag;
+	int	xflag;	/* exit when the boot program exits */
 	int	qflag;
 	int	xtblbit;
 	ulong	displaychan;
@@ -48,7 +49,8 @@ usage(void)
 		"\t-7\n"
 		"\t-B\n"
 		"\t-C<channel string>\n"
-		"\t-S\n");
+		"\t-S\n"
+		"\t-x\n");
 
 	exits("usage");
 }
@@ -201,6 +203,9 @@ option(int argc, char *argv[], void (*badusage)(void))
 		break;
 	case 'v':
 		vflag++;	/* print startup messages */
+		break;
+	case 'x':		/* exit with the boot program, ending servers it left running */
+		xflag = 1;
 		break;
 	} ARGEND
 	return argv;
