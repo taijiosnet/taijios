@@ -47,7 +47,7 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (2 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (0), grid (5), demo (6), ebook (0), math (0).
+5. App families: acme (25 `dis/` rows + 13 helper binaries outside `dis/`), charon (15), alphabet (83), spree (0), grid (5), demo (6), ebook (0), math (0).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
@@ -77,7 +77,7 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 | 12 | [12. Ebook - readers - 0 rows](dis-to-zx/12-ebook.md) | Ebook (`agy-taijios-dis-app-families`) | 0 |
 | 13 | [13. Math - numeric modules - 0 rows](dis-to-zx/13-math.md) | Math (`agy-taijios-dis-legacy-math`) | 0 |
 | 14 | [14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 2 rows](dis-to-zx/14-legacy-misc.md) | Legacy misc (`agy-taijios-dis-legacy-math`) | 2 |
-| 15 | [15. Acme helper binaries outside dis/ - 22 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside dis/ (unassigned) | 22 |
+| 15 | [15. Acme helper binaries outside dis/ - 13 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside dis/ (acme lane) | 13 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **567**.
+Total open table rows across sections 1–16: **558**.

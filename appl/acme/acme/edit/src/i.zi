@@ -1,0 +1,12 @@
+// acme/edit/i: insert replacement before each addressed range.
+using Args :: #import "taijios_args";
+Edit :: #import "edit_common";
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        Edit.PrintErr("usage: i 'replacement'\n");
+        return 0;
+    }
+    return Edit.RunEdit("i", Args.Operand(0), false, 2);
+}

@@ -1,0 +1,146 @@
+// acme/edit/e: resolve file[:address] patterns against /mnt/acme/index.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Edit :: #import "edit_common";
+
+PROG :: "e";
+
+LineNo :: (f: Edit.File) -> (l0: s32, l1: s32, ok: bool) {
+    path := Edit.AcmePath(f.id, "body");
+    fd := Io.OpenFile(path, Edit.OREAD);
+    if fd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "%: can't open %: %\n", PROG, path, Io.LastError());
+        Edit.PrintErr(BuilderFinish(msg));
+        return 0, 0, false;
+    }
+
+    n0: s32 = 1;
+    n1: s32 = 1;
+    q: s32 = 0;
+    buf: [4096]u8;
+    have: s64 = 0;
+    eof := false;
+
+    while q < f.q1 {
+        if have < 4 && !eof {
+            n := Io.ReadBytes(fd, buf[have:]);
+            if n <= 0 {
+                eof = true;
+            } else {
+                have += cast(s64)n;
+            }
+        }
+        if have == 0 {
+            unused Io.CloseFile(fd);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: early EOF on %\n", PROG, path);
+            Edit.PrintErr(BuilderFinish(msg));
+            return 0, 0, false;
+        }
+        b := buf[0];
+        w := Edit.Utf8CharWidth(buf[:], 0, have);
+        if b == #char "\n" {
+            if q < f.q0 { n0 += 1 }
+            if q + 1 < f.q1 { n1 += 1 }
+        }
+        rem := have - w;
+        for k: 0..rem - 1 { buf[k] = buf[k + w] }
+        have = rem;
+        q += 1;
+    }
+    unused Io.CloseFile(fd);
+    return n0, n1, true;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    arg_idx: s32 = 0;
+    lines := false;
+    if count > 0 && Args.Operand(0) == "-l" {
+        lines = true;
+        arg_idx = 1;
+    }
+    if arg_idx >= count {
+        Edit.PrintErr("usage: e 'file[:address]' ...\n");
+        return 0;
+    }
+
+    files: Vec(Edit.File);
+    while arg_idx < count {
+        pat := Args.Operand(arg_idx);
+        n := Edit.FindFile(PROG, pat, *files);
+        if n < 0 { return 0 }
+        if n == 0 {
+            Edit.Errors(PROG, "no files match pattern", pat);
+            return 0;
+        }
+        arg_idx += 1;
+    }
+
+    for i: 0..files.count - 1 {
+        addr := Edit.CopyStr(files[i].addr);
+        ap := Edit.AcmePath(files[i].id, "addr");
+        afd := Io.OpenFile(ap, Edit.ORDWR);
+        if afd < 0 {
+            Edit.RError(PROG, ap);
+            return 0;
+        }
+        cp := Edit.AcmePath(files[i].id, "ctl");
+        cfd := Io.OpenFile(cp, Edit.ORDWR);
+        if cfd < 0 {
+            unused Io.CloseFile(afd);
+            Edit.RError(PROG, cp);
+            return 0;
+        }
+        if Io.WriteBytes(cfd, "addr=dot\n") != 9 {
+            unused Io.CloseFile(afd);
+            unused Io.CloseFile(cfd);
+            Edit.RError(PROG, "setting address to dot");
+            return 0;
+        }
+        if Io.WriteBytes(afd, addr) != cast(s32)addr.count {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: %:% is invalid address\n", PROG, files[i].name, addr);
+            Edit.PrintErr(BuilderFinish(msg));
+            files[i].ok = false;
+            unused Io.CloseFile(afd);
+            unused Io.CloseFile(cfd);
+            continue;
+        }
+        q0, q1, ok := Edit.ReadAddrPair(PROG, afd);
+        unused Io.CloseFile(afd);
+        unused Io.CloseFile(cfd);
+        if !ok { return 0 }
+        files[i].q0 = q0;
+        files[i].q1 = q1;
+        files[i].ok = true;
+    }
+
+    Edit.SortFiles(*files, Edit.CMP_FCMP);
+
+    for i: 0..files.count - 1 {
+        f := files[i];
+        if !f.ok { continue }
+        out: Vec(u8);
+        if lines {
+            l0, l1, ok := LineNo(f);
+            if !ok { return 0 }
+            if l1 > l0 {
+                BuilderPrint(*out, "%:%,%\n", f.name, l0, l1);
+            } else {
+                BuilderPrint(*out, "%:%\n", f.name, l0);
+            }
+        } else {
+            if f.q1 > f.q0 {
+                BuilderPrint(*out, "%:#%,#%\n", f.name, f.q0, f.q1);
+            } else {
+                BuilderPrint(*out, "%:#%\n", f.name, f.q0);
+            }
+        }
+        unused Edit.WriteAll(1, BuilderFinish(out));
+    }
+    return 0;
+}

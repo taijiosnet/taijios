@@ -1,23 +1,64 @@
 <../../../../../mkconfig
 
-TARG=\
-	a.dis\
-	c.dis\
-	d.dis\
-	e.dis\
-	g.dis\
-	i.dis\
-	p.dis\
-	x.dis\
-	pipe.dis\
+ZXCMD=$ROOT/appl/cmd
+BIN=$ROOT/acme/edit
 
-MODULES=\
-	
-SYSMODULES=\
-	sh.m\
-	sys.m\
-	draw.m\
+ZXTARG=\
+	a.zx\
+	c.zx\
+	d.zx\
+	e.zx\
+	g.zx\
+	i.zx\
+	p.zx\
+	pipe.zx\
+	x.zx\
 
-DISBIN=$ROOT/acme/edit
+ZXBIN=${ZXTARG:%=$BIN/%}
 
-<$ROOT/mkfiles/mkdis
+COMMON=edit_common.zi $ZXCMD/taijios_args.zi $ZXCMD/taijios_io.zi
+HOSTS=--bind-host taijios_args --bind-host taijios_io
+
+all:V:	$ZXTARG
+
+install:V:	$ZXBIN
+
+install-zx:V:	$ZXBIN
+
+clean:V:
+	rm -f $ZXTARG
+
+nuke:V:	clean
+	rm -f $ZXBIN
+
+a.zx:	a.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry a:main -o $target a.zi
+
+c.zx:	c.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry c:main -o $target c.zi
+
+d.zx:	d.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry d:main -o $target d.zi
+
+e.zx:	e.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry e:main -o $target e.zi
+
+g.zx:	g.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry g:main -o $target g.zi
+
+i.zx:	i.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry i:main -o $target i.zi
+
+p.zx:	p.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry p:main -o $target p.zi
+
+x.zx:	x.zi $COMMON mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --entry x:main -o $target x.zi
+
+pipe.zx:	pipe.zi $COMMON $ZXCMD/taijios_namespace.zi $ZXCMD/taijios_process.zi mkfile
+	zi2zx --root . --module-path $ZXCMD $HOSTS --bind-host taijios_namespace --bind-host taijios_process --entry pipe:main -o $target pipe.zi
+
+$BIN/%.zx:	%.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 $stem.zx "$staged" && mv "$staged" "$target"

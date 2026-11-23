@@ -1,0 +1,703 @@
+// Minimal in-memory /mnt/acme 9P server for testing acme helpers in a guest.
+// Usage: mock_acme.zx <sh-script-path>
+// Mounts /mnt/acme (and binds it to /chan), runs /dis/sh.zx <script>, and
+// serves /mnt/acme/index plus windows 1 (/test/alpha.txt) and 2 (/test/beta.txt).
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Namespace :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+
+NODE_ROOT :: 0;
+NODE_INDEX :: 1;
+NODE_W1_DIR :: 10;
+NODE_W1_ADDR :: 11;
+NODE_W1_BODY :: 12;
+NODE_W1_CTL :: 13;
+NODE_W1_DATA :: 14;
+NODE_W2_DIR :: 20;
+NODE_W2_ADDR :: 21;
+NODE_W2_BODY :: 22;
+NODE_W2_CTL :: 23;
+NODE_W2_DATA :: 24;
+
+Window :: struct {
+    id: s32;
+    name: string;
+    body: Vec(u8);
+    dot0: s32;
+    dot1: s32;
+    addr0: s32;
+    addr1: s32;
+    lim0: s32;
+    lim1: s32;
+    has_limit: bool;
+}
+
+Server :: struct {
+    conn: s32;
+    fid: [64]s64;
+    node: [64]s32;
+    attached: bool;
+    hdr: [4]u8;
+    hdr_count: s64;
+    msg: [8192]u8;
+    rep: [8192]u8;
+    used: s64;
+    wins: [2]Window;
+}
+
+InitWin :: (w: *Window, id: s32, name: string, initial: string) {
+    w.id = id;
+    w.name = name;
+    VecClear(w.body);
+    for c: initial { unused VecPush(w.body, c) }
+    w.dot0 = 0;
+    w.dot1 = 0;
+    w.addr0 = 0;
+    w.addr1 = 0;
+    w.lim0 = 0;
+    w.lim1 = 0;
+    w.has_limit = false;
+}
+
+RuneCount :: (b: []u8) -> s32 {
+    i: s64 = 0;
+    n: s32 = 0;
+    while i < b.count {
+        c := b[i];
+        w: s64 = 1;
+        if (c & 0xE0) == 0xC0 && i + 2 <= b.count { w = 2 }
+        else if (c & 0xF0) == 0xE0 && i + 3 <= b.count { w = 3 }
+        else if (c & 0xF8) == 0xF0 && i + 4 <= b.count { w = 4 }
+        i += w;
+        n += 1;
+    }
+    return n;
+}
+
+RuneToByteOffset :: (b: []u8, q: s32) -> s64 {
+    i: s64 = 0;
+    n: s32 = 0;
+    while i < b.count && n < q {
+        c := b[i];
+        w: s64 = 1;
+        if (c & 0xE0) == 0xC0 && i + 2 <= b.count { w = 2 }
+        else if (c & 0xF0) == 0xE0 && i + 3 <= b.count { w = 3 }
+        else if (c & 0xF8) == 0xF0 && i + 4 <= b.count { w = 4 }
+        i += w;
+        n += 1;
+    }
+    return i;
+}
+
+Pad11 :: (out: *Vec(u8), v: s32) {
+    tmp: Vec(u8);
+    BuilderPrint(*tmp, "%", v);
+    s := BuilderFinish(tmp);
+    pad := 11 - s.count;
+    while pad > 0 { unused VecPush(out.*, #char " "); pad -= 1 }
+    unused BuilderAppend(out.*, s);
+    unused VecPush(out.*, #char " ");
+}
+
+FormatIndex :: (srv: *Server) -> string {
+    out: Vec(u8);
+    for i: 0..1 {
+        w := *srv.wins[i];
+        Pad11(*out, w.id);
+        Pad11(*out, cast(s32)w.name.count);
+        Pad11(*out, RuneCount(w.body[:]));
+        Pad11(*out, 0);
+        Pad11(*out, 0);
+        unused BuilderAppend(out, w.name);
+        unused BuilderAppend(out, " Del Snarf | Look\n");
+    }
+    return TextDetach(TextCopy(BuilderFinish(out)));
+}
+
+FormatAddr :: (w: *Window) -> string {
+    out: Vec(u8);
+    Pad11(*out, w.addr0);
+    Pad11(*out, w.addr1);
+    return TextDetach(TextCopy(BuilderFinish(out)));
+}
+
+ParseNum :: (s: string, at: *s64) -> (val: s32, ok: bool) {
+    p := at.*;
+    if p >= s.count || s[p] < #char "0" || s[p] > #char "9" { return 0, false }
+    v: s32 = 0;
+    while p < s.count && s[p] >= #char "0" && s[p] <= #char "9" {
+        v = v * 10 + cast(s32)(s[p] - #char "0");
+        p += 1;
+    }
+    at.* = p;
+    return v, true;
+}
+
+EvalSingleAddr :: (w: *Window, s: string, at: *s64) -> (q0: s32, q1: s32, ok: bool) {
+    total := RuneCount(w.body[:]);
+    p := at.*;
+    if p >= s.count { return 0, 0, false }
+    c := s[p];
+    if c == #char "." {
+        at.* = p + 1;
+        return w.addr0, w.addr1, true;
+    }
+    if c == #char "$" {
+        at.* = p + 1;
+        return total, total, true;
+    }
+    if c == #char "#" {
+        p += 1;
+        n, ok := ParseNum(s, *p);
+        if !ok || n < 0 || n > total { return 0, 0, false }
+        at.* = p;
+        return n, n, true;
+    }
+    if c >= #char "0" && c <= #char "9" {
+        n, ok := ParseNum(s, *p);
+        if !ok { return 0, 0, false }
+        at.* = p;
+        if n == 0 { return 0, 0, true }
+        // Line n (1-based).
+        line: s32 = 1;
+        q: s32 = 0;
+        start: s32 = 0;
+        i: s64 = 0;
+        while i < w.body.count {
+            if line == n { start = q; break }
+            if w.body[i] == #char "\n" { line += 1 }
+            b := w.body[i];
+            bw: s64 = 1;
+            if (b & 0xE0) == 0xC0 && i + 2 <= w.body.count { bw = 2 }
+            else if (b & 0xF0) == 0xE0 && i + 3 <= w.body.count { bw = 3 }
+            else if (b & 0xF8) == 0xF0 && i + 4 <= w.body.count { bw = 4 }
+            i += bw;
+            q += 1;
+        }
+        if line != n { return 0, 0, false }
+        end := start;
+        while i < w.body.count {
+            b := w.body[i];
+            bw: s64 = 1;
+            if (b & 0xE0) == 0xC0 && i + 2 <= w.body.count { bw = 2 }
+            else if (b & 0xF0) == 0xE0 && i + 3 <= w.body.count { bw = 3 }
+            else if (b & 0xF8) == 0xF0 && i + 4 <= w.body.count { bw = 4 }
+            i += bw;
+            end += 1;
+            if b == #char "\n" { break }
+        }
+        return start, end, true;
+    }
+    if c == #char "/" {
+        // Simple literal or ".*\n" pattern search starting from w.addr1 within limit.
+        p += 1;
+        end_pat := p;
+        while end_pat < s.count && s[end_pat] != #char "/" { end_pat += 1 }
+        pat := s[p:end_pat];
+        if end_pat < s.count { end_pat += 1 }
+        at.* = end_pat;
+
+        lo: s32 = ifx w.has_limit then w.lim0 else 0;
+        hi: s32 = ifx w.has_limit then w.lim1 else total;
+        start_q := w.addr1;
+        if start_q < lo { start_q = lo }
+
+        if pat == ".*\\n" || pat == ".*\n" {
+            // Match next line within [start_q, hi].
+            if start_q >= hi { return 0, 0, false }
+            bi := RuneToByteOffset(w.body[:], start_q);
+            hi_b := RuneToByteOffset(w.body[:], hi);
+            q := start_q;
+            while bi < hi_b {
+                b := w.body[bi];
+                bw: s64 = 1;
+                if (b & 0xE0) == 0xC0 && bi + 2 <= hi_b { bw = 2 }
+                else if (b & 0xF0) == 0xE0 && bi + 3 <= hi_b { bw = 3 }
+                else if (b & 0xF8) == 0xF0 && bi + 4 <= hi_b { bw = 4 }
+                bi += bw;
+                q += 1;
+                if b == #char "\n" { return start_q, q, true }
+            }
+            return 0, 0, false;
+        }
+
+        // Literal substring search from start_q to hi.
+        if pat.count == 0 { return start_q, start_q, true }
+        lo_b := RuneToByteOffset(w.body[:], start_q);
+        hi_b := RuneToByteOffset(w.body[:], hi);
+        if hi_b - lo_b < pat.count { return 0, 0, false }
+        limit := hi_b - pat.count;
+        pos := lo_b;
+        while pos <= limit {
+            matched := true;
+            for k: 0..pat.count - 1 {
+                if w.body[pos + k] != pat[k] { matched = false; break }
+            }
+            if matched {
+                mq0 := RuneCount(w.body[:pos]);
+                mq1 := mq0 + RuneCount(w.body[pos:pos + pat.count]);
+                return mq0, mq1, true;
+            }
+            pos += 1;
+        }
+        return 0, 0, false;
+    }
+    return 0, 0, false;
+}
+
+WriteAddr :: (w: *Window, text: string) -> bool {
+    if text.count == 0 { return false }
+    at: s64 = 0;
+    q0, q1, ok := EvalSingleAddr(w, text, *at);
+    if !ok { return false }
+    if at < text.count && text[at] == #char "," {
+        at += 1;
+        r0, r1, ok2 := EvalSingleAddr(w, text, *at);
+        if !ok2 { return false }
+        q1 = r1;
+        unused r0;
+    }
+    if at != text.count { return false }
+    if q1 < q0 { return false }
+    w.addr0 = q0;
+    w.addr1 = q1;
+    return true;
+}
+
+WriteCtl :: (w: *Window, text: string) -> bool {
+    // Process line by line (or single token without newline like "dot=addr").
+    at: s64 = 0;
+    while at < text.count {
+        end := at;
+        while end < text.count && text[end] != #char "\n" { end += 1 }
+        cmd := text[at:end];
+        at = ifx end < text.count then end + 1 else end;
+        if cmd.count == 0 { continue }
+        if cmd == "addr=dot" {
+            w.addr0 = w.dot0;
+            w.addr1 = w.dot1;
+        } else if cmd == "dot=addr" {
+            w.dot0 = w.addr0;
+            w.dot1 = w.addr1;
+        } else if cmd == "limit=addr" {
+            w.lim0 = w.addr0;
+            w.lim1 = w.addr1;
+            w.has_limit = true;
+        } else if cmd == "mark" || cmd == "nomark" || cmd == "clean" {
+            // Accepted no-op for test server.
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+WriteData :: (w: *Window, text: string) {
+    b0 := RuneToByteOffset(w.body[:], w.addr0);
+    b1 := RuneToByteOffset(w.body[:], w.addr1);
+    next: Vec(u8);
+    for i: 0..b0 - 1 { unused VecPush(next, w.body[i]) }
+    for c: text { unused VecPush(next, c) }
+    for i: b1..w.body.count - 1 { unused VecPush(next, w.body[i]) }
+    VecClear(w.body);
+    for i: 0..next.count - 1 { unused VecPush(w.body, next[i]) }
+    added := RuneCount(w.body[b0:b0 + text.count]);
+    w.addr1 = w.addr0 + added;
+    w.addr0 = w.addr1;
+}
+
+// --- 9P2000 helpers ---
+
+ReadFull :: (h: s32, buf: []u8) -> bool {
+    done: s64 = 0;
+    while done < buf.count {
+        n := Io.ReadBytes(h, buf[done:]);
+        if n <= 0 { return false }
+        done += cast(s64)n;
+    }
+    return true;
+}
+
+Get :: (b: []u8, at: s64, w: s64) -> u64 {
+    v: u64 = 0;
+    for i: 0..w - 1 { v |= cast(u64)b[at + i] << cast(u64)(8 * i) }
+    return v;
+}
+
+Put :: (srv: *Server, v: u64, w: s64) {
+    for i: 0..w - 1 {
+        srv.rep[srv.used] = cast(u8)((v >> cast(u64)(8 * i)) & 255);
+        srv.used += 1;
+    }
+}
+
+PutAt :: (srv: *Server, at: s64, v: u64, w: s64) {
+    end := srv.used;
+    srv.used = at;
+    Put(srv, v, w);
+    srv.used = end;
+}
+
+PutText :: (srv: *Server, t: string) {
+    Put(srv, cast(u64)t.count, 2);
+    for c: t { srv.rep[srv.used] = c; srv.used += 1 }
+}
+
+IsDir :: (node: s32) -> bool {
+    return node == NODE_ROOT || node == NODE_W1_DIR || node == NODE_W2_DIR;
+}
+
+NodeName :: (node: s32) -> string {
+    if node == NODE_ROOT { return "/" }
+    if node == NODE_INDEX { return "index" }
+    if node == NODE_W1_DIR { return "1" }
+    if node == NODE_W2_DIR { return "2" }
+    leaf := node % 10;
+    if leaf == 1 { return "addr" }
+    if leaf == 2 { return "body" }
+    if leaf == 3 { return "ctl" }
+    if leaf == 4 { return "data" }
+    return "";
+}
+
+PutQid :: (srv: *Server, node: s32) {
+    Put(srv, ifx IsDir(node) then 128 else 0, 1);
+    Put(srv, 0, 4);
+    Put(srv, cast(u64)node, 8);
+}
+
+PutStat :: (srv: *Server, node: s32) {
+    start := srv.used;
+    srv.used += 2;
+    Put(srv, 0, 2);
+    Put(srv, 0, 4);
+    PutQid(srv, node);
+    Put(srv, ifx IsDir(node) then 0x800001ed else 0x1b6, 4);
+    Put(srv, 0, 4);
+    Put(srv, 0, 4);
+    Put(srv, 0, 8);
+    PutText(srv, NodeName(node));
+    PutText(srv, "zx");
+    PutText(srv, "zx");
+    PutText(srv, "zx");
+    PutAt(srv, start, cast(u64)(srv.used - start - 2), 2);
+}
+
+Begin :: (srv: *Server, kind: u64, tag: u64) {
+    srv.used = 4;
+    Put(srv, kind, 1);
+    Put(srv, tag, 2);
+}
+
+Refuse :: (srv: *Server, tag: u64, msg: string) {
+    Begin(srv, 107, tag);
+    PutText(srv, msg);
+}
+
+Send :: (srv: *Server) -> bool {
+    size := srv.used;
+    PutAt(srv, 0, cast(u64)size, 4);
+    done: s64 = 0;
+    while done < size {
+        n := Io.WriteBytes(srv.conn, TextView(srv.rep[done:size]));
+        if n <= 0 { return false }
+        done += cast(s64)n;
+    }
+    return true;
+}
+
+Slot :: (srv: *Server, fid: s64) -> s64 {
+    for i: 0..srv.fid.count - 1 { if srv.fid[i] == fid { return i } }
+    return -1;
+}
+
+Assign :: (srv: *Server, fid: s64, node: s32) -> bool {
+    s := Slot(srv, fid);
+    if s < 0 { s = Slot(srv, -1) }
+    if s < 0 { return false }
+    srv.fid[s] = fid;
+    srv.node[s] = node;
+    return true;
+}
+
+WalkOne :: (cur: s32, name: string) -> s32 {
+    if name == ".." {
+        if cur == NODE_W1_DIR || cur == NODE_W2_DIR || cur == NODE_INDEX { return NODE_ROOT }
+        if cur >= 11 && cur <= 14 { return NODE_W1_DIR }
+        if cur >= 21 && cur <= 24 { return NODE_W2_DIR }
+        return NODE_ROOT;
+    }
+    if cur == NODE_ROOT {
+        if name == "index" { return NODE_INDEX }
+        if name == "1" { return NODE_W1_DIR }
+        if name == "2" { return NODE_W2_DIR }
+        return -1;
+    }
+    if cur == NODE_W1_DIR || cur == NODE_W2_DIR {
+        base := cur;
+        if name == "addr" { return base + 1 }
+        if name == "body" { return base + 2 }
+        if name == "ctl" { return base + 3 }
+        if name == "data" { return base + 4 }
+        return -1;
+    }
+    return -1;
+}
+
+WinForNode :: (srv: *Server, node: s32) -> *Window {
+    if node >= 10 && node < 20 { return *srv.wins[0] }
+    if node >= 20 && node < 30 { return *srv.wins[1] }
+    return null;
+}
+
+Step :: (srv: *Server, wait: bool) -> s32 {
+    while srv.hdr_count < 4 {
+        n: s32;
+        if wait { n = Io.ReadBytes(srv.conn, srv.hdr[srv.hdr_count:]) }
+        else { n = Io.PollRead(srv.conn, srv.hdr[srv.hdr_count:]) }
+        if n == -2 { return 0 }
+        if n <= 0 { return -1 }
+        srv.hdr_count += cast(s64)n;
+    }
+    srv.hdr_count = 0;
+    size := cast(s64)Get(srv.hdr[:], 0, 4);
+    if size < 7 || size > srv.msg.count || !ReadFull(srv.conn, srv.msg[4:size]) { return -1 }
+    m := srv.msg[:size];
+    kind := Get(m, 4, 1);
+    tag := Get(m, 5, 2);
+    fid := ifx size >= 11 then cast(s64)Get(m, 7, 4) else -1;
+    slot := Slot(srv, fid);
+
+    if kind == 100 {
+        limit := Get(m, 7, 4);
+        Begin(srv, 101, tag);
+        Put(srv, ifx limit > 8192 then 8192 else limit, 4);
+        PutText(srv, "9P2000");
+    } else if kind == 104 {
+        if !Assign(srv, fid, NODE_ROOT) { return -1 }
+        srv.attached = true;
+        Begin(srv, 105, tag);
+        PutQid(srv, NODE_ROOT);
+    } else if kind == 108 {
+        Begin(srv, 109, tag);
+    } else if slot < 0 {
+        Refuse(srv, tag, "unknown fid");
+    } else if kind == 110 {
+        target := cast(s64)Get(m, 11, 4);
+        nwname := cast(s64)Get(m, 15, 2);
+        cur := srv.node[slot];
+        qids: [16]s32;
+        nq: s64 = 0;
+        pos: s64 = 17;
+        ok := true;
+        for k: 0..nwname - 1 {
+            nlen := cast(s64)Get(m, pos, 2);
+            pos += 2;
+            nm := TextView(m[pos:pos + nlen]);
+            pos += nlen;
+            nxt := WalkOne(cur, nm);
+            if nxt < 0 { ok = false; break }
+            cur = nxt;
+            if nq < 16 { qids[nq] = cur; nq += 1 }
+        }
+        if !ok && nq == 0 {
+            Refuse(srv, tag, "file does not exist");
+        } else {
+            if ok {
+                if !Assign(srv, target, cur) {
+                    Refuse(srv, tag, "too many open files");
+                    return ifx Send(srv) then 1 else -1;
+                }
+            }
+            Begin(srv, 111, tag);
+            Put(srv, cast(u64)nq, 2);
+            for k: 0..nq - 1 { PutQid(srv, qids[k]) }
+        }
+    } else if kind == 112 {
+        Begin(srv, 113, tag);
+        PutQid(srv, srv.node[slot]);
+        Put(srv, 0, 4);
+    } else if kind == 116 {
+        offset := cast(s64)Get(m, 11, 8);
+        count := cast(s64)Get(m, 19, 4);
+        if count > 8168 { count = 8168 }
+        nd := srv.node[slot];
+        if IsDir(nd) {
+            Begin(srv, 117, tag);
+            body := srv.used;
+            srv.used += 4;
+            if offset == 0 {
+                if nd == NODE_ROOT {
+                    PutStat(srv, NODE_INDEX);
+                    PutStat(srv, NODE_W1_DIR);
+                    PutStat(srv, NODE_W2_DIR);
+                } else {
+                    PutStat(srv, nd + 1);
+                    PutStat(srv, nd + 2);
+                    PutStat(srv, nd + 3);
+                    PutStat(srv, nd + 4);
+                }
+            }
+            PutAt(srv, body, cast(u64)(srv.used - body - 4), 4);
+        } else if nd == NODE_INDEX {
+            data := FormatIndex(srv);
+            Begin(srv, 117, tag);
+            if offset >= data.count {
+                Put(srv, 0, 4);
+            } else {
+                rem := data.count - offset;
+                if rem > count { rem = count }
+                Put(srv, cast(u64)rem, 4);
+                for k: 0..rem - 1 { srv.rep[srv.used] = data[offset + k]; srv.used += 1 }
+            }
+        } else {
+            w := WinForNode(srv, nd);
+            leaf := nd % 10;
+            if leaf == 1 {
+                // addr
+                data := FormatAddr(w);
+                Begin(srv, 117, tag);
+                if offset >= data.count {
+                    Put(srv, 0, 4);
+                } else {
+                    rem := data.count - offset;
+                    if rem > count { rem = count }
+                    Put(srv, cast(u64)rem, 4);
+                    for k: 0..rem - 1 { srv.rep[srv.used] = data[offset + k]; srv.used += 1 }
+                }
+            } else if leaf == 2 {
+                // body
+                Begin(srv, 117, tag);
+                if offset >= w.body.count {
+                    Put(srv, 0, 4);
+                } else {
+                    rem := w.body.count - offset;
+                    if rem > count { rem = count }
+                    Put(srv, cast(u64)rem, 4);
+                    for k: 0..rem - 1 { srv.rep[srv.used] = w.body[offset + k]; srv.used += 1 }
+                }
+            } else if leaf == 4 {
+                // data: read from w.addr0, advancing w.addr0 by runes read.
+                b0 := RuneToByteOffset(w.body[:], w.addr0);
+                Begin(srv, 117, tag);
+                if b0 >= w.body.count {
+                    Put(srv, 0, 4);
+                } else {
+                    rem := w.body.count - b0;
+                    if rem > count { rem = count }
+                    // Avoid splitting a UTF-8 sequence.
+                    while rem > 0 && b0 + rem < w.body.count && (w.body[b0 + rem] & 0xC0) == 0x80 {
+                        rem -= 1;
+                    }
+                    Put(srv, cast(u64)rem, 4);
+                    for k: 0..rem - 1 { srv.rep[srv.used] = w.body[b0 + k]; srv.used += 1 }
+                    w.addr0 += RuneCount(w.body[b0:b0 + rem]);
+                }
+            } else {
+                Begin(srv, 117, tag);
+                Put(srv, 0, 4);
+            }
+        }
+    } else if kind == 118 {
+        count := cast(s64)Get(m, 19, 4);
+        nd := srv.node[slot];
+        w := WinForNode(srv, nd);
+        payload := TextView(m[23:23 + count]);
+        leaf := nd % 10;
+        if w == null {
+            Refuse(srv, tag, "permission denied");
+        } else if leaf == 1 {
+            if WriteAddr(w, payload) {
+                Begin(srv, 119, tag);
+                Put(srv, cast(u64)count, 4);
+            } else {
+                Refuse(srv, tag, "address out of range");
+            }
+        } else if leaf == 3 {
+            if WriteCtl(w, payload) {
+                Begin(srv, 119, tag);
+                Put(srv, cast(u64)count, 4);
+            } else {
+                Refuse(srv, tag, "bad ctl");
+            }
+        } else if leaf == 4 {
+            WriteData(w, payload);
+            Begin(srv, 119, tag);
+            Put(srv, cast(u64)count, 4);
+        } else {
+            Refuse(srv, tag, "permission denied");
+        }
+    } else if kind == 120 {
+        srv.fid[slot] = -1;
+        Begin(srv, 121, tag);
+    } else if kind == 124 {
+        Begin(srv, 125, tag);
+        body := srv.used;
+        srv.used += 2;
+        PutStat(srv, srv.node[slot]);
+        PutAt(srv, body, cast(u64)(srv.used - body - 2), 2);
+    } else if kind == 126 {
+        Begin(srv, 127, tag);
+    } else {
+        Refuse(srv, tag, "not supported");
+    }
+    return ifx Send(srv) then 1 else -1;
+}
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() < 1 {
+        unused Io.WriteBytes(2, "usage: mock_acme script\n");
+        return 1;
+    }
+    script := Args.Operand(0);
+
+    srv: Server;
+    for i: 0..srv.fid.count - 1 { srv.fid[i] = -1 }
+    InitWin(*srv.wins[0], 1, "/test/alpha.txt", "one foo\ntwo bar\nthree foo\n");
+    InitWin(*srv.wins[1], 2, "/test/beta.txt", "hello world\n");
+
+    unused Namespace.Fork();
+    if Namespace.Bind("/build/tests/acme/main/mnt", "/mnt", Namespace.Before) != 0 {
+        unused Io.WriteBytes(2, "mock_acme: bind /mnt failed\n");
+        return 1;
+    }
+
+    ends: [2]s32;
+    if Namespace.Pipe(ends[:]) != 0 {
+        unused Io.WriteBytes(2, "mock_acme: pipe failed\n");
+        return 1;
+    }
+    srv.conn = ends[0];
+    ticket := Namespace.MountAsync(ends[1], -1, "/mnt/acme", Namespace.Replace, "");
+    unused Io.CloseFile(ends[1]);
+    while ticket > 0 && !srv.attached {
+        st := Step(*srv, false);
+        if st < 0 { break }
+        if st == 0 && Namespace.MountDone(ticket, false) != -2 { break }
+    }
+    if ticket <= 0 || !srv.attached || Namespace.MountDone(ticket, true) != 0 {
+        unused Io.WriteBytes(2, "mock_acme: mount /mnt/acme failed\n");
+        return 1;
+    }
+    unused Namespace.Bind("/mnt/acme", "/chan", Namespace.Before);
+
+    args := string.[script];
+    child := Process.Start("/dis/sh.zx", args[:]);
+    if child.id <= 0 {
+        unused Io.WriteBytes(2, "mock_acme: cannot start sh.zx\n");
+        return 1;
+    }
+    while true {
+        st := Step(*srv, false);
+        if st < 0 { break }
+        if st == 0 {
+            out := Process.Poll(child.id);
+            if out.status != -2 { break }
+        }
+    }
+    unused Io.CloseFile(srv.conn);
+    return 0;
+}

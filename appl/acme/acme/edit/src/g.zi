@@ -1,0 +1,60 @@
+// acme/edit/g: filter addressed ranges matching a regexp.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Edit :: #import "edit_common";
+
+PROG :: "g";
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        Edit.PrintErr("usage: g '/regexp/'\n");
+        return 0;
+    }
+    pat := Args.Operand(0);
+    if pat.count == 0 || pat[0] != #char "/" {
+        Edit.PrintErr("usage: g '/regexp/'\n");
+        return 0;
+    }
+
+    files: Vec(Edit.File);
+    if !Edit.ReadInput(PROG, *files) { return 0 }
+
+    id: s32 = -1;
+    afd: s32 = -1;
+    dfd: s32 = -1;
+    cfd: s32 = -1;
+
+    for i: 0..files.count - 1 {
+        f := files[i];
+        if !f.ok { continue }
+        if f.id != id {
+            id = f.id;
+            if !Edit.OpenWindow(PROG, id, *afd, *dfd, *cfd, false) { return 0 }
+        }
+        if Io.WriteBytes(afd, f.addr) != cast(s32)f.addr.count || Io.WriteBytes(cfd, "limit=addr\n") != 11 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%:% is invalid limit", f.name, f.addr);
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, BuilderFinish(msg));
+            return 0;
+        }
+        if !Edit.WriteAddrNum(afd, f.q0) {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "can't set dot");
+            return 0;
+        }
+        if Io.WriteBytes(afd, pat) == cast(s32)pat.count {
+            out: Vec(u8);
+            if f.q0 == f.q1 {
+                BuilderPrint(*out, "%:#%\n", f.name, f.q0);
+            } else {
+                BuilderPrint(*out, "%:#%,#%\n", f.name, f.q0, f.q1);
+            }
+            unused Edit.WriteAll(1, BuilderFinish(out));
+        }
+    }
+    Edit.CloseWindow(*afd, *dfd, *cfd);
+    return 0;
+}

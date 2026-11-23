@@ -1,0 +1,226 @@
+// acme/edit/pipe: pipe each addressed range through a command and replace it.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Namespace :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+Edit :: #import "edit_common";
+
+PROG :: "pipe";
+UTFMAX :: 4;
+
+Exists :: (path: string) -> bool {
+    meta: [12]u8;
+    return Io.StatFile(path, meta[:]) >= 0;
+}
+
+HasSuffix :: (s: string, suf: string) -> bool {
+    if s.count < suf.count { return false }
+    return s[s.count - suf.count:] == suf;
+}
+
+ResolveCommand :: (cmd: string) -> string {
+    if HasSuffix(cmd, ".zx") || HasSuffix(cmd, ".dis") {
+        if Exists(cmd) { return cmd }
+    } else {
+        zx: Vec(u8);
+        BuilderPrint(*zx, "%.zx", cmd);
+        zxs := Edit.CopyStr(BuilderFinish(zx));
+        if Exists(zxs) { return zxs }
+
+        dis: Vec(u8);
+        BuilderPrint(*dis, "%.dis", cmd);
+        diss := Edit.CopyStr(BuilderFinish(dis));
+        if Exists(diss) { return diss }
+    }
+    is_rel := cmd.count == 0 || (cmd[0] != #char "/" && !(cmd.count >= 2 && cmd[0] == #char "." && cmd[1] == #char "/"));
+    if is_rel {
+        if HasSuffix(cmd, ".zx") || HasSuffix(cmd, ".dis") {
+            p: Vec(u8);
+            BuilderPrint(*p, "/dis/%", cmd);
+            ps := Edit.CopyStr(BuilderFinish(p));
+            if Exists(ps) { return ps }
+        } else {
+            zx: Vec(u8);
+            BuilderPrint(*zx, "/dis/%.zx", cmd);
+            zxs := Edit.CopyStr(BuilderFinish(zx));
+            if Exists(zxs) { return zxs }
+
+            dis: Vec(u8);
+            BuilderPrint(*dis, "/dis/%.dis", cmd);
+            diss := Edit.CopyStr(BuilderFinish(dis));
+            if Exists(diss) { return diss }
+        }
+    }
+    return "";
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 1 {
+        Edit.PrintErr("usage: pipe command\n");
+        return 0;
+    }
+
+    cmd_name := Args.Operand(0);
+    cmd_args: Vec(string);
+    for i: 1..count - 1 {
+        unused VecPush(cmd_args, Edit.CopyStr(Args.Operand(i)));
+    }
+
+    files: Vec(Edit.File);
+    if !Edit.ReadInput(PROG, *files) { return 0 }
+
+    Edit.SortFiles(*files, Edit.CMP_SCMP);
+
+    id: s32 = -1;
+    afd: s32 = -1;
+    dfd: s32 = -1;
+    cfd: s32 = -1;
+
+    for i: 0..files.count - 1 {
+        f := files[i];
+        if !f.ok { continue }
+        if f.id != id {
+            id = f.id;
+            if !Edit.OpenWindow(PROG, id, *afd, *dfd, *cfd, true) { return 0 }
+        }
+        if !Edit.WriteAddrNum(afd, f.q0) {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "writing address");
+            return 0;
+        }
+
+        q0 := f.q0;
+        q1 := f.q1;
+        data: Vec(u8);
+        q := q0;
+        chunk: [4096]u8;
+        abuf: [12]u8;
+        while q < q1 {
+            want := cast(s64)(q1 - q) * UTFMAX;
+            if want > chunk.count { want = chunk.count }
+            nc := Io.ReadBytes(dfd, chunk[:want]);
+            if nc <= 0 {
+                Edit.CloseWindow(*afd, *dfd, *cfd);
+                Edit.Error(PROG, "read error from acme");
+                return 0;
+            }
+            for k: 0..nc - 1 { unused VecPush(data, chunk[k]) }
+            unused Io.SeekFile(afd, 0, 0);
+            if Io.ReadBytes(afd, abuf[:]) != 12 {
+                Edit.CloseWindow(*afd, *dfd, *cfd);
+                Edit.RError(PROG, "reading address");
+                return 0;
+            }
+            q = Edit.ParseInt(TextView(abuf[:12]));
+        }
+
+        // Exact byte length for q1 - q0 runes.
+        s0: s64 = 0;
+        nr: s32 = 0;
+        while nr < q1 - q0 && s0 < data.count {
+            w := Edit.Utf8CharWidth(data[:], s0, data.count);
+            if w <= 0 { break }
+            s0 += w;
+            nr += 1;
+        }
+
+        resolved := ResolveCommand(cmd_name);
+        if resolved.count == 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: file does not exist\n", cmd_name);
+            Edit.PrintErr(BuilderFinish(msg));
+            continue;
+        }
+
+        p1: [2]s32;
+        p2: [2]s32;
+        if Namespace.Pipe(p1[:]) < 0 || Namespace.Pipe(p2[:]) < 0 {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.Error(PROG, "pipe");
+            return 0;
+        }
+
+        launch := Process.StartWith(resolved, cmd_args[:], p1[0], p2[1], -1);
+        unused Io.CloseFile(p1[0]);
+        unused Io.CloseFile(p2[1]);
+        if launch.id <= 0 {
+            unused Io.CloseFile(p1[1]);
+            unused Io.CloseFile(p2[0]);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: %\n", cmd_name, launch.error);
+            Edit.PrintErr(BuilderFinish(msg));
+            continue;
+        }
+
+        // Feed input to child while draining its output to avoid pipe deadlock.
+        result: Vec(u8);
+        sent: s64 = 0;
+        p2_eof := false;
+        while sent < s0 {
+            step := s0 - sent;
+            if step > 4096 { step = 4096 }
+            nw := Io.WriteBytes(p1[1], TextView(data[sent:sent + step]));
+            if nw <= 0 {
+                unused Io.CloseFile(p1[1]);
+                unused Io.CloseFile(p2[0]);
+                unused Process.Wait(launch.id);
+                Edit.CloseWindow(*afd, *dfd, *cfd);
+                Edit.Error(PROG, "write error to process");
+                return 0;
+            }
+            sent += cast(s64)nw;
+            while !p2_eof {
+                pr := Io.PollRead(p2[0], chunk[:]);
+                if pr == -2 { break }
+                if pr <= 0 { p2_eof = true; break }
+                for k: 0..pr - 1 { unused VecPush(result, chunk[k]) }
+            }
+        }
+        unused Io.CloseFile(p1[1]);
+
+        while !p2_eof {
+            nr2 := Io.ReadBytes(p2[0], chunk[:]);
+            if nr2 <= 0 { break }
+            for k: 0..nr2 - 1 { unused VecPush(result, chunk[k]) }
+        }
+        unused Io.CloseFile(p2[0]);
+        unused Process.Wait(launch.id);
+
+        if !Edit.WriteAddrRange(afd, q0, q1) {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "writing address");
+            return 0;
+        }
+
+        new_q1 := q0 + Edit.NRunes(result[:], result.count);
+        if result.count > 0 {
+            if !Edit.WriteAll(dfd, TextView(result[:])) {
+                Edit.CloseWindow(*afd, *dfd, *cfd);
+                Edit.Error(PROG, "write error to acme");
+                return 0;
+            }
+        } else {
+            if Io.WriteBytes(dfd, "") != 0 {
+                Edit.CloseWindow(*afd, *dfd, *cfd);
+                Edit.Error(PROG, "write error to acme");
+                return 0;
+            }
+        }
+
+        if !Edit.WriteAddrRange(afd, q0, new_q1) {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "writing address");
+            return 0;
+        }
+        if Io.WriteBytes(cfd, "dot=addr\n") != 9 {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "writing dot");
+            return 0;
+        }
+    }
+    Edit.CloseWindow(*afd, *dfd, *cfd);
+    return 0;
+}

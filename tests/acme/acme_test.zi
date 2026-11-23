@@ -1,0 +1,209 @@
+// Guest regression for the Acme family ZX ports.
+//
+// From the TaijiOS root:
+//     ziran run --target=c --root tests/acme tests/acme/acme_test.zi -- emu/Linux/o.emu
+#import "std/byte_text_linux";
+#import "std/file";
+#import "std/file_linux";
+#import "std/file_tree_linux";
+#import "std/process_run_linux";
+
+Case :: struct {
+    name: string;
+    script: string;
+    out: string;
+    err: string;
+}
+
+WORK :: "build/tests/acme/main";
+
+cases: [14]Case = Case.[
+    .{
+        name = "edit-usage",
+        script = "/acme/edit/e.zx\n/acme/edit/a.zx\n/acme/edit/c.zx\n/acme/edit/d.zx extra\n/acme/edit/g.zx\n/acme/edit/i.zx\n/acme/edit/p.zx bad\n/acme/edit/pipe.zx\n/acme/edit/x.zx\n",
+        out = "",
+        err = "usage: e 'file[:address]' ...\nusage: a 'replacement'\nusage: c 'replacement'\nusage : d\nusage: g '/regexp/'\nusage: i 'replacement'\nusage: p [-n]\nusage: pipe command\nusage: x '/regexp/'\n",
+    },
+    .{
+        name = "edit-e-range",
+        script = "/acme/edit/e.zx 'alpha:0,$'\n",
+        out = "/test/alpha.txt:#0,#26\n",
+        err = "",
+    },
+    .{
+        name = "edit-e-lines",
+        script = "/acme/edit/e.zx -l 'alpha:0,$' 'beta:1'\n",
+        out = "/test/alpha.txt:1,3\n/test/beta.txt:1\n",
+        err = "",
+    },
+    .{
+        name = "edit-e-nomatch",
+        script = "/acme/edit/e.zx 'nosuch:0,$'\n",
+        out = "",
+        err = "e: no files match pattern nosuch:0,$\n",
+    },
+    .{
+        name = "edit-e-badaddr",
+        script = "/acme/edit/e.zx 'alpha:#999'\n",
+        out = "",
+        err = "e: /test/alpha.txt:#999 is invalid address\n",
+    },
+    .{
+        name = "edit-p",
+        script = "/acme/edit/e.zx 'beta:0,$' | /acme/edit/p.zx\n",
+        out = "hello world\n",
+        err = "",
+    },
+    .{
+        name = "edit-p-n",
+        script = "/acme/edit/e.zx 'beta:#0,#5' | /acme/edit/p.zx -n\n",
+        out = "/test/beta.txt:#0,#5: hello",
+        err = "",
+    },
+    .{
+        name = "edit-x-g-p",
+        script = "/acme/edit/e.zx 'alpha:0,$' | /acme/edit/x.zx '/.*\\n/' | /acme/edit/g.zx '/foo/' | /acme/edit/p.zx\n",
+        out = "one foo\nthree foo\n",
+        err = "",
+    },
+    .{
+        name = "edit-c-unescape",
+        script = "/acme/edit/e.zx 'alpha:0,$' | /acme/edit/x.zx '/foo/' | /acme/edit/c.zx 'BAR'\ncat /mnt/acme/1/body\n",
+        out = "one BAR\ntwo bar\nthree BAR\n",
+        err = "",
+    },
+    .{
+        name = "edit-c-newline",
+        script = "/acme/edit/e.zx 'beta:#5,#6' | /acme/edit/c.zx '\\n'\ncat /mnt/acme/2/body\n",
+        out = "hello\nworld\n",
+        err = "",
+    },
+    .{
+        name = "edit-a",
+        script = "/acme/edit/e.zx 'beta:#0,#5' | /acme/edit/a.zx '!'\ncat /mnt/acme/2/body\n",
+        out = "hello! world\n",
+        err = "",
+    },
+    .{
+        name = "edit-i",
+        script = "/acme/edit/e.zx 'beta:#6,#11' | /acme/edit/i.zx 'big '\ncat /mnt/acme/2/body\n",
+        out = "hello big world\n",
+        err = "",
+    },
+    .{
+        name = "edit-d",
+        script = "/acme/edit/e.zx 'beta:#5,#11' | /acme/edit/d.zx\ncat /mnt/acme/2/body\n",
+        out = "hello\n",
+        err = "",
+    },
+    .{
+        name = "edit-pipe",
+        script = "/acme/edit/e.zx 'beta:#0,#5' | /acme/edit/pipe.zx tr a-z A-Z\ncat /mnt/acme/2/body\n",
+        out = "HELLO world\n",
+        err = "",
+    },
+];
+
+failures: s64 = 0;
+
+Path :: (dir: string, kind: string, index: s64) -> string {
+    p: Vec(u8);
+    BuilderPrint(*p, "%/%/%.%", WORK, dir, kind, index);
+    return BuilderFinish(p);
+}
+
+BuildMock :: () -> bool {
+    cmd := string.[
+        "zi2zx",
+        "--root", "tests/acme",
+        "--module-path", "appl/cmd",
+        "--bind-host", "taijios_args",
+        "--bind-host", "taijios_io",
+        "--bind-host", "taijios_namespace",
+        "--bind-host", "taijios_process",
+        "--entry", "mock_acme:main",
+        "-o", "build/tests/acme/mock_acme.zx",
+        "tests/acme/mock_acme.zi",
+    ];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = cmd[:]}, *run) || run.code != 0 {
+        print("acme: failed to build mock_acme.zx\n");
+        return false;
+    }
+    ch := string.["chmod", "755", "build/tests/acme/mock_acme.zx"];
+    ch_run: ProcessRun;
+    return RunProcess(.{arguments = ch[:]}, *ch_run) && ch_run.code == 0;
+}
+
+Prepare :: () -> bool {
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/tests");
+    unused CreateDirectory("build/tests/acme");
+    if !CreateDirectory(WORK) { return false }
+    dirs := string.["cases", "result", "mnt", "mnt/acme"];
+    for dirs {
+        p: Vec(u8);
+        BuilderPrint(*p, "%/%", WORK, it);
+        if !CreateDirectory(BuilderFinish(p)) { return false }
+    }
+    for i: 0..cases.count - 1 {
+        if !WriteEntireFile(Path("cases", "script", i), cases[i].script) { return false }
+    }
+    return true;
+}
+
+DriverScript :: () -> string {
+    s: Vec(u8);
+    for i: 0..cases.count - 1 {
+        BuilderPrint(*s, "/build/tests/acme/mock_acme.zx /%/cases/script.% > /%/result/out.% >[2] /%/result/err.%\n",
+            WORK, i, WORK, i, WORK, i);
+    }
+    return BuilderFinish(s);
+}
+
+ReadResult :: (kind: string, index: s64) -> string {
+    text, ok := ReadEntireFile(Path("result", kind, index));
+    return ifx ok then text else "<missing>";
+}
+
+Expect :: (ok: bool, c: Case, field: string, got: string, want: string) {
+    if ok { return }
+    failures += 1;
+    print("FAIL % %:\n  got:  %\n  want: %\n", c.name, field, got, want);
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    if !Prepare() { print("cannot prepare %\n", WORK); return 1 }
+    if !BuildMock() { return 1 }
+
+    driver_path: Vec(u8);
+    BuilderPrint(*driver_path, "%/driver.sh", WORK);
+    dp := BuilderFinish(driver_path);
+    if !WriteEntireFile(dp, DriverScript()) { return 1 }
+
+    root: Text = WorkingDirectory();
+    guest_driver: Vec(u8);
+    BuilderPrint(*guest_driver, "/%", dp);
+    command := string.["timeout", "120", emu, "-r", TextView(root), "/dis/sh.zx", BuilderFinish(guest_driver)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("cannot start %\n", emu);
+        return 1;
+    }
+
+    for i: 0..cases.count - 1 {
+        c := cases[i];
+        out := ReadResult("out", i);
+        err := ReadResult("err", i);
+        Expect(out == c.out, c, "stdout", out, c.out);
+        Expect(err == c.err, c, "stderr", err, c.err);
+    }
+    if failures != 0 {
+        print("acme: % failures in % cases\n", failures, cases.count);
+        return 1;
+    }
+    print("acme: all % cases passed\n", cases.count);
+    return 0;
+}

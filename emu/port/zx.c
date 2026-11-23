@@ -2173,7 +2173,7 @@ zxio(void *context, const char *module, const char *function,
 	}else{
 		if(buffer->kind != HOST_STRING || (length != 0 && buffer->data == nil))
 			return 0;
-		count = length == 0 ? 0 : kwrite(fd, (void *)buffer->data, length);
+		count = kwrite(fd, length == 0 ? (void *)"" : (void *)buffer->data, length);
 		/* A write that lands is progress, as a read that returns data is. */
 		if(count > 0)
 			BundleHostRenewSteps();

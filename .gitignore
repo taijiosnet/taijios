@@ -238,3 +238,6 @@ y.debug
 /dis/auth/*.zx
 /appl/cmd/auxi/*.zx
 /dis/auxi/*.zx
+/appl/acme/**/*.zx
+/acme/**/*.zx
+/dis/acme/*.zx

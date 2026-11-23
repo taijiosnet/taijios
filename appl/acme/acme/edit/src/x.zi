@@ -1,0 +1,87 @@
+// acme/edit/x: loop over regexp matches within each addressed range.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Edit :: #import "edit_common";
+
+PROG :: "x";
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        Edit.PrintErr("usage: x '/regexp/'\n");
+        return 0;
+    }
+    pat := Args.Operand(0);
+    if pat.count == 0 || pat[0] != #char "/" {
+        Edit.PrintErr("usage: x '/regexp/'\n");
+        return 0;
+    }
+
+    files: Vec(Edit.File);
+    if !Edit.ReadInput(PROG, *files) { return 0 }
+
+    id: s32 = -1;
+    afd: s32 = -1;
+    dfd: s32 = -1;
+    cfd: s32 = -1;
+
+    for i: 0..files.count - 1 {
+        f := files[i];
+        if !f.ok { continue }
+        if f.id != id {
+            id = f.id;
+            if !Edit.OpenWindow(PROG, id, *afd, *dfd, *cfd, false) { return 0 }
+        }
+        if Io.WriteBytes(afd, f.addr) != cast(s32)f.addr.count || Io.WriteBytes(cfd, "limit=addr\n") != 11 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%:% is invalid limit", f.name, f.addr);
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, BuilderFinish(msg));
+            return 0;
+        }
+        if !Edit.WriteAddrNum(afd, f.q0) {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "can't set address");
+            return 0;
+        }
+        if Io.WriteBytes(cfd, "dot=addr") != 8 {
+            Edit.CloseWindow(*afd, *dfd, *cfd);
+            Edit.RError(PROG, "can't unset dot");
+            return 0;
+        }
+        addr := f.q0 - 1;
+        matched := false;
+        while true {
+            if Io.WriteBytes(afd, pat) != cast(s32)pat.count { break }
+            aq0, aq1, ok := Edit.ReadAddrPair(PROG, afd);
+            if !ok {
+                Edit.CloseWindow(*afd, *dfd, *cfd);
+                return 0;
+            }
+            if matched && aq1 == aq0 && addr == aq1 {
+                matched = false;
+                addr += 1;
+                if addr > f.q1 { break }
+                if !Edit.WriteAddrNum(afd, addr) {
+                    Edit.CloseWindow(*afd, *dfd, *cfd);
+                    Edit.RError(PROG, "writing address");
+                    return 0;
+                }
+                continue;
+            }
+            matched = true;
+            if aq0 < addr || aq0 >= f.q1 || aq1 > f.q1 { break }
+            addr = aq1;
+            out: Vec(u8);
+            if aq0 == aq1 {
+                BuilderPrint(*out, "%:#%\n", f.name, aq0);
+            } else {
+                BuilderPrint(*out, "%:#%,#%\n", f.name, aq0, aq1);
+            }
+            unused Edit.WriteAll(1, BuilderFinish(out));
+        }
+    }
+    Edit.CloseWindow(*afd, *dfd, *cfd);
+    return 0;
+}

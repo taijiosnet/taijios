@@ -1,0 +1,73 @@
+// acme/edit/p: print the text of each addressed range.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+Edit :: #import "edit_common";
+
+PROG :: "p";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    nflag := false;
+    if count == 1 && Args.Operand(0) == "-n" {
+        nflag = true;
+    } else if count != 0 {
+        Edit.PrintErr("usage: p [-n]\n");
+        return 0;
+    }
+
+    files: Vec(Edit.File);
+    if !Edit.ReadInput(PROG, *files) { return 0 }
+
+    Edit.SortFiles(*files, Edit.CMP_SCMP);
+
+    id: s32 = -1;
+    afd: s32 = -1;
+    dfd: s32 = -1;
+    cfd: s32 = -1;
+    bbuf: [512]u8;
+
+    for i: 0..files.count - 1 {
+        f := files[i];
+        if !f.ok { continue }
+        if f.id != id {
+            id = f.id;
+            if !Edit.OpenWindow(PROG, id, *afd, *dfd, *cfd, false) { return 0 }
+        }
+        if nflag {
+            hdr: Vec(u8);
+            if f.q1 > f.q0 {
+                BuilderPrint(*hdr, "%:#%,#%: ", f.name, f.q0, f.q1);
+            } else {
+                BuilderPrint(*hdr, "%:#%: ", f.name, f.q0);
+            }
+            unused Edit.WriteAll(1, BuilderFinish(hdr));
+        }
+        m := f.q0;
+        while m < f.q1 {
+            if !Edit.WriteAddrNum(afd, m) {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "%: %:% is invalid address\n", PROG, f.name, f.addr);
+                Edit.PrintErr(BuilderFinish(msg));
+                break;
+            }
+            n := Io.ReadBytes(dfd, bbuf[:]);
+            if n <= 0 { break }
+            nb := cast(s64)n;
+            nr := Edit.NRunes(bbuf[:], nb);
+            while m + nr > f.q1 && nb > 0 {
+                nb -= 1;
+                while nb > 0 && (bbuf[nb] & 0xC0) == 0x80 {
+                    nb -= 1;
+                }
+                nr -= 1;
+            }
+            if nb == 0 { break }
+            unused Edit.WriteAll(1, TextView(bbuf[:nb]));
+            m += nr;
+        }
+    }
+    Edit.CloseWindow(*afd, *dfd, *cfd);
+    return 0;
+}

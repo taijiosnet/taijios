@@ -1,0 +1,538 @@
+// Shared helpers for the sam-style acme/edit filters (a, c, d, e, g, i, p, pipe, x).
+#import "std/vec";
+using Io :: #import "taijios_io";
+
+#scope_export
+
+OREAD :: 0;
+OWRITE :: 1;
+ORDWR :: 2;
+
+CMP_BSCMP :: 0;
+CMP_SCMP :: 1;
+CMP_NCMP :: 2;
+CMP_FCMP :: 3;
+
+INDEXFILE :: "/mnt/acme/index";
+
+File :: struct {
+    id: s32;
+    seq: s32;
+    ok: bool;
+    q0: s32;
+    q1: s32;
+    name: string;
+    addr: string;
+}
+
+LineReader :: struct {
+    handle: s32;
+    buf: [4096]u8;
+    start: s64;
+    end: s64;
+    done: bool;
+}
+
+CopyStr :: (s: string) -> string {
+    return TextDetach(TextCopy(s));
+}
+
+WriteAll :: (fd: s32, text: string) -> bool {
+    done: s64 = 0;
+    while done < text.count {
+        n := Io.WriteBytes(fd, text[done:]);
+        if n <= 0 { return false }
+        done += n;
+    }
+    return true;
+}
+
+PrintErr :: (text: string) {
+    unused WriteAll(2, text);
+}
+
+Error :: (prog: string, s: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "%: %\n", prog, s);
+    PrintErr(BuilderFinish(out));
+}
+
+Errors :: (prog: string, s: string, t: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "%: % %\n", prog, s, t);
+    PrintErr(BuilderFinish(out));
+}
+
+RError :: (prog: string, s: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "%: %: %\n", prog, s, Io.LastError());
+    PrintErr(BuilderFinish(out));
+}
+
+StrCmp :: (a: string, b: string) -> s32 {
+    n := ifx a.count < b.count then a.count else b.count;
+    for i: 0..n - 1 {
+        if a[i] < b[i] { return -1 }
+        if a[i] > b[i] { return 1 }
+    }
+    if a.count < b.count { return -1 }
+    if a.count > b.count { return 1 }
+    return 0;
+}
+
+StrStr :: (s: string, t: string) -> s64 {
+    if t.count == 0 { return 0 }
+    if t.count > s.count { return -1 }
+    limit := s.count - t.count;
+    for p: 0..limit {
+        if s[p:p + t.count] == t { return p }
+    }
+    return -1;
+}
+
+ParseInt :: (s: string) -> s32 {
+    i: s64 = 0;
+    while i < s.count && (s[i] == #char " " || s[i] == #char "\t" || s[i] == #char "\n" || s[i] == #char "\r") {
+        i += 1;
+    }
+    neg := false;
+    if i < s.count && s[i] == #char "-" {
+        neg = true;
+        i += 1;
+    } else if i < s.count && s[i] == #char "+" {
+        i += 1;
+    }
+    val: s64 = 0;
+    while i < s.count && s[i] >= #char "0" && s[i] <= #char "9" {
+        val = val * 10 + cast(s64)(s[i] - #char "0");
+        i += 1;
+    }
+    if neg { val = -val }
+    return cast(s32)val;
+}
+
+Utf8CharWidth :: (buf: []u8, at: s64, limit: s64) -> s64 {
+    if at >= limit { return 0 }
+    b := buf[at];
+    if b < 0x80 { return 1 }
+    if (b & 0xE0) == 0xC0 {
+        if at + 2 <= limit { return 2 }
+        return 1;
+    }
+    if (b & 0xF0) == 0xE0 {
+        if at + 3 <= limit { return 3 }
+        return 1;
+    }
+    if (b & 0xF8) == 0xF0 {
+        if at + 4 <= limit { return 4 }
+        return 1;
+    }
+    return 1;
+}
+
+NRunes :: (buf: []u8, nb: s64) -> s32 {
+    i: s64 = 0;
+    n: s32 = 0;
+    while i < nb {
+        w := Utf8CharWidth(buf, i, nb);
+        if w <= 0 { break }
+        i += w;
+        n += 1;
+    }
+    return n;
+}
+
+ReadLine :: (r: *LineReader) -> (text: string, ok: bool) {
+    line: Vec(u8);
+    while true {
+        if r.start >= r.end {
+            if r.done { break }
+            n := Io.ReadBytes(r.handle, r.buf[:]);
+            if n <= 0 {
+                r.done = true;
+                break;
+            }
+            r.start = 0;
+            r.end = cast(s64)n;
+        }
+        c := r.buf[r.start];
+        r.start += 1;
+        unused VecPush(line, c);
+        if c == #char "\n" { break }
+    }
+    if line.count == 0 { return "", false }
+    return CopyStr(BuilderFinish(line)), true;
+}
+
+ReadAddrPair :: (prog: string, afd: s32) -> (q0: s32, q1: s32, ok: bool) {
+    unused Io.SeekFile(afd, 0, 0);
+    bbuf: [24]u8;
+    got: s64 = 0;
+    while got < 24 {
+        n := Io.ReadBytes(afd, bbuf[got:]);
+        if n <= 0 { break }
+        got += cast(s64)n;
+    }
+    if got != 24 {
+        RError(prog, "reading address");
+        return 0, 0, false;
+    }
+    s := TextView(bbuf[:24]);
+    return ParseInt(s[0:12]), ParseInt(s[12:24]), true;
+}
+
+AcmePath :: (id: s32, leaf: string) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "/mnt/acme/%/%", id, leaf);
+    return CopyStr(BuilderFinish(out));
+}
+
+WriteAddrNum :: (afd: s32, q0: s32) -> bool {
+    out: Vec(u8);
+    BuilderPrint(*out, "#%", q0);
+    s := BuilderFinish(out);
+    return Io.WriteBytes(afd, s) == cast(s32)s.count;
+}
+
+WriteAddrRange :: (afd: s32, q0: s32, q1: s32) -> bool {
+    out: Vec(u8);
+    BuilderPrint(*out, "#%,#%", q0, q1);
+    s := BuilderFinish(out);
+    return Io.WriteBytes(afd, s) == cast(s32)s.count;
+}
+
+OpenWindow :: (prog: string, id: s32, afd: *s32, dfd: *s32, cfd: *s32, nomark: bool) -> bool {
+    if afd.* >= 0 { unused Io.CloseFile(afd.*); afd.* = -1 }
+    if dfd.* >= 0 { unused Io.CloseFile(dfd.*); dfd.* = -1 }
+    if cfd.* >= 0 { unused Io.CloseFile(cfd.*); cfd.* = -1 }
+
+    ap := AcmePath(id, "addr");
+    a := Io.OpenFile(ap, ORDWR);
+    if a < 0 {
+        RError(prog, ap);
+        return false;
+    }
+    dp := AcmePath(id, "data");
+    d := Io.OpenFile(dp, ORDWR);
+    if d < 0 {
+        unused Io.CloseFile(a);
+        RError(prog, dp);
+        return false;
+    }
+    cp := AcmePath(id, "ctl");
+    c := Io.OpenFile(cp, ORDWR);
+    if c < 0 {
+        unused Io.CloseFile(a);
+        unused Io.CloseFile(d);
+        RError(prog, cp);
+        return false;
+    }
+    if nomark {
+        if Io.WriteBytes(c, "mark\nnomark\n") != 12 {
+            unused Io.CloseFile(a);
+            unused Io.CloseFile(d);
+            unused Io.CloseFile(c);
+            RError(prog, "setting nomark");
+            return false;
+        }
+    }
+    afd.* = a;
+    dfd.* = d;
+    cfd.* = c;
+    return true;
+}
+
+CloseWindow :: (afd: *s32, dfd: *s32, cfd: *s32) {
+    if afd.* >= 0 { unused Io.CloseFile(afd.*); afd.* = -1 }
+    if dfd.* >= 0 { unused Io.CloseFile(dfd.*); dfd.* = -1 }
+    if cfd.* >= 0 { unused Io.CloseFile(cfd.*); cfd.* = -1 }
+}
+
+FindFile :: (prog: string, pat: string, out: *Vec(File)) -> s64 {
+    fd := Io.OpenFile(INDEXFILE, OREAD);
+    if fd < 0 {
+        RError(prog, INDEXFILE);
+        return -1;
+    }
+    colon: s64 = 0;
+    while colon < pat.count && pat[colon] != #char ":" {
+        colon += 1;
+    }
+    pat1: string;
+    pat2: string;
+    if colon == pat.count {
+        pat1 = pat;
+        pat2 = ".";
+    } else {
+        pat1 = pat[0:colon];
+        pat2 = pat[colon + 1:];
+    }
+
+    reader: LineReader;
+    reader.handle = fd;
+    matches: Vec(File);
+    while true {
+        raw, ok := ReadLine(*reader);
+        if !ok { break }
+        if raw.count < 5 * 12 {
+            unused Io.CloseFile(fd);
+            RError(prog, "bad index file format");
+            return -1;
+        }
+        line := raw;
+        if line.count > 0 && line[line.count - 1] == #char "\n" {
+            line = line[0:line.count - 1];
+        }
+        if line.count < 5 * 12 {
+            unused Io.CloseFile(fd);
+            RError(prog, "bad index file format");
+            return -1;
+        }
+        blank: s64 = 5 * 12;
+        while blank < line.count && line[blank] != #char " " {
+            blank += 1;
+        }
+        name := line[5 * 12:blank];
+        if StrCmp(name, pat1) == 0 {
+            VecClear(matches);
+            f: File;
+            f.id = ParseInt(line);
+            f.name = CopyStr(name);
+            f.addr = CopyStr(pat2);
+            unused VecPush(matches, f);
+            break;
+        }
+        if StrStr(name, pat1) >= 0 {
+            f: File;
+            f.id = ParseInt(line);
+            f.name = CopyStr(name);
+            f.addr = CopyStr(pat2);
+            unused VecPush(matches, f);
+        }
+    }
+    unused Io.CloseFile(fd);
+    for i: 0..matches.count - 1 {
+        unused VecPush(out.*, matches[i]);
+    }
+    return matches.count;
+}
+
+CmpFile :: (a: File, b: File, kind: s32) -> s32 {
+    if kind == CMP_BSCMP { return b.seq - a.seq }
+    if kind == CMP_SCMP { return a.seq - b.seq }
+    if kind == CMP_NCMP {
+        c := StrCmp(a.name, b.name);
+        if c != 0 { return c }
+        return a.seq - b.seq;
+    }
+    if kind == CMP_FCMP {
+        c := StrCmp(a.name, b.name);
+        if c != 0 { return c }
+        if a.q0 != b.q0 { return a.q0 - b.q0 }
+        return a.q1 - b.q1;
+    }
+    return 0;
+}
+
+SortFiles :: (a: *Vec(File), kind: s32) {
+    if a.count <= 1 { return }
+    QSort(a, 0, a.count - 1, kind);
+}
+
+ReadInput :: (prog: string, files: *Vec(File)) -> bool {
+    reader: LineReader;
+    reader.handle = 0;
+    seq: s32 = 0;
+    while true {
+        line, ok := ReadLine(*reader);
+        if !ok { break }
+        if line.count > 0 && line[line.count - 1] == #char "\n" {
+            line = line[0:line.count - 1];
+        }
+        tf: Vec(File);
+        n := FindFile(prog, line, *tf);
+        if n < 0 { return false }
+        if n == 0 {
+            Errors(prog, "no files match input", line);
+            return false;
+        }
+        for i: 0..tf.count - 1 {
+            item := tf[i];
+            item.seq = seq;
+            seq += 1;
+            unused VecPush(files.*, item);
+        }
+    }
+
+    SortFiles(files, CMP_NCMP);
+
+    for i: 0..files.count - 1 {
+        files.*[i].ok = true;
+        addr := CopyStr(files.*[i].addr);
+        if addr.count > 0 && addr[0] == #char "#" {
+            p: s64 = 1;
+            n: s32 = 0;
+            while p < addr.count && addr[p] >= #char "0" && addr[p] <= #char "9" {
+                n = n * 10 + cast(s32)(addr[p] - #char "0");
+                p += 1;
+            }
+            files.*[i].q0 = n;
+            if p == addr.count {
+                files.*[i].q1 = n;
+                continue;
+            }
+            if addr[p] == #char "," {
+                p += 1;
+                n = 0;
+                while p < addr.count && addr[p] >= #char "0" && addr[p] <= #char "9" {
+                    n = n * 10 + cast(s32)(addr[p] - #char "0");
+                    p += 1;
+                }
+                files.*[i].q1 = n;
+                if p == addr.count { continue }
+            }
+        }
+        ap := AcmePath(files.*[i].id, "addr");
+        afd := Io.OpenFile(ap, ORDWR);
+        if afd < 0 {
+            RError(prog, ap);
+            return false;
+        }
+        cp := AcmePath(files.*[i].id, "ctl");
+        cfd := Io.OpenFile(cp, ORDWR);
+        if cfd < 0 {
+            unused Io.CloseFile(afd);
+            RError(prog, cp);
+            return false;
+        }
+        if Io.WriteBytes(cfd, "addr=dot\n") != 9 {
+            unused Io.CloseFile(afd);
+            unused Io.CloseFile(cfd);
+            RError(prog, "setting address to dot");
+            return false;
+        }
+        if Io.WriteBytes(afd, addr) != cast(s32)addr.count {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "%: %:% is invalid address\n", prog, files.*[i].name, addr);
+            PrintErr(BuilderFinish(msg));
+            files.*[i].ok = false;
+            unused Io.CloseFile(afd);
+            unused Io.CloseFile(cfd);
+            continue;
+        }
+        q0, q1, ok := ReadAddrPair(prog, afd);
+        unused Io.CloseFile(afd);
+        unused Io.CloseFile(cfd);
+        if !ok { return false }
+        files.*[i].q0 = q0;
+        files.*[i].q1 = q1;
+    }
+    return true;
+}
+
+// mode: 0 = change (#q0,#q1), 1 = append (#q1), 2 = insert (#q0)
+RunEdit :: (prog: string, repl_in: string, unescape: bool, mode: s32) -> s32 {
+    files: Vec(File);
+    if !ReadInput(prog, *files) { return 0 }
+
+    SortFiles(*files, CMP_BSCMP);
+
+    repl := repl_in;
+    if unescape {
+        out: Vec(u8);
+        j: s64 = 0;
+        while j < repl_in.count {
+            c := repl_in[j];
+            if c == #char "\\" && j + 1 < repl_in.count {
+                nxt := repl_in[j + 1];
+                if nxt == #char "n" {
+                    unused VecPush(out, #char "\n");
+                    j += 2;
+                    continue;
+                } else if nxt == #char "\\" {
+                    unused VecPush(out, #char "\\");
+                    j += 2;
+                    continue;
+                }
+            }
+            unused VecPush(out, c);
+            j += 1;
+        }
+        repl = CopyStr(BuilderFinish(out));
+    }
+
+    id: s32 = -1;
+    afd: s32 = -1;
+    dfd: s32 = -1;
+    cfd: s32 = -1;
+
+    for i: 0..files.count - 1 {
+        f := files[i];
+        if !f.ok { continue }
+        if f.id != id {
+            id = f.id;
+            if !OpenWindow(prog, id, *afd, *dfd, *cfd, true) { return 0 }
+        }
+        addr_ok := false;
+        if mode == 0 {
+            addr_ok = WriteAddrRange(afd, f.q0, f.q1);
+        } else if mode == 1 {
+            addr_ok = WriteAddrNum(afd, f.q1);
+        } else {
+            addr_ok = WriteAddrNum(afd, f.q0);
+        }
+        if !addr_ok {
+            CloseWindow(*afd, *dfd, *cfd);
+            RError(prog, "writing address");
+            return 0;
+        }
+        if repl.count > 0 && Io.WriteBytes(dfd, repl) != cast(s32)repl.count {
+            CloseWindow(*afd, *dfd, *cfd);
+            RError(prog, "writing replacement");
+            return 0;
+        }
+        if repl.count == 0 && mode == 0 {
+            if Io.WriteBytes(dfd, "") != 0 {
+                CloseWindow(*afd, *dfd, *cfd);
+                RError(prog, "writing replacement");
+                return 0;
+            }
+        }
+    }
+    CloseWindow(*afd, *dfd, *cfd);
+    return 0;
+}
+
+#scope_file
+
+CopyFile :: (f: File) -> File {
+    out: File;
+    out.id = f.id;
+    out.seq = f.seq;
+    out.ok = f.ok;
+    out.q0 = f.q0;
+    out.q1 = f.q1;
+    out.name = CopyStr(f.name);
+    out.addr = CopyStr(f.addr);
+    return out;
+}
+
+QSort :: (a: *Vec(File), lo: s64, hi: s64, kind: s32) {
+    if lo >= hi { return }
+    pivot := CopyFile(a.*[(lo + hi) / 2]);
+    i := lo;
+    j := hi;
+    while i <= j {
+        while CmpFile(a.*[i], pivot, kind) < 0 { i += 1 }
+        while CmpFile(a.*[j], pivot, kind) > 0 { j -= 1 }
+        if i <= j {
+            tmp := CopyFile(a.*[i]);
+            a.*[i] = CopyFile(a.*[j]);
+            a.*[j] = tmp;
+            i += 1;
+            j -= 1;
+        }
+    }
+    if lo < j { QSort(a, lo, j, kind) }
+    if i < hi { QSort(a, i, hi, kind) }
+}

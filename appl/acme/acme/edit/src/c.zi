@@ -1,0 +1,12 @@
+// acme/edit/c: change each addressed range to replacement (expanding \n and \\).
+using Args :: #import "taijios_args";
+Edit :: #import "edit_common";
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        Edit.PrintErr("usage: c 'replacement'\n");
+        return 0;
+    }
+    return Edit.RunEdit("c", Args.Operand(0), true, 0);
+}
