@@ -510,8 +510,13 @@ def check_namespace(root, env, boot):
     (root / 'cdtest/hello').write_text('hello from ZX\n', encoding='ascii')
     result = boot('/namespace.zx', 'cd', '/cdtest')
     assert result.returncode == 0 and 'ZX_CHDIR_OK' in result.stdout and not result.stderr, result
+    (root / 'pctltest').mkdir()
+    (root / 'pctltest/inner').write_text('inner\n', encoding='ascii')
+    result = boot('/namespace.zx', 'pctl')
+    assert result.returncode == 0 and 'ZX_PCTL_OK' in result.stdout and not result.stderr, result
     print('Without Dis, a ZX child served a 9P tree on a pipe given as its standard streams; its parent mounted, '
-          'read, bound and unmounted the tree, forked a namespace, and polled a pipe')
+          'read, bound and unmounted the tree, forked a namespace, and polled a pipe; children forked their '
+          'environment, rooted a new namespace and gave up devices, as pctl does')
 
 
 def check_hosted_process(emulator, root, env):

@@ -254,7 +254,103 @@ Child :: (mode: string, input: s32, output: s32) -> s32 {
 
 // Under the Dis shell's zxrun: a child on chosen streams answers through a pipe,
 // and a child blocked reading its input is killed.
+// Read up to buffer.count bytes of a file; -1 if it cannot be opened.
+ReadSmall :: (path: string, buffer: []u8) -> s64 {
+    handle := IO.Open(path, 0);
+    if handle < 0 { return -1 }
+    done: s64 = 0;
+    while done < buffer.count {
+        n := IO.Read(handle, buffer[done:]);
+        if n <= 0 { break }
+        done += n;
+    }
+    unused IO.Close(handle);
+    return done;
+}
+
+// The number in a file such as #p/1/pgrp, which pads it with spaces.
+ReadNumber :: (path: string) -> s64 {
+    bytes: [32]u8;
+    count := ReadSmall(path, bytes[:]);
+    value: s64 = -1;
+    for i: 0 .. count - 1 {
+        if bytes[i] >= 48 && bytes[i] <= 57 {
+            if value < 0 { value = 0 }
+            value = value * 10 + cast(s64)bytes[i] - 48;
+        }
+    }
+    return value;
+}
+
+// "#p/<pid>/<file>" in `out`.
+ProgPath :: (pid: s32, file: string, out: []u8) -> string {
+    digits: [12]u8;
+    count: s64 = 0;
+    rest := pid;
+    while true {
+        digits[count] = cast(u8)(48 + rest % 10);
+        count += 1;
+        rest /= 10;
+        if rest == 0 { break }
+    }
+    used: s64 = 0;
+    for c: "#p/" { out[used] = c; used += 1 }
+    for i: 0 .. count - 1 { out[used] = digits[count - 1 - i]; used += 1 }
+    out[used] = 47; used += 1;
+    for c: file { out[used] = c; used += 1 }
+    return TextView(out[:used]);
+}
+
+SetVariable :: (value: string) -> bool {
+    handle := IO.Create("/env/probevar", 1, 438);
+    if handle < 0 { return false }
+    ok := IO.Write(handle, value) == cast(s32)value.count;
+    return IO.Close(handle) == 0 && ok;
+}
+
+Variable :: (value: string) -> bool {
+    bytes: [32]u8;
+    count := ReadSmall("/env/probevar", bytes[:]);
+    return count == value.count && Same(bytes[:count], value);
+}
+
+// Run this probe in a mode and return its value, or -1 if it failed.
+RunMode :: (mode: string) -> s64 {
+    operands: [1]string = .{mode};
+    outcome := Process.Run(self_path, operands[:]);
+    return ifx outcome.status == 1 then outcome.value else -1;
+}
+
+// The pctl host calls in the booted program and its children.
+Pctl :: () -> s32 {
+    if Process.Pid() != 1 { return Fail("the booted program is process 1") }
+    if !SetVariable("parent") || RunMode("envshare") != 0 || !Variable("shared") {
+        return Fail("children share the environment");
+    }
+    if !SetVariable("parent") { return Fail("reset the variable") }
+    first := RunMode("envfork");
+    second := RunMode("envfork");
+    if first < 2 || second <= first || !Variable("parent") { return Fail("ForkEnv keeps a child's variables to itself") }
+    inner: [16]u8;
+    if RunMode("newns") != 0 || ReadSmall("/inner", inner[:]) != -1 || ReadSmall("/pctltest/inner", inner[:]) != 6 {
+        return Fail("NewNs roots only the child's namespace at its directory");
+    }
+    if RunMode("nodevs") != 0 { return Fail("NoDevs forbids devices but not pipes") }
+    console := IO.Open("#c", 0);
+    if console < 0 || IO.Close(console) != 0 { return Fail("NoDevs in a forked namespace leaves the parent's") }
+    print("ZX_PCTL_OK\n");
+    return 0;
+}
+
 Hosted :: () -> s32 {
+    // A command run from Dis is its Dis process, which can lead a new group.
+    pid := Process.Pid();
+    path: [64]u8;
+    status := IO.Open(ProgPath(pid, "status", path[:]), 0);
+    if pid <= 0 || status < 0 || IO.Close(status) != 0 || Process.NewPgrp() != pid ||
+       ReadNumber(ProgPath(pid, "pgrp", path[:])) != cast(s64)pid {
+        return Fail("hosted pid and process group");
+    }
     ends: [2]s32;
     if Namespace.Pipe(ends[:]) != 0 { return Fail("hosted pipe") }
     echo := Child("echo", ends[0], ends[0]);
@@ -309,6 +405,29 @@ main :: () -> s32 {
         if Args.OperandCount() != 2 { return Fail("hosted mode needs the probe path") }
         self_path = Args.Operand(1);
         return Hosted();
+    }
+    if mode == "pctl" { return Pctl() }
+    if mode == "envshare" { return ifx Variable("parent") && SetVariable("shared") then 0 else 20 }
+    if mode == "envfork" {
+        if !Namespace.ForkEnv() || !Variable("parent") || !SetVariable("child") || !Variable("child") { return 21 }
+        pid := Process.Pid();
+        if pid < 2 || Process.NewPgrp() != pid { return 22 }
+        return pid;
+    }
+    if mode == "newns" {
+        // Fork first: the directory and the root belong to the namespace.
+        if !Namespace.Fork() || IO.Chdir("/pctltest") != 0 || !Namespace.NewNs() { return 23 }
+        bytes: [16]u8;
+        if ReadSmall("/inner", bytes[:]) != 6 || ReadSmall("/namespace.zx", bytes[:]) != -1 { return 24 }
+        return 0;
+    }
+    if mode == "nodevs" {
+        console := IO.Open("#c", 0);
+        if console < 0 || IO.Close(console) != 0 { return 25 }
+        if !Namespace.Fork() || !Namespace.NoDevs() || IO.Open("#c", 0) >= 0 { return 26 }
+        ends: [2]s32;
+        if Namespace.Pipe(ends[:]) != 0 { return 27 }
+        return 0;
     }
     if mode == "share" { return ifx Namespace.Bind("/n/served", "/n/shared", Namespace.Replace) == 0 then 0 else 7 }
     if mode == "private" {

@@ -46,4 +46,19 @@ Unmount :: (source: string, old: string) -> s32 #foreign host_api;
 // change its parent's namespace calls this first.
 Fork :: () -> bool #foreign host_api;
 
+// Give the calling process a namespace whose root is its current directory,
+// as pctl NEWNS does. Devices stay forbidden if NoDevs was called.
+NewNs :: () -> bool #foreign host_api;
+
+// Forbid attaching devices by # name, as pctl NODEVS does, except pipes (#|),
+// the environment (#e), file2chan space (#s) and the secure-socket devices.
+// Like pctl, it changes the namespace the caller shares: call Fork first to
+// keep the restriction to the caller and its later children.
+NoDevs :: () -> bool #foreign host_api;
+
+// Give the calling process its own copy of the environment, as pctl FORKENV
+// does. ZX children share their parent's environment, so a child that sets
+// variables only for itself, such as a shell, calls this first.
+ForkEnv :: () -> bool #foreign host_api;
+
 Error :: () -> string #foreign host_api;

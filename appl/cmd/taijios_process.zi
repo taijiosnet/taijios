@@ -35,3 +35,12 @@ Kill :: (id: s32) -> bool #foreign host_api;
 // position. The child holds its own reference to each one: close a handle
 // here after the call when only the child should keep that end open.
 StartWith :: (path: string, operands: []string, input: s32, output: s32, errors: s32) -> Launch #foreign host_api;
+
+// The caller's process id, as pctl returns it. A command run from Dis has its
+// Dis process id; on the Dis-free desktop the booted program is 1 and each
+// child has the id Task Manager lists for it.
+Pid :: () -> s32 #foreign host_api;
+
+// Start a process group led by the caller, as pctl NEWPGRP does, and return
+// its id, which is the caller's process id, or -1.
+NewPgrp :: () -> s32 #foreign host_api;

@@ -908,6 +908,8 @@ struct ZxCommand {
 	ZxSurface *surface;
 	int hosted;
 	int depth;
+	int pid;	/* A native command's process id: 1 for the boot program. */
+	int group;	/* Its process group, once it starts one. */
 	HostValue *args;
 	int argc;
 	int *fd;
@@ -1327,7 +1329,8 @@ struct ZxProcess {
 };
 
 static Lock zxprocesslock;
-static int zxprocessactive, zxprocesspid;
+/* Process 1 is the program the emulator boots; children count from 2. */
+static int zxprocessactive, zxprocesspid = 1;
 static ZxProcess *zxprocesslist;
 static Rendez zxactivity;
 
@@ -1508,6 +1511,7 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 	/* Number children in the order they were started. */
 	lock(&zxprocesslock);
 	process->pid = ++zxprocesspid;
+	process->command.pid = process->pid;
 	unlock(&zxprocesslock);
 	kproc("ZX command", zxprocessworker, process, KPDUPPG|KPDUPENVG);
 	poperror();
@@ -1637,7 +1641,7 @@ zxnativetaskcapture(ZxCommand *command)
 	for(index = 0, process = zxprocesslist; process != nil; index++, process = process->listed){
 		row = &command->tasks[index];
 		row->pid = process->pid;
-		row->group = 0;
+		row->group = process->command.group;
 		row->state = Pready;
 		row->kib = -1;
 		row->cpunanos = -1;
@@ -1723,6 +1727,38 @@ zxprocessregister(ZxCommand *command, const HostValue *args, ZxResult *result, i
 	return process->id;
 }
 
+/* The caller's process id, as pctl returns it, after starting a process
+ * group led by the caller if asked, as pctl NEWPGRP does. A command run
+ * from Dis is its Dis process; a native one has the id the task list shows. */
+static int
+zxpctl(ZxCommand *command, int newgroup)
+{
+	Prog *self;
+
+	if(command->hosted){
+		self = up->iprog;
+		if(self == nil)
+			return -1;
+		if(newgroup){
+			acquire();
+			if(waserror()){
+				release();
+				return -1;
+			}
+			newgrp(self);
+			poperror();
+			release();
+		}
+		return self->pid;
+	}
+	if(newgroup){
+		lock(&zxprocesslock);
+		command->group = command->pid;
+		unlock(&zxprocesslock);
+	}
+	return command->pid;
+}
+
 static int
 zxprocess(void *context, const char *module, const char *function,
 	const HostValue *args, int n, HostValue *result)
@@ -1733,6 +1769,11 @@ zxprocess(void *context, const char *module, const char *function,
 	int id, i, chosen, streams[3];
 
 	USED(module);
+	if(strcmp(function, "Pid") == 0 || strcmp(function, "NewPgrp") == 0){
+		if(n != 0)
+			return 0;
+		return zxs32(result, zxpctl(command, strcmp(function, "NewPgrp") == 0));
+	}
 	chosen = strcmp(function, "StartWith") == 0;
 	if(strcmp(function, "Run") == 0 || strcmp(function, "Start") == 0 || chosen){
 		if(n != (chosen ? 5 : 2) || args[0].kind != HOST_STRING || args[1].kind != HOST_SLICE ||
@@ -2199,6 +2240,7 @@ zxnamespace(void *context, const char *module, const char *function,
 	ZxCommand *command = context;
 	char first[ZxGuestPathBytes + 1], second[ZxGuestPathBytes + 1];
 	Pgrp *copy, *shared;
+	Egrp *env, *sharedenv;
 	ZxMount *mount, **link;
 	int ends[2], handles[2], fd, afd, binding, status;
 
@@ -2208,6 +2250,51 @@ zxnamespace(void *context, const char *module, const char *function,
 			return 0;
 		*result = (HostValue){.kind = HOST_STRING, .type = "string",
 			.data = (uchar *)command->err, .length = strlen(command->err)};
+		return 1;
+	}
+	if(strcmp(function, "ForkEnv") == 0){
+		if(n != 0)
+			return 0;
+		/* As pctl FORKENV: this process and its later children get their
+		 * own copy of the environment instead of sharing the parent's. */
+		env = newegrp();
+		egrpcpy(env, up->env->egrp);
+		sharedenv = up->env->egrp;
+		up->env->egrp = env;
+		closeegrp(sharedenv);
+		zxbool(result, 1);
+		return 1;
+	}
+	if(strcmp(function, "NewNs") == 0){
+		if(n != 0)
+			return 0;
+		/* As pctl NEWNS: a namespace whose root is the current directory. */
+		copy = newpgrp();
+		if(waserror()){
+			closepgrp(copy);
+			zxioerrstr(command, nil);
+			zxbool(result, 0);
+			return 1;
+		}
+		copy->dot = cclone(up->env->pgrp->dot);
+		copy->slash = cclone(up->env->pgrp->dot);
+		cnameclose(copy->slash->name);
+		copy->slash->name = newcname("/");
+		copy->nodevs = up->env->pgrp->nodevs;
+		poperror();
+		shared = up->env->pgrp;
+		up->env->pgrp = copy;
+		closepgrp(shared);
+		zxbool(result, 1);
+		return 1;
+	}
+	if(strcmp(function, "NoDevs") == 0){
+		if(n != 0)
+			return 0;
+		/* As pctl NODEVS: only pipes, the environment, file2chan space and
+		 * the secure-socket devices can be attached by # name from now on. */
+		up->env->pgrp->nodevs = 1;
+		zxbool(result, 1);
 		return 1;
 	}
 	if(strcmp(function, "Fork") == 0){
@@ -3292,7 +3379,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		if(zxmodule(abi.module, "taijios_process")){
 			if(strcmp(abi.function, "Run") == 0 || strcmp(abi.function, "Start") == 0 ||
 			   strcmp(abi.function, "Poll") == 0 || strcmp(abi.function, "Wait") == 0 ||
-			   strcmp(abi.function, "Kill") == 0 || strcmp(abi.function, "StartWith") == 0)
+			   strcmp(abi.function, "Kill") == 0 || strcmp(abi.function, "StartWith") == 0 ||
+			   strcmp(abi.function, "Pid") == 0 || strcmp(abi.function, "NewPgrp") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxprocess, command};
 			continue;
 		}
@@ -3340,6 +3428,8 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			if(strcmp(abi.function, "Pipe") == 0 || strcmp(abi.function, "Mount") == 0 ||
 			   strcmp(abi.function, "Bind") == 0 || strcmp(abi.function, "Unmount") == 0 ||
 			   strcmp(abi.function, "Fork") == 0 || strcmp(abi.function, "Error") == 0 ||
+			   strcmp(abi.function, "ForkEnv") == 0 || strcmp(abi.function, "NewNs") == 0 ||
+			   strcmp(abi.function, "NoDevs") == 0 ||
 			   strcmp(abi.function, "MountAsync") == 0 || strcmp(abi.function, "MountDone") == 0 ||
 			   strcmp(abi.function, "Export") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxnamespace, command};
@@ -3836,7 +3926,7 @@ zxboot(const char *path, int argc, char **argv)
 #ifdef TAIJI_ZX
 	extern int vflag;
 	ZxSurface surface = {.win = H, .pointermillis = -1};
-	ZxCommand command = {.argc = argc};
+	ZxCommand command = {.argc = argc, .pid = 1};
 	ZxResult result;
 	int i;
 
