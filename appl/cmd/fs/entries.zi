@@ -1,0 +1,8 @@
+// /dis/fs/entries.zx module entry point (replaces appl/cmd/fs/entries.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "tx" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("entries", "tx");
+}

@@ -1,0 +1,8 @@
+// /dis/fs/match.zx module entry point (replaces appl/cmd/fs/match.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "ps-a-r" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("match", "ps-a-r");
+}

@@ -1,0 +1,8 @@
+// /dis/fs/void.zx module entry point (replaces appl/cmd/fs/void.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "vv" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("void", "vv");
+}

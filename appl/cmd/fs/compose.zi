@@ -1,0 +1,8 @@
+// /dis/fs/compose.zx module entry point (replaces appl/cmd/fs/compose.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "ms-d" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("compose", "ms-d");
+}

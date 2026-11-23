@@ -1,0 +1,8 @@
+// /dis/fs/filter.zx module entry point (replaces appl/cmd/fs/filter.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "xpx-d" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("filter", "xpx-d");
+}

@@ -1,0 +1,8 @@
+// /dis/fs/or.zx module entry point (replaces appl/cmd/fs/or.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "pppp*" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("or", "pppp*");
+}

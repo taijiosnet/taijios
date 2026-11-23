@@ -1,0 +1,8 @@
+// /dis/fs/run.zx module entry point (replaces appl/cmd/fs/run.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "sc" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("run", "sc");
+}

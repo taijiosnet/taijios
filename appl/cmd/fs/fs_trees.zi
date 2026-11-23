@@ -1,0 +1,1707 @@
+// Tree-producing fs modules: walk, proto, unbundle, filter, chstat, setroot, merge.
+#import "std/vec"
+#import "std/option"
+Io :: #import "taijios_io";
+using Fs :: #import "fs_types";
+
+// ============================================================================
+// 1. walk: "xs-bs"
+// ============================================================================
+
+walk_prod: s32 = -1;
+
+W_NONE :: 0;
+W_NULLROOT :: 1;
+W_NULLEND :: 2;
+W_ROOT :: 3;
+W_DIRENTRY :: 4;
+W_FILEENTRY :: 5;
+W_DATA :: 6;
+W_FILEEND :: 7;
+W_DIREND :: 8;
+W_OVER :: 9;
+
+WalkFrame :: struct {
+    path: string;
+    entries: Vec(FsDir);
+    loop: Vec(bool);
+    i: s64;
+}
+
+WalkState :: struct {
+    root: string;
+    blocksize: s64;
+    errc: s32;
+    frames: Vec(WalkFrame);
+    entered: Vec(FsDir);
+    last: s32;
+    fh: s32;
+    fpath: string;
+    flength: s64;
+    fread: s64;
+}
+
+walks: Vec(WalkState);
+
+RunWalk :: (opts: []FsOpt, args: []s32) -> s32 {
+    if walk_prod < 0 { walk_prod = FsProducer("walk", WalkNext) }
+    blocksize: s64 = ATOMICIO;
+    for * it: opts {
+        if it.opt == #char "b" && it.args.count > 0 {
+            bs := LimboInt(ValueText(it.args[0]));
+            if bs > 0 { blocksize = bs }
+        }
+    }
+    path := ValueText(args[0]);
+    d, ok := StatPath(path);
+    if !ok {
+        ErrLine(WithError(Join("fs: walk: cannot stat ", Q(path))));
+        return -1;
+    }
+    if !IsDir(d) {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: walk: % is not a directory", Q(path));
+        ErrLine(BuilderFinish(out));
+        return -1;
+    }
+    v := NewValue(#char "x", walk_prod);
+    w: WalkState;
+    w.root = path;
+    w.blocksize = blocksize;
+    w.errc = ReportStart("walk");
+    w.fh = -1;
+    VecPush(walks, w);
+    SetN0(v, walks.count - 1);
+    return v;
+}
+
+SameDir :: (a: FsDir, b: FsDir) -> bool {
+    return a.qpath == b.qpath && a.qtype == b.qtype && a.dtype == b.dtype && a.dev == b.dev;
+}
+
+WalkEnter :: (w: s64, d: FsDir) -> bool {
+    i: s64 = 0;
+    while i < walks[w].entered.count {
+        if SameDir(walks[w].entered[i], d) { return false }
+        i += 1;
+    }
+    VecPush(walks[w].entered, d);
+    return true;
+}
+
+WalkLeave :: (w: s64) {
+    if walks[w].entered.count > 0 {
+        unused VecPop(walks[w].entered);
+    }
+}
+
+WalkPush :: (w: s64, path: string) {
+    f: WalkFrame;
+    f.path = path;
+    if !ReadDir(path, *f.entries) {
+        Report(walks[w].errc, WithError(Join("cannot readdir ", Q(path))));
+        VecClear(f.entries);
+    }
+    for f.entries {
+        loop := false;
+        if IsDir(it) { loop = !WalkEnter(w, it) }
+        VecPush(f.loop, loop);
+    }
+    VecPush(walks[w].frames, f);
+}
+
+WalkPop :: (w: s64) -> Item {
+    k := walks[w].frames.count - 1;
+    i := walks[w].frames[k].entries.count - 1;
+    while i >= 0 {
+        if IsDir(walks[w].frames[k].entries[i]) && !walks[w].frames[k].loop[i] { WalkLeave(w) }
+        i -= 1;
+    }
+    unused VecPop(walks[w].frames);
+    walks[w].last = W_DIREND;
+    return ItemOf(End);
+}
+
+WalkCloseFile :: (w: s64) {
+    if walks[w].fh >= 0 { unused Io.CloseFile(walks[w].fh) }
+    walks[w].fh = -1;
+}
+
+WalkOver :: (w: s64) -> Item {
+    WalkCloseFile(w);
+    walks[w].last = W_OVER;
+    return ItemOf(Done);
+}
+
+WalkAdvance :: (w: s64) -> Item {
+    k := walks[w].frames.count - 1;
+    while walks[w].frames[k].i < walks[w].frames[k].entries.count {
+        i := walks[w].frames[k].i;
+        d := walks[w].frames[k].entries[i];
+        name := Join(walks[w].frames[k].path, d.name);
+        if IsDir(d) {
+            if walks[w].frames[k].loop[i] {
+                Report(walks[w].errc, Join("filesystem loop at ", QQ(name)));
+                walks[w].frames[k].i += 1;
+                continue;
+            }
+            h := Io.OpenFile(name, 0);
+            if h < 0 {
+                Report(walks[w].errc, WithError(Join("cannot cd to ", QQ(name))));
+                walks[w].frames[k].i += 1;
+                continue;
+            }
+            unused Io.CloseFile(h);
+            walks[w].last = W_DIRENTRY;
+            return EntryOf(d);
+        }
+        h := Io.OpenFile(name, 0);
+        if h < 0 {
+            Report(walks[w].errc, WithError(Join("cannot open ", Q(name))));
+            walks[w].frames[k].i += 1;
+            continue;
+        }
+        walks[w].fh = h;
+        walks[w].fpath = name;
+        walks[w].flength = d.length;
+        walks[w].fread = 0;
+        walks[w].last = W_FILEENTRY;
+        return EntryOf(d);
+    }
+    return WalkPop(w);
+}
+
+WalkNextEntry :: (w: s64) -> Item {
+    k := walks[w].frames.count - 1;
+    walks[w].frames[k].i += 1;
+    return WalkAdvance(w);
+}
+
+WalkBlock :: (w: s64) -> Item {
+    if walks[w].fread < walks[w].flength {
+        want := walks[w].flength - walks[w].fread;
+        if want > walks[w].blocksize { want = walks[w].blocksize }
+        buffer: Vec(u8);
+        for _: 0..want - 1 { VecPush(buffer, 0) }
+        n := Io.ReadBytes(walks[w].fh, buffer[:]);
+        if n <= 0 {
+            if n < 0 {
+                Report(walks[w].errc, WithError(Join("error reading ", Q(walks[w].fpath))));
+            } else {
+                out: Vec(u8);
+                BuilderPrint(*out, "% is shorter than expected (%/%)", Q(walks[w].fpath), walks[w].fread, walks[w].flength);
+                Report(walks[w].errc, BuilderFinish(out));
+            }
+        } else {
+            walks[w].fread += n;
+            walks[w].last = W_DATA;
+            item := ItemOf(Data);
+            item.data = TextDetach(TextCopy(TextView(buffer[:n])));
+            return item;
+        }
+    }
+    walks[w].last = W_FILEEND;
+    return ItemOf(End);
+}
+
+WalkNext :: (v: s32, reply: s32) -> Item {
+    w := N0(v);
+    last := walks[w].last;
+    if last == W_OVER { return ItemOf(Done) }
+    if last == W_NONE {
+        d, ok := StatPath(walks[w].root);
+        if !ok {
+            Report(walks[w].errc, WithError(Join("cannot stat ", Q(walks[w].root))));
+            walks[w].last = W_NULLROOT;
+            return EntryOf(NullDir());
+        }
+        d.name = walks[w].root;
+        walks[w].last = W_ROOT;
+        return EntryOf(d);
+    }
+    if last == W_NULLROOT {
+        if reply == Down {
+            walks[w].last = W_NULLEND;
+            return ItemOf(End);
+        }
+        return WalkOver(w);
+    }
+    if last == W_NULLEND { return WalkOver(w) }
+    if reply == Quit { return WalkOver(w) }
+    if last == W_ROOT {
+        if reply != Down { return WalkOver(w) }
+        d, ok := StatPath(walks[w].root);
+        unused ok;
+        unused WalkEnter(w, d);
+        path := walks[w].root;
+        if path.count == 0 || path[path.count - 1] != #char "/" { path = Join(path, "/") }
+        WalkPush(w, path);
+        return WalkAdvance(w);
+    }
+    if last == W_DIRENTRY {
+        k := walks[w].frames.count - 1;
+        if reply == Down {
+            d := walks[w].frames[k].entries[walks[w].frames[k].i];
+            WalkPush(w, Join3(walks[w].frames[k].path, d.name, "/"));
+            return WalkAdvance(w);
+        }
+        if reply == Skip { return WalkPop(w) }
+        return WalkNextEntry(w);
+    }
+    if last == W_FILEENTRY {
+        if reply == Down { return WalkBlock(w) }
+        WalkCloseFile(w);
+        if reply == Skip { return WalkPop(w) }
+        return WalkNextEntry(w);
+    }
+    if last == W_DATA {
+        if reply == Skip {
+            WalkCloseFile(w);
+            return WalkNextEntry(w);
+        }
+        return WalkBlock(w);
+    }
+    if last == W_FILEEND {
+        WalkCloseFile(w);
+        return WalkNextEntry(w);
+    }
+    if walks[w].frames.count == 0 { return WalkOver(w) }
+    return WalkNextEntry(w);
+}
+
+// ============================================================================
+// 2. proto: "xs-rs"
+// ============================================================================
+
+proto_prod: s32 = -1;
+
+P_STAR :: 1;
+P_PLUS :: 2;
+P_EMPTY :: 4;
+
+ProtoSpec :: struct {
+    name: string;
+    mode: u32;
+    has_mode: bool;
+    owner: string;
+    group: string;
+    old: string;
+    flags: s32;
+    sub: Vec(s32);
+}
+
+ProtoParser :: struct {
+    text: string;
+    pos: s64;
+    indent: s32;
+    lastline: string;
+    has_last: bool;
+}
+
+ProtoNode :: struct {
+    dir: FsDir;
+    real_path: string;
+    children: Vec(s32);
+}
+
+ProtoWalkFrame :: struct {
+    node: s32;
+    i: s64;
+}
+
+ProtoState :: struct {
+    root_node: s32;
+    errc: s32;
+    frames: Vec(ProtoWalkFrame);
+    last: s32;
+    fh: s32;
+    fpath: string;
+    flength: s64;
+    fread: s64;
+}
+
+proto_specs: Vec(ProtoSpec);
+proto_nodes: Vec(ProtoNode);
+protos: Vec(ProtoState);
+
+ProtoGets :: (p: *ProtoParser) -> (line: string, ok: bool) {
+    if p.pos >= p.text.count { return "", false }
+    start := p.pos;
+    while p.pos < p.text.count && p.text[p.pos] != #char "\n" { p.pos += 1 }
+    if p.pos < p.text.count { p.pos += 1 }
+    return p.text[start:p.pos], true;
+}
+
+ProtoGetName :: (s: string, allowminus: bool) -> string {
+    if s.count == 0 { return "" }
+    if allowminus && s == "-" { return "" }
+    if s[0] == #char "$" { return "" }
+    return Keep(s);
+}
+
+ProtoGetMode :: (s_in: string) -> (mode: u32, has_mode: bool) {
+    s := ProtoGetName(s_in, true);
+    if s.count == 0 { return 0xFFFFFFFF, false }
+    m: u32 = 0;
+    i: s64 = 0;
+    if i < s.count && s[i] == #char "d" { m |= DMDIR; i += 1 }
+    if i < s.count && s[i] == #char "a" { m |= DMAPPEND; i += 1 }
+    if i < s.count && s[i] == #char "l" { m |= DMEXCL; i += 1 }
+    xmode, rest := OctalPrefix(s);
+    if rest.count != 0 { return 0xFFFFFFFF, false }
+    return cast(u32)xmode | m, true;
+}
+
+ProtoTokenize :: (s: string, out: *Vec(string)) {
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && (s[i] == #char " " || s[i] == #char "\t" || s[i] == #char "\n" || s[i] == #char "\r") { i += 1 }
+        if i >= s.count { break }
+        start := i;
+        while i < s.count && s[i] != #char " " && s[i] != #char "\t" && s[i] != #char "\n" && s[i] != #char "\r" { i += 1 }
+        VecPush(<<out, s[start:i]);
+    }
+}
+
+// A proto file is text; a line with control bytes is not a proto line, so a
+// directory or other binary opened as a proto file cannot put its raw bytes
+// into entry names or error messages.
+ProtoTextLine :: (s: string) -> bool {
+    for i: 0..s.count-1 {
+        b := cast(u8)s[i];
+        if b < 32 && b != 9 && b != 10 && b != 13 { return false }
+    }
+    return true;
+}
+
+ProtoReadLine :: (p: *ProtoParser, indent: s32) -> s32 {
+    while true {
+        s: string;
+        if p.has_last {
+            s = p.lastline;
+            p.has_last = false;
+        } else if p.indent == -1 {
+            return -1;
+        } else {
+            line, ok := ProtoGets(p);
+            if !ok {
+                p.indent = -1;
+                return -1;
+            }
+            s = line;
+        }
+        if !ProtoTextLine(s) { continue }
+        spc: s32 = 0;
+        i: s64 = 0;
+        while i < s.count {
+            c := s[i];
+            if c == #char " " { spc += 1 }
+            else if c == #char "\t" { spc += 8 }
+            else { break }
+            i += 1;
+        }
+        if i == s.count || s[i] == #char "#" || s[i] == #char "\n" || s[i] == #char "\r" {
+            continue;
+        }
+        if spc <= indent {
+            p.lastline = s;
+            p.has_last = true;
+            return -1;
+        }
+        p.indent = spc;
+        toks: Vec(string);
+        ProtoTokenize(s, *toks);
+        f: ProtoSpec;
+        f.mode = 0xFFFFFFFF;
+        f.has_mode = false;
+        if toks.count > 0 { f.name = ProtoGetName(toks[0], false) }
+        if toks.count > 1 {
+            m, hm := ProtoGetMode(toks[1]);
+            f.mode = m;
+            f.has_mode = hm;
+        }
+        if toks.count > 2 { f.owner = ProtoGetName(toks[2], true) }
+        if toks.count > 3 { f.group = ProtoGetName(toks[3], true) }
+        if toks.count > 4 { f.old = Keep(toks[4]) }
+        VecPush(proto_specs, f);
+        return cast(s32)(proto_specs.count - 1);
+    }
+    return -1;
+}
+
+SortProtoSub :: (sub: *Vec(s32)) {
+    // stable sort by proto_specs[idx].name
+    n := sub.count;
+    i: s64 = 1;
+    while i < n {
+        key := sub.*[i];
+        j := i - 1;
+        while j >= 0 && NameLess(proto_specs[key].name, proto_specs[sub.*[j]].name) {
+            sub.*[j + 1] = sub.*[j];
+            j -= 1;
+        }
+        sub.*[j + 1] = key;
+        i += 1;
+    }
+}
+
+ReadProto :: (p: *ProtoParser, indent: s32, sub_out: *Vec(s32)) -> s32 {
+    flags: s32 = 0;
+    while true {
+        f_idx := ProtoReadLine(p, indent);
+        if f_idx < 0 { break }
+        fname := proto_specs[f_idx].name;
+        if fname == "*" {
+            flags |= P_STAR;
+        } else if fname == "+" {
+            flags |= P_PLUS;
+        } else {
+            sub: Vec(s32);
+            cflags := ReadProto(p, p.indent, *sub);
+            proto_specs[f_idx].flags = cflags;
+            VecSwap(proto_specs[f_idx].sub, sub);
+            VecPush(<<sub_out, f_idx);
+        }
+    }
+    SortProtoSub(sub_out);
+    return flags;
+}
+
+File2Dir :: (f_idx: s32, has_old: bool, old: FsDir) -> FsDir {
+    d := NullDir();
+    if has_old {
+        if old.dtype != #char "M" {
+            d.uid = "sys";
+            d.gid = "sys";
+            xmode := (old.mode >> 6) & 7;
+            d.mode = old.mode | xmode | (xmode << 3);
+        } else {
+            d.uid = old.uid;
+            d.gid = old.gid;
+            d.mode = old.mode;
+        }
+        d.length = old.length;
+        d.mtime = old.mtime;
+        d.atime = old.atime;
+        d.muid = old.muid;
+        d.name = old.name;
+    }
+    if f_idx >= 0 {
+        f := *proto_specs[f_idx];
+        d.name = f.name;
+        if f.owner.count > 0 { d.uid = f.owner }
+        if f.group.count > 0 { d.gid = f.group }
+        if f.has_mode { d.mode = f.mode }
+    }
+    return d;
+}
+
+BuildProtoTree :: (flags: s32, path: string, d: FsDir, sub: []s32, errc: s32) -> s32 {
+    node: ProtoNode;
+    node.dir = d;
+    node.real_path = Keep(path);
+    VecPush(proto_nodes, node);
+    node_idx := cast(s32)(proto_nodes.count - 1);
+    if !IsDir(d) { return node_idx }
+
+    a: Vec(FsDir);
+    if (flags & P_EMPTY) == 0 {
+        unused ReadDir(path, *a);
+    }
+    i: s64 = 0;
+    j: s64 = 0;
+    prevsub := "";
+    has_prev := false;
+    while i < a.count || j < sub.count {
+        while j < sub.count {
+            sf := *proto_specs[sub[j]];
+            s := sf.name;
+            if has_prev && s == prevsub {
+                Report(errc, Join("duplicate entry ", Slash(path, s)));
+                j += 1;
+                continue;
+            }
+            if sf.old.count > 0 && i < a.count && s == a[i].name {
+                i += 1;
+            }
+            if sf.old.count > 0 || (i < a.count && !NameLess(s, a[i].name)) {
+                break;
+            }
+            Report(errc, Join(Slash(path, s), " not found"));
+            j += 1;
+        }
+        foundsub := j < sub.count && (proto_specs[sub[j]].old.count > 0 || (i < a.count && proto_specs[sub[j]].name == a[i].name));
+        if foundsub || (flags & (P_PLUS | P_STAR)) != 0 {
+            f_idx: s32 = -1;
+            if foundsub {
+                f_idx = sub[j];
+                j += 1;
+                prevsub = proto_specs[f_idx].name;
+                has_prev = true;
+            }
+            p: string;
+            xd: FsDir;
+            if foundsub && proto_specs[f_idx].old.count > 0 {
+                p = proto_specs[f_idx].old;
+                sd, ok := StatPath(p);
+                if !ok {
+                    Report(errc, WithError(Join("cannot stat ", Q(p))));
+                    continue;
+                }
+                xd = sd;
+            } else {
+                p = Slash(path, a[i].name);
+                xd = a[i];
+                i += 1;
+            }
+            cd := File2Dir(f_idx, true, xd);
+            cnode: s32;
+            empty_sub: [0]s32;
+            if !IsDir(cd) {
+                cnode = BuildProtoTree(0, p, cd, empty_sub[:], errc);
+            } else if (flags & P_PLUS) != 0 {
+                cnode = BuildProtoTree(P_PLUS, p, cd, empty_sub[:], errc);
+            } else if (flags & P_STAR) != 0 && !foundsub {
+                cnode = BuildProtoTree(P_EMPTY, p, cd, empty_sub[:], errc);
+            } else {
+                csub: Vec(s32);
+                for k: 0..proto_specs[f_idx].sub.count - 1 { VecPush(csub, proto_specs[f_idx].sub[k]) }
+                cnode = BuildProtoTree(proto_specs[f_idx].flags, p, cd, csub[:], errc);
+            }
+            VecPush(proto_nodes[node_idx].children, cnode);
+        } else {
+            i += 1;
+        }
+    }
+    return node_idx;
+}
+
+RunProto :: (opts: []FsOpt, args: []s32) -> s32 {
+    if proto_prod < 0 { proto_prod = FsProducer("proto", ProtoNext) }
+    protofile := ValueText(args[0]);
+    rootpath := "/";
+    for * it: opts {
+        if it.opt == #char "r" && it.args.count > 0 {
+            rp := ValueText(it.args[0]);
+            if rp.count > 0 { rootpath = rp }
+        }
+    }
+    h := Io.OpenFile(protofile, 0);
+    if h < 0 {
+        ErrLine(WithError(Join("fs: proto: cannot open ", Q(protofile))));
+        return -1;
+    }
+    raw: Vec(u8);
+    buf: [4096]u8;
+    while true {
+        n := Io.ReadBytes(h, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw, TextView(buf[:n]));
+    }
+    unused Io.CloseFile(h);
+
+    parser: ProtoParser;
+    parser.text = BuilderFinish(raw);
+    root_spec: ProtoSpec;
+    root_spec.name = Keep(rootpath);
+    root_spec.mode = DMDIR | 0x1FF;
+    root_spec.has_mode = false;
+    VecPush(proto_specs, root_spec);
+    root_spec_idx := cast(s32)(proto_specs.count - 1);
+    root_sub: Vec(s32);
+    rflags := ReadProto(*parser, -1, *root_sub);
+    proto_specs[root_spec_idx].flags = rflags;
+
+    errc := ReportStart("proto");
+    root_dir := File2Dir(root_spec_idx, false, NullDir());
+    root_dir.mode = DMDIR | 0x1FF;
+    root_node := BuildProtoTree(rflags, rootpath, root_dir, root_sub[:], errc);
+
+    v := NewValue(#char "x", proto_prod);
+    ps: ProtoState;
+    ps.root_node = root_node;
+    ps.errc = errc;
+    ps.fh = -1;
+    VecPush(protos, ps);
+    SetN0(v, protos.count - 1);
+    return v;
+}
+
+ProtoCloseFile :: (ps: s64) {
+    if protos[ps].fh >= 0 { unused Io.CloseFile(protos[ps].fh) }
+    protos[ps].fh = -1;
+}
+
+ProtoOver :: (ps: s64) -> Item {
+    ProtoCloseFile(ps);
+    protos[ps].last = W_OVER;
+    return ItemOf(Done);
+}
+
+ProtoPop :: (ps: s64) -> Item {
+    unused VecPop(protos[ps].frames);
+    protos[ps].last = W_DIREND;
+    return ItemOf(End);
+}
+
+ProtoAdvance :: (ps: s64) -> Item {
+    k := protos[ps].frames.count - 1;
+    pnode := protos[ps].frames[k].node;
+    while protos[ps].frames[k].i < proto_nodes[pnode].children.count {
+        cnode := proto_nodes[pnode].children[protos[ps].frames[k].i];
+        d := proto_nodes[cnode].dir;
+        rpath := proto_nodes[cnode].real_path;
+        if IsDir(d) {
+            protos[ps].last = W_DIRENTRY;
+            return EntryOf(d);
+        }
+        h := Io.OpenFile(rpath, 0);
+        if h < 0 {
+            Report(protos[ps].errc, WithError(Join("cannot open ", Q(rpath))));
+            protos[ps].frames[k].i += 1;
+            continue;
+        }
+        protos[ps].fh = h;
+        protos[ps].fpath = rpath;
+        protos[ps].flength = d.length;
+        protos[ps].fread = 0;
+        protos[ps].last = W_FILEENTRY;
+        return EntryOf(d);
+    }
+    return ProtoPop(ps);
+}
+
+ProtoNextEntry :: (ps: s64) -> Item {
+    k := protos[ps].frames.count - 1;
+    protos[ps].frames[k].i += 1;
+    return ProtoAdvance(ps);
+}
+
+ProtoBlock :: (ps: s64) -> Item {
+    if protos[ps].fread < protos[ps].flength {
+        want := protos[ps].flength - protos[ps].fread;
+        if want > ATOMICIO { want = ATOMICIO }
+        buffer: Vec(u8);
+        for _: 0..want - 1 { VecPush(buffer, 0) }
+        n := Io.ReadBytes(protos[ps].fh, buffer[:]);
+        if n <= 0 {
+            if n < 0 {
+                Report(protos[ps].errc, WithError(Join("error reading ", Q(protos[ps].fpath))));
+            } else {
+                out: Vec(u8);
+                BuilderPrint(*out, "% is shorter than expected (%/%)", Q(protos[ps].fpath), protos[ps].fread, protos[ps].flength);
+                Report(protos[ps].errc, BuilderFinish(out));
+            }
+        } else {
+            protos[ps].fread += n;
+            protos[ps].last = W_DATA;
+            item := ItemOf(Data);
+            item.data = TextDetach(TextCopy(TextView(buffer[:n])));
+            return item;
+        }
+    }
+    protos[ps].last = W_FILEEND;
+    return ItemOf(End);
+}
+
+ProtoNext :: (v: s32, reply: s32) -> Item {
+    ps := N0(v);
+    last := protos[ps].last;
+    if last == W_OVER { return ItemOf(Done) }
+    if last == W_NONE {
+        protos[ps].last = W_ROOT;
+        return EntryOf(proto_nodes[protos[ps].root_node].dir);
+    }
+    if reply == Quit { return ProtoOver(ps) }
+    if last == W_ROOT {
+        if reply != Down { return ProtoOver(ps) }
+        f: ProtoWalkFrame;
+        f.node = protos[ps].root_node;
+        f.i = 0;
+        VecPush(protos[ps].frames, f);
+        return ProtoAdvance(ps);
+    }
+    if last == W_DIRENTRY {
+        k := protos[ps].frames.count - 1;
+        pnode := protos[ps].frames[k].node;
+        cnode := proto_nodes[pnode].children[protos[ps].frames[k].i];
+        if reply == Down {
+            f: ProtoWalkFrame;
+            f.node = cnode;
+            f.i = 0;
+            VecPush(protos[ps].frames, f);
+            return ProtoAdvance(ps);
+        }
+        if reply == Skip { return ProtoPop(ps) }
+        return ProtoNextEntry(ps);
+    }
+    if last == W_FILEENTRY {
+        if reply == Down { return ProtoBlock(ps) }
+        ProtoCloseFile(ps);
+        if reply == Skip { return ProtoPop(ps) }
+        return ProtoNextEntry(ps);
+    }
+    if last == W_DATA {
+        if reply == Skip {
+            ProtoCloseFile(ps);
+            return ProtoNextEntry(ps);
+        }
+        return ProtoBlock(ps);
+    }
+    if last == W_FILEEND {
+        ProtoCloseFile(ps);
+        return ProtoNextEntry(ps);
+    }
+    if protos[ps].frames.count == 0 { return ProtoOver(ps) }
+    return ProtoNextEntry(ps);
+}
+
+// ============================================================================
+// 3. unbundle: "xs"
+// ============================================================================
+
+unbundle_prod: s32 = -1;
+ARCHIVE_END :: "end of archive\n";
+
+U_NONE :: 0;
+U_NULLROOT :: 1;
+U_NULLEND :: 2;
+U_ROOT :: 3;
+U_DIRENTRY :: 4;
+U_FILEENTRY :: 5;
+U_DATA :: 6;
+U_FILEEND :: 7;
+U_DIREND :: 8;
+U_OVER :: 9;
+
+UnbundleFrame :: struct {
+    failed: bool;
+    skipping: bool;
+}
+
+UnbundleState :: struct {
+    fd: s32;
+    close_fd: bool;
+    errc: s32;
+    last: s32;
+    frames: Vec(UnbundleFrame);
+    buffer: Vec(u8);
+    at: s64;
+    eof: bool;
+    file: FsDir;
+    n: s64;
+}
+
+unbundles: Vec(UnbundleState);
+
+RunUnbundle :: (opts: []FsOpt, args: []s32) -> s32 {
+    unused opts;
+    if unbundle_prod < 0 { unbundle_prod = FsProducer("unbundle", UnbundleNext) }
+    p := ValueText(args[0]);
+    fd: s32 = 0;
+    close_fd := false;
+    if p != "-" {
+        fd = Io.OpenFile(p, 0);
+        if fd < 0 {
+            ErrLine(WithError(Join("fs: unbundle: cannot open ", Q(p))));
+            return -1;
+        }
+        close_fd = true;
+    }
+    v := NewValue(#char "x", unbundle_prod);
+    u: UnbundleState;
+    u.fd = fd;
+    u.close_fd = close_fd;
+    u.errc = ReportStart("bundle");
+    VecPush(unbundles, u);
+    SetN0(v, unbundles.count - 1);
+    return v;
+}
+
+UnbundleFill :: (u: s64) -> bool {
+    if unbundles[u].eof { return false }
+    chunk: [8192]u8;
+    n := Io.ReadBytes(unbundles[u].fd, chunk[:]);
+    if n <= 0 {
+        unbundles[u].eof = true;
+        return false;
+    }
+    rest: Vec(u8);
+    i := unbundles[u].at;
+    while i < unbundles[u].buffer.count {
+        VecPush(rest, unbundles[u].buffer[i]);
+        i += 1;
+    }
+    for chunk[:n] { VecPush(rest, it) }
+    VecSwap(unbundles[u].buffer, rest);
+    unbundles[u].at = 0;
+    return true;
+}
+
+UnbundleSlice :: (u: s64, from: s64, to: s64) -> string {
+    out: Vec(u8);
+    i := from;
+    while i < to {
+        VecPush(out, unbundles[u].buffer[i]);
+        i += 1;
+    }
+    return BuilderFinish(out);
+}
+
+UnbundleLine :: (u: s64) -> string {
+    while true {
+        i := unbundles[u].at;
+        while i < unbundles[u].buffer.count {
+            if unbundles[u].buffer[i] == #char "\n" {
+                line := UnbundleSlice(u, unbundles[u].at, i + 1);
+                unbundles[u].at = i + 1;
+                return line;
+            }
+            i += 1;
+        }
+        if !UnbundleFill(u) {
+            if unbundles[u].at >= unbundles[u].buffer.count { return "" }
+            line := UnbundleSlice(u, unbundles[u].at, unbundles[u].buffer.count);
+            unbundles[u].at = unbundles[u].buffer.count;
+            return line;
+        }
+    }
+    return "";
+}
+
+UnbundleBytes :: (u: s64, n: s64) -> string {
+    if unbundles[u].at >= unbundles[u].buffer.count { unused UnbundleFill(u) }
+    have := unbundles[u].buffer.count - unbundles[u].at;
+    if have <= 0 { return "" }
+    take := ifx have < n then have else n;
+    data := UnbundleSlice(u, unbundles[u].at, unbundles[u].at + take);
+    unbundles[u].at += take;
+    return data;
+}
+
+UnbundleSkipData :: (u: s64, length: s64) -> bool {
+    n: s64 = 0;
+    while n < length {
+        want := length - n;
+        if want > ATOMICIO { want = ATOMICIO }
+        got := UnbundleBytes(u, want);
+        if got.count == 0 { return false }
+        n += got.count;
+    }
+    return true;
+}
+
+Header2Dir :: (s: string) -> (dir: FsDir, ok: bool) {
+    words: Vec(string);
+    Unquoted(s, *words);
+    d := NullDir();
+    if words.count != 6 { return d, false }
+    d.name = Keep(words[0]);
+    oct_val, _ := OctalPrefix(words[1]);
+    d.mode = cast(u32)oct_val;
+    d.uid = Keep(words[2]);
+    d.gid = Keep(words[3]);
+    d.mtime = cast(u32)LimboInt(words[4]);
+    d.length = LimboInt(words[5]);
+    return d, true;
+}
+
+UnbundleSkipDir :: (u: s64) -> bool {
+    while true {
+        p := UnbundleLine(u);
+        if p.count == 0 {
+            Report(unbundles[u].errc, "unexpected eof");
+            return true;
+        }
+        if p == ARCHIVE_END || p[0] == #char "\n" { return true }
+        d, ok := Header2Dir(p);
+        if !ok {
+            Report(unbundles[u].errc, Join("invalid bundle header ", Q(p[0:p.count - 1])));
+            return false;
+        }
+        if IsDir(d) { continue }
+        if !UnbundleSkipData(u, d.length) { return false }
+    }
+    return true;
+}
+
+UnbundleOver :: (u: s64) -> Item {
+    if unbundles[u].close_fd && unbundles[u].fd >= 0 {
+        unused Io.CloseFile(unbundles[u].fd);
+        unbundles[u].fd = -1;
+    }
+    unbundles[u].last = U_OVER;
+    return ItemOf(Done);
+}
+
+UnbundleCloseFrame :: (u: s64) -> Item {
+    unbundles[u].last = U_DIREND;
+    return ItemOf(End);
+}
+
+UnbundleAdvance :: (u: s64) -> Item {
+    while true {
+        k := unbundles[u].frames.count - 1;
+        p := UnbundleLine(u);
+        if p.count == 0 {
+            Report(unbundles[u].errc, "unexpected eof");
+            return UnbundleCloseFrame(u);
+        }
+        if p == ARCHIVE_END || p[0] == #char "\n" { return UnbundleCloseFrame(u) }
+        d, ok := Header2Dir(p);
+        if !ok {
+            Report(unbundles[u].errc, Join("invalid bundle header ", Q(p[0:p.count - 1])));
+            unbundles[u].frames[k].failed = true;
+            return UnbundleCloseFrame(u);
+        }
+        if IsDir(d) {
+            if unbundles[u].frames[k].skipping { continue }
+            unbundles[u].last = U_DIRENTRY;
+            return EntryOf(d);
+        }
+        if unbundles[u].frames[k].skipping {
+            if !UnbundleSkipData(u, d.length) {
+                unbundles[u].frames[k].failed = true;
+                return UnbundleCloseFrame(u);
+            }
+            continue;
+        }
+        unbundles[u].file = d;
+        unbundles[u].n = 0;
+        unbundles[u].last = U_FILEENTRY;
+        return EntryOf(d);
+    }
+    return ItemOf(Done);
+}
+
+UnbundleAfterSkip :: (u: s64, ok: bool, skipping: bool) -> Item {
+    k := unbundles[u].frames.count - 1;
+    if !ok {
+        unbundles[u].frames[k].failed = true;
+        return UnbundleCloseFrame(u);
+    }
+    if skipping { unbundles[u].frames[k].skipping = true }
+    return UnbundleAdvance(u);
+}
+
+UnbundleBlock :: (u: s64) -> Item {
+    length := unbundles[u].file.length;
+    if unbundles[u].n < length {
+        want := length - unbundles[u].n;
+        if want > ATOMICIO { want = ATOMICIO }
+        data := UnbundleBytes(u, want);
+        if data.count == 0 {
+            Report(unbundles[u].errc, "premature eof");
+            k := unbundles[u].frames.count - 1;
+            unbundles[u].frames[k].failed = true;
+            return UnbundleCloseFrame(u);
+        }
+        unbundles[u].n += data.count;
+        unbundles[u].last = U_DATA;
+        item := ItemOf(Data);
+        item.data = data;
+        return item;
+    }
+    unbundles[u].last = U_FILEEND;
+    return ItemOf(End);
+}
+
+UnbundleNext :: (v: s32, reply: s32) -> Item {
+    u := N0(v);
+    last := unbundles[u].last;
+    if last == U_OVER { return ItemOf(Done) }
+    if last == U_NONE {
+        p := UnbundleLine(u);
+        if p.count == 0 || p == ARCHIVE_END {
+            unbundles[u].last = U_NULLROOT;
+            return EntryOf(NullDir());
+        }
+        d, ok := Header2Dir(p);
+        if !ok {
+            unbundles[u].last = U_NULLROOT;
+            Report(unbundles[u].errc, "invalid first header");
+            return EntryOf(NullDir());
+        }
+        if !IsDir(d) {
+            unbundles[u].last = U_NULLROOT;
+            Report(unbundles[u].errc, "first entry is not a directory");
+            return EntryOf(NullDir());
+        }
+        unbundles[u].last = U_ROOT;
+        return EntryOf(d);
+    }
+    if last == U_NULLROOT {
+        if reply == Down {
+            unbundles[u].last = U_NULLEND;
+            return ItemOf(End);
+        }
+        return UnbundleOver(u);
+    }
+    if last == U_NULLEND { return UnbundleOver(u) }
+    if reply == Quit { return UnbundleOver(u) }
+    if last == U_ROOT {
+        if reply == Down {
+            f: UnbundleFrame;
+            VecPush(unbundles[u].frames, f);
+            return UnbundleAdvance(u);
+        }
+        unused UnbundleSkipDir(u);
+        return UnbundleOver(u);
+    }
+    if last == U_DIRENTRY {
+        if reply == Down {
+            f: UnbundleFrame;
+            VecPush(unbundles[u].frames, f);
+            return UnbundleAdvance(u);
+        }
+        return UnbundleAfterSkip(u, UnbundleSkipDir(u), reply == Skip);
+    }
+    if last == U_FILEENTRY {
+        if reply == Down { return UnbundleBlock(u) }
+        ok := UnbundleSkipData(u, unbundles[u].file.length);
+        return UnbundleAfterSkip(u, ok, reply == Skip);
+    }
+    if last == U_DATA {
+        if reply == Skip {
+            ok := UnbundleSkipData(u, unbundles[u].file.length - unbundles[u].n);
+            return UnbundleAfterSkip(u, ok, false);
+        }
+        return UnbundleBlock(u);
+    }
+    if last == U_FILEEND { return UnbundleAdvance(u) }
+    failed := unbundles[u].frames[unbundles[u].frames.count - 1].failed;
+    unused VecPop(unbundles[u].frames);
+    if unbundles[u].frames.count == 0 { return UnbundleOver(u) }
+    k := unbundles[u].frames.count - 1;
+    if failed {
+        unbundles[u].frames[k].failed = true;
+        return UnbundleCloseFrame(u);
+    }
+    return UnbundleAdvance(u);
+}
+
+// ============================================================================
+// 4. filter ("xpx-d") and 5. chstat ("xx-pp-ms-us-gs-ts-as-c")
+// ============================================================================
+
+filter_prod: s32 = -1;
+
+FilterState :: struct {
+    dflag: bool;
+    gate: s32;
+    chstat: bool;
+    mask: s64;
+    mode: s64;
+    uid: string;
+    gid: string;
+    mtime: s64;
+    atime: s64;
+    cflag: bool;
+    names: Vec(string);
+    name: string;
+    indent: s64;
+    last: Item;
+    started: bool;
+    over: bool;
+}
+
+filters: Vec(FilterState);
+
+NewFilter :: (src: s32, f: FilterState) -> s32 {
+    if filter_prod < 0 { filter_prod = FsProducer("filter", FilterNext) }
+    v := NewValue(#char "x", filter_prod);
+    kids: [1]s32 = .[src];
+    SetKids(v, kids[:]);
+    VecPush(filters, f);
+    SetN0(v, filters.count - 1);
+    return v;
+}
+
+RunFilter :: (opts: []FsOpt, args: []s32) -> s32 {
+    // Note: in appl/cmd/fs/filter.b, signature is "xpx-d": args[0] is gate, args[1] is fs!
+    f: FilterState;
+    f.dflag = opts.count > 0;
+    f.gate = args[0];
+    return NewFilter(args[1], f);
+}
+
+RunChstat :: (opts: []FsOpt, args: []s32) -> s32 {
+    f: FilterState;
+    f.chstat = true;
+    f.gate = -1;
+    f.mtime = -1;
+    f.atime = -1;
+    for * it: opts {
+        opt := it.opt;
+        if opt == #char "c" {
+            f.cflag = true;
+            continue;
+        }
+        if opt == #char "p" && it.args.count > 0 {
+            if f.gate >= 0 { Discard(f.gate) }
+            f.gate = it.args[0];
+            continue;
+        }
+        s := ifx it.args.count > 0 then ValueText(it.args[0]) else "";
+        if opt == #char "m" {
+            ok, mask, mode := ParseMode(s);
+            f.mask = mask & ~cast(s64)DMDIR;
+            f.mode = mode;
+            if !ok {
+                out: Vec(u8);
+                BuilderPrint(*out, "fs: chstat: bad mode %", QQ(s));
+                ErrLine(BuilderFinish(out));
+                if f.gate >= 0 { Discard(f.gate) }
+                return -1;
+            }
+        } else if opt == #char "u" {
+            f.uid = Keep(s);
+        } else if opt == #char "g" {
+            f.gid = Keep(s);
+        } else if opt == #char "t" {
+            f.mtime = LimboInt(s) & 0xFFFFFFFF;
+        } else if opt == #char "a" {
+            f.atime = LimboInt(s) & 0xFFFFFFFF;
+        }
+    }
+    return NewFilter(args[0], f);
+}
+
+FilterPass :: (f: s64, d: FsDir, name: string, depth: s64, gate: s32) -> bool {
+    if depth == 0 || (filters[f].dflag && IsDir(d)) { return true }
+    e := EntryItemOf(d, name, depth);
+    return Query(gate, *e);
+}
+
+FilterChange :: (f: s64, d: *FsDir, name: string, depth: s64) {
+    c := true;
+    if filters[f].gate >= 0 {
+        e := EntryItemOf(<<d, name, depth);
+        c = Query(filters[f].gate, *e);
+    }
+    if !c { return }
+    mode := cast(s64)d.mode;
+    if filters[f].cflag {
+        m := mode & 0x1C0;
+        mode = (mode & ~0x3F) | (m >> 3) | (m >> 6);
+    }
+    mode = (mode & ~filters[f].mask) | (filters[f].mode & filters[f].mask);
+    d.mode = cast(u32)(mode & 0xFFFFFFFF);
+    if filters[f].uid.count > 0 { d.uid = filters[f].uid }
+    if filters[f].gid.count > 0 { d.gid = filters[f].gid }
+    if filters[f].mtime != -1 { d.mtime = cast(u32)filters[f].mtime }
+    if filters[f].atime != -1 { d.atime = cast(u32)filters[f].atime }
+}
+
+FilterFinish :: (f: s64, src: s32, reply: s32) -> Item {
+    unused FsNext(src, reply);
+    filters[f].over = true;
+    return ItemOf(Done);
+}
+
+FilterPop :: (f: s64) {
+    last := VecPop(filters[f].names);
+    filters[f].name = last.value;
+}
+
+FilterNext :: (v: s32, reply_in: s32) -> Item {
+    f := N0(v);
+    src := Kid(v, 0);
+    gate := filters[f].gate;
+    if filters[f].over { return ItemOf(Done) }
+    reply := reply_in;
+    if filters[f].started {
+        d := filters[f].last;
+        if reply == Quit {
+            filters[f].over = true;
+            unused FsNext(src, Quit);
+            return ItemOf(Done);
+        }
+        if reply == Next {
+            if d.kind == End {
+                filters[f].indent -= 1;
+                if filters[f].indent == 0 { return FilterFinish(f, src, Next) }
+                FilterPop(f);
+            }
+        } else if reply == Skip {
+            filters[f].indent -= 1;
+            if filters[f].indent == 0 { return FilterFinish(f, src, Skip) }
+            FilterPop(f);
+        } else if reply == Down {
+            if d.kind == Entry {
+                VecPush(filters[f].names, filters[f].name);
+                if IsDir(d.dir) {
+                    if filters[f].indent == 0 {
+                        filters[f].name = d.dir.name;
+                    } else {
+                        filters[f].name = Slash(filters[f].name, d.dir.name);
+                    }
+                }
+                filters[f].indent += 1;
+            }
+        }
+    } else {
+        filters[f].started = true;
+        reply = Start;
+    }
+    while true {
+        item := FsNext(src, reply);
+        if item.kind == Done {
+            filters[f].over = true;
+            return item;
+        }
+        if item.kind == Entry {
+            p := filters[f].name;
+            if filters[f].indent > 0 && p.count > 0 && p[p.count - 1] != #char "/" { p = Join(p, "/") }
+            if filters[f].chstat {
+                FilterChange(f, *item.dir, Join(p, item.dir.name), filters[f].indent);
+            } else if !FilterPass(f, item.dir, Join(p, item.dir.name), filters[f].indent, gate) && filters[f].indent > 0 {
+                reply = Next;
+                continue;
+            }
+        }
+        filters[f].last = item;
+        return item;
+    }
+    return ItemOf(Done);
+}
+
+// ============================================================================
+// 6. setroot: "xsx-c"
+// ============================================================================
+
+setroot_prod: s32 = -1;
+
+SR_ROOT :: 0;
+SR_ELEMS :: 1;
+SR_COPY :: 2;
+SR_ENDS :: 3;
+SR_OVER :: 4;
+
+SetrootState :: struct {
+    root: string;
+    cflag: bool;
+    phase: s32;
+    started: bool;
+    dir: s64;
+    elems: Vec(string);
+    k: s64;
+    lev: s64;
+    r: s32;
+    indent: s64;
+    last: Item;
+}
+
+setroot_states: Vec(SetrootState);
+setroot_dirs: Vec(FsDir);
+
+RunSetroot :: (opts: []FsOpt, args: []s32) -> s32 {
+    // Signature in appl/cmd/fs/setroot.b is "xsx-c": args[0] is root: string, args[1] is fs!
+    if setroot_prod < 0 { setroot_prod = FsProducer("setroot", SetrootNext) }
+    root := ValueText(args[0]);
+    cflag := opts.count > 0;
+    if root.count == 0 && !cflag {
+        ErrLine("fs: setroot: empty path");
+        return -1;
+    }
+    v := NewValue(#char "x", setroot_prod);
+    kids: [1]s32 = .[args[1]];
+    SetKids(v, kids[:]);
+    s: SetrootState;
+    s.root = root;
+    s.cflag = cflag;
+    VecPush(setroot_states, s);
+    SetN0(v, setroot_states.count - 1);
+    return v;
+}
+
+CopyTreeItem :: (src: s32, reply: s32, indent: *s64, last: *Item) -> (item: Item, over: bool, quit: bool) {
+    if reply == Quit {
+        unused FsNext(src, Quit);
+        return ItemOf(Done), true, true;
+    }
+    if reply == Next && last.kind == End {
+        <<indent = indent.* - 1;
+        if indent.* == 0 {
+            unused FsNext(src, Next);
+            return ItemOf(Done), true, false;
+        }
+    } else if reply == Skip {
+        <<indent = indent.* - 1;
+        if indent.* == 0 {
+            unused FsNext(src, Skip);
+            return ItemOf(Done), true, false;
+        }
+    } else if reply == Down && last.kind == Entry {
+        <<indent = indent.* + 1;
+    }
+    item := FsNext(src, reply);
+    <<last = item;
+    return item, false, false;
+}
+
+SetrootTokens :: (s: string) -> Vec(string) {
+    out: Vec(string);
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && s[i] == #char "/" { i += 1 }
+        start := i;
+        while i < s.count && s[i] != #char "/" { i += 1 }
+        if i > start { VecPush(out, s[start:i]) }
+    }
+    return out;
+}
+
+SetrootElem :: (s: s64) -> Item {
+    d := setroot_dirs[setroot_states[s].dir];
+    d.name = setroot_states[s].elems[setroot_states[s].k];
+    return EntryOf(d);
+}
+
+SetrootCopy :: (s: s64, src: s32, reply: s32) -> Item {
+    item := FsNext(src, reply);
+    setroot_states[s].last = item;
+    return item;
+}
+
+SetrootOver :: (s: s64) -> Item {
+    setroot_states[s].phase = SR_OVER;
+    return ItemOf(Done);
+}
+
+SetrootEnds :: (s: s64) -> Item {
+    setroot_states[s].phase = SR_ENDS;
+    if setroot_states[s].lev > 1 {
+        setroot_states[s].lev -= 1;
+        return ItemOf(End);
+    }
+    return SetrootOver(s);
+}
+
+SetrootNext :: (v: s32, reply: s32) -> Item {
+    s := N0(v);
+    src := Kid(v, 0);
+    if setroot_states[s].phase == SR_OVER { return ItemOf(Done) }
+    if !setroot_states[s].started {
+        setroot_states[s].started = true;
+        first := FsNext(src, Start);
+        if first.kind == Done { return SetrootOver(s) }
+        VecPush(setroot_dirs, first.dir);
+        setroot_states[s].dir = setroot_dirs.count - 1;
+        if !setroot_states[s].cflag {
+            d := first.dir;
+            d.name = setroot_states[s].root;
+            setroot_states[s].phase = SR_ROOT;
+            return EntryOf(d);
+        }
+        root := setroot_states[s].root;
+        if root.count == 0 { root = first.dir.name }
+        if root.count > 0 && root[0] == #char "/" { VecPush(setroot_states[s].elems, "/") }
+        for SetrootTokens(root) { VecPush(setroot_states[s].elems, it) }
+        setroot_states[s].phase = SR_ELEMS;
+        return SetrootElem(s);
+    }
+    phase := setroot_states[s].phase;
+    if phase == SR_ROOT {
+        if reply != Down {
+            unused FsNext(src, Quit);
+            return SetrootOver(s);
+        }
+        setroot_states[s].indent = 1;
+        setroot_states[s].phase = SR_COPY;
+        return SetrootCopy(s, src, Down);
+    }
+    if phase == SR_ELEMS {
+        r := reply;
+        setroot_states[s].r = r;
+        if r == Quit {
+            unused FsNext(src, Quit);
+            return SetrootOver(s);
+        }
+        if r == Next { setroot_states[s].lev += 1 }
+        setroot_states[s].lev += 1;
+        setroot_states[s].k += 1;
+        if setroot_states[s].k < setroot_states[s].elems.count { return SetrootElem(s) }
+        if r != Down {
+            unused FsNext(src, Quit);
+            return SetrootEnds(s);
+        }
+        setroot_states[s].indent = 1;
+        setroot_states[s].phase = SR_COPY;
+        return SetrootCopy(s, src, Down);
+    }
+    if phase == SR_COPY {
+        item, over, quit := CopyTreeItem(src, reply, *setroot_states[s].indent, *setroot_states[s].last);
+        if quit { return SetrootOver(s) }
+        if over {
+            if !setroot_states[s].cflag { return SetrootOver(s) }
+            return SetrootEnds(s);
+        }
+        return item;
+    }
+    if reply == Quit { return SetrootOver(s) }
+    return SetrootEnds(s);
+}
+
+// ============================================================================
+// 7. merge: "xxxx*-1-cm"
+// ============================================================================
+
+merge_prod: s32 = -1;
+
+M_NONE :: 0;
+M_ROOT :: 1;
+M_DIRPAIR :: 2;
+M_SINGLE :: 3;
+M_COPYITEM :: 4;
+M_DIREND :: 5;
+M_OVER :: 6;
+
+M_NOREPLY :: -2;
+
+MergeFrame :: struct {
+    has0: bool;
+    has1: bool;
+    head0: FsDir;
+    head1: FsDir;
+    eof0: bool;
+    eof1: bool;
+    recurse: bool;
+}
+
+MergeState :: struct {
+    frames: Vec(MergeFrame);
+    pend0: s32;
+    pend1: s32;
+    last: s32;
+    w: s32;
+    other_had: bool;
+    other_eof: bool;
+    indent: s64;
+    copy_last: Item;
+    recurse: bool;
+    cmp: s32;
+}
+
+merges: Vec(MergeState);
+
+Merge2 :: (a: s32, b: s32, recurse: bool, cmp: s32) -> s32 {
+    v := NewValue(#char "x", merge_prod);
+    kids: [2]s32 = .[a, b];
+    SetKids(v, kids[:]);
+    m: MergeState;
+    m.pend0 = Start;
+    m.pend1 = Start;
+    m.recurse = recurse;
+    m.cmp = cmp;
+    VecPush(merges, m);
+    SetN0(v, merges.count - 1);
+    return v;
+}
+
+RunMerge :: (opts: []FsOpt, args: []s32) -> s32 {
+    if merge_prod < 0 { merge_prod = FsProducer("merge", MergeNext) }
+    recurse := true;
+    cmp: s32 = -1;
+    for * it: opts {
+        if it.opt == #char "1" { recurse = false }
+        if it.opt == #char "c" && it.args.count > 0 { cmp = it.args[0] }
+    }
+    v := Merge2(args[0], args[1], recurse, cmp);
+    for args[2:] { v = Merge2(v, it, recurse, cmp) }
+    return v;
+}
+
+MergeInput :: (v: s32, side: s32) -> s32 { return Kid(v, side) }
+
+MergeFetch :: (v: s32, m: s64, side: s32) -> Item {
+    pend := ifx side == 0 then merges[m].pend0 else merges[m].pend1;
+    if side == 0 { merges[m].pend0 = M_NOREPLY } else { merges[m].pend1 = M_NOREPLY }
+    return FsNext(MergeInput(v, side), ifx pend == M_NOREPLY then Next else pend);
+}
+
+MergeSetPend :: (m: s64, side: s32, r: s32) {
+    if side == 0 { merges[m].pend0 = r } else { merges[m].pend1 = r }
+}
+
+MergeCmp :: (m: s64, d0: FsDir, d1: FsDir, has0: bool, has1: bool) -> s32 {
+    mask: s32 = (ifx has0 then 1 else 0) | (ifx has1 then 2 else 0);
+    if merges[m].cmp < 0 { return mask }
+    a := d0;
+    b := d1;
+    return Compare(merges[m].cmp, *a, *b, has0, has1) & mask;
+}
+
+MergeOver :: (v: s32, m: s64) -> Item {
+    if merges[m].pend0 != M_NOREPLY { unused MergeFetch(v, m, 0) }
+    if merges[m].pend1 != M_NOREPLY { unused MergeFetch(v, m, 1) }
+    merges[m].last = M_OVER;
+    return ItemOf(Done);
+}
+
+MergePushFrame :: (m: s64, recurse: bool) {
+    f: MergeFrame;
+    f.recurse = recurse;
+    VecPush(merges[m].frames, f);
+}
+
+MergePopFrame :: (v: s32, m: s64) -> Item {
+    unused VecPop(merges[m].frames);
+    if merges[m].frames.count == 0 { return MergeOver(v, m) }
+    return MergeLoop(v, m);
+}
+
+MergeLoop :: (v: s32, m: s64) -> Item {
+    while true {
+        k := merges[m].frames.count - 1;
+        if !merges[m].frames[k].eof0 && !merges[m].frames[k].has0 {
+            it := MergeFetch(v, m, 0);
+            if it.kind == Entry {
+                merges[m].frames[k].head0 = it.dir;
+                merges[m].frames[k].has0 = true;
+            } else {
+                merges[m].pend0 = Next;
+                merges[m].frames[k].eof0 = true;
+            }
+        }
+        if !merges[m].frames[k].eof1 && !merges[m].frames[k].has1 {
+            it := MergeFetch(v, m, 1);
+            if it.kind == Entry {
+                merges[m].frames[k].head1 = it.dir;
+                merges[m].frames[k].has1 = true;
+            } else {
+                merges[m].pend1 = Next;
+                merges[m].frames[k].eof1 = true;
+            }
+        }
+        if merges[m].frames[k].eof0 && merges[m].frames[k].eof1 {
+            merges[m].last = M_DIREND;
+            return ItemOf(End);
+        }
+        d0 := merges[m].frames[k].head0;
+        d1 := merges[m].frames[k].head1;
+        w0 := merges[m].frames[k].has0;
+        w1 := merges[m].frames[k].has1;
+        if w0 && w1 && d0.name != d1.name {
+            if NameLess(d0.name, d1.name) { w1 = false } else { w0 = false }
+        }
+        c := MergeCmp(m, d0, d1, w0, w1);
+        if w0 && w1 {
+            if c != 0 && merges[m].frames[k].recurse && IsDir(d0) && IsDir(d1) {
+                merges[m].last = M_DIRPAIR;
+                return EntryOf(d0);
+            }
+            if c == 2 {
+                merges[m].pend0 = Next;
+                merges[m].frames[k].has0 = false;
+            } else {
+                merges[m].pend1 = Next;
+                merges[m].frames[k].has1 = false;
+            }
+        }
+        if (c & 1) != 0 {
+            merges[m].w = 0;
+            merges[m].other_had = merges[m].frames[k].has1;
+            merges[m].other_eof = merges[m].frames[k].eof1;
+            merges[m].frames[k].has0 = false;
+            merges[m].last = M_SINGLE;
+            return EntryOf(merges[m].frames[k].head0);
+        }
+        if (c & 2) != 0 {
+            merges[m].w = 1;
+            merges[m].other_had = merges[m].frames[k].has0;
+            merges[m].other_eof = merges[m].frames[k].eof0;
+            merges[m].frames[k].has1 = false;
+            merges[m].last = M_SINGLE;
+            return EntryOf(merges[m].frames[k].head1);
+        }
+        if !w0 {
+            merges[m].pend1 = Next;
+            merges[m].frames[k].has1 = false;
+        } else {
+            merges[m].pend0 = Next;
+            merges[m].frames[k].has0 = false;
+        }
+    }
+    return ItemOf(Done);
+}
+
+MergeStopOther :: (v: s32, m: s64, r: s32) -> Item {
+    other := 1 - merges[m].w;
+    k := merges[m].frames.count - 1;
+    if !merges[m].other_had && !merges[m].other_eof { unused MergeFetch(v, m, other) }
+    if !merges[m].other_eof {
+        MergeSetPend(m, other, r);
+        if other == 0 { merges[m].frames[k].has0 = false } else { merges[m].frames[k].has1 = false }
+    }
+    if r == Quit { return MergeOver(v, m) }
+    return MergePopFrame(v, m);
+}
+
+MergeNext :: (v: s32, reply: s32) -> Item {
+    m := N0(v);
+    last := merges[m].last;
+    if last == M_OVER { return ItemOf(Done) }
+    if last == M_NONE {
+        a := MergeFetch(v, m, 0);
+        b := MergeFetch(v, m, 1);
+        merges[m].last = M_ROOT;
+        if MergeCmp(m, a.dir, b.dir, a.kind == Entry, b.kind == Entry) == 2 { return EntryOf(b.dir) }
+        return EntryOf(a.dir);
+    }
+    if last == M_ROOT {
+        merges[m].pend0 = reply;
+        merges[m].pend1 = reply;
+        if reply != Down { return MergeOver(v, m) }
+        MergePushFrame(m, merges[m].recurse);
+        return MergeLoop(v, m);
+    }
+    k := merges[m].frames.count - 1;
+    if last == M_DIRPAIR {
+        merges[m].pend0 = reply;
+        merges[m].pend1 = reply;
+        merges[m].frames[k].has0 = false;
+        merges[m].frames[k].has1 = false;
+        if reply == Quit { return MergeOver(v, m) }
+        if reply == Skip { return MergePopFrame(v, m) }
+        if reply == Down { MergePushFrame(m, true) }
+        return MergeLoop(v, m);
+    }
+    if last == M_SINGLE {
+        w := merges[m].w;
+        if reply == Down {
+            MergeSetPend(m, w, Down);
+            merges[m].indent = 1;
+            item := MergeFetch(v, m, w);
+            merges[m].copy_last = item;
+            merges[m].last = M_COPYITEM;
+            return item;
+        }
+        MergeSetPend(m, w, reply);
+        if reply == Skip || reply == Quit { return MergeStopOther(v, m, reply) }
+        return MergeLoop(v, m);
+    }
+    if last == M_COPYITEM {
+        w := merges[m].w;
+        if reply == Quit {
+            MergeSetPend(m, w, Quit);
+            return MergeStopOther(v, m, Quit);
+        }
+        cl := merges[m].copy_last;
+        if (reply == Next && cl.kind == End) || reply == Skip {
+            merges[m].indent -= 1;
+            if merges[m].indent == 0 {
+                MergeSetPend(m, w, reply);
+                return MergeLoop(v, m);
+            }
+        } else if reply == Down && cl.kind == Entry {
+            merges[m].indent += 1;
+        }
+        MergeSetPend(m, w, reply);
+        item := MergeFetch(v, m, w);
+        merges[m].copy_last = item;
+        return item;
+    }
+    if reply == Quit { return MergeOver(v, m) }
+    return MergePopFrame(v, m);
+}

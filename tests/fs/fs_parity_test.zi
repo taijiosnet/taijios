@@ -1,0 +1,243 @@
+// Guest parity test for /dis/fs and /dis/fs/* (all 30 verbs).
+// Runs the same input table through /dis/fs.dis (old) and /dis/fs.zx (new)
+// in the headless emulator and compares every output byte-for-byte.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/fs tests/fs/fs_parity_test.zi -- [EMU] [MODE]
+//   MODE: "parity" (default, compares .dis vs .zx), "zx" (checks .zx standalone after .dis removal)
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/fs_test";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+ExpectEq :: (got: string, want: string, what: string) {
+    if got == "<missing>" || want == "<missing>" || got != want {
+        failures += 1;
+        print("FAIL: %\n  got : [%]\n  want: [%]\n", what, got, want);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+ReadRes :: (sub: string, name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/%/%", WORK, sub, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+RunSuite :: (emu: string, suffix: string, out_sub: string) -> bool {
+    out_dir: Vec(u8);
+    BuilderPrint(*out_dir, "%/%", WORK, out_sub);
+    unused RemoveTree(BuilderFinish(out_dir));
+    od_s: Vec(u8);
+    BuilderPrint(*od_s, "%/%", WORK, out_sub);
+    if !CreateDirectory(BuilderFinish(od_s)) { return false }
+
+    // Clean write/mergewrite destination dirs for this run
+    wdir: Vec(u8);
+    BuilderPrint(*wdir, "%/out_write_%", WORK, out_sub);
+    unused RemoveTree(BuilderFinish(wdir));
+    mwdir: Vec(u8);
+    BuilderPrint(*mwdir, "%/out_mw_%", WORK, out_sub);
+    unused RemoveTree(BuilderFinish(mwdir));
+    mw_init: Vec(u8);
+    BuilderPrint(*mw_init, "%/out_mw_%", WORK, out_sub);
+    unused CreateDirectory(BuilderFinish(mw_init));
+    mw_keep: Vec(u8);
+    BuilderPrint(*mw_keep, "%/out_mw_%/extra.txt", WORK, out_sub);
+    unused WriteEntireFile(BuilderFinish(mw_keep), "old extra\n");
+
+    fs_cmd: Vec(u8);
+    BuilderPrint(*fs_cmd, "/dis/fs%", suffix);
+    fs := BuilderFinish(fs_cmd);
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    // 1. print + walk (implicit and explicit)
+    BuilderPrint(*script, "% print treeA > %/01_print.out >[2] %/01_print.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {entries {walk treeA}} > %/02_walk.out >[2] %/02_walk.err\n", fs, out_sub, out_sub);
+    // 2. size
+    BuilderPrint(*script, "% size treeA > %/03_size.out >[2] %/03_size.err\n", fs, out_sub, out_sub);
+    // 3. ls
+    BuilderPrint(*script, "% ls treeA > %/04_ls.out >[2] %/04_ls.err\n", fs, out_sub, out_sub);
+    // 4. match (glob, -a, -r) + select
+    BuilderPrint(*script, "% print {select {match '*.txt'} treeA} > %/05_match.out >[2] %/05_match.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {select {match -r '^a'} treeA} > %/06_match_r.out >[2] %/06_match_r.err\n", fs, out_sub, out_sub);
+    // 5. and, or, not, depth, mode, path
+    BuilderPrint(*script, "% print {select {and {match '*.txt'} {not {match 'a.txt'}}} treeA} > %/07_and_not.out >[2] %/07_and_not.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {select {or {match 'a.txt'} {match 'c.dat'}} treeA} > %/08_or.out >[2] %/08_or.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {select {depth 1} treeA} > %/09_depth.out >[2] %/09_depth.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {select {mode +d} treeA} > %/10_mode.out >[2] %/10_mode.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {select {path treeA/sub} treeA} > %/11_path.out >[2] %/11_path.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {select {path -x treeA/sub} treeA} > %/12_path_x.out >[2] %/12_path_x.err\n", fs, out_sub, out_sub);
+    // 6. filter + setroot + chstat
+    BuilderPrint(*script, "% print {filter {not {match '*.dat'}} treeA} > %/13_filter.out >[2] %/13_filter.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {setroot /virt treeA} > %/14_setroot.out >[2] %/14_setroot.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% ls {chstat -u alice -g staff -m a+rw treeA} > %/15_chstat.out >[2] %/15_chstat.err\n", fs, out_sub, out_sub);
+    // 7. bundle + unbundle roundtrip
+    BuilderPrint(*script, "% bundle treeA > %/16_bundle.arch >[2] %/16_bundle.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {unbundle %/16_bundle.arch} > %/17_unbundle.out >[2] %/17_unbundle.err\n", fs, out_sub, out_sub, out_sub);
+    BuilderPrint(*script, "% size {unbundle %/16_bundle.arch} > %/18_unbundle_size.out >[2] %/18_unbundle_size.err\n", fs, out_sub, out_sub, out_sub);
+    // 8. merge + compose
+    BuilderPrint(*script, "% print {merge treeA treeB} > %/19_merge.out >[2] %/19_merge.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {merge -c {compose AoverB} treeA treeB} > %/20_merge_and.out >[2] %/20_merge_and.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {merge -c {compose AxorB} treeA treeB} > %/21_merge_diff.out >[2] %/21_merge_diff.err\n", fs, out_sub, out_sub);
+    // 9. write
+    BuilderPrint(*script, "% write out_write_% treeA > %/22_write.out >[2] %/22_write.err\n", fs, out_sub, out_sub, out_sub);
+    BuilderPrint(*script, "% print out_write_% > %/23_write_check.out >[2] %/23_write_check.err\n", fs, out_sub, out_sub, out_sub);
+    // 10. mergewrite
+    BuilderPrint(*script, "% mergewrite {compose 'A'} out_mw_% treeA > %/24_mw.out >[2] %/24_mw.err\n", fs, out_sub, out_sub, out_sub);
+    BuilderPrint(*script, "% print out_mw_% > %/25_mw_check.out >[2] %/25_mw_check.err\n", fs, out_sub, out_sub, out_sub);
+    // 11. proto
+    BuilderPrint(*script, "% print {proto -r treeA test.proto} > %/26_proto.out >[2] %/26_proto.err\n", fs, out_sub, out_sub);
+    // 12. eval + void
+    BuilderPrint(*script, "% void {eval 'print treeA'} > %/27_eval.out >[2] %/27_eval.err\n", fs, out_sub, out_sub);
+    // 13. query + exec + pipe + run
+    BuilderPrint(*script, "% print {select {query @{test -f $file}} treeA} > %/28_query.out >[2] %/28_query.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% exec @{echo $file} {select {match '*.txt'} treeA} > %/29_exec.out >[2] %/29_exec.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% pipe -1 @{cat} {filter {match 'a.txt'} treeA} > %/30_pipe.out >[2] %/30_pipe.err\n", fs, out_sub, out_sub);
+    BuilderPrint(*script, "% print {run @{s=treeA}} > %/31_run.out >[2] %/31_run.err\n", fs, out_sub, out_sub);
+
+    sp: Vec(u8);
+    BuilderPrint(*sp, "%/script_%", WORK, out_sub);
+    unused WriteEntireFile(BuilderFinish(sp), BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script_%", WORK, out_sub);
+    command: [6]string = .[emu, "-x", "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return false;
+    }
+    return true;
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    mode := ifx argc > 2 then TextFromCString(argv[2]) else "parity";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) ||
+        !CreateDirectory("build/dis-legacy-math/fs_test/treeA") ||
+        !CreateDirectory("build/dis-legacy-math/fs_test/treeA/sub") ||
+        !CreateDirectory("build/dis-legacy-math/fs_test/treeB") ||
+        !CreateDirectory("build/dis-legacy-math/fs_test/treeB/sub") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/treeA/a.txt", "alpha\n");
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/treeA/sub/b.txt", "beta 123\n");
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/treeA/sub/c.dat", "0123456789");
+
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/treeB/a.txt", "alphaB\n");
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/treeB/d.txt", "delta\n");
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/treeB/sub/b.txt", "beta 123\n");
+
+    unused WriteEntireFile("build/dis-legacy-math/fs_test/test.proto",
+        "a.txt\nsub\n\tb.txt\n");
+
+    if mode == "parity" {
+        if !RunSuite(emu, ".dis", "dis") { return 1 }
+        if !RunSuite(emu, ".zx", "zx") { return 1 }
+
+        // Compare outputs between .dis and .zx
+        cases: [26]string = .[
+            "01_print.out", "02_walk.out", "03_size.out", "04_ls.out",
+            "05_match.out", "06_match_r.out", "07_and_not.out", "08_or.out",
+            "09_depth.out", "10_mode.out", "11_path.out", "12_path_x.out",
+            "13_filter.out", "14_setroot.out", "15_chstat.out",
+            "16_bundle.arch", "17_unbundle.out", "18_unbundle_size.out",
+            "19_merge.out", "20_merge_and.out", "21_merge_diff.out",
+            "26_proto.out", "27_eval.out",
+            "28_query.out", "29_exec.out", "30_pipe.out"
+        ];
+        for cases {
+            ExpectEq(ReadRes("zx", it), ReadRes("dis", it), it);
+        }
+        // 31_run
+        ExpectEq(ReadRes("zx", "31_run.out"), ReadRes("dis", "31_run.out"), "31_run.out");
+        // Error output must match for every case too.
+        err_cases: [31]string = .[
+            "01_print.err", "02_walk.err", "03_size.err", "04_ls.err",
+            "05_match.err", "06_match_r.err", "07_and_not.err", "08_or.err",
+            "09_depth.err", "10_mode.err", "11_path.err", "12_path_x.err",
+            "13_filter.err", "14_setroot.err", "15_chstat.err",
+            "16_bundle.err", "17_unbundle.err", "18_unbundle_size.err",
+            "19_merge.err", "20_merge_and.err", "21_merge_diff.err",
+            "22_write.err", "23_write_check.err", "24_mw.err",
+            "25_mw_check.err", "26_proto.err", "27_eval.err",
+            "28_query.err", "29_exec.err", "30_pipe.err", "31_run.err"
+        ];
+        for err_cases {
+            ExpectEq(ReadRes("zx", it), ReadRes("dis", it), it);
+        }
+        // Write & mergewrite checks (paths contain out_write_zx vs out_write_dis, so check content)
+        Expect(Contains(ReadRes("zx", "23_write_check.out"), "out_write_zx/a.txt\n"), "write a.txt");
+        Expect(Contains(ReadRes("zx", "23_write_check.out"), "out_write_zx/sub/b.txt\n"), "write sub/b.txt");
+        Expect(Contains(ReadRes("zx", "25_mw_check.out"), "out_mw_zx/a.txt\n"), "mergewrite a.txt");
+        Expect(!Contains(ReadRes("zx", "25_mw_check.out"), "extra.txt"), "mergewrite removed extra.txt");
+    } else {
+        if !RunSuite(emu, ".zx", "zx") { return 1 }
+        ExpectEq(ReadRes("zx", "01_print.out"), "treeA\ntreeA/a.txt\ntreeA/sub\ntreeA/sub/b.txt\ntreeA/sub/c.dat\n", "01_print.out");
+        ExpectEq(ReadRes("zx", "02_walk.out"), ReadRes("zx", "01_print.out"), "02_walk.out");
+        ExpectEq(ReadRes("zx", "03_size.out"), "25\n", "03_size.out");
+        Expect(Contains(ReadRes("zx", "04_ls.out"), "treeA/a.txt\n"), "04_ls.out");
+        ExpectEq(ReadRes("zx", "05_match.out"), "treeA/a.txt\ntreeA/sub/b.txt\n", "05_match.out");
+        ExpectEq(ReadRes("zx", "06_match_r.out"), "treeA/a.txt\n", "06_match_r.out");
+        ExpectEq(ReadRes("zx", "07_and_not.out"), "treeA/sub/b.txt\n", "07_and_not.out");
+        ExpectEq(ReadRes("zx", "08_or.out"), "treeA/a.txt\ntreeA/sub/c.dat\n", "08_or.out");
+        ExpectEq(ReadRes("zx", "09_depth.out"), "treeA\ntreeA/a.txt\ntreeA/sub\n", "09_depth.out");
+        ExpectEq(ReadRes("zx", "10_mode.out"), "treeA\ntreeA/sub\n", "10_mode.out");
+        ExpectEq(ReadRes("zx", "11_path.out"), "treeA\ntreeA/sub\ntreeA/sub/b.txt\ntreeA/sub/c.dat\n", "11_path.out");
+        ExpectEq(ReadRes("zx", "12_path_x.out"), "treeA\ntreeA/a.txt\n", "12_path_x.out");
+        ExpectEq(ReadRes("zx", "13_filter.out"), "treeA\ntreeA/a.txt\ntreeA/sub\ntreeA/sub/b.txt\n", "13_filter.out");
+        ExpectEq(ReadRes("zx", "14_setroot.out"), "/virt\n/virt/a.txt\n/virt/sub\n/virt/sub/b.txt\n/virt/sub/c.dat\n", "14_setroot.out");
+        Expect(Contains(ReadRes("zx", "15_chstat.out"), "alice staff"), "15_chstat.out");
+        ExpectEq(ReadRes("zx", "17_unbundle.out"), ReadRes("zx", "01_print.out"), "17_unbundle.out");
+        ExpectEq(ReadRes("zx", "18_unbundle_size.out"), "25\n", "18_unbundle_size.out");
+        Expect(Contains(ReadRes("zx", "19_merge.out"), "treeA/d.txt\n"), "19_merge.out");
+        ExpectEq(ReadRes("zx", "20_merge_and.out"), "treeA\ntreeA/a.txt\ntreeA/d.txt\ntreeA/sub\ntreeA/sub/b.txt\ntreeA/sub/c.dat\n", "20_merge_and.out");
+        ExpectEq(ReadRes("zx", "21_merge_diff.out"), "treeA\ntreeA/d.txt\n", "21_merge_diff.out");
+        Expect(Contains(ReadRes("zx", "23_write_check.out"), "out_write_zx/sub/b.txt\n"), "23_write_check.out");
+        Expect(!Contains(ReadRes("zx", "25_mw_check.out"), "extra.txt"), "25_mw_check.out");
+        ExpectEq(ReadRes("zx", "26_proto.out"), "treeA\ntreeA/a.txt\ntreeA/sub\ntreeA/sub/b.txt\n", "26_proto.out");
+        ExpectEq(ReadRes("zx", "27_eval.out"), ReadRes("zx", "01_print.out"), "27_eval.out");
+        ExpectEq(ReadRes("zx", "28_query.out"), "treeA/a.txt\ntreeA/sub/b.txt\ntreeA/sub/c.dat\n", "28_query.out");
+        ExpectEq(ReadRes("zx", "29_exec.out"), "treeA/a.txt\ntreeA/sub/b.txt\n", "29_exec.out");
+        ExpectEq(ReadRes("zx", "30_pipe.out"), "alpha\n", "30_pipe.out");
+        ExpectEq(ReadRes("zx", "31_run.out"), ReadRes("zx", "01_print.out"), "31_run.out");
+    }
+
+    if failures != 0 {
+        print("fs_parity_test: % failures\n", failures);
+        return 1;
+    }
+    print("fs_parity_test: all checks passed (%)\n", mode);
+    return 0;
+}

@@ -1,0 +1,8 @@
+// /dis/fs/write.zx module entry point (replaces appl/cmd/fs/write.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "vsx" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("write", "vsx");
+}

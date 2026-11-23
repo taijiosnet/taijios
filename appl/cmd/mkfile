@@ -59,7 +59,6 @@ TARG=\
 	fmt.dis\
 	fortune.dis\
 	freq.dis\
-	fs.dis\
 	ftest.dis\
 	ftpfs.dis\
 	getauthinfo.dis\
@@ -199,6 +198,7 @@ ZXCOMMANDS=$ZXCOMMANDS chmod
 ZXCOMMANDS=$ZXCOMMANDS rm
 ZXCOMMANDS=$ZXCOMMANDS uuencode
 ZXCOMMANDS=$ZXCOMMANDS uudecode
+ZXCOMMANDS=$ZXCOMMANDS fs
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -351,6 +351,9 @@ linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/
 graph0.zx: tcltk/graph0_app.zi tcltk/graph0_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_args.zi taijios_files.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_BANDED --bind-host taijios_args --bind-host taijios_files --bind-host zx_surface --entry graph0_app:main -o $target tcltk/graph0_app.zi
 
+fs.zx: fs.zi fs/fs_eval.zi fs/fs_types.zi fs/fs_trees.zi fs/fs_ops.zi sh/shell_parse.zi taijios_args.zi taijios_io.zi taijios_stat.zi taijios_files.zi taijios_time.zi taijios_namespace.zi taijios_process.zi mkfile
+	zi2zx --root . --module-path fs --module-path sh --bind-host taijios_args --bind-host taijios_io --bind-host taijios_stat --bind-host taijios_files --bind-host taijios_time --bind-host taijios_namespace --bind-host taijios_process --entry fs:main -o $target fs.zi
+
 # These commands exist only as ZX bundles, so the ordinary install builds them.
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
@@ -422,6 +425,7 @@ $DISBIN/pwd.zx: pwd.zx mkfile
 $DISBIN/rm.zx: rm.zx mkfile
 $DISBIN/uuencode.zx: uuencode.zx mkfile
 $DISBIN/uudecode.zx: uudecode.zx mkfile
+$DISBIN/fs.zx: fs.zx mkfile
 
 $DISBIN/%.zx: %.zx
 	mode=0644

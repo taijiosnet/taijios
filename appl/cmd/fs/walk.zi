@@ -1,0 +1,8 @@
+// /dis/fs/walk.zx module entry point (replaces appl/cmd/fs/walk.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "xs-bs" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("walk", "xs-bs");
+}

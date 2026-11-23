@@ -1,0 +1,962 @@
+// Shared types, value producers, file stat/readdir helpers, report collector,
+// mode/pattern helpers, and type signature formatting for /dis/fs and /dis/fs/*.zx.
+#import "std/vec"
+#import "std/option"
+Io :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Files :: #import "taijios_files";
+Time :: #import "taijios_time";
+
+Start :: -1;
+Next :: 0;
+Down :: 1;
+Skip :: 2;
+Quit :: 3;
+
+// Item kinds on an fs stream.
+Entry :: 1;
+Data :: 2;
+End :: 3;
+Done :: 4;
+
+DMDIR :: 0x80000000;
+DMAPPEND :: 0x40000000;
+DMEXCL :: 0x20000000;
+DMAUTH :: 0x08000000;
+ATOMICIO :: 8192;
+
+FsDir :: struct {
+    name: string;
+    uid: string;
+    gid: string;
+    muid: string;
+    qpath: u64;
+    qvers: u32;
+    qtype: u8;
+    mode: u32;
+    atime: u32;
+    mtime: u32;
+    length: s64;
+    dtype: s32;
+    dev: s32;
+}
+
+Item :: struct {
+    kind: s32;
+    dir: FsDir;
+    data: string;
+}
+
+EntryItem :: struct {
+    dir: FsDir;
+    path: string;
+    depth: s64;
+    ok: bool;
+}
+
+FsOpt :: struct {
+    opt: s32;
+    args: Vec(s32);
+}
+
+IsDir :: (d: FsDir) -> bool { return (d.mode & DMDIR) != 0 }
+
+Keep :: (s: string) -> string { return TextDetach(TextCopy(s)) }
+
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    unused BuilderAppend(out, a);
+    unused BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+Join3 :: (a: string, b: string, c: string) -> string {
+    out: Vec(u8);
+    unused BuilderAppend(out, a);
+    unused BuilderAppend(out, b);
+    unused BuilderAppend(out, c);
+    return BuilderFinish(out);
+}
+
+Slash :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    unused BuilderAppend(out, a);
+    if a.count == 0 || a[a.count - 1] != #char "/" { VecPush(out, #char "/") }
+    unused BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+WriteOut :: (s: string) {
+    if s.count > 0 { unused Io.WriteBytes(1, s) }
+}
+
+WriteErr :: (s: string) {
+    if s.count > 0 { unused Io.WriteBytes(2, s) }
+}
+
+ErrLine :: (s: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "%\n", s);
+    unused Io.WriteBytes(2, BuilderFinish(out));
+}
+
+WithError :: (prefix: string) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "%: %", prefix, Io.LastError());
+    return BuilderFinish(out);
+}
+
+// %q formatting as in Limbo sys->sprint("%q", s).
+NeedsQuote :: (s: string) -> bool {
+    if s.count == 0 { return true }
+    for s {
+        if it == #char " " || it == #char "\t" || it == #char "\n" || it == #char "\r" || it == #char "'" {
+            return true;
+        }
+    }
+    return false;
+}
+
+AppendQQ :: (out: *Vec(u8), s: string) {
+    VecPush(<<out, #char "'");
+    for s {
+        if it == #char "'" { VecPush(<<out, #char "'") }
+        VecPush(<<out, it);
+    }
+    VecPush(<<out, #char "'");
+}
+
+AppendQ :: (out: *Vec(u8), s: string) {
+    if NeedsQuote(s) {
+        AppendQQ(out, s);
+    } else {
+        unused BuilderAppend(<<out, s);
+    }
+}
+
+Q :: (s: string) -> string {
+    out: Vec(u8);
+    AppendQ(*out, s);
+    return BuilderFinish(out);
+}
+
+QQ :: (s: string) -> string {
+    out: Vec(u8);
+    AppendQQ(*out, s);
+    return BuilderFinish(out);
+}
+
+// str->unquoted(s): split rc-style single-quoted words on whitespace.
+Unquoted :: (s: string, out: *Vec(string)) {
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && (s[i] == #char " " || s[i] == #char "\t" || s[i] == #char "\n" || s[i] == #char "\r") {
+            i += 1;
+        }
+        if i >= s.count { break }
+        w: Vec(u8);
+        inquote := false;
+        while i < s.count {
+            c := s[i];
+            if inquote {
+                if c == #char "'" {
+                    if i + 1 < s.count && s[i + 1] == #char "'" {
+                        VecPush(w, #char "'");
+                        i += 2;
+                    } else {
+                        inquote = false;
+                        i += 1;
+                    }
+                } else {
+                    VecPush(w, c);
+                    i += 1;
+                }
+            } else {
+                if c == #char "'" {
+                    inquote = true;
+                    i += 1;
+                } else if c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r" {
+                    break;
+                } else {
+                    VecPush(w, c);
+                    i += 1;
+                }
+            }
+        }
+        VecPush(<<out, BuilderFinish(w));
+    }
+}
+
+LimboInt :: (s: string) -> s64 {
+    i: s64 = 0;
+    while i < s.count && (s[i] == #char " " || s[i] == #char "\t") { i += 1 }
+    neg := false;
+    if i < s.count && s[i] == #char "-" { neg = true; i += 1 }
+    else if i < s.count && s[i] == #char "+" { i += 1 }
+    v: s64 = 0;
+    while i < s.count && s[i] >= #char "0" && s[i] <= #char "9" {
+        v = v * 10 + cast(s64)(s[i] - #char "0");
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+Octal :: (out: *Vec(u8), n: u64) {
+    digits: [24]u8;
+    k := 0;
+    x := n;
+    while true {
+        digits[k] = cast(u8)(#char "0" + (x & 7));
+        k += 1;
+        x >>= 3;
+        if x == 0 { break }
+    }
+    while k > 0 {
+        k -= 1;
+        VecPush(<<out, digits[k]);
+    }
+}
+
+OctalPrefix :: (s: string) -> (val: s64, rest: string) {
+    n: s64 = 0;
+    i: s64 = 0;
+    while i < s.count && s[i] >= #char "0" && s[i] <= #char "7" {
+        n = n * 8 + cast(s64)(s[i] - #char "0");
+        i += 1;
+    }
+    return n, s[i:];
+}
+
+AppendRune :: (out: *Vec(u8), r: s32) {
+    if r < 0x80 {
+        VecPush(<<out, cast(u8)r);
+    } else if r < 0x800 {
+        VecPush(<<out, cast(u8)(0xC0 | (r >> 6)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    } else if r < 0x10000 {
+        VecPush(<<out, cast(u8)(0xE0 | (r >> 12)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 6) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    } else {
+        VecPush(<<out, cast(u8)(0xF0 | (r >> 18)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 12) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 6) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    }
+}
+
+NullDir :: () -> FsDir {
+    d: FsDir;
+    d.qpath = 0xFFFFFFFFFFFFFFFF;
+    d.qvers = 0xFFFFFFFF;
+    d.qtype = 0xFF;
+    d.mode = 0xFFFFFFFF;
+    d.atime = 0xFFFFFFFF;
+    d.mtime = 0xFFFFFFFF;
+    d.length = -1;
+    d.dtype = -1;
+    d.dev = -1;
+    return d;
+}
+
+DirOf :: (info: Stat.Info) -> FsDir {
+    d: FsDir;
+    d.name = Keep(info.name);
+    d.uid = Keep(info.owner);
+    d.gid = Keep(info.group);
+    d.muid = Keep(info.modifier);
+    d.qpath = info.identity.qid;
+    d.qvers = cast(u32)info.identity.version;
+    d.qtype = info.identity.qtype;
+    d.mode = info.mode;
+    d.atime = cast(u32)info.accessed;
+    d.mtime = cast(u32)info.modified;
+    d.length = info.length;
+    d.dtype = cast(s32)(info.identity.dev & 0xFFFF);
+    d.dev = cast(s32)(info.identity.dev >> 16);
+    return d;
+}
+
+StatPath :: (path: string) -> (dir: FsDir, ok: bool) {
+    record: [Stat.BufferSize]u8;
+    size := Io.StatPacked(path, record[:]);
+    if size <= 0 { return .{}, false }
+    info := Stat.Decode(record[:size]);
+    if info.size == 0 { return .{}, false }
+    return DirOf(info), true;
+}
+
+NameLess :: (a: string, b: string) -> bool {
+    n := ifx a.count < b.count then a.count else b.count;
+    for i: 0..n - 1 { if a[i] != b[i] { return a[i] < b[i] } }
+    return a.count < b.count;
+}
+
+SortDirs :: (dirs: *Vec(FsDir)) {
+    order: Vec(s64);
+    i: s64 = 0;
+    while i < dirs.count {
+        VecPush(order, i);
+        j := order.count - 2;
+        while j >= 0 && NameLess(dirs.*[i].name, dirs.*[order[j]].name) {
+            order[j + 1] = order[j];
+            j -= 1;
+        }
+        order[j + 1] = i;
+        i += 1;
+    }
+    sorted: Vec(FsDir);
+    for order { VecPush(sorted, dirs.*[it]) }
+    VecSwap(<<dirs, sorted);
+}
+
+ReadDir :: (path: string, out: *Vec(FsDir)) -> bool {
+    h := Io.OpenFile(path, 0);
+    if h < 0 { return false }
+    bytes: [Stat.BufferSize]u8;
+    while true {
+        size := Io.ReadBytes(h, bytes[:]);
+        if size < 0 {
+            unused Io.CloseFile(h);
+            return false;
+        }
+        if size == 0 { break }
+        offset: s64 = 0;
+        while offset < size {
+            info := Stat.Decode(bytes[offset:size]);
+            if info.size == 0 { break }
+            offset += info.size;
+            seen := false;
+            i: s64 = 0;
+            while i < out.count {
+                if out.*[i].name == info.name { seen = true }
+                i += 1;
+            }
+            if !seen { VecPush(<<out, DirOf(info)) }
+        }
+    }
+    unused Io.CloseFile(h);
+    SortDirs(out);
+    return true;
+}
+
+ReadDirUnsorted :: (path: string, out: *Vec(FsDir)) -> bool {
+    h := Io.OpenFile(path, 0);
+    if h < 0 { return false }
+    bytes: [Stat.BufferSize]u8;
+    while true {
+        size := Io.ReadBytes(h, bytes[:]);
+        if size < 0 {
+            unused Io.CloseFile(h);
+            return false;
+        }
+        if size == 0 { break }
+        offset: s64 = 0;
+        while offset < size {
+            info := Stat.Decode(bytes[offset:size]);
+            if info.size == 0 { break }
+            offset += info.size;
+            seen := false;
+            i: s64 = 0;
+            while i < out.count {
+                if out.*[i].name == info.name { seen = true }
+                i += 1;
+            }
+            if !seen { VecPush(<<out, DirOf(info)) }
+        }
+    }
+    unused Io.CloseFile(h);
+    return true;
+}
+
+// Report collection (Report.start / Report.enable in fslib.b)
+ReportMsg :: struct {
+    prefix: string;
+    msg: string;
+}
+
+report_prefixes: Vec(string);
+report_msgs: Vec(ReportMsg);
+
+ReportReset :: () {
+    VecClear(report_prefixes);
+    VecClear(report_msgs);
+}
+
+ReportStart :: (name: string) -> s32 {
+    VecPush(report_prefixes, Keep(name));
+    return cast(s32)(report_prefixes.count - 1);
+}
+
+Report :: (errc: s32, msg: string) {
+    if errc < 0 || cast(s64)errc >= report_prefixes.count { return }
+    m: ReportMsg;
+    m.prefix = report_prefixes[errc];
+    m.msg = Keep(msg);
+    VecPush(report_msgs, m);
+}
+
+PrintReports :: () {
+    for report_msgs {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: %: %\n", it.prefix, it.msg);
+        unused Io.WriteBytes(2, BuilderFinish(out));
+    }
+}
+
+// Value arena and producers
+NextOp :: #type (v: s32, reply: s32) -> Item;
+EntryOp :: #type (v: s32, go: bool) -> EntryItem;
+GateOp :: #type (v: s32, e: *EntryItem) -> bool;
+CmpOp :: #type (v: s32, d0: *FsDir, d1: *FsDir, has0: bool, has1: bool) -> s32;
+VoidOp :: #type (v: s32, go: bool) -> s32;
+
+Producer :: struct {
+    name: string;
+    next: NextOp;
+    entry: EntryOp;
+    gate: GateOp;
+    cmp: CmpOp;
+    run_void: VoidOp;
+}
+
+ValObj :: struct {
+    typec: s32;
+    prod: s32;
+    n0: s64;
+    n1: s64;
+    errc: s32;
+    text: string;
+    kids: Vec(s32);
+    used: bool;
+}
+
+producers: Vec(Producer);
+values: Vec(ValObj);
+
+FsProducer :: (name: string, next: NextOp) -> s32 {
+    p: Producer;
+    p.name = name;
+    p.next = next;
+    VecPush(producers, p);
+    return cast(s32)(producers.count - 1);
+}
+
+EntriesProducer :: (name: string, entry: EntryOp) -> s32 {
+    p: Producer;
+    p.name = name;
+    p.entry = entry;
+    VecPush(producers, p);
+    return cast(s32)(producers.count - 1);
+}
+
+GateProducer :: (name: string, gate: GateOp) -> s32 {
+    p: Producer;
+    p.name = name;
+    p.gate = gate;
+    VecPush(producers, p);
+    return cast(s32)(producers.count - 1);
+}
+
+SelectorProducer :: (name: string, cmp: CmpOp) -> s32 {
+    p: Producer;
+    p.name = name;
+    p.cmp = cmp;
+    VecPush(producers, p);
+    return cast(s32)(producers.count - 1);
+}
+
+VoidProducer :: (name: string, run_void: VoidOp) -> s32 {
+    p: Producer;
+    p.name = name;
+    p.run_void = run_void;
+    VecPush(producers, p);
+    return cast(s32)(producers.count - 1);
+}
+
+NewValue :: (typec: s32, prod: s32) -> s32 {
+    v: ValObj;
+    v.typec = typec;
+    v.prod = prod;
+    v.errc = -1;
+    VecPush(values, v);
+    return cast(s32)(values.count - 1);
+}
+
+NewString :: (s: string) -> s32 {
+    v := NewValue(#char "s", -1);
+    values[v].text = Keep(s);
+    return v;
+}
+
+NewCmd :: (cmd_node: s32, text: string) -> s32 {
+    v := NewValue(#char "c", -1);
+    values[v].n0 = cast(s64)cmd_node;
+    values[v].text = Keep(text);
+    return v;
+}
+
+TypecOf :: (v: s32) -> s32 {
+    if v < 0 || cast(s64)v >= values.count { return 0 }
+    return values[v].typec;
+}
+
+ValueText :: (v: s32) -> string { return values[v].text }
+SetText :: (v: s32, s: string) { values[v].text = Keep(s) }
+N0 :: (v: s32) -> s64 { return values[v].n0 }
+SetN0 :: (v: s32, n: s64) { values[v].n0 = n }
+N1 :: (v: s32) -> s64 { return values[v].n1 }
+SetN1 :: (v: s32, n: s64) { values[v].n1 = n }
+ErrcOf :: (v: s32) -> s32 { return values[v].errc }
+SetErrc :: (v: s32, e: s32) { values[v].errc = e }
+SetKids :: (v: s32, kids: []s32) {
+    VecClear(values[v].kids);
+    for kids { VecPush(values[v].kids, it) }
+}
+KidCount :: (v: s32) -> s64 { return values[v].kids.count }
+Kid :: (v: s32, i: s64) -> s32 { return values[v].kids[i] }
+
+EntryItemOf :: (d: FsDir, path: string, depth: s64) -> EntryItem {
+    e: EntryItem;
+    e.dir = d;
+    e.path = path;
+    e.depth = depth;
+    e.ok = true;
+    return e;
+}
+
+ItemOf :: (kind: s32) -> Item {
+    i: Item;
+    i.kind = kind;
+    return i;
+}
+
+EntryOf :: (d: FsDir) -> Item {
+    i: Item;
+    i.kind = Entry;
+    i.dir = d;
+    return i;
+}
+
+FsNext :: (v: s32, reply: s32) -> Item {
+    if v < 0 || cast(s64)v >= values.count { return ItemOf(Done) }
+    values[v].used = true;
+    p := values[v].prod;
+    if p < 0 || cast(s64)p >= producers.count { return ItemOf(Done) }
+    return producers[p].next(v, reply);
+}
+
+EntriesNext :: (v: s32, go: bool) -> EntryItem {
+    none: EntryItem;
+    if v < 0 || cast(s64)v >= values.count { return none }
+    values[v].used = true;
+    p := values[v].prod;
+    if p < 0 || cast(s64)p >= producers.count { return none }
+    return producers[p].entry(v, go);
+}
+
+Query :: (v: s32, e: *EntryItem) -> bool {
+    if v < 0 || cast(s64)v >= values.count { return false }
+    values[v].used = true;
+    p := values[v].prod;
+    if p < 0 || cast(s64)p >= producers.count { return false }
+    return producers[p].gate(v, e);
+}
+
+Compare :: (v: s32, d0: *FsDir, d1: *FsDir, has0: bool, has1: bool) -> s32 {
+    if v < 0 || cast(s64)v >= values.count { return 0 }
+    values[v].used = true;
+    p := values[v].prod;
+    if p < 0 || cast(s64)p >= producers.count { return 0 }
+    return producers[p].cmp(v, d0, d1, has0, has1);
+}
+
+RunVoid :: (v: s32, go: bool) {
+    if v < 0 || cast(s64)v >= values.count { return }
+    if values[v].used { return }
+    values[v].used = true;
+    p := values[v].prod;
+    if p < 0 || cast(s64)p >= producers.count { return }
+    unused producers[p].run_void(v, go);
+}
+
+Discard :: (v: s32) {
+    if v < 0 || cast(s64)v >= values.count { return }
+    if values[v].used { return }
+    tc := values[v].typec;
+    if tc == #char "x" {
+        first := FsNext(v, Start);
+        if first.kind != Done { unused FsNext(v, Quit) }
+    } else if tc == #char "t" {
+        unused EntriesNext(v, false);
+    } else if tc == #char "v" {
+        RunVoid(v, false);
+    } else {
+        values[v].used = true;
+    }
+}
+
+// Type signature helpers from appl/lib/fslib.b
+Type2s :: (c: s32) -> string {
+    if c == #char "a" { return "any" }
+    if c == #char "x" { return "fs" }
+    if c == #char "s" { return "string" }
+    if c == #char "v" { return "void" }
+    if c == #char "p" { return "gate" }
+    if c == #char "c" { return "command" }
+    if c == #char "t" { return "entries" }
+    if c == #char "m" { return "selector" }
+    out: Vec(u8);
+    BuilderAppend(out, "unknowntype('");
+    VecPush(out, cast(u8)c);
+    BuilderAppend(out, "')");
+    return BuilderFinish(out);
+}
+
+SplitType :: (t: string) -> (rt: s32, at: string, ot: string) {
+    if t.count == 0 { return -1, "", "" }
+    i: s64 = 1;
+    while i < t.count {
+        if t[i] == #char "-" { break }
+        i += 1;
+    }
+    return cast(s32)t[0], t[1:i], t[i:];
+}
+
+OptTypes :: (opt: s32, opts: string) -> (ok: s32, argtypes: string) {
+    i: s64 = 1;
+    while i < opts.count {
+        if cast(s32)opts[i] == opt && opts[i - 1] == #char "-" {
+            j := i + 1;
+            while j < opts.count {
+                if opts[j] == #char "-" { break }
+                j += 1;
+            }
+            return 0, opts[i + 1:j];
+        }
+        i += 1;
+    }
+    return -1, "";
+}
+
+TypeCompat :: (t0: string, t1: string) -> bool {
+    rt0, at0, ot0 := SplitType(t0);
+    rt1, at1, ot1 := SplitType(t1);
+    if (rt0 != rt1 && rt0 != #char "a") || at0 != at1 { return false }
+    i: s64 = 1;
+    while i < ot0.count {
+        j := i;
+        while j < ot0.count {
+            if ot0[j] == #char "-" { break }
+            j += 1;
+        }
+        ok, t := OptTypes(cast(s32)ot0[i], ot1);
+        if ok == -1 || ot0[i:j] != t { return false }
+        i = j + 2;
+    }
+    return true;
+}
+
+CmdUsage :: (s_in: string, t: string) -> string {
+    if s_in.count == 0 { return "" }
+    out: Vec(u8);
+    unused BuilderAppend(out, s_in);
+    oi: s64 = 0;
+    while oi < t.count {
+        if t[oi] == #char "-" { break }
+        oi += 1;
+    }
+    if oi < t.count {
+        single: Vec(u8);
+        multi: Vec(u8);
+        i := oi;
+        while i < t.count - 1 {
+            j := i + 1;
+            while j < t.count {
+                if t[j] == #char "-" { break }
+                j += 1;
+            }
+            optargs := t[i + 2:j];
+            if optargs.count == 0 {
+                VecPush(single, t[i + 1]);
+            } else {
+                unused BuilderAppend(multi, " [-");
+                VecPush(multi, t[i + 1]);
+                for k: 0..optargs.count - 1 {
+                    VecPush(multi, #char " ");
+                    unused BuilderAppend(multi, Type2s(cast(s32)optargs[k]));
+                }
+                VecPush(multi, #char "]");
+            }
+            i = j;
+        }
+        if single.count > 0 {
+            unused BuilderAppend(out, " [-");
+            unused BuilderAppend(out, TextView(single[:]));
+            VecPush(out, #char "]");
+        }
+        unused BuilderAppend(out, TextView(multi[:]));
+    }
+    is_multi := false;
+    if oi > 2 && t[oi - 1] == #char "*" {
+        is_multi = true;
+        oi -= 2;
+    }
+    k: s64 = 1;
+    while k < oi {
+        VecPush(out, #char " ");
+        unused BuilderAppend(out, Type2s(cast(s32)t[k]));
+        k += 1;
+    }
+    if is_multi {
+        unused BuilderAppend(out, " [");
+        unused BuilderAppend(out, Type2s(cast(s32)t[k]));
+        unused BuilderAppend(out, "...]");
+    }
+    unused BuilderAppend(out, " -> ");
+    if t.count > 0 { unused BuilderAppend(out, Type2s(cast(s32)t[0])) }
+    return BuilderFinish(out);
+}
+
+// Mode formatting and Daytime filet (for ls, exec -p/-P, pipe -p/-P, query -p/-P)
+MODES: [8]string = .["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
+MONTHS: [12]string = .["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+Modes :: (mode: u32) -> string {
+    out: Vec(u8);
+    if (mode & DMDIR) != 0 {
+        VecPush(out, #char "d");
+    } else if (mode & DMAPPEND) != 0 {
+        VecPush(out, #char "a");
+    } else if (mode & DMAUTH) != 0 {
+        VecPush(out, #char "A");
+    } else {
+        VecPush(out, #char "-");
+    }
+    VecPush(out, ifx (mode & DMEXCL) != 0 then #char "l" else #char "-");
+    unused BuilderAppend(out, MODES[(mode >> 6) & 7]);
+    unused BuilderAppend(out, MODES[(mode >> 3) & 7]);
+    unused BuilderAppend(out, MODES[mode & 7]);
+    return BuilderFinish(out);
+}
+
+Now :: () -> s64 {
+    time: [32]u8;
+    size := Files.ReadBytesAt("/dev/time", 0, time[:]);
+    if size <= 0 { return 0 }
+    micros: s64 = 0;
+    for time[:size] {
+        if it < #char "0" || it > #char "9" { break }
+        micros = micros * 10 + cast(s64)(it - #char "0");
+    }
+    return micros / 1000000;
+}
+
+Two :: (n: s64) -> string {
+    out: Vec(u8);
+    if n < 10 { VecPush(out, #char "0") }
+    BuilderPrint(*out, "%", n);
+    return BuilderFinish(out);
+}
+
+Civil :: (z_in: s64) -> (year: s64, month: s64, day: s64) {
+    z := z_in + 719468;
+    era := ifx z >= 0 then z / 146097 else (z - 146096) / 146097;
+    doe := z - era * 146097;
+    yoe := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y := yoe + era * 400;
+    doy := doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp := (5 * doy + 2) / 153;
+    d := doy - (153 * mp + 2) / 5 + 1;
+    m := ifx mp < 10 then mp + 3 else mp - 9;
+    return ifx m <= 2 then y + 1 else y, m, d;
+}
+
+Filet :: (now: s64, file: s64) -> string {
+    zone: [2048]u8;
+    n := Files.ReadBytesAt("/env/timezone", 0, zone[:]);
+    if n <= 0 { n = Files.ReadBytesAt("/locale/timezone", 0, zone[:]) }
+    local := file;
+    if n > 0 { local += Time.ZoneOffset(TextView(zone[:n]), file) }
+    days := local / 86400;
+    secs := local % 86400;
+    if secs < 0 {
+        secs += 86400;
+        days -= 1;
+    }
+    year, month, day := Civil(days);
+    out: Vec(u8);
+    if now - file < 6 * 30 * 24 * 3600 {
+        BuilderPrint(*out, "% % ", MONTHS[month - 1], Two(day));
+        BuilderPrint(*out, "%:%", Two(secs / 3600), Two((secs / 60) % 60));
+    } else {
+        BuilderPrint(*out, "% %  %", MONTHS[month - 1], Two(day), year);
+    }
+    return BuilderFinish(out);
+}
+
+// chmod-style mode parser for mode and chstat
+USER :: 0x1C0;  // 0700
+GROUP :: 0x38;  // 070
+OTHER :: 0x7;   // 07
+ALL :: 0x1FF;   // 0777
+READ :: 0x124;  // 0444
+WRITE :: 0x92;  // 0222
+EXEC :: 0x49;   // 0111
+
+ParseMode :: (spec: string) -> (ok: bool, mask: s64, mode: s64) {
+    mask: s64 = cast(s64)(DMAPPEND | DMEXCL | DMDIR | DMAUTH);
+    i: s64 = 0;
+    while i < spec.count {
+        c := spec[i];
+        if c == #char "u" {
+            mask |= USER;
+        } else if c == #char "g" {
+            mask |= GROUP;
+        } else if c == #char "o" {
+            mask |= OTHER;
+        } else if c == #char "a" {
+            mask |= ALL;
+        } else {
+            break;
+        }
+        i += 1;
+    }
+    if i == spec.count { return false, 0, 0 }
+    if i == 0 { mask |= ALL }
+    op := spec[i];
+    i += 1;
+    if op != #char "+" && op != #char "-" && op != #char "=" { return false, 0, 0 }
+    mode: s64 = 0;
+    while i < spec.count {
+        c := spec[i];
+        if c == #char "r" {
+            mode |= READ;
+        } else if c == #char "w" {
+            mode |= WRITE;
+        } else if c == #char "x" {
+            mode |= EXEC;
+        } else if c == #char "a" {
+            mode |= DMAPPEND;
+        } else if c == #char "l" {
+            mode |= DMEXCL;
+        } else if c == #char "d" {
+            mode |= DMDIR;
+        } else if c == #char "A" {
+            mode |= DMAUTH;
+        } else {
+            return false, 0, 0;
+        }
+        i += 1;
+    }
+    if op == #char "+" || op == #char "-" { mask &= mode }
+    if op == #char "-" { mode = ~mode }
+    return true, mask & 0xFFFFFFFF, mode & 0xFFFFFFFF;
+}
+
+// FilepatMatch from appl/lib/filepat.b
+Runes :: (s: string, out: *Vec(s32)) {
+    i: s64 = 0;
+    while i < s.count {
+        c := cast(s32)s[i];
+        width: s64 = 1;
+        if c >= 0xF0 && i + 3 < s.count {
+            c = ((c & 0x07) << 18) | ((cast(s32)s[i + 1] & 0x3F) << 12) | ((cast(s32)s[i + 2] & 0x3F) << 6) | (cast(s32)s[i + 3] & 0x3F);
+            width = 4;
+        } else if c >= 0xE0 && i + 2 < s.count {
+            c = ((c & 0x0F) << 12) | ((cast(s32)s[i + 1] & 0x3F) << 6) | (cast(s32)s[i + 2] & 0x3F);
+            width = 3;
+        } else if c >= 0xC0 && i + 1 < s.count {
+            c = ((c & 0x1F) << 6) | (cast(s32)s[i + 1] & 0x3F);
+            width = 2;
+        }
+        VecPush(<<out, c);
+        i += width;
+    }
+}
+
+PatChar :: (pat: []s32, p_in: s64) -> (next: s64, c: s32, esc: s32) {
+    p := p_in;
+    if p == pat.count { return p, 0, -1 }
+    r := pat[p];
+    p += 1;
+    if p == pat.count || r != #char "\\" { return p, r, 0 }
+    return p + 1, pat[p], 1;
+}
+
+PatRange :: (pat: []s32, p: s64) -> (next: s64, lo: s32, hi: s32) {
+    q, lo, e0 := PatChar(pat, p);
+    unused e0;
+    q1, hi, esc := PatChar(pat, q);
+    if esc == 0 && hi == #char "-" {
+        q2, hi2, e2 := PatChar(pat, q1);
+        unused e2;
+        return q2, lo, hi2;
+    }
+    return q, lo, lo;
+}
+
+FilepatMatch1 :: (pat_in: []s32, name: []s32) -> bool {
+    pat := pat_in;
+    n: s64 = 0;
+    p: s64 = 0;
+    while p < pat.count {
+        r := pat[p];
+        p += 1;
+        if r == #char "*" {
+            pat = pat[p:];
+            if pat.count == 0 { return true }
+            while n <= name.count {
+                if FilepatMatch1(pat, name[n:]) { return true }
+                n += 1;
+            }
+            return false;
+        } else if r == #char "[" {
+            if n == name.count { return false }
+            s := name[n];
+            n += 1;
+            matched := false;
+            invert := false;
+            first := true;
+            esc: s32 = 0;
+            while p < pat.count {
+                q, c, e := PatChar(pat, p);
+                p = q;
+                r = c;
+                esc = e;
+                if first && esc == 0 && r == #char "^" {
+                    invert = true;
+                    first = false;
+                    continue;
+                }
+                first = false;
+                if esc == 0 && r == #char "]" { break }
+                q2, lo, hi := PatRange(pat, p - 1);
+                p = q2;
+                if lo <= s && s <= hi { matched = true }
+            }
+            if !(esc == 0 && r == #char "]") || invert == matched { return false }
+        } else if r == #char "?" {
+            if n == name.count { return false }
+            n += 1;
+        } else if r == #char "\\" {
+            if n == name.count || p == pat.count { return false }
+            c := pat[p];
+            p += 1;
+            if c != name[n] { return false }
+            n += 1;
+        } else {
+            if n == name.count || r != name[n] { return false }
+            n += 1;
+        }
+    }
+    return n == name.count;
+}
+
+FilepatMatch :: (pat: string, name: string) -> bool {
+    p: Vec(s32);
+    n: Vec(s32);
+    Runes(pat, *p);
+    Runes(name, *n);
+    return FilepatMatch1(p[:], n[:]);
+}

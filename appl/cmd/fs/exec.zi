@@ -1,0 +1,8 @@
+// /dis/fs/exec.zx module entry point (replaces appl/cmd/fs/exec.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "vct-ns-tc-p-P" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("exec", "vct-ns-tc-p-P");
+}

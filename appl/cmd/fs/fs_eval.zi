@@ -1,0 +1,637 @@
+// Expression parser, type converter, verb dispatcher, and CLI entry points for /dis/fs and /dis/fs/*.zx.
+#import "std/vec"
+#import "std/option"
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+ShParse :: #import "shell_parse";
+using Fs :: #import "fs_types";
+Trees :: #import "fs_trees";
+Ops :: #import "fs_ops";
+
+TOK_WORD :: 0;
+TOK_SHCMD :: 1;
+TOK_VAR :: 2;
+
+VerbDef :: struct {
+    name: string;
+    types: string;
+}
+
+VERBS: [30]VerbDef = .[
+    .{name = "and",        types = "pppp*"},
+    .{name = "bundle",     types = "vx"},
+    .{name = "chstat",     types = "xx-pp-ms-us-gs-ts-as-c"},
+    .{name = "compose",    types = "ms-d"},
+    .{name = "depth",      types = "ps"},
+    .{name = "entries",    types = "tx"},
+    .{name = "eval",       types = "as-v"},
+    .{name = "exec",       types = "vct-ns-tc-p-P"},
+    .{name = "filter",     types = "xpx-d"},
+    .{name = "join",       types = "ms-d"},
+    .{name = "ls",         types = "vt-u-m"},
+    .{name = "match",      types = "ps-a-r"},
+    .{name = "merge",      types = "xxxx*-1-cm"},
+    .{name = "mergewrite", types = "vmsx"},
+    .{name = "mode",       types = "ps"},
+    .{name = "not",        types = "pp"},
+    .{name = "or",         types = "pppp*"},
+    .{name = "path",       types = "pss*-x"},
+    .{name = "pipe",       types = "vcx-1-p-P"},
+    .{name = "print",      types = "vt"},
+    .{name = "proto",      types = "xs-rs"},
+    .{name = "query",      types = "pc-p-P"},
+    .{name = "run",        types = "sc"},
+    .{name = "select",     types = "tpt"},
+    .{name = "setroot",    types = "xsx-c"},
+    .{name = "size",       types = "vt"},
+    .{name = "unbundle",   types = "xs"},
+    .{name = "void",       types = "vv"},
+    .{name = "walk",       types = "xs-bs"},
+    .{name = "write",      types = "vsx"}
+];
+
+FindVerb :: (cmd_in: string) -> s64 {
+    cmd := cmd_in;
+    if cmd.count > 8 && cmd[0:8] == "/dis/fs/" {
+        cmd = cmd[8:];
+    }
+    if cmd.count > 4 && cmd[cmd.count - 4:] == ".dis" {
+        cmd = cmd[0:cmd.count - 4];
+    } else if cmd.count > 3 && cmd[cmd.count - 3:] == ".zx" {
+        cmd = cmd[0:cmd.count - 3];
+    }
+    for VERBS {
+        if it.name == cmd { return it_index }
+    }
+    return -1;
+}
+
+EvalState :: struct {
+    s: string;
+    spos: s64;
+    args: Vec(s32);
+    verbose: bool;
+    parse_err: bool;
+}
+
+Getc :: (p: *EvalState) -> s32 {
+    c: s32 = -1;
+    if p.spos < p.s.count {
+        c = cast(s32)p.s[p.spos];
+    }
+    p.spos += 1;
+    return c;
+}
+
+Ungetc :: (p: *EvalState) {
+    p.spos -= 1;
+}
+
+InChars :: (c: s32, chars: string) -> bool {
+    if c < 0 { return false }
+    for chars {
+        if cast(s32)it == c { return true }
+    }
+    return false;
+}
+
+GetQWord :: (p: *EvalState, keepq: bool) -> string {
+    out: Vec(u8);
+    while true {
+        nc := Getc(p);
+        while nc != #char "'" && nc >= 0 {
+            VecPush(out, cast(u8)nc);
+            nc = Getc(p);
+        }
+        if nc == -1 {
+            ErrLine("fs: eval: unterminated quote");
+            p.parse_err = true;
+            return "";
+        }
+        if Getc(p) != #char "'" {
+            Ungetc(p);
+            if keepq { VecPush(out, #char "'") }
+            return BuilderFinish(out);
+        }
+        VecPush(out, #char "'");
+        if keepq { VecPush(out, #char "'") }
+    }
+    return "";
+}
+
+GetVar :: (p: *EvalState) -> string {
+    c := Getc(p);
+    if c == -1 {
+        ErrLine("fs: eval: unexpected eof after '$'");
+        p.parse_err = true;
+        return "";
+    }
+    v: Vec(u8);
+    while c >= 0 && !InChars(c, " \t\n@{}'") {
+        VecPush(v, cast(u8)c);
+        c = Getc(p);
+    }
+    Ungetc(p);
+    vs := BuilderFinish(v);
+    i: s64 = 0;
+    while i < vs.count {
+        if vs[i] < #char "0" || vs[i] > #char "9" { break }
+        i += 1;
+    }
+    if i < vs.count || vs.count == 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: eval: invalid $ reference $%", Q(vs));
+        ErrLine(BuilderFinish(out));
+        p.parse_err = true;
+        return "";
+    }
+    return vs;
+}
+
+GetTok :: (p: *EvalState) -> (t: s32, s: string) {
+    c := Getc(p);
+    while c == #char " " || c == #char "\t" {
+        c = Getc(p);
+    }
+    if c == -1 { return -1, "" }
+    if c == #char "\n" { return #char "\n", "" }
+    if c == #char "{" { return #char "{", "" }
+    if c == #char "}" { return #char "}", "" }
+    if c == #char "@" {
+        nc := Getc(p);
+        while nc == #char " " || nc == #char "\t" {
+            nc = Getc(p);
+        }
+        if nc != #char "{" {
+            ErrLine("fs: eval: expected '{' after '@'");
+            p.parse_err = true;
+            return -1, "";
+        }
+        out: Vec(u8);
+        VecPush(out, #char "{");
+        d: s32 = 1;
+        while true {
+            nc = Getc(p);
+            if nc == -1 { break }
+            VecPush(out, cast(u8)nc);
+            if nc == #char "{" {
+                d += 1;
+            } else if nc == #char "}" {
+                d -= 1;
+                if d == 0 { break }
+            } else if nc == #char "'" {
+                qw := GetQWord(p, true);
+                if p.parse_err { return -1, "" }
+                unused BuilderAppend(out, qw);
+            }
+        }
+        if nc == -1 {
+            ErrLine("fs: eval: unbalanced '{' in shell command");
+            p.parse_err = true;
+            return -1, "";
+        }
+        return TOK_SHCMD, BuilderFinish(out);
+    }
+    if c == #char "$" {
+        vs := GetVar(p);
+        return TOK_VAR, vs;
+    }
+    if c == #char "'" {
+        ws := GetQWord(p, false);
+        return TOK_WORD, ws;
+    }
+    out: Vec(u8);
+    while c >= 0 {
+        VecPush(out, cast(u8)c);
+        c = Getc(p);
+        if InChars(c, " \t{}\n") {
+            Ungetc(p);
+            break;
+        }
+    }
+    return TOK_WORD, BuilderFinish(out);
+}
+
+Tok2s :: (t: s32, s: string) -> string {
+    if t == TOK_WORD { return s }
+    if t == TOK_SHCMD { return "@" }
+    if t == TOK_VAR { return Join("$", s) }
+    out: Vec(u8);
+    VecPush(out, cast(u8)t);
+    return BuilderFinish(out);
+}
+
+DiscardAll :: (opts: []FsOpt, args: []s32) {
+    for oi: 0..opts.count - 1 {
+        for ai: 0..opts[oi].args.count - 1 { Discard(opts[oi].args[ai]) }
+    }
+    for args { Discard(it) }
+}
+
+AppendFsOpt :: (dst: *Vec(FsOpt), src: *FsOpt) {
+    fo: FsOpt;
+    fo.opt = src.opt;
+    for j: 0..src.args.count - 1 { VecPush(fo.args, src.args[j]) }
+    VecPush(<<dst, fo);
+}
+
+DispatchVerb :: (idx: s64, opts: []FsOpt, args: []s32) -> s32 {
+    name := VERBS[idx].name;
+    if name == "and"        { return Ops.RunAnd(opts, args) }
+    if name == "bundle"     { return Ops.RunBundle(opts, args) }
+    if name == "chstat"     { return Trees.RunChstat(opts, args) }
+    if name == "compose"    { return Ops.RunCompose(opts, args) }
+    if name == "depth"      { return Ops.RunDepth(opts, args) }
+    if name == "entries"    { return Ops.RunEntries(opts, args) }
+    if name == "eval"       { return RunEval(opts, args) }
+    if name == "exec"       { return Ops.RunExec(opts, args) }
+    if name == "filter"     { return Trees.RunFilter(opts, args) }
+    if name == "join"       { return Ops.RunCompose(opts, args) }
+    if name == "ls"         { return Ops.RunLs(opts, args) }
+    if name == "match"      { return Ops.RunMatch(opts, args) }
+    if name == "merge"      { return Trees.RunMerge(opts, args) }
+    if name == "mergewrite" { return Ops.RunMergewrite(opts, args) }
+    if name == "mode"       { return Ops.RunMode(opts, args) }
+    if name == "not"        { return Ops.RunNot(opts, args) }
+    if name == "or"         { return Ops.RunOr(opts, args) }
+    if name == "path"       { return Ops.RunPath(opts, args) }
+    if name == "pipe"       { return Ops.RunPipe(opts, args) }
+    if name == "print"      { return Ops.RunPrint(opts, args) }
+    if name == "proto"      { return Trees.RunProto(opts, args) }
+    if name == "query"      { return Ops.RunQuery(opts, args) }
+    if name == "run"        { return Ops.RunRun(opts, args) }
+    if name == "select"     { return Ops.RunSelect(opts, args) }
+    if name == "setroot"    { return Trees.RunSetroot(opts, args) }
+    if name == "size"       { return Ops.RunSize(opts, args) }
+    if name == "unbundle"   { return Trees.RunUnbundle(opts, args) }
+    if name == "void"       { return Ops.RunVoidVerb(opts, args) }
+    if name == "walk"       { return Trees.RunWalk(opts, args) }
+    if name == "write"      { return Ops.RunWrite(opts, args) }
+    return -1;
+}
+
+Cvt1 :: (v: s32, t: s32) -> s32 {
+    if v < 0 { return -1 }
+    if TypecOf(v) == t { return v }
+    empty_opts: [0]FsOpt;
+    if t == #char "t" {
+        x := Cvt1(v, #char "x");
+        if x < 0 { return -1 }
+        a: [1]s32 = .[x];
+        return Ops.RunEntries(empty_opts[:], a[:]);
+    }
+    if t == #char "x" {
+        s := Cvt1(v, #char "s");
+        if s < 0 { return -1 }
+        a: [1]s32 = .[s];
+        return Trees.RunWalk(empty_opts[:], a[:]);
+    }
+    if t == #char "p" {
+        s := Cvt1(v, #char "s");
+        if s < 0 { return -1 }
+        a: [1]s32 = .[s];
+        return Ops.RunMatch(empty_opts[:], a[:]);
+    }
+    if t == #char "s" {
+        c := Cvt1(v, #char "c");
+        if c < 0 { return -1 }
+        a: [1]s32 = .[c];
+        return Ops.RunRun(empty_opts[:], a[:]);
+    }
+    if t == #char "v" {
+        tr := Cvt1(v, #char "t");
+        if tr < 0 { return -1 }
+        a: [1]s32 = .[tr];
+        return Ops.RunPrint(empty_opts[:], a[:]);
+    }
+    return -1;
+}
+
+CvtValues :: (t: string, cmd: string, args_in: []s32, cur: *s64, out: *Vec(s32)) -> bool {
+    i: s64 = 0;
+    while i < t.count {
+        tc := cast(s32)t[i];
+        if cur.* >= args_in.count {
+            eb: Vec(u8);
+            BuilderPrint(*eb, "fs: eval: % missing argument of type %", Q(cmd), Type2s(tc));
+            ErrLine(BuilderFinish(eb));
+            return false;
+        }
+        arg_v := args_in[cur.*];
+        v := Cvt1(arg_v, tc);
+        if v < 0 {
+            eb: Vec(u8);
+            BuilderPrint(*eb, "fs: eval: %: % cannot be converted to %", Q(cmd), Type2s(TypecOf(arg_v)), Type2s(tc));
+            ErrLine(BuilderFinish(eb));
+            return false;
+        }
+        VecPush(<<out, v);
+        <<cur = cur.* + 1;
+        i += 1;
+    }
+    return true;
+}
+
+CvtArgs :: (args_in: []s32, cmd: string, otype: string, opts_out: *Vec(FsOpt), args_out: *Vec(s32)) -> bool {
+    _, at, ot := SplitType(otype);
+    work: Vec(s32);
+    for args_in { VecPush(work, it) }
+    cur: s64 = 0;
+    if ot.count > 0 {
+        opts_rev: Vec(FsOpt);
+        while cur < work.count {
+            s := "";
+            if TypecOf(work[cur]) == #char "s" {
+                s = ValueText(work[cur]);
+                if s.count <= 1 || s[0] != #char "-" {
+                    s = "";
+                } else if s == "--" {
+                    cur += 1;
+                    s = "";
+                }
+            }
+            if s.count == 0 { break }
+            cur += 1;
+            s = s[1:];
+            next_opt_word := false;
+            while s.count > 0 {
+                opt := cast(s32)s[0];
+                ok, t := OptTypes(opt, ot);
+                if ok == -1 {
+                    eb: Vec(u8);
+                    BuilderPrint(*eb, "fs: eval: %: unknown option -", cmd);
+                    VecPush(eb, cast(u8)opt);
+                    ErrLine(BuilderFinish(eb));
+                    // remaining unused args into args_out for discard
+                    while cur < work.count { VecPush(<<args_out, work[cur]); cur += 1 }
+                    for oi: 0..opts_rev.count - 1 { AppendFsOpt(opts_out, *opts_rev[oi]) }
+                    return false;
+                }
+                if t.count == 0 {
+                    s = s[1:];
+                    fo: FsOpt;
+                    fo.opt = opt;
+                    VecPush(opts_rev, fo);
+                } else {
+                    if s.count > 1 {
+                        cur -= 1;
+                        work[cur] = NewString(s[1:]);
+                    }
+                    fo: FsOpt;
+                    fo.opt = opt;
+                    if !CvtValues(t, cmd, work[:], *cur, *fo.args) {
+                        for fo.args { VecPush(<<args_out, it) }
+                        while cur < work.count { VecPush(<<args_out, work[cur]); cur += 1 }
+                        for oi: 0..opts_rev.count - 1 { AppendFsOpt(opts_out, *opts_rev[oi]) }
+                        return false;
+                    }
+                    VecPush(opts_rev, fo);
+                    next_opt_word = true;
+                    break;
+                }
+            }
+            if next_opt_word { continue }
+        }
+        // Reverse opts_rev to match prepended order in eval.b
+        ri := opts_rev.count - 1;
+        while ri >= 0 {
+            AppendFsOpt(opts_out, *opts_rev[ri]);
+            ri -= 1;
+        }
+    }
+    if at.count < 1 || at[0] == #char "*" {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fs: eval: invalid type descriptor % for %", QQ(at), QQ(cmd));
+        ErrLine(BuilderFinish(eb));
+        while cur < work.count { VecPush(<<args_out, work[cur]); cur += 1 }
+        return false;
+    }
+    n := work.count - cur;
+    exp_at: Vec(u8);
+    if at[at.count - 1] == #char "*" {
+        tc := at[at.count - 2];
+        unused BuilderAppend(exp_at, at[0:at.count - 2]);
+        while exp_at.count < n { VecPush(exp_at, tc) }
+    } else {
+        unused BuilderAppend(exp_at, at);
+    }
+    at_s := BuilderFinish(exp_at);
+    if n != at_s.count {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fs: eval: wrong number of arguments to %", QQ(cmd));
+        ErrLine(BuilderFinish(eb));
+        while cur < work.count { VecPush(<<args_out, work[cur]); cur += 1 }
+        return false;
+    }
+    if !CvtValues(at_s, cmd, work[:], *cur, args_out) {
+        while cur < work.count { VecPush(<<args_out, work[cur]); cur += 1 }
+        return false;
+    }
+    return true;
+}
+
+RunCmd :: (cmd: string, args: []s32) -> s32 {
+    v_idx := FindVerb(cmd);
+    if v_idx < 0 {
+        p := Join(cmd, ".dis");
+        if p.count > 0 && p[0] != #char "/" && !(p.count > 1 && p[0] == #char "." && p[1] == #char "/") {
+            p = Join("/dis/fs/", p);
+        }
+        eb1: Vec(u8);
+        BuilderPrint(*eb1, "fs: eval: cannot load %: % does not exist", p, QQ(p));
+        ErrLine(BuilderFinish(eb1));
+        eb2: Vec(u8);
+        BuilderPrint(*eb2, "fs: eval: unknown verb %", QQ(cmd));
+        ErrLine(BuilderFinish(eb2));
+        empty_opts: [0]FsOpt;
+        DiscardAll(empty_opts[:], args);
+        return -1;
+    }
+    otype := VERBS[v_idx].types;
+    opts: Vec(FsOpt);
+    cargs: Vec(s32);
+    if !CvtArgs(args, cmd, otype, *opts, *cargs) {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fs: eval: usage: %", CmdUsage(cmd, otype));
+        ErrLine(BuilderFinish(eb));
+        DiscardAll(opts[:], cargs[:]);
+        return -1;
+    }
+    r := DispatchVerb(v_idx, opts[:], cargs[:]);
+    if r < 0 {
+        DiscardAll(opts[:], cargs[:]);
+    }
+    return r;
+}
+
+EvalExpr :: (p: *EvalState) -> s32 {
+    args: Vec(s32);
+    t, s := GetTok(p);
+    if p.parse_err { return -1 }
+    if t != TOK_WORD {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fs: eval: syntax error (char %), expected word, found %", p.spos, QQ(Tok2s(t, s)));
+        ErrLine(BuilderFinish(eb));
+        return -1;
+    }
+    cmd := s;
+    empty_opts: [0]FsOpt;
+    while true {
+        t, s = GetTok(p);
+        if p.parse_err {
+            DiscardAll(empty_opts[:], args[:]);
+            return -1;
+        }
+        if t == #char "{" {
+            v := EvalExpr(p);
+            if v < 0 {
+                DiscardAll(empty_opts[:], args[:]);
+                return -1;
+            }
+            VecPush(args, v);
+        } else if t == #char "}" {
+            break;
+        } else if t == TOK_WORD {
+            VecPush(args, NewString(s));
+        } else if t == TOK_VAR {
+            n := LimboInt(s);
+            if n < 0 || n >= p.args.count {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "fs: eval: invalid arg reference $%", s);
+                ErrLine(BuilderFinish(eb));
+                DiscardAll(empty_opts[:], args[:]);
+                return -1;
+            }
+            if p.args[n] < 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "fs: eval: cannot use $% twice", n);
+                ErrLine(BuilderFinish(eb));
+                DiscardAll(empty_opts[:], args[:]);
+                return -1;
+            }
+            VecPush(args, p.args[n]);
+            p.args[n] = -1;
+        } else if t == TOK_SHCMD {
+            err: Text;
+            node := ShParse.ParseString(s, *err);
+            if node < 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "fs: eval: cannot parse shell command @%: %", s, TextView(err));
+                ErrLine(BuilderFinish(eb));
+                DiscardAll(empty_opts[:], args[:]);
+                return -1;
+            }
+            ct := ShParse.CmdText(node);
+            VecPush(args, NewCmd(node, TextView(ct)));
+        } else if t == -1 {
+            break;
+        } else {
+            DiscardAll(empty_opts[:], args[:]);
+            eb: Vec(u8);
+            BuilderPrint(*eb, "fs: eval: syntax error; unexpected token % before char %", t, p.spos);
+            ErrLine(BuilderFinish(eb));
+            return -1;
+        }
+    }
+    return RunCmd(cmd, args[:]);
+}
+
+RunEval :: (opts: []FsOpt, args: []s32) -> s32 {
+    p: EvalState;
+    p.s = ValueText(args[0]);
+    p.spos = 0;
+    p.verbose = opts.count > 0;
+    return EvalExpr(*p);
+}
+
+PrintFsUsage :: () {
+    out: Vec(u8);
+    unused BuilderAppend(out, "usage: fs expression\n");
+    unused BuilderAppend(out, "verbs are:\n");
+    for VERBS {
+        BuilderPrint(*out, "\t%\n", CmdUsage(it.name, it.types));
+    }
+    unused BuilderAppend(out, "automatic conversions:\n");
+    unused BuilderAppend(out, "\tstring -> fs {walk string}\n");
+    unused BuilderAppend(out, "\tfs -> entries {entries fs}\n");
+    unused BuilderAppend(out, "\tstring -> gate {match string}\n");
+    unused BuilderAppend(out, "\tentries -> void {print entries}\n");
+    unused BuilderAppend(out, "\tcommand -> string {run command}\n");
+    WriteErr(BuilderFinish(out));
+}
+
+EvalTopLevel :: (expr: string) -> s32 {
+    ReportReset();
+    empty_opts: [0]FsOpt;
+    a: [1]s32 = .[NewString(expr)];
+    v := RunEval(empty_opts[:], a[:]);
+    failed := false;
+    if v < 0 {
+        failed = true;
+    } else {
+        RunVoid(v, true);
+    }
+    PrintReports();
+    if failed {
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    return 0;
+}
+
+RunFsMain :: () -> s32 {
+    argc := Args.OperandCount();
+    if argc <= 0 {
+        PrintFsUsage();
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    s0 := Args.Operand(0);
+    expr: Vec(u8);
+    if argc == 1 && s0.count >= 2 && s0[0] == #char "{" && s0[s0.count - 1] == #char "}" {
+        unused BuilderAppend(expr, "void ");
+        unused BuilderAppend(expr, s0);
+    } else {
+        unused BuilderAppend(expr, "void {");
+        unused BuilderAppend(expr, s0);
+        i: s32 = 1;
+        while i < argc {
+            a := Args.Operand(i);
+            VecPush(expr, #char " ");
+            if a.count == 0 || a[0] != #char "{" {
+                AppendQ(*expr, a);
+            } else {
+                unused BuilderAppend(expr, a);
+            }
+            i += 1;
+        }
+        VecPush(expr, #char "}");
+    }
+    return EvalTopLevel(BuilderFinish(expr));
+}
+
+RunVerbMain :: (verb: string, types: string) -> s32 {
+    argc := Args.OperandCount();
+    if argc == 1 && Args.Operand(0) == "--types" {
+        out: Vec(u8);
+        BuilderPrint(*out, "%\n", types);
+        WriteOut(BuilderFinish(out));
+        return 0;
+    }
+    expr: Vec(u8);
+    unused BuilderAppend(expr, "void {");
+    unused BuilderAppend(expr, verb);
+    i: s32 = 0;
+    while i < argc {
+        a := Args.Operand(i);
+        VecPush(expr, #char " ");
+        if a.count == 0 || a[0] != #char "{" {
+            AppendQ(*expr, a);
+        } else {
+            unused BuilderAppend(expr, a);
+        }
+        i += 1;
+    }
+    VecPush(expr, #char "}");
+    return EvalTopLevel(BuilderFinish(expr));
+}

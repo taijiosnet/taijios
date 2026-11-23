@@ -1,60 +1,59 @@
 <../../../mkconfig
-# fs write /n/local/n/fossil/usr/inferno {filter {and {not {or *.dis *.sbl}} {path /appl/cmd/fs /module/fslib.m /appl/lib/fslib.b /appl/cmd/fs.b /man/1/fs}} /}
-TARG=\
-	and.dis\
-	bundle.dis\
-	chstat.dis\
-	compose.dis\
-	depth.dis\
-	entries.dis\
-	eval.dis\
-	exec.dis\
-	filter.dis\
-	ls.dis\
-	match.dis\
-	merge.dis\
-	mergewrite.dis\
-	mode.dis\
-	not.dis\
-	or.dis\
-	path.dis\
-	pipe.dis\
-	print.dis\
-	proto.dis\
-	query.dis\
-	run.dis\
-	select.dis\
-	setroot.dis\
-	size.dis\
-	unbundle.dis\
-	walk.dis\
-	write.dis\
-	void.dis\
 
+ZI2ZX=zi2zx
+ZXBIN=$ROOT/dis/fs
+ZIFLAGS=--root . --module-path .. --module-path ../sh --bind-host taijios_args --bind-host taijios_io --bind-host taijios_stat --bind-host taijios_files --bind-host taijios_time --bind-host taijios_namespace --bind-host taijios_process
 
-INS=	${TARG:%=$ROOT/dis/fs/%}
+ZXCOMMANDS=\
+	and\
+	bundle\
+	chstat\
+	compose\
+	depth\
+	entries\
+	eval\
+	exec\
+	filter\
+	join\
+	ls\
+	match\
+	merge\
+	mergewrite\
+	mode\
+	not\
+	or\
+	path\
+	pipe\
+	print\
+	proto\
+	query\
+	run\
+	select\
+	setroot\
+	size\
+	unbundle\
+	void\
+	walk\
+	write\
 
-SYSMODULES=\
-	bufio.m\
-	draw.m\
-	sh.m\
-	sys.m\
-	bundle.m\
-	fslib.m\
+ZXTARGETS=${ZXCOMMANDS:%=%.zx}
+ZXINSTALL=${ZXCOMMANDS:%=$ZXBIN/%.zx}
 
-DISBIN=$ROOT/dis/fs
+all:V:		$ZXTARGETS
 
-<$ROOT/mkfiles/mkdis
-
-all:V:		$TARG
-
-install:V:	$INS
-
-nuke:V: clean
-	rm -f $INS
+install:V:	$ZXINSTALL
 
 clean:V:
-	rm -f *.dis *.sbl
+	rm -f *.zx *.dis *.sbl
+
+nuke:V:		clean
+	cd $ZXBIN; rm -f $ZXTARGETS
 
 uninstall:V:
-	rm -f $INS
+	rm -f $ZXINSTALL
+
+&.zx:	&.zi fs_types.zi fs_trees.zi fs_ops.zi fs_eval.zi
+	$ZI2ZX $ZIFLAGS --entry $stem:main -o $target $stem.zi
+
+$ZXBIN/%.zx:	%.zx
+	install -m 0755 $stem.zx $target

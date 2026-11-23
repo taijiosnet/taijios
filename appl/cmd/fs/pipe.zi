@@ -1,0 +1,8 @@
+// /dis/fs/pipe.zx module entry point (replaces appl/cmd/fs/pipe.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "vcx-1-p-P" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("pipe", "vcx-1-p-P");
+}

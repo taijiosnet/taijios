@@ -1,0 +1,8 @@
+// /dis/fs/bundle.zx module entry point (replaces appl/cmd/fs/bundle.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "vx" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("bundle", "vx");
+}

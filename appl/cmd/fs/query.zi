@@ -1,0 +1,8 @@
+// /dis/fs/query.zx module entry point (replaces appl/cmd/fs/query.b).
+Eval :: #import "fs_eval";
+
+Types :: () -> string { return "pc-p-P" }
+
+main :: () -> s32 {
+    return Eval.RunVerbMain("query", "pc-p-P");
+}
