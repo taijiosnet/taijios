@@ -813,13 +813,9 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/disk/calc.tab.dis | appl/cmd/disk/prep/calc.tab.b |  | - |  |
-| dis/disk/fdisk.dis | appl/cmd/disk/prep/fdisk.b |  | - |  |
 | dis/disk/format.dis | appl/cmd/disk/format.b | module/format.m | - |  |
 | dis/disk/ftl.dis | appl/cmd/disk/ftl.b |  | - |  |
 | dis/disk/kfs.dis | appl/cmd/disk/kfs.b |  | - |  |
-| dis/disk/pedit.dis | appl/cmd/disk/prep/pedit.b |  | - |  |
-| dis/disk/prep.dis | appl/cmd/disk/prep/prep.b |  | - |  |
 | dis/fs/and.dis | appl/cmd/fs/and.b |  | - |  |
 | dis/fs/bundle.dis | appl/cmd/fs/bundle.b | module/bundle.m | - |  |
 | dis/fs/chstat.dis | appl/cmd/fs/chstat.b |  | - |  |

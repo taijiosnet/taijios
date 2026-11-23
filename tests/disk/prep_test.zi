@@ -1,0 +1,111 @@
+// Table-driven tests for calc.zi expression evaluator and guest parity tests
+// for disk/prep and disk/fdisk on disk image files.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root appl/cmd/disk/prep tests/disk/prep_test.zi -- [EMU] [PREFIX] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+using Calc :: #import "calc"
+
+WORK :: "build/dis-legacy-math/prep";
+
+ExprCase :: struct {
+    expr: string;
+    dot: s64;
+    dollar: s64;
+    size: s64;
+    want: s64;
+    want_err: string;
+}
+
+expr_cases: [9]ExprCase = ExprCase.[
+    .{expr = "42", dot = 10, dollar = 100, size = 1000, want = 42},
+    .{expr = ". + 5", dot = 10, dollar = 100, size = 1000, want = 15},
+    .{expr = "$ - 10", dot = 10, dollar = 100, size = 1000, want = 90},
+    .{expr = "25%", dot = 0, dollar = 100, size = 1000, want = 250},
+    .{expr = "(2 + 3) * 4", dot = 0, dollar = 100, size = 1000, want = 20},
+    .{expr = "-10 + 25", dot = 0, dollar = 100, size = 1000, want = 15},
+    .{expr = "100 / 4", dot = 0, dollar = 100, size = 1000, want = 25},
+    .{expr = "10 / 0", dot = 0, dollar = 100, size = 1000, want_err = "division by zero"},
+    .{expr = "1 + * 2", dot = 0, dollar = 100, size = 1000, want_err = "syntax error"},
+];
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "disk/";
+    suffix := ifx argc > 3 then TextFromCString(argv[3]) else "";
+
+    for expr_cases {
+        v, err := Calc.ParseExpr(it.expr, it.dot, it.dollar, it.size);
+        Expect(err == it.want_err, it.expr);
+        if it.want_err == "" { Expect(v == it.want, it.expr) }
+    }
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/prep/work") ||
+        !CreateDirectory("build/dis-legacy-math/prep/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Create a 2 MiB disk image (4096 sectors = 2 cylinders of 64*32=2048 sectors)
+    img: Vec(u8);
+    for i: 0..2097151 { VecPush(img, 0) }
+    img_text := BuilderFinish(img);
+    unused WriteEntireFile("build/dis-legacy-math/prep/work/plan9.img", img_text);
+    unused WriteEntireFile("build/dis-legacy-math/prep/work/dos.img", img_text);
+    unused WriteEntireFile("build/dis-legacy-math/prep/work/prep.in", "a nvram 2 3\na fs 3 $\nw\nq\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. prep: add nvram and fs partitions and write table
+    BuilderPrint(*script, "%prep% -b plan9.img < prep.in > ../result/prep_w.out >[2] ../result/prep_w.err\n", prefix, suffix);
+    // 2. prep -p: print ctl format of written partition table
+    BuilderPrint(*script, "%prep% -p plan9.img > ../result/prep_p.out >[2] ../result/prep_p.err\n", prefix, suffix);
+    // 3. mbr -9 + fdisk -p on dos.img
+    BuilderPrint(*script, "disk/mbr -9 dos.img > /dev/null >[2] /dev/null\n");
+    BuilderPrint(*script, "%fdisk% -p dos.img > ../result/fdisk_p.out >[2] ../result/fdisk_p.err\n", prefix, suffix);
+    unused WriteEntireFile("build/dis-legacy-math/prep/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("prep_p.out") == "part nvram 2 3\npart fs 3 4096\n", "prep -p output");
+    Expect(Result("fdisk_p.out") == "part plan9 32 4096\n", "fdisk -p output");
+
+    if failures != 0 {
+        print("prep_test: % failures\n", failures);
+        return 1;
+    }
+    print("prep_test: all checks passed\n");
+    return 0;
+}

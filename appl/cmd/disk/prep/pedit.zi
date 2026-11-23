@@ -1,0 +1,223 @@
+// Partition table editor state and helpers shared by disk/prep and disk/fdisk.
+#import "std/option";
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Disks :: #import "disks";
+
+MAXPART :: 32;
+
+Part :: struct {
+    name: Text;
+    ctlname: Text;
+    start: s64;
+    end: s64;
+    ctlstart: s64;
+    ctlend: s64;
+    changed: bool;
+    tag: s32;
+    // Extra fields used by fdisk
+    primary: bool;
+    active: u8;
+    ptype: u8;
+    lba: s64;
+    size: s64;
+}
+
+Edit :: struct {
+    disk: Disks.Disk;
+    parts: Vec(Part);
+    unit: string;
+    dot: s64;
+    end: s64;
+    changed: bool;
+    warned: bool;
+    lastcmd: u8;
+}
+
+FindPartIndex :: (edit: *Edit, name: string) -> s64 {
+    for i: 0..edit.parts.count - 1 {
+        if TextView(edit.parts[i].name) == name { return i }
+    }
+    return -1;
+}
+
+OkName :: (edit: *Edit, name: string, err: *Text) -> bool {
+    VecClear(err.bytes);
+    if name.count == 0 {
+        BuilderAppend(err.bytes, "partition has no name");
+        return false;
+    }
+    if FindPartIndex(edit, name) >= 0 {
+        BuilderPrint(*err.bytes, "already have partition with name '%'", name);
+        return false;
+    }
+    return true;
+}
+
+AddPart :: (edit: *Edit, p: Part, err: *Text) -> bool {
+    if !OkName(edit, TextView(p.name), err) { return false }
+    if edit.parts.count >= MAXPART {
+        BuilderAppend(err.bytes, "too many partitions");
+        return false;
+    }
+    is_changed := p.changed;
+    VecPush(edit.parts, p);
+    // Insertion-sort by start
+    i := edit.parts.count - 1;
+    while i > 0 && edit.parts[i].start < edit.parts[i - 1].start {
+        // Swap edit.parts[i] and edit.parts[i - 1] field by field
+        a_start := edit.parts[i].start;
+        a_end := edit.parts[i].end;
+        a_cs := edit.parts[i].ctlstart;
+        a_ce := edit.parts[i].ctlend;
+        a_ch := edit.parts[i].changed;
+        a_tag := edit.parts[i].tag;
+        a_pri := edit.parts[i].primary;
+        a_act := edit.parts[i].active;
+        a_pt := edit.parts[i].ptype;
+        a_lba := edit.parts[i].lba;
+        a_sz := edit.parts[i].size;
+        a_name: Text;
+        BuilderAppend(a_name.bytes, TextView(edit.parts[i].name));
+        a_cname: Text;
+        BuilderAppend(a_cname.bytes, TextView(edit.parts[i].ctlname));
+
+        edit.parts[i].start = edit.parts[i - 1].start;
+        edit.parts[i].end = edit.parts[i - 1].end;
+        edit.parts[i].ctlstart = edit.parts[i - 1].ctlstart;
+        edit.parts[i].ctlend = edit.parts[i - 1].ctlend;
+        edit.parts[i].changed = edit.parts[i - 1].changed;
+        edit.parts[i].tag = edit.parts[i - 1].tag;
+        edit.parts[i].primary = edit.parts[i - 1].primary;
+        edit.parts[i].active = edit.parts[i - 1].active;
+        edit.parts[i].ptype = edit.parts[i - 1].ptype;
+        edit.parts[i].lba = edit.parts[i - 1].lba;
+        edit.parts[i].size = edit.parts[i - 1].size;
+        b_name: Text;
+        BuilderAppend(b_name.bytes, TextView(edit.parts[i - 1].name));
+        b_cname: Text;
+        BuilderAppend(b_cname.bytes, TextView(edit.parts[i - 1].ctlname));
+        VecClear(edit.parts[i].name.bytes);
+        BuilderAppend(edit.parts[i].name.bytes, TextView(b_name));
+        VecClear(edit.parts[i].ctlname.bytes);
+        BuilderAppend(edit.parts[i].ctlname.bytes, TextView(b_cname));
+
+        edit.parts[i - 1].start = a_start;
+        edit.parts[i - 1].end = a_end;
+        edit.parts[i - 1].ctlstart = a_cs;
+        edit.parts[i - 1].ctlend = a_ce;
+        edit.parts[i - 1].changed = a_ch;
+        edit.parts[i - 1].tag = a_tag;
+        edit.parts[i - 1].primary = a_pri;
+        edit.parts[i - 1].active = a_act;
+        edit.parts[i - 1].ptype = a_pt;
+        edit.parts[i - 1].lba = a_lba;
+        edit.parts[i - 1].size = a_sz;
+        VecClear(edit.parts[i - 1].name.bytes);
+        BuilderAppend(edit.parts[i - 1].name.bytes, TextView(a_name));
+        VecClear(edit.parts[i - 1].ctlname.bytes);
+        BuilderAppend(edit.parts[i - 1].ctlname.bytes, TextView(a_cname));
+        i -= 1;
+    }
+    if is_changed { edit.changed = true }
+    return true;
+}
+
+DelPartAt :: (edit: *Edit, idx: s64) {
+    if idx < 0 || idx >= edit.parts.count { return }
+    i := idx;
+    while i + 1 < edit.parts.count {
+        edit.parts[i].start = edit.parts[i + 1].start;
+        edit.parts[i].end = edit.parts[i + 1].end;
+        edit.parts[i].ctlstart = edit.parts[i + 1].ctlstart;
+        edit.parts[i].ctlend = edit.parts[i + 1].ctlend;
+        edit.parts[i].changed = edit.parts[i + 1].changed;
+        edit.parts[i].tag = edit.parts[i + 1].tag;
+        edit.parts[i].primary = edit.parts[i + 1].primary;
+        edit.parts[i].active = edit.parts[i + 1].active;
+        edit.parts[i].ptype = edit.parts[i + 1].ptype;
+        edit.parts[i].lba = edit.parts[i + 1].lba;
+        edit.parts[i].size = edit.parts[i + 1].size;
+        n_name: Text;
+        BuilderAppend(n_name.bytes, TextView(edit.parts[i + 1].name));
+        n_cname: Text;
+        BuilderAppend(n_cname.bytes, TextView(edit.parts[i + 1].ctlname));
+        VecClear(edit.parts[i].name.bytes);
+        BuilderAppend(edit.parts[i].name.bytes, TextView(n_name));
+        VecClear(edit.parts[i].ctlname.bytes);
+        BuilderAppend(edit.parts[i].ctlname.bytes, TextView(n_cname));
+        i += 1;
+    }
+    unused VecPop(edit.parts);
+    edit.changed = true;
+}
+
+Tokenize :: (s: string, out: *Vec(Text)) {
+    VecClear(<<out);
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && (s[i] == #char " " || s[i] == #char "\t" || s[i] == #char "\n" || s[i] == #char "\r") {
+            i += 1;
+        }
+        if i >= s.count { break }
+        start := i;
+        while i < s.count && s[i] != #char " " && s[i] != #char "\t" && s[i] != #char "\n" && s[i] != #char "\r" {
+            i += 1;
+        }
+        t: Text;
+        BuilderAppend(t.bytes, s[start:i]);
+        VecPush(<<out, t);
+    }
+}
+
+CtlStart :: (p: *Part) -> s64 {
+    return ifx p.ctlstart != 0 then p.ctlstart else p.start;
+}
+
+CtlEnd :: (p: *Part) -> s64 {
+    return ifx p.ctlend != 0 then p.ctlend else p.end;
+}
+
+PrintCtl :: (edit: *Edit, fd: s32) {
+    offset := edit.disk.offset;
+    for i: 0..edit.parts.count - 1 {
+        cname := TextView(edit.parts[i].ctlname);
+        if cname.count > 0 {
+            line: Vec(u8);
+            BuilderPrint(*line, "part % % %\n", cname, offset + CtlStart(*edit.parts[i]), offset + CtlEnd(*edit.parts[i]));
+            unused Cli.WriteAll(fd, BuilderFinish(line));
+        }
+    }
+}
+
+AppendRightPad :: (out: *Vec(u8), s: string, width: s64) {
+    BuilderAppend(<<out, s);
+    pad := width - s.count;
+    while pad > 0 {
+        VecPush(<<out, #char " ");
+        pad -= 1;
+    }
+}
+
+AppendLeftPad :: (out: *Vec(u8), val: s64, width: s64) {
+    num: Vec(u8);
+    BuilderPrint(*num, "%", val);
+    pad := width - num.count;
+    while pad > 0 {
+        VecPush(<<out, #char " ");
+        pad -= 1;
+    }
+    BuilderAppend(<<out, TextView(num[:]));
+}
+
+AppendRightPadNum :: (out: *Vec(u8), val: s64, width: s64) {
+    num: Vec(u8);
+    BuilderPrint(*num, "%", val);
+    BuilderAppend(<<out, TextView(num[:]));
+    pad := width - num.count;
+    while pad > 0 {
+        VecPush(<<out, #char " ");
+        pad -= 1;
+    }
+}

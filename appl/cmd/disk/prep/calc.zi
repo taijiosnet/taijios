@@ -1,0 +1,137 @@
+// Partition size/offset arithmetic evaluator replacing calc.y / calc.tab.dis.
+// Grammar: expr := term (('+'|'-') term)* ; term := unary (('*'|'/') unary)* ;
+// unary := '-' unary | postfix ; postfix := primary ('%')* ;
+// primary := NUMBER | '.' | '$' | '(' expr ')'.
+#import "std/vec";
+
+Parser :: struct {
+    s: string;
+    pos: s64;
+    dot: s64;
+    dollar: s64;
+    size: s64;
+    err: string;
+}
+
+SkipSpace :: (p: *Parser) {
+    while p.pos < p.s.count {
+        c := p.s[p.pos];
+        if c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r" || c == 11 || c == 12 {
+            p.pos += 1;
+        } else {
+            break;
+        }
+    }
+}
+
+ParsePrimary :: (p: *Parser) -> s64 {
+    SkipSpace(p);
+    if p.pos >= p.s.count {
+        p.err = "syntax error";
+        return 0;
+    }
+    c := p.s[p.pos];
+    if c == #char "." {
+        p.pos += 1;
+        return p.dot;
+    }
+    if c == #char "$" {
+        p.pos += 1;
+        return p.dollar;
+    }
+    if c == #char "(" {
+        p.pos += 1;
+        v := ParseExprRec(p);
+        if p.err != "" { return 0 }
+        SkipSpace(p);
+        if p.pos >= p.s.count || p.s[p.pos] != #char ")" {
+            p.err = "syntax error";
+            return 0;
+        }
+        p.pos += 1;
+        return v;
+    }
+    if c >= #char "0" && c <= #char "9" {
+        v: s64 = 0;
+        while p.pos < p.s.count && p.s[p.pos] >= #char "0" && p.s[p.pos] <= #char "9" {
+            v = v * 10 + cast(s64)(p.s[p.pos] - #char "0");
+            p.pos += 1;
+        }
+        return v;
+    }
+    p.err = "syntax error";
+    return 0;
+}
+
+ParseUnary :: (p: *Parser) -> s64 {
+    SkipSpace(p);
+    if p.pos < p.s.count && p.s[p.pos] == #char "-" {
+        p.pos += 1;
+        return -ParseUnary(p);
+    }
+    v := ParsePrimary(p);
+    if p.err != "" { return 0 }
+    while true {
+        SkipSpace(p);
+        if p.pos < p.s.count && p.s[p.pos] == #char "%" {
+            p.pos += 1;
+            v = (p.size * v) / 100;
+        } else {
+            break;
+        }
+    }
+    return v;
+}
+
+ParseTerm :: (p: *Parser) -> s64 {
+    v := ParseUnary(p);
+    if p.err != "" { return 0 }
+    while true {
+        SkipSpace(p);
+        if p.pos >= p.s.count { break }
+        op := p.s[p.pos];
+        if op != #char "*" && op != #char "/" { break }
+        p.pos += 1;
+        rhs := ParseUnary(p);
+        if p.err != "" { return 0 }
+        if op == #char "*" {
+            v *= rhs;
+        } else {
+            if rhs == 0 {
+                p.err = "division by zero";
+                return 0;
+            }
+            v /= rhs;
+        }
+    }
+    return v;
+}
+
+ParseExprRec :: (p: *Parser) -> s64 {
+    v := ParseTerm(p);
+    if p.err != "" { return 0 }
+    while true {
+        SkipSpace(p);
+        if p.pos >= p.s.count { break }
+        op := p.s[p.pos];
+        if op != #char "+" && op != #char "-" { break }
+        p.pos += 1;
+        rhs := ParseTerm(p);
+        if p.err != "" { return 0 }
+        if op == #char "+" { v += rhs } else { v -= rhs }
+    }
+    return v;
+}
+
+ParseExpr :: (s: string, dot: s64, dollar: s64, size: s64) -> (val: s64, err: string) {
+    p: Parser;
+    p.s = s;
+    p.dot = dot;
+    p.dollar = dollar;
+    p.size = size;
+    v := ParseExprRec(*p);
+    if p.err != "" { return 0, p.err }
+    SkipSpace(*p);
+    if p.pos != p.s.count { return 0, "syntax error" }
+    return v, "";
+}

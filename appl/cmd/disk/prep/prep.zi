@@ -1,0 +1,503 @@
+// disk/prep [-bfprw] [-a partname]... [-s sectorsize] /dev/sdC0/plan9:
+// edit Plan 9 / Inferno disk partition tables.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Lines :: #import "zx_lines";
+using Disks :: #import "disks";
+using Calc :: #import "calc";
+using Pedit :: #import "pedit";
+
+USAGE :: "usage: disk/prep [-bfprw] [-a partname]... [-s sectorsize] /dev/sdC0/plan9\n";
+
+KB :: 1024;
+MB :: 1048576;
+GB :: 1073741824;
+
+AutoSpec :: struct {
+    name: string;
+    min: s64;
+    max: s64;
+    weight: s64;
+    alloc: bool;
+    size: s64;
+}
+
+MakePart :: (name: string, start: s64, end: s64, changed: bool) -> Pedit.Part {
+    p: Pedit.Part;
+    BuilderAppend(p.name.bytes, name);
+    BuilderAppend(p.ctlname.bytes, name);
+    p.start = start;
+    p.end = end;
+    p.changed = changed;
+    return p;
+}
+
+OkPrepName :: (name: string) -> bool {
+    for i: 0..name.count - 1 {
+        c := name[i];
+        if c < 32 || c == #char " " || c == #char "/" || c == 0x7F { return false }
+    }
+    return true;
+}
+
+ParseInt :: (s: string) -> s64 {
+    v: s64 = 0;
+    for i: 0..s.count - 1 {
+        c := s[i];
+        if c < #char "0" || c > #char "9" { break }
+        v = v * 10 + cast(s64)(c - #char "0");
+    }
+    return v;
+}
+
+PrintSum :: (edit: *Pedit.Edit, has_part: bool, idx: s64, a: s64, b: s64) {
+    c: u8 = #char " ";
+    name := "empty";
+    if has_part {
+        if edit.parts[idx].changed { c = #char "'" }
+        name = TextView(edit.parts[idx].name);
+    }
+    sz := (b - a) * edit.disk.secsize;
+    suf := "B ";
+    div: s64 = 1;
+    if sz >= GB { suf = "GB"; div = GB }
+    else if sz >= MB { suf = "MB"; div = MB }
+    else if sz >= KB { suf = "KB"; div = KB }
+
+    line: Vec(u8);
+    VecPush(line, c);
+    VecPush(line, #char " ");
+    Pedit.AppendRightPad(*line, name, 12);
+    VecPush(line, #char " ");
+    Pedit.AppendLeftPad(*line, a, edit.disk.width);
+    VecPush(line, #char " ");
+    Pedit.AppendRightPadNum(*line, b, edit.disk.width);
+    if div == 1 {
+        BuilderPrint(*line, " (% sectors, % %)\n", b - a, sz, suf);
+    } else {
+        frac := ((sz % div) * 100) / div;
+        BuilderPrint(*line, " (% sectors, %.", b - a, sz / div);
+        if frac < 10 { VecPush(line, #char "0") }
+        BuilderPrint(*line, "% %)\n", frac, suf);
+    }
+    unused Cli.WriteAll(1, BuilderFinish(line));
+}
+
+PrintTable :: (edit: *Pedit.Edit) {
+    lastend: s64 = 0;
+    for i: 0..edit.parts.count - 1 {
+        if lastend < edit.parts[i].start {
+            PrintSum(edit, false, 0, lastend, edit.parts[i].start);
+        }
+        PrintSum(edit, true, i, edit.parts[i].start, edit.parts[i].end);
+        lastend = edit.parts[i].end;
+    }
+    if lastend < edit.end {
+        PrintSum(edit, false, 0, lastend, edit.end);
+    }
+}
+
+ReadPartTable :: (edit: *Pedit.Edit) -> bool {
+    secsize := edit.disk.secsize;
+    if Io.SeekFile(edit.disk.fd, secsize, 0) != secsize { return true }
+    buf: Vec(u8);
+    for i: 0..secsize - 1 { VecPush(buf, 0) }
+    if Disks.ReadN(edit.disk.fd, buf[:]) != secsize { return true }
+    end := secsize;
+    for i: 0..secsize - 1 {
+        if buf[i] == 0 { end = i; break }
+    }
+    tab := TextView(buf[:end]);
+    if tab.count < 4 || tab[:4] != "part" {
+        unused Cli.WriteAll(2, "no plan9 partition table found\n");
+        return true;
+    }
+    waserr := false;
+    pos: s64 = 0;
+    toks: Vec(Text);
+    err: Text;
+    while pos < tab.count {
+        start := pos;
+        while pos < tab.count && tab[pos] != #char "\n" { pos += 1 }
+        line := tab[start:pos];
+        if pos < tab.count { pos += 1 }
+        if line.count == 0 { continue }
+        Pedit.Tokenize(line, *toks);
+        if toks.count != 4 || TextView(toks[0]) != "part" {
+            waserr = true;
+            continue;
+        }
+        a := ParseInt(TextView(toks[2]));
+        b := ParseInt(TextView(toks[3]));
+        if a >= b {
+            waserr = true;
+            continue;
+        }
+        if !Pedit.AddPart(edit, MakePart(TextView(toks[1]), a, b, false), *err) {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "?%: not continuing\n", TextView(err));
+            unused Cli.WriteAll(2, BuilderFinish(msg));
+            return false;
+        }
+    }
+    if waserr { unused Cli.WriteAll(2, "syntax error reading partition\n") }
+    return true;
+}
+
+WritePartTable :: (edit: *Pedit.Edit) -> string {
+    if edit.disk.rdonly { return "read only" }
+    secsize := edit.disk.secsize;
+    buf: Vec(u8);
+    for i: 0..secsize - 1 { VecPush(buf, 0) }
+    n: s64 = 0;
+    for i: 0..edit.parts.count - 1 {
+        line: Vec(u8);
+        BuilderPrint(*line, "part % % %\n", TextView(edit.parts[i].name), edit.parts[i].start, edit.parts[i].end);
+        if n + line.count > secsize {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "partition table bigger than sector (% bytes)\n", secsize);
+            unused Cli.WriteAll(2, BuilderFinish(msg));
+            return "overflow";
+        }
+        for j: 0..line.count - 1 { buf[n + j] = line[j] }
+        n += line.count;
+    }
+    if Io.SeekFile(edit.disk.wfd, secsize, 0) != secsize { return "seek error" }
+    if Io.WriteBytes(edit.disk.wfd, TextView(buf[:])) != cast(s32)secsize { return "write error" }
+    for i: 0..edit.parts.count - 1 { edit.parts[i].changed = false }
+    edit.changed = false;
+    return "";
+}
+
+RunCommand :: (edit: *Pedit.Edit, cmdline: string, reader: *Lines.LineReader) -> bool {
+    toks: Vec(Text);
+    Pedit.Tokenize(cmdline, *toks);
+    if toks.count == 0 { return true }
+    first := TextView(toks[0]);
+    if first.count != 1 {
+        unused Cli.WriteAll(2, "?\n");
+        return true;
+    }
+    c := first[0];
+    err_buf: Text;
+
+    if c == #char "." {
+        if toks.count == 1 {
+            out: Vec(u8);
+            BuilderPrint(*out, "\t. %\n", edit.dot);
+            unused Cli.WriteAll(1, BuilderFinish(out));
+        } else if toks.count > 2 {
+            BuilderAppend(err_buf.bytes, "args");
+        } else {
+            ndot, cerr := Calc.ParseExpr(TextView(toks[1]), edit.dot, edit.end, edit.end);
+            if cerr != "" { BuilderAppend(err_buf.bytes, cerr) } else { edit.dot = ndot }
+        }
+    } else if c == #char "p" {
+        if toks.count != 1 { BuilderAppend(err_buf.bytes, "args") } else { PrintTable(edit) }
+    } else if c == #char "P" {
+        if toks.count != 1 { BuilderAppend(err_buf.bytes, "args") } else { Pedit.PrintCtl(edit, 1) }
+    } else if c == #char "w" {
+        if toks.count != 1 {
+            BuilderAppend(err_buf.bytes, "args");
+        } else {
+            werr := WritePartTable(edit);
+            if werr != "" { BuilderAppend(err_buf.bytes, werr) }
+        }
+    } else if c == #char "q" {
+        if toks.count != 1 {
+            edit.warned = false;
+            BuilderAppend(err_buf.bytes, "args");
+        } else if edit.changed && (!edit.warned || edit.lastcmd != #char "q") {
+            edit.warned = true;
+            BuilderAppend(err_buf.bytes, "changes unwritten");
+        } else {
+            return false;
+        }
+    } else if c == #char "h" || c == #char "?" {
+        unused Cli.WriteAll(1, ". [newdot] - display or set value of dot\na name [start [end]] - add partition\nd name - delete partition\nh - sys->print help message\np - sys->print partition table\nP - sys->print commands to update sd(3) device\nw - write partition table\nq - quit\n");
+    } else if c == #char "d" {
+        if toks.count != 2 {
+            BuilderAppend(err_buf.bytes, "args");
+        } else {
+            idx := Pedit.FindPartIndex(edit, TextView(toks[1]));
+            if idx < 0 { BuilderAppend(err_buf.bytes, "no such partition") } else { Pedit.DelPartAt(edit, idx) }
+        }
+    } else if c == #char "a" {
+        if toks.count < 2 || toks.count > 4 {
+            BuilderAppend(err_buf.bytes, "args");
+        } else {
+            name := TextView(toks[1]);
+            if !Pedit.OkName(edit, name, *err_buf) {
+                // err_buf already populated
+            } else if !OkPrepName(name) {
+                BuilderAppend(err_buf.bytes, "bad character in name");
+            } else {
+                qbuf: Vec(u8);
+                qstart := "";
+                if toks.count >= 3 {
+                    qstart = TextView(toks[2]);
+                } else {
+                    unused Cli.WriteAll(2, "start sector: ");
+                    if !Lines.ReadLine(reader, *qbuf) { return false }
+                    qstart = TextView(qbuf[:]);
+                }
+                start, serr := Calc.ParseExpr(qstart, edit.dot, edit.end, edit.end);
+                if serr != "" {
+                    BuilderAppend(err_buf.bytes, serr);
+                } else if start < 0 || start >= edit.end {
+                    BuilderAppend(err_buf.bytes, "start out of range");
+                } else {
+                    in_part := false;
+                    for i: 0..edit.parts.count - 1 {
+                        if edit.parts[i].start <= start && start < edit.parts[i].end {
+                            BuilderPrint(*err_buf.bytes, "start sector in partition '%'", TextView(edit.parts[i].name));
+                            in_part = true;
+                            break;
+                        }
+                    }
+                    if !in_part {
+                        maxend := edit.end;
+                        for i: 0..edit.parts.count - 1 {
+                            if start < edit.parts[i].start && edit.parts[i].start < maxend {
+                                maxend = edit.parts[i].start;
+                            }
+                        }
+                        qend_buf: Vec(u8);
+                        qend := "";
+                        if toks.count >= 4 {
+                            qend = TextView(toks[3]);
+                        } else {
+                            pmsg: Vec(u8);
+                            BuilderPrint(*pmsg, "end [%..%] ", start, maxend);
+                            unused Cli.WriteAll(2, BuilderFinish(pmsg));
+                            if !Lines.ReadLine(reader, *qend_buf) { return false }
+                            qend = TextView(qend_buf[:]);
+                        }
+                        end_v, eerr := Calc.ParseExpr(qend, edit.dot, maxend, edit.end);
+                        if eerr != "" {
+                            BuilderAppend(err_buf.bytes, eerr);
+                        } else if start == end_v {
+                            BuilderAppend(err_buf.bytes, "size zero partition");
+                        } else if end_v <= start || end_v > maxend {
+                            BuilderAppend(err_buf.bytes, "end out of range");
+                        } else if start < 2 && name == "9fat" {
+                            BuilderAppend(err_buf.bytes, "overlaps with the pbs and/or the partition table");
+                        } else if !Pedit.AddPart(edit, MakePart(name, start, end_v, true), *err_buf) {
+                            // err_buf already populated
+                        } else {
+                            edit.dot = end_v;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        BuilderAppend(err_buf.bytes, "unknown command");
+    }
+
+    if err_buf.bytes.count > 0 {
+        emsg: Vec(u8);
+        BuilderPrint(*emsg, "?%\n", TextView(err_buf));
+        unused Cli.WriteAll(2, BuilderFinish(emsg));
+    }
+    edit.lastcmd = c;
+    return true;
+}
+
+main :: () -> s32 {
+    auto: [10]AutoSpec = .[
+        .{name = "9fat", min = 10 * MB, max = 100 * MB, weight = 10},
+        .{name = "nvram", min = 512, max = 512, weight = 1},
+        .{name = "fscfg", min = 512, max = 512, weight = 1},
+        .{name = "fs", min = 200 * MB, max = 0, weight = 10},
+        .{name = "fossil", min = 200 * MB, max = 0, weight = 4},
+        .{name = "arenas", min = 500 * MB, max = 0, weight = 20},
+        .{name = "isect", min = 25 * MB, max = 0, weight = 1},
+        .{name = "other", min = 200 * MB, max = 0, weight = 4},
+        .{name = "swap", min = 100 * MB, max = 512 * MB, weight = 1},
+        .{name = "cache", min = 50 * MB, max = 1 * GB, weight = 2},
+    ];
+
+    blank := false;
+    file := false;
+    doauto := false;
+    printflag := false;
+    rdonly := false;
+    dowrite := false;
+    secsize: s64 = 0;
+
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "a" {
+            p, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            found := false;
+            for i: 0..auto.count - 1 {
+                if auto[i].name == p {
+                    if auto[i].alloc {
+                        msg: Vec(u8);
+                        BuilderPrint(*msg, "you said -a % more than once.\n", p);
+                        unused Cli.WriteAll(2, BuilderFinish(msg));
+                        return Cli.Usage(USAGE);
+                    }
+                    auto[i].alloc = true;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "don't know how to create automatic partition %\n", p);
+                unused Cli.WriteAll(2, BuilderFinish(msg));
+                return Cli.Usage(USAGE);
+            }
+            doauto = true;
+        } else if letter == #char "b" {
+            blank = true;
+        } else if letter == #char "f" {
+            file = true;
+        } else if letter == #char "p" {
+            printflag = true;
+            rdonly = true;
+        } else if letter == #char "r" {
+            rdonly = true;
+        } else if letter == #char "s" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            secsize = ParseInt(val);
+        } else if letter == #char "w" {
+            dowrite = true;
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+
+    if Args.OperandCount() - scan.next != 1 { return Cli.Usage(USAGE) }
+    diskpath := Args.Operand(scan.next);
+
+    edit: Pedit.Edit;
+    edit.unit = "sector";
+    mode: s32 = ifx rdonly then 0 else 2;
+    if !Disks.Open(*edit.disk, diskpath, mode, file) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "cannot open disk: %\n", Io.LastError());
+        unused Cli.WriteAll(2, BuilderFinish(msg));
+        unused Args.SetFailure("opendisk");
+        return 1;
+    }
+    if secsize != 0 {
+        edit.disk.secsize = secsize;
+        edit.disk.secs = edit.disk.size / secsize;
+    }
+    edit.end = edit.disk.secs;
+
+    // Check for FAT boot sector in sector 1
+    if Io.SeekFile(edit.disk.fd, edit.disk.secsize, 0) == edit.disk.secsize {
+        fbuf: [32]u8;
+        if Io.ReadBytes(edit.disk.fd, fbuf[:]) >= 3 && fbuf[0] == 0xEB && fbuf[1] == 0x3C && fbuf[2] == 0x90 {
+            unused Cli.WriteAll(2, "there's a fat partition where the\nplan9 partition table would go.\nif you really want to overwrite it, zero\nthe second sector of the disk and try again\n");
+            Disks.Close(*edit.disk);
+            unused Args.SetFailure("fat partition");
+            return 1;
+        }
+    }
+
+    if !blank && !ReadPartTable(*edit) {
+        Disks.Close(*edit.disk);
+        unused Args.SetFailure("partition");
+        return 1;
+    }
+
+    reader: Lines.LineReader;
+    reader.handle = 0;
+
+    if printflag {
+        unused RunCommand(*edit, "P", *reader);
+        Disks.Close(*edit.disk);
+        return 0;
+    }
+
+    if doauto {
+        if edit.parts.count > 0 {
+            unused Cli.WriteAll(2, "partitions already exist; not repartitioning\n");
+        } else {
+            secs := edit.disk.secs;
+            ss := edit.disk.secsize;
+            while true {
+                totw: s64 = 0;
+                for i: 0..auto.count - 1 {
+                    if auto[i].alloc && auto[i].size == 0 { totw += auto[i].weight }
+                }
+                if totw == 0 { break }
+                if secs <= 0 {
+                    unused Cli.WriteAll(2, "ran out of disk space during autopartition.\n");
+                    break;
+                }
+                futz := false;
+                for i: 0..auto.count - 1 {
+                    if !auto[i].alloc || auto[i].size != 0 { continue }
+                    s := (secs * auto[i].weight) / totw;
+                    if s < auto[i].min / ss {
+                        auto[i].size = auto[i].min / ss;
+                        secs -= auto[i].size;
+                        futz = true;
+                        break;
+                    }
+                }
+                if futz { continue }
+                for i: 0..auto.count - 1 {
+                    if !auto[i].alloc || auto[i].size != 0 { continue }
+                    s := (secs * auto[i].weight) / totw;
+                    if auto[i].max != 0 && s > auto[i].max / ss {
+                        auto[i].size = auto[i].max / ss;
+                        secs -= auto[i].size;
+                        futz = true;
+                        break;
+                    }
+                }
+                if futz { continue }
+                for i: 0..auto.count - 1 {
+                    if !auto[i].alloc || auto[i].size != 0 { continue }
+                    s := (secs * auto[i].weight) / totw;
+                    auto[i].size = s;
+                    secs -= auto[i].size;
+                    totw -= auto[i].weight;
+                }
+            }
+            pos: s64 = 0;
+            err: Text;
+            for i: 0..auto.count - 1 {
+                if !auto[i].alloc { continue }
+                omsg: Vec(u8);
+                BuilderPrint(*omsg, "% %\n", auto[i].name, auto[i].size);
+                unused Cli.WriteAll(1, BuilderFinish(omsg));
+                unused Pedit.AddPart(*edit, MakePart(auto[i].name, pos, pos + auto[i].size, true), *err);
+                pos += auto[i].size;
+            }
+        }
+    }
+
+    if dowrite {
+        unused RunCommand(*edit, "w", *reader);
+        Disks.Close(*edit.disk);
+        return 0;
+    }
+
+    unused RunCommand(*edit, "p", *reader);
+    line: Vec(u8);
+    while true {
+        unused Cli.WriteAll(2, ">>> ");
+        if !Lines.ReadLine(*reader, *line) {
+            if edit.changed { unused Cli.WriteAll(2, "?warning: changes not written\n") }
+            break;
+        }
+        if !RunCommand(*edit, TextView(line[:]), *reader) { break }
+    }
+    Disks.Close(*edit.disk);
+    return 0;
+}
