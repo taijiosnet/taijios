@@ -1,0 +1,111 @@
+// CSS font family/style/weight/size resolution to Inferno Charon fonts,
+// ported from appl/ebook/cssfont.b.
+using Units :: #import "units"
+
+BOLD :: 0;
+CW :: 1;
+ITALIC :: 2;
+PLAIN :: 3;
+NSTYLES :: 4;
+NSIZES :: 5;
+
+Spec :: struct {
+    family: string;
+    style: string;
+    weight: string;
+    size: string;
+}
+
+// Standard Charon font heights (tiny, small, normal, large, vlarge).
+DEFAULT_HEIGHTS: [NSIZES]s32 = .[10, 12, 14, 18, 22];
+
+FontPath :: (class_id: s32, size_idx: s32) -> string {
+    s := ifx size_idx < 0 then 0 else (ifx size_idx >= NSIZES then NSIZES - 1 else size_idx);
+    if class_id == BOLD {
+        paths: [NSIZES]string = .[
+            "/fonts/charon/bold.tiny.font",
+            "/fonts/charon/bold.small.font",
+            "/fonts/charon/bold.normal.font",
+            "/fonts/charon/bold.large.font",
+            "/fonts/charon/bold.vlarge.font",
+        ];
+        return paths[s];
+    }
+    if class_id == CW {
+        paths: [NSIZES]string = .[
+            "/fonts/charon/cw.tiny.font",
+            "/fonts/charon/cw.small.font",
+            "/fonts/charon/cw.normal.font",
+            "/fonts/charon/cw.large.font",
+            "/fonts/charon/cw.vlarge.font",
+        ];
+        return paths[s];
+    }
+    if class_id == ITALIC {
+        paths: [NSIZES]string = .[
+            "/fonts/charon/italic.tiny.font",
+            "/fonts/charon/italic.small.font",
+            "/fonts/charon/italic.normal.font",
+            "/fonts/charon/italic.large.font",
+            "/fonts/charon/italic.vlarge.font",
+        ];
+        return paths[s];
+    }
+    paths: [NSIZES]string = .[
+        "/fonts/charon/plain.tiny.font",
+        "/fonts/charon/plain.small.font",
+        "/fonts/charon/plain.normal.font",
+        "/fonts/charon/plain.large.font",
+        "/fonts/charon/plain.vlarge.font",
+    ];
+    return paths[s];
+}
+
+MatchHeight :: (desired: s32, heights: []s32) -> s32 {
+    n := cast(s32)heights.count;
+    if n <= 0 || desired <= heights[0] { return 0 }
+    if desired >= heights[n - 1] { return n - 1 }
+    for i: 1..n-1 {
+        if desired >= heights[i - 1] && desired <= heights[i] {
+            if desired - heights[i - 1] < heights[i] - desired { return i - 1 }
+            return i;
+        }
+    }
+    return 0;
+}
+
+GetClass :: (spec: Spec) -> s32 {
+    if spec.family == "monospace" { return CW }
+    if spec.style == "italic" { return ITALIC }
+    if spec.weight == "bold" { return BOLD }
+    return PLAIN;
+}
+
+ChooseSize :: (size: string, parentem: s32, parentex: s32, heights: []s32) -> s32 {
+    if size.count > 0 && size[0] >= 48 && size[0] <= 57 {
+        px, ok := Units.LengthPx(size, cast(s64)parentem, cast(s64)parentex, cast(s64)parentem);
+        if ok { return MatchHeight(cast(s32)px, heights) }
+    }
+    if size == "xx-small" || size == "x-small" { return 0 }
+    if size == "small" { return 1 }
+    if size == "medium" { return 2 }
+    if size == "large" { return 3 }
+    if size == "x-large" || size == "xx-large" { return 4 }
+    if size == "larger" || size == "smaller" {
+        idx := MatchHeight(parentem, heights);
+        if size[0] == 115 { // 's'
+            if idx > 0 { idx -= 1 }
+        } else {
+            if idx < NSIZES - 1 { idx += 1 }
+        }
+        return idx;
+    }
+    return 2;
+}
+
+GetFont :: (spec: Spec, parentem: s32, parentex: s32) -> (path: string, em: s32, ex: s32) {
+    class_id := GetClass(spec);
+    idx := ChooseSize(spec.size, parentem, parentex, DEFAULT_HEIGHTS[:]);
+    h := DEFAULT_HEIGHTS[idx];
+    return FontPath(class_id, idx), h, h;
+}

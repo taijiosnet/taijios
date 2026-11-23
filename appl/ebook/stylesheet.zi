@@ -1,0 +1,167 @@
+// CSS1 selector matching and specificity cascade, ported from appl/ebook/stylesheet.b.
+#import "std/vec"
+using Strmap :: #import "strmap"
+using CSS :: #import "cssparser"
+
+DEFAULT_ORIGIN :: 0;
+READER_ORIGIN :: 1;
+AUTHOR_ORIGIN :: 2;
+
+RULEHASH :: 23;
+MAX_STYLES :: 64;
+
+// CSS1 §3.2 specificity bit layout (exact match to appl/ebook/stylesheet.b)
+TAG_BIT :: 0x04000000;
+CLASS_BIT :: 0x08000000;
+ID_BIT :: 0x10000000;
+ORIGIN_SHIFT :: 29;
+IMPORTANCE_BIT :: 0x40000000;
+
+Ldecl :: struct {
+    attrid: s32;
+    specificity: s32;
+    val: Text;
+}
+
+SheetRule :: struct {
+    key: Text;
+    sub: Text;
+    decls: Vec(Ldecl);
+    next: s32;
+}
+
+Sheet :: struct {
+    stylemap: Strmap.Map;
+    numstyles: s32;
+    rules: Vec(SheetRule);
+    bucket_head: [RULEHASH]s32;
+    ruleid: s32;
+}
+
+Style :: struct {
+    attrs: [MAX_STYLES]Text;
+    spec: [MAX_STYLES]s32;
+    numstyles: s32;
+}
+
+InitSheet :: (sheet: *Sheet, style_names: []string) {
+    Strmap.InitMap(*sheet.stylemap, style_names);
+    sheet.numstyles = cast(s32)style_names.count;
+    if sheet.numstyles > MAX_STYLES { sheet.numstyles = MAX_STYLES }
+    sheet.ruleid = 0;
+    unused VecResize(sheet.rules, 0);
+    for i: 0..RULEHASH-1 { sheet.bucket_head[i] = -1 }
+}
+
+SplitSelector :: (s: string) -> (tag: string, class_name: string) {
+    for i: 0..s.count-1 {
+        if s[i] == 46 { return s[:i], s[i + 1:] }
+    }
+    return s, "";
+}
+
+AddRules :: (sheet: *Sheet, rules_list: *CSS.RuleList, origin: s32) {
+    rules := VecSlice(rules_list.items, 0, rules_list.items.count);
+    orig_bits: s32 = origin << ORIGIN_SHIFT;
+    for r: 0..rules.count-1 {
+        sel := TextView(rules[r].selector);
+        tag, cls := SplitSelector(sel);
+        spec: s32 = sheet.ruleid;
+        sheet.ruleid += 1;
+        if tag.count > 0 { spec |= cast(s32)TAG_BIT }
+        if cls.count > 0 { spec |= cast(s32)CLASS_BIT }
+        spec |= orig_bits;
+
+        sr: SheetRule;
+        if cls.count > 0 {
+            unused BuilderAppend(sr.key.bytes, ".");
+            unused BuilderAppend(sr.key.bytes, cls);
+            unused BuilderAppend(sr.sub.bytes, tag);
+        } else {
+            unused BuilderAppend(sr.key.bytes, tag);
+        }
+
+        for d: 0..rules[r].decls.count-1 {
+            attrid := Strmap.IndexOf(*sheet.stylemap, TextView(rules[r].decls[d].name));
+            if attrid >= 0 && attrid < sheet.numstyles {
+                ld: Ldecl;
+                ld.attrid = attrid;
+                ld.specificity = ifx rules[r].decls[d].important then (spec | cast(s32)IMPORTANCE_BIT) else spec;
+                unused BuilderAppend(ld.val.bytes, TextView(rules[r].decls[d].val));
+                unused VecPush(sr.decls, ld);
+            }
+        }
+        bucket := Strmap.HashFn(TextView(sr.key), RULEHASH);
+        sr.next = sheet.bucket_head[bucket];
+        idx := cast(s32)sheet.rules.count;
+        unused VecPush(sheet.rules, sr);
+        sheet.bucket_head[bucket] = idx;
+    }
+}
+
+InitStyle :: (sheet: *Sheet, style: *Style) {
+    style.numstyles = sheet.numstyles;
+    for i: 0..MAX_STYLES-1 {
+        unused VecResize(style.attrs[i].bytes, 0);
+        style.spec[i] = 0;
+    }
+}
+
+ApplyDecl :: (style: *Style, attrid: s32, specificity: s32, val: string) {
+    if attrid < 0 || attrid >= style.numstyles { return }
+    if specificity > style.spec[attrid] {
+        unused VecResize(style.attrs[attrid].bytes, 0);
+        unused BuilderAppend(style.attrs[attrid].bytes, val);
+        style.spec[attrid] = specificity;
+    }
+}
+
+StyleAdd :: (sheet: *Sheet, style: *Style, tag: string, class_name: string) {
+    if class_name.count > 0 {
+        key: Text;
+        unused BuilderAppend(key.bytes, ".");
+        unused BuilderAppend(key.bytes, class_name);
+        ks := TextView(key);
+        v := Strmap.HashFn(ks, RULEHASH);
+        cur := sheet.bucket_head[v];
+        while cur >= 0 {
+            r := *sheet.rules[cur];
+            sub := TextView(r.sub);
+            if TextView(r.key) == ks && (sub.count == 0 || sub == tag) {
+                for d: 0..r.decls.count-1 {
+                    ApplyDecl(style, r.decls[d].attrid, r.decls[d].specificity, TextView(r.decls[d].val));
+                }
+            }
+            cur = r.next;
+        }
+    }
+    if tag.count > 0 {
+        v := Strmap.HashFn(tag, RULEHASH);
+        cur := sheet.bucket_head[v];
+        while cur >= 0 {
+            r := *sheet.rules[cur];
+            if TextView(r.key) == tag {
+                for d: 0..r.decls.count-1 {
+                    ApplyDecl(style, r.decls[d].attrid, r.decls[d].specificity, TextView(r.decls[d].val));
+                }
+            }
+            cur = r.next;
+        }
+    }
+}
+
+StyleAddDecls :: (sheet: *Sheet, style: *Style, decl_list: *CSS.DeclList) {
+    decls := VecSlice(decl_list.items, 0, decl_list.items.count);
+    base_spec: s32 = cast(s32)ID_BIT | (cast(s32)AUTHOR_ORIGIN << ORIGIN_SHIFT);
+    for i: 0..decls.count-1 {
+        attrid := Strmap.IndexOf(*sheet.stylemap, TextView(decls[i].name));
+        if attrid >= 0 {
+            spec: s32 = ifx decls[i].important then (base_spec | cast(s32)IMPORTANCE_BIT) else base_spec;
+            ApplyDecl(style, attrid, spec, TextView(decls[i].val));
+        }
+    }
+}
+
+StyleAddOne :: (style: *Style, attrid: s32, origin: s32, val: string) {
+    ApplyDecl(style, attrid, origin << ORIGIN_SHIFT, val);
+}

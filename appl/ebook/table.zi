@@ -1,0 +1,122 @@
+// HTML table column/row span layout engine, ported from appl/ebook/table.b.
+#import "std/vec"
+
+Cell :: struct {
+    present: bool;
+    span_x: s32;
+    span_y: s32;
+    req_w: s32;
+    req_h: s32;
+    out_x: s32;
+    out_y: s32;
+    out_w: s32;
+    out_h: s32;
+}
+
+ExpandWidths :: (start: s32, cell_size: s32, span: s32, sizes: []s32, expand: []s32) {
+    share: s32 = 0;
+    tot: s32 = 0;
+    end_idx := start + span;
+    if end_idx > cast(s32)sizes.count { end_idx = cast(s32)sizes.count }
+    for idx: start..end_idx-1 {
+        tot += sizes[idx];
+        if expand[idx] != 0 { share += 1 }
+    }
+    slack := cell_size - tot;
+    if slack <= 0 { return }
+    if share == 0 { share = end_idx - start }
+    if share <= 0 { return }
+    for idx: start..end_idx-1 {
+        m := slack / share;
+        sizes[idx] += m;
+        slack -= m;
+        share -= 1;
+        if share <= 0 { break }
+    }
+}
+
+LayoutTable :: (cells: []Cell, cols: s32, rows: s32) -> (total_w: s32, total_h: s32) {
+    if cols <= 0 || rows <= 0 { return 0, 0 }
+    colwidths: Vec(s32);
+    colexpand: Vec(s32);
+    rowheights: Vec(s32);
+    rowexpand: Vec(s32);
+    unused VecResize(colwidths, cast(s64)cols);
+    unused VecResize(colexpand, cast(s64)cols);
+    unused VecResize(rowheights, cast(s64)rows);
+    unused VecResize(rowexpand, cast(s64)rows);
+    for x: 0..cols-1 { colwidths[x] = 0; colexpand[x] = 1 }
+    for y: 0..rows-1 { rowheights[y] = 0; rowexpand[y] = 1 }
+
+    // 1. Single-column width pass
+    for x: 0..cols-1 {
+        for y: 0..rows-1 {
+            c := *cells[cast(s64)y * cast(s64)cols + cast(s64)x];
+            if c.present && c.span_x == 1 && c.req_w > colwidths[x] {
+                colwidths[x] = c.req_w;
+            }
+        }
+    }
+    // 2. Multi-column width expansion pass
+    cw_slice := VecSlice(colwidths, 0, colwidths.count);
+    ce_slice := VecSlice(colexpand, 0, colexpand.count);
+    for x: 0..cols-1 {
+        for y: 0..rows-1 {
+            c := *cells[cast(s64)y * cast(s64)cols + cast(s64)x];
+            if c.present && c.span_x > 1 {
+                ExpandWidths(x, c.req_w, c.span_x, cw_slice, ce_slice);
+            }
+        }
+    }
+    // 3. Single-row height pass
+    for y: 0..rows-1 {
+        for x: 0..cols-1 {
+            c := *cells[cast(s64)y * cast(s64)cols + cast(s64)x];
+            if c.present && c.span_y == 1 && c.req_h > rowheights[y] {
+                rowheights[y] = c.req_h;
+            }
+        }
+    }
+    // 4. Multi-row height expansion pass
+    rh_slice := VecSlice(rowheights, 0, rowheights.count);
+    re_slice := VecSlice(rowexpand, 0, rowexpand.count);
+    for y: 0..rows-1 {
+        for x: 0..cols-1 {
+            c := *cells[cast(s64)y * cast(s64)cols + cast(s64)x];
+            if c.present && c.span_y > 1 {
+                ExpandWidths(y, c.req_h, c.span_y, rh_slice, re_slice);
+            }
+        }
+    }
+
+    // 5. Compute total dimensions & cell placements
+    total_w: s32 = 0;
+    total_h: s32 = 0;
+    for x: 0..cols-1 { total_w += cw_slice[x] }
+    for y: 0..rows-1 { total_h += rh_slice[y] }
+
+    py: s32 = 0;
+    for y: 0..rows-1 {
+        px: s32 = 0;
+        for x: 0..cols-1 {
+            c := *cells[cast(s64)y * cast(s64)cols + cast(s64)x];
+            if c.present {
+                c.out_x = px;
+                c.out_y = py;
+                sw: s32 = 0;
+                sh: s32 = 0;
+                for xx: 0..c.span_x-1 {
+                    if x + xx < cols { sw += cw_slice[x + xx] }
+                }
+                for yy: 0..c.span_y-1 {
+                    if y + yy < rows { sh += rh_slice[y + yy] }
+                }
+                c.out_w = sw;
+                c.out_h = sh;
+            }
+            px += cw_slice[x];
+        }
+        py += rh_slice[y];
+    }
+    return total_w, total_h;
+}

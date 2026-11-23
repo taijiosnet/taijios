@@ -1,0 +1,56 @@
+// Bidirectional string <-> integer map, ported from appl/ebook/strmap.b.
+#import "std/vec"
+
+BUCKETS :: 31;
+MAX_ENTRIES :: 128;
+
+Map :: struct {
+    names: [MAX_ENTRIES]Text;
+    count: s32;
+    bucket_head: [BUCKETS]s32;
+    next: [MAX_ENTRIES]s32;
+}
+
+HashFn :: (s: string, n: s32) -> s32 {
+    h: u32 = 0;
+    for i: 0..s.count-1 {
+        h = h * 65599 + cast(u32)s[i];
+    }
+    return cast(s32)((h & 0x7FFFFFFF) % cast(u32)n);
+}
+
+InitMap :: (m: *Map, items: []string) {
+    m.count = 0;
+    for b: 0..BUCKETS-1 { m.bucket_head[b] = -1 }
+    for i: 0..items.count-1 {
+        if i >= MAX_ENTRIES { break }
+        unused VecResize(m.names[i].bytes, 0);
+        unused BuilderAppend(m.names[i].bytes, items[i]);
+        m.count = cast(s32)(i + 1);
+        if items[i].count > 0 {
+            v := HashFn(items[i], BUCKETS);
+            m.next[i] = m.bucket_head[v];
+            m.bucket_head[v] = cast(s32)i;
+        } else {
+            m.next[i] = -1;
+        }
+    }
+}
+
+IndexOf :: (m: *Map, s: string) -> s32 {
+    if s.count == 0 { return -1 }
+    v := HashFn(s, BUCKETS);
+    cur := m.bucket_head[v];
+    while cur >= 0 {
+        if TextView(m.names[cur]) == s { return cur }
+        cur = m.next[cur];
+    }
+    return -1;
+}
+
+NameOf :: (m: *Map, index: s32, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    if index < 0 || index >= m.count { return false }
+    unused BuilderAppend(out.bytes, TextView(m.names[index]));
+    return true;
+}

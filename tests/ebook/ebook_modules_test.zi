@@ -1,0 +1,84 @@
+// Table-driven unit tests for appl/ebook library modules:
+// strmap, cssparser, stylesheet, cssfont, and table.
+#import "std/vec"
+using Strmap :: #import "strmap"
+using CSS :: #import "cssparser"
+using Sheet :: #import "stylesheet"
+using Font :: #import "cssfont"
+using Table :: #import "table"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    // 1. Strmap tests
+    names: [4]string = .["color", "font-size", "margin-top", "text-align"];
+    m: Strmap.Map;
+    Strmap.InitMap(*m, names[:]);
+    Expect(Strmap.IndexOf(*m, "color") == 0, "strmap color");
+    Expect(Strmap.IndexOf(*m, "text-align") == 3, "strmap text-align");
+    Expect(Strmap.IndexOf(*m, "unknown") == -1, "strmap miss");
+    out: Text;
+    Expect(Strmap.NameOf(*m, 2, *out) && TextView(out) == "margin-top", "strmap reverse");
+
+    // 2. CSSparser tests
+    rules: CSS.RuleList;
+    CSS.Parse("/* comment */ p, h1.lead { color: #F0A !important; font-size: 14px; } div p { color: red; }", *rules);
+    Expect(rules.items.count == 2, "cssparser splits comma selectors and drops context selector");
+    if rules.items.count == 2 {
+        Expect(TextView(rules.items[0].selector) == "p" && TextView(rules.items[1].selector) == "h1.lead", "selectors");
+        Expect(rules.items[0].decls.count == 2, "2 decls");
+        Expect(TextView(rules.items[0].decls[0].name) == "color" && TextView(rules.items[0].decls[0].val) == "#ff00aa" && rules.items[0].decls[0].important, "hex3 + !important");
+        Expect(TextView(rules.items[0].decls[1].name) == "font-size" && TextView(rules.items[0].decls[1].val) == "14px" && !rules.items[0].decls[1].important, "font-size");
+    }
+
+    // 3. Stylesheet cascade & specificity tests
+    sh: Sheet.Sheet;
+    Sheet.InitSheet(*sh, names[:]);
+    def_rules: CSS.RuleList;
+    CSS.Parse("p { color: #000000; font-size: 12px; }", *def_rules);
+    Sheet.AddRules(*sh, *def_rules, Sheet.DEFAULT_ORIGIN);
+    auth_rules: CSS.RuleList;
+    CSS.Parse("p { color: #111111; } .note { color: #222222; }", *auth_rules);
+    Sheet.AddRules(*sh, *auth_rules, Sheet.AUTHOR_ORIGIN);
+
+    st: Sheet.Style;
+    Sheet.InitStyle(*sh, *st);
+    Sheet.StyleAdd(*sh, *st, "p", "note");
+    Expect(TextView(st.attrs[0]) == "#222222", "class beats tag in same origin");
+    Expect(TextView(st.attrs[1]) == "12px", "inherited default font-size");
+
+    inline_decls: CSS.DeclList;
+    CSS.ParseDecls("color: #333333;", *inline_decls);
+    Sheet.StyleAddDecls(*sh, *st, *inline_decls);
+    Expect(TextView(st.attrs[0]) == "#333333", "inline style beats class");
+
+    // 4. CSSfont tests
+    fpath, em, ex := Font.GetFont(.{family = "monospace", style = "", weight = "", size = "large"}, 14, 14);
+    Expect(fpath == "/fonts/charon/cw.large.font" && em == 18 && ex == 18, "monospace large");
+    fpath2, em2, _ := Font.GetFont(.{family = "", style = "italic", weight = "bold", size = "smaller"}, 14, 14);
+    Expect(fpath2 == "/fonts/charon/italic.small.font" && em2 == 12, "italic smaller");
+    fpath3, em3, _ := Font.GetFont(.{family = "", style = "", weight = "bold", size = "2em"}, 10, 10);
+    Expect(fpath3 == "/fonts/charon/bold.vlarge.font" && em3 == 22, "bold 2em");
+
+    // 5. Table layout tests (2x2 with a 2-col spanning header of width 100)
+    cells: [4]Table.Cell;
+    cells[0] = .{present = true, span_x = 2, span_y = 1, req_w = 100, req_h = 20};
+    cells[1] = .{present = false};
+    cells[2] = .{present = true, span_x = 1, span_y = 1, req_w = 30, req_h = 40};
+    cells[3] = .{present = true, span_x = 1, span_y = 1, req_w = 40, req_h = 25};
+    tw, th := Table.LayoutTable(cells[:], 2, 2);
+    Expect(tw == 100 && th == 60, "table total 100x60");
+    Expect(cells[0].out_x == 0 && cells[0].out_y == 0 && cells[0].out_w == 100 && cells[0].out_h == 20, "header span cell");
+    Expect(cells[2].out_x == 0 && cells[2].out_y == 20 && cells[2].out_w == 45 && cells[2].out_h == 40, "row1 col0");
+    Expect(cells[3].out_x == 45 && cells[3].out_y == 20 && cells[3].out_w == 55 && cells[3].out_h == 40, "row1 col1");
+
+    if failures == 0 { print("ebook_modules_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}
