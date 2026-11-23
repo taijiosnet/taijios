@@ -459,6 +459,38 @@ def check_desktop_shell(emulator, root, env):
     print('Private ZX desktop launched windows and used native title bars to move, resize, maximize, restore, minimize and close')
 
 
+def check_command_names(emulator, root, env, boot, operands):
+    """A command name starts its installed ZX bundle unless a Dis module has that name."""
+    (root / 'dis').mkdir()
+    shutil.copy2(root / 'probe.zx', root / 'dis/probe.zx')
+    result = boot('probe', *operands)
+    assert result.returncode == 0 and not result.stderr, result
+    assert 'Initial ZX: "/dis/probe.zx"' in result.stdout and 'ZX_BOOT_OK' in result.stdout, result
+    assert 'Initial Dis:' not in result.stdout, result
+
+    legacy = root / 'legacy'
+    (legacy / 'dis').mkdir(parents=True)
+    shutil.copy2(root / 'plain.zx', legacy / 'dis/twin.zx')
+    (legacy / 'dis/twin.dis').write_bytes(b'not a Dis module')
+    # This root has no Dis runtime files, so the emulator stops after naming its choice.
+    with subprocess.Popen([emulator, '-v', '-r', legacy, 'twin'], env=env, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True) as legacy_boot:
+        output = bytearray()
+        deadline = time.monotonic() + 10
+        try:
+            while b'Initial ' not in output or not output.endswith(b'\n'):
+                assert time.monotonic() < deadline, bytes(output)
+                if select.select([legacy_boot.stdout], [], [], 0.2)[0]:
+                    data = legacy_boot.stdout.read1(1024)
+                    assert data, bytes(output)
+                    output.extend(data)
+        finally:
+            legacy_boot.kill()
+    assert b'Initial Dis:' in output and b'Initial ZX:' not in output and b'ZX_VOID_OK' not in output, bytes(output)
+    shutil.rmtree(legacy)
+    print('A command name started its ZX bundle without Dis, and a Dis module of the same name kept priority')
+
+
 def catalog_programs(catalog):
     """Map each graphical entry the menu shows to the guest program it starts."""
     programs = {}
@@ -481,7 +513,7 @@ def check_catalog_apps(emulator, root, env):
     bundles = root / 'dis/wm'
     bundles.mkdir(parents=True)
     for bundle in sorted((ROOT / 'dis/wm').glob('*.zx')):
-        if bundle.stem not in ('rill', 'desktop_panel'):
+        if bundle.stem not in ('rill', 'desktop_panel', 'wm'):
             shutil.copy2(bundle, bundles / bundle.name)
     # Colours and Date are built here until the installer ships them.
     for name, hosts in (('colors', ('taijios_draw',)), ('date', ('taijios_files',))):
@@ -512,11 +544,18 @@ def check_catalog_apps(emulator, root, env):
         'ziran', 'bundle', '--root', source.parent, '--module-path', ROOT / 'appl/cmd',
         '--module-path', ROOT / 'appl/cmd/tcltk', '--bind-host', 'taijios_desktop',
         '--bind-host', 'taijios_wm', '--bind-host', 'taijios_args', '--bind-host', 'zx_surface',
-        '--bind-host', 'taijios_io', '--entry', 'zx_app_compat:main', '-o', root / 'apps.zx', source,
+        '--bind-host', 'taijios_io', '--entry', 'zx_app_compat:main', '-o', bundles / 'rill.zx', source,
     ], env=env, check=True, timeout=60)
+    # Installed like this, the window manager and its desktop are the session the emulator starts.
+    shutil.copy2(root / 'wm.zx', bundles / 'wm.zx')
     assert not any(path.suffix == '.dis' for path in root.rglob('*') if not path.is_symlink())
 
     programs = catalog_programs(root / 'lib/apps')
+    # No Dis module can start here, so the menu must not offer one even when its file exists.
+    (bundles / 'legacy.dis').write_bytes(b'not a Dis module')
+    (root / 'lib/apps/org.taijiosnet.wm-legacy.desktop').write_text(
+        '[Desktop Entry]\nType=Application\nName=Legacy\nExec=/dis/wm/legacy.dis\n'
+        'TryExec=/dis/wm/legacy.dis\nTerminal=false\n', encoding='utf-8')
     expected = sorted(Path(program).stem for program in programs.values()
                       if program.endswith('.zx') and (root / program[1:]).exists())
     need_dis = sorted(Path(program).stem for program in programs.values() if program.endswith('.dis'))
@@ -524,7 +563,7 @@ def check_catalog_apps(emulator, root, env):
 
     with private_display() as display:
         private_env = env | {'DISPLAY': display['DISPLAY']}
-        shell = launch(private_env, emulator, '-v', '-r', root, '-g', '1024x768', '/wm.zx', '--desktop', '/apps.zx',
+        shell = launch(private_env, emulator, '-v', '-r', root, '-g', '1024x768',
                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         transcript = bytearray()
         handled = 0
@@ -564,7 +603,7 @@ def check_catalog_apps(emulator, root, env):
             status = shell.wait(timeout=10)
             transcript.extend(shell.stdout.read(4096))
             assert status == 0, f'the desktop exited with status {status}'
-            assert b'Initial Dis:' not in transcript
+            assert b'Initial ZX: "/dis/wm/wm.zx"' in transcript and b'Initial Dis:' not in transcript
             assert sorted(seen['ZX_APP_OPEN']) == sorted(seen['ZX_APP_RESIZED']) == expected, (seen, expected)
             assert f'ZX_APPS_OK {len(expected)}\n'.encode() in transcript
         except (AssertionError, subprocess.SubprocessError) as error:
@@ -574,8 +613,8 @@ def check_catalog_apps(emulator, root, env):
         finally:
             stop(shell)
             shell.stdout.close()
-    print(f'Private ZX desktop opened, focused, moved, resized and closed {len(expected)} catalog applications '
-          f'without Dis: {" ".join(expected)}')
+    print(f'Started without a command, the emulator opened the ZX desktop, which opened, focused, moved, resized '
+          f'and closed {len(expected)} catalog applications without Dis: {" ".join(expected)}')
     print(f'{len(need_dis)} catalog applications still need Dis: {" ".join(need_dis)}')
 
 
@@ -649,6 +688,7 @@ def main():
             assert failed.returncode == 1 and f'emu: {path}:' in failed.stderr, failed
             assert 'Initial Dis:' not in failed.stdout, failed
         print('Direct ZX boot, arguments, namespace, standard streams, exit statuses and loader errors passed')
+        check_command_names(emulator, root, env, boot, operands)
 
         children = boot('/zxrun.zx', '-c', '/probe.zx', 'children')
         assert children.returncode == 0 and 'ZX_VOID_OK' in children.stdout and not children.stderr, children

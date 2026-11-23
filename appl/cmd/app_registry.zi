@@ -29,6 +29,8 @@ locale_bytes: [128]u8;
 locale_length: s64;
 theme_bytes: [128]u8;
 theme_length: s64;
+zx_only: bool;
+zx_known: bool;
 
 #scope_export
 Locale :: () -> string { return TextView(locale_bytes[:locale_length]) }
@@ -77,7 +79,17 @@ Executable :: (name: string) -> bool {
     if name == "" { return true }
     decoded: [1024]u8; path: [1024]u8
     n := D.Decode(name, decoded[:])
-    return n > 0 && ResolveProgram(TextView(decoded[:n]), path[:])
+    if n <= 0 || !ResolveProgram(TextView(decoded[:n]), path[:]) { return false }
+    program := ZText(path[:])
+    return !ZXOnly() || program.count < 4 || program[program.count-4:] != ".dis"
+}
+// The emulator sets emuboot when it started from a ZX bundle. No Dis module runs there.
+ZXOnly :: () -> bool {
+    if !zx_known {
+        boot: [1024]u8
+        zx_only = ReadFile("/env/emuboot", boot[:]) > 0; zx_known = true
+    }
+    return zx_only
 }
 #scope_file
 NameHash :: (name: string) -> u32 {

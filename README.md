@@ -63,6 +63,18 @@ Kryon's window chrome and the Rill theme's control sprites. Drag it to move the
 window, and use its Hide, Maximize and Close controls. Closing a window ends
 its application, and the manager does not report that as a failure when it
 exits.
+
+Install the manager as the session with `(cd appl/wm && mk install-wm-zx)`.
+Once `/dis/wm/wm.zx` is installed, starting the emulator without a command, as
+in `Linux/386/bin/emu -r "$PWD" -g 1024x768`, boots the manager without loading
+Dis, and the manager opens the Rill desktop from `/dis/wm/rill.zx`. The
+emulator also starts a command name from its installed ZX bundle when the
+guest has no Dis module of that name, so `emu -r "$PWD" tclsh` boots
+`/dis/tclsh.zx`. `emu -r "$PWD" wm/wm` keeps starting the Dis window manager
+while `/dis/wm/wm.dis` is installed. Use it for the catalog applications that
+exist only as Dis modules. A guest booted from a ZX bundle has the bundle's
+path in the `emuboot` environment variable, and the application catalog hides
+the entries whose program is a Dis module there.
 The default desktop continues to start Rill through the regular desktop runner.
 
 The emulator defaults to a 128 MiB `main` pool for native allocations, including

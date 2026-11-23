@@ -281,7 +281,15 @@ main(int argc, char *argv[])
 	}else if(bootargc > 0 && zxbootable(bootargs[0])){
 		bootfile = *bootargs++;
 		bootargc--;
-	}
+	}else if(bootargc > 0){
+		/* A command installed only as a ZX bundle starts without Dis. */
+		bootfile = zxcommand(bootargs[0]);
+		if(bootfile != nil){
+			bootargs++;
+			bootargc--;
+		}
+	}else
+		bootfile = zxcommand(nil);
 #else
 	option(argc, argv, usage);
 #endif
@@ -386,6 +394,8 @@ emuinit(void *initmod)
 
 #ifdef __linux__
 	if(bootfile != nil){
+		/* Guests read this to learn that no Dis module can run. */
+		ksetenv("emuboot", bootfile, 1);
 		start = startzx;
 		initmod = bootfile;
 	}

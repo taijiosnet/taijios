@@ -19,7 +19,11 @@ def string(value):
 def argument(value):
     escaped = ''.join('\\' + c if c in '\\"`$' else c for c in value)
     return string('"' + escaped + '"')
-launch = ' '.join(map(argument, (emulator, '-r', root, '-g', '1024x768', 'wm/wm')))
+# Without a command the emulator opens the ZX desktop once its window manager is installed.
+command = [emulator, '-r', root, '-g', '1024x768']
+if not (Path(root) / 'dis/wm/wm.zx').exists():
+    command.append('wm/wm')
+launch = ' '.join(map(argument, command))
 Path(destination).write_text('[Desktop Entry]\nType=Application\nVersion=1.5\n'
     'Name=TaijiOS\nGenericName=TaijiOS Desktop\nComment=Run the TaijiOS guest desktop\n'
     'Icon=org.taijiosnet.TaijiOS\nExec=' + launch + '\nTryExec=' + string(emulator) + '\n'

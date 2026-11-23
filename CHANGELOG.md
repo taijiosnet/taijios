@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Open the Rill desktop without loading Dis when the emulator starts without a command and the ZX window manager is installed, start command names from their ZX bundles, and hide catalog entries that need Dis there.
+
 - Exit the ZX desktop cleanly after closing a window whose application was still drawing.
 
 - Let System Log and other ZX windows poll stdin under the native window manager, so all installed ZX app bundles run without Dis.

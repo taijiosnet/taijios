@@ -116,6 +116,14 @@ colors.dis: $MODDIR/zx.m $MODDIR/zxrun.m
 native_wm.zx: native_wm.zi native_titlebar.zi taijios_native_wm.zi desktop_windows.zi compositor.zi ../lib/guest_draw.zi ../lib/guest_input.zi ../lib/winplace.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi ../cmd/tcltk/zx_surface.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../lib --module-path ../cmd --module-path ../cmd/tcltk --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_native_wm --entry native_wm:main -o $target native_wm.zi
 
+# The session the emulator starts without a command: it opens the Rill desktop.
+install-wm-zx:V: $DISBIN/wm.zx
+
+$DISBIN/wm.zx: native_wm.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 native_wm.zx "$staged" && mv "$staged" "$target"
+
 desktop_panel.zx: desktop_panel.zi ../cmd/taijios_panel.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_panel --entry desktop_panel:main -o $target desktop_panel.zi
 

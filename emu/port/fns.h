@@ -215,6 +215,7 @@ int		walk(Chan**, char**, int, int, int*);
 void		cleanexit(int);
 #ifdef __linux__
 int		zxbootable(const char*);
+char*		zxcommand(const char*);
 int		zxboot(const char*, int, char**);
 #endif
 void		oshostintr(Proc*);

@@ -3355,6 +3355,43 @@ zxbootable(const char *path)
 #endif
 }
 
+/*
+ * The guest path of the ZX bundle that a command name starts when the root
+ * has no Dis module of that name, or nil. A nil name asks for the session
+ * started without a command: the installed ZX window manager, which opens
+ * the desktop. The root is read on the host because no namespace exists yet.
+ */
+char*
+zxcommand(const char *name)
+{
+#ifdef TAIJI_ZX
+	enum { NameBytes = 256 };
+	char host[MAXROOT + NameBytes + 16];
+	int session = name == nil;
+
+	if(session)
+		name = "wm/wm";
+	if(name[0] == '\0' || name[0] == '/' || name[0] == '-' || strlen(name) > NameBytes ||
+	   strstr(name, "..") != nil)
+		return nil;
+	if(!session){
+		snprint(host, sizeof(host), "%s/dis/%s.dis", rootdir, name);
+		if(access(host, F_OK) == 0)
+			return nil;
+		snprint(host, sizeof(host), "%s/dis/%s", rootdir, name);
+		if(access(host, F_OK) == 0)
+			return nil;
+	}
+	snprint(host, sizeof(host), "%s/dis/%s.zx", rootdir, name);
+	if(access(host, R_OK) != 0)
+		return nil;
+	return smprint("/dis/%s.zx", name);
+#else
+	USED(name);
+	return nil;
+#endif
+}
+
 int
 zxboot(const char *path, int argc, char **argv)
 {

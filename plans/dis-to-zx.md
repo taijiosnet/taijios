@@ -19,15 +19,19 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 
 ## Default desktop load chain (verified in source)
 
-`emu -r root wm/wm` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel.
+Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window manager, `appl/wm/native_wm.zi`) -> `/dis/wm/rill.zx`. It takes effect in a root once `cd appl/wm && mk install-wm-zx` has installed `wm.zx`; until then the emulator starts `emuinit.dis` as before. `tests/desktop/zx_boot_test.py --graphics` boots this chain in a root with no `.dis`.
+
+Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
+
+Catalog applications that still need the legacy chain (39): avi bounce brutus c4 calendar coffee collide cprof deb edit filename getauthinfo keyboard logon man mand mash mpeg mprof pen polyhedra prof qt readmail remotelogon reversi rmtdir rt sam sendmail sh snake sweeper telnet tetris unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
 
 ## Column legend
 
-- Path: file on disk under `dis/`. Limbo source: matched implementation under `appl/` (name/path convention, mkfile cross-checks); `unknown` = no matching Limbo source on disk (stale binary or generated). Interface: matching module definition under `module/`. Boot: P0/P1/P2 = loaded in the verified default-boot chain; `-` = not loaded in the default boot. Notes: `zx-twin` = same-directory `.zx` replacement already installed.
+- Path: file on disk under `dis/`. Limbo source: matched implementation under `appl/` (name/path convention, mkfile cross-checks); `unknown` = no matching Limbo source on disk (stale binary or generated). Interface: matching module definition under `module/`. Boot: P0/P1/P2 = loaded in the legacy chain above; `-` = not loaded by it. Notes: `zx-twin` = same-directory `.zx` replacement already installed.
 
 ## Ownership
 
-- Desktop core (wm, zxrun, toolbar/panel, winplace): implementation exclusively owned by `codex-taijios-zx-graphical-dis-port-3`; its sources, defaults, tests and build outputs are not edited elsewhere.
+- Desktop core (wm, zxrun, toolbar/panel, winplace): implementation exclusively owned by `claude-taijios-zx-graphical-dis-port`; its sources, defaults, tests and build outputs are not edited elsewhere.
 - Live Rill install: owned by `root2498`. Standalone pointer-index prerequisite: handled by the existing e18 compiler.
 - All other families are open; take one family per tested commit, boot order first.
 
@@ -39,7 +43,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 4. Legacy misc (95 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
 6. WM apps with zx-twins (7 rows) and the rest of dis/wm (59 rows total): delete or port through the desktop-core owner.
-7. Desktop core (4 rows): stays with `codex-taijios-zx-graphical-dis-port-3`; last before the `zero.dis` switch.
+7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
 ## Open rows
 
