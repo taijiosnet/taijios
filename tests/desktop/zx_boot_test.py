@@ -435,6 +435,74 @@ def check_tertiary_pointer(emulator, root, env):
     print('Native ZX WM delivered middle-button press, hold and release at the right position without changing buttons 1 and 3')
 
 
+def check_event_queue_overflow(emulator, root, env):
+    from PIL import Image
+    from test_logwindow import private_display
+    from test_tcltk import launch, stop, until
+
+    surfaces = ROOT / 'appl/cmd/tcltk'
+    source = Path(__file__).with_name('zx_overflow_probe.zi')
+    subprocess.run([
+        'ziran', 'bundle', '--root', source.parent, '--module-path', surfaces, '--module-path', ROOT / 'appl/cmd',
+        '--bind-host', 'zx_surface', '--bind-host', 'taijios_io',
+        '--entry', 'zx_overflow_probe:main', '-o', root / 'overflow.zx', source,
+    ], env=env, check=True, timeout=60)
+    release = root / 'release'
+    release.unlink(missing_ok=True)
+
+    with private_display() as display:
+        private_env = env | {'DISPLAY': display['DISPLAY']}
+        app = launch(private_env, emulator, '-v', '-r', root, '-g', '640x480', '/wm.zx',
+                     '/overflow.zx', stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        transcript = bytearray()
+
+        def desktop(*args, check=True):
+            return subprocess.run(args, env=private_env, capture_output=True, check=check, timeout=10).stdout
+
+        def wait_marker(label):
+            def seen():
+                while select.select([app.stdout], [], [], 0)[0]:
+                    chunk = app.stdout.read1(1024)
+                    if not chunk:
+                        break
+                    transcript.extend(chunk)
+                return label.encode() in transcript
+            until(seen, f'missing {label}', timeout=10)
+
+        try:
+            window = until(lambda: desktop('xdotool', 'search', '--onlyvisible', '--name',
+                                           '^inferno$', check=False).decode().strip(), 'overflow WM window missing')
+
+            def visible():
+                assert app.poll() is None, f'overflow WM exited with {app.returncode}'
+                frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
+                return frame.getpixel((16, 16)) == (40, 160, 80)
+
+            until(visible, 'overflow probe window was not painted')
+            wait_marker('ZX_OVERFLOW_READY\n')
+            desktop('xdotool', 'windowfocus', window)
+            desktop('xdotool', 'mousemove', '--window', window, '16', '16', 'click', '1')
+            # Send 35 'a' keystrokes (> 64 non-Move events: KeyDown + Text + KeyUp each) while the app is busy.
+            desktop('xdotool', 'type', '--delay', '5', 'a' * 35)
+            time.sleep(0.2)
+            release.write_bytes(b'go')
+            time.sleep(0.3)
+            desktop('xdotool', 'key', 'z')
+            assert app.wait(timeout=10) == 0, f'overflow WM exited with {app.returncode}'
+            transcript.extend(app.stdout.read(4096))
+            assert b'ZX_OVERFLOW_OK ' in transcript, transcript.decode(errors='replace')
+            assert b'ZX_OVERFLOW_CLOSED' not in transcript, transcript.decode(errors='replace')
+        except (AssertionError, subprocess.SubprocessError) as error:
+            stop(app)
+            raise AssertionError(f'{error}\n{transcript.decode(errors="replace")}') from error
+        finally:
+            release.unlink(missing_ok=True)
+            stop(app)
+            app.stdout.close()
+    print('Native ZX WM kept a busy application connected across a 64-event ring overflow and delivered retried events')
+
+
 def check_desktop_shell(emulator, root, env):
     from PIL import Image
     from test_logwindow import private_display
@@ -984,6 +1052,7 @@ def main():
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)
             check_tertiary_pointer(emulator, root, env)
+            check_event_queue_overflow(emulator, root, env)
             check_desktop_shell(emulator, root, env)
             check_catalog_apps(emulator, root, env)
             check_image_viewer(emulator, root, env)

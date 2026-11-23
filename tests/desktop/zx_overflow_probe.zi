@@ -1,0 +1,52 @@
+Surface :: #import "zx_surface";
+Io :: #import "taijios_io";
+
+Width :: 64;
+Height :: 48;
+
+main :: () -> s32 {
+    if !Surface.Open("Overflow probe", Width, Height) { return 1 }
+    pixels: [Width * Height * 4]u8;
+    for i: 0 .. Width * Height - 1 {
+        offset := i * 4;
+        pixels[offset] = 40;
+        pixels[offset + 1] = 160;
+        pixels[offset + 2] = 80;
+        pixels[offset + 3] = 255;
+    }
+    if !Surface.Present(Width, Height, TextView(pixels[:])) { return 2 }
+    print("ZX_OVERFLOW_READY\n");
+
+    // Stay busy without reading Surface.Event until the test creates /release.
+    while true {
+        fd := Io.OpenFile("/release", 0);
+        if fd >= 0 {
+            unused Io.CloseFile(fd);
+            break;
+        }
+    }
+
+    received: s32 = 0;
+    saw_z := false;
+    while !saw_z {
+        event := Surface.Event(500);
+        if event.kind == Surface.Closed {
+            print("ZX_OVERFLOW_CLOSED %\n", received);
+            return 3;
+        }
+        if event.kind == Surface.Key || event.kind == Surface.TextEvent ||
+           event.kind == Surface.Down || event.kind == Surface.Up {
+            received += 1;
+            if event.kind == Surface.TextEvent && event.text == "z" {
+                saw_z = true;
+            }
+        }
+    }
+    if received <= 64 {
+        print("ZX_OVERFLOW_SHORT %\n", received);
+        return 4;
+    }
+    print("ZX_OVERFLOW_OK %\n", received);
+    Surface.Close();
+    return 0;
+}
