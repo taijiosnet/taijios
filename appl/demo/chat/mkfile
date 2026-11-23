@@ -1,6 +1,7 @@
 <../../../mkconfig
 
 TARG=\
+		chat.dis\
 
 SHTARG=\
 		chatclient.sh\
@@ -8,6 +9,10 @@ SHTARG=\
 MODULES=\
 
 SYSMODULES= \
+	draw.m\
+	sys.m\
+	tk.m\
+	tkclient.m\
 
 DISBIN=$ROOT/dis/demo/chat
 
