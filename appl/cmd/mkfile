@@ -107,7 +107,6 @@ TARG=\
 	prof.dis\
 	ps.dis\
 	puttar.dis\
-	pwd.dis\
 	ramfile.dis\
 	randpass.dis\
 	raw2iaf.dis\
@@ -198,6 +197,7 @@ SYSMODULES=\
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
 ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh env
+ZXCOMMANDS=$ZXCOMMANDS pwd
 ZXCOMMANDS=$ZXCOMMANDS export mntgen
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -263,6 +263,8 @@ ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 
 mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
+pwd.zx: pwd.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry pwd:main -o $target pwd.zi
 
 env.zx: env.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry env:main -o $target env.zi
@@ -357,6 +359,7 @@ $DISBIN/cp.zx: cp.zx mkfile
 $DISBIN/test.zx: test.zx mkfile
 $DISBIN/ls.zx: ls.zx mkfile
 $DISBIN/mkdir.zx: mkdir.zx mkfile
+$DISBIN/pwd.zx: pwd.zx mkfile
 
 $DISBIN/%.zx: %.zx
 	mode=0644

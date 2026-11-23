@@ -1,0 +1,124 @@
+// Guest regression for the top-level shell commands M to Z rewritten in Ziran.
+// Every expected status, output and diagnostic below is what the Limbo
+// original printed when it was replaced. Each case runs through the guest
+// shell, which starts /dis/NAME.zx.
+//
+// From the TaijiOS root, after "(cd appl/cmd && mk install)":
+//     ziran run --target=c --root tests/commands tests/commands/m_z_test.zi -- [EMU]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+
+Case :: struct {
+    tool: string // empty: args is a whole shell command
+    args: string
+    input: string // fixture used as standard input; empty reads /dev/null
+    status: string
+    out: string
+    err: string
+    binary_out: bool // standard output must equal the binary fixture
+}
+
+WORK :: "build/tests/commands-m-z";
+
+ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
+WORDS :: "one two  three\nfour\tfive\n";
+
+cases: [3]Case = Case.[
+    .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
+    .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
+    .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
+];
+
+failures: s32;
+
+Expect :: (ok: bool, index: s64, what: string, got: string, want: string) {
+    if ok { return }
+    failures += 1
+    print("FAIL case % (% %) %:\n  got  [%]\n  want [%]\n", index, cases[index].tool, cases[index].args, what, got, want)
+}
+
+Write :: (name: string, text: string) -> bool {
+    path: Vec(u8)
+    BuilderPrint(*path, "%/work/%", WORK, name)
+    return WriteEntireFile(BuilderFinish(path), text)
+}
+
+Directory :: (name: string) -> bool {
+    path: Vec(u8)
+    BuilderPrint(*path, "%/%", WORK, name)
+    return CreateDirectory(BuilderFinish(path))
+}
+
+// The bytes 0 through 255, forty times: crosses the 8 KiB transfer size.
+Binary :: () -> Text {
+    bytes: Vec(u8)
+    for 1..40 { for 0..255 { VecPush(bytes, cast(u8)it) } }
+    return BuilderFinish(bytes)
+}
+
+Prepare :: (binary: string) -> bool {
+    unused RemoveTree(WORK)
+    unused CreateDirectory("build")
+    unused CreateDirectory("build/tests")
+    if !CreateDirectory(WORK) || !Directory("work") || !Directory("result") ||
+        !Directory("work/tree") || !Directory("work/tree/sub") { return false }
+    return Write("a.txt", ALPHA) && Write("words", WORDS) && Write("empty", "") && Write("bin", binary) &&
+        Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n")
+}
+
+// One guest shell script runs every case and keeps each result in a file.
+Script :: () -> Text {
+    script: Vec(u8)
+    BuilderPrint(*script, "cd /%/work\n", WORK)
+    for cases {
+        if it.tool == "" {
+            BuilderPrint(*script, "{%}", it.args)
+        } else {
+            BuilderPrint(*script, "% %", it.tool, it.args)
+        }
+        input := ifx it.input == "" then "/dev/null" else it.input
+        BuilderPrint(*script, " < % > ../result/out.% >[2] ../result/err.%\n", input, it_index, it_index)
+        BuilderPrint(*script, "echo $status > ../result/status.%\n", it_index)
+    }
+    return BuilderFinish(script)
+}
+
+Result :: (kind: string, index: s64) -> string {
+    path: Vec(u8)
+    BuilderPrint(*path, "%/result/%.%", WORK, kind, index)
+    text, ok := ReadEntireFile(BuilderFinish(path))
+    return ifx ok then text else "<missing>"
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu"
+    binary: Text = Binary()
+    if !Prepare(TextView(binary)) { print("cannot prepare %\n", WORK); return 1 }
+    script: Text = Script()
+    if !WriteEntireFile("build/tests/commands-m-z/script", TextView(script)) { return 1 }
+    root: Text = WorkingDirectory()
+    guest: Vec(u8)
+    BuilderPrint(*guest, "%/script", WORK)
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)]
+    run: ProcessRun
+    started := RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run)
+    if !started { print("cannot start %\n", emu); return 1 }
+    for cases {
+        status_line: Vec(u8)
+        BuilderPrint(*status_line, "%\n", it.status)
+        status := BuilderFinish(status_line)
+        got_status := Result("status", it_index)
+        Expect(got_status == status, it_index, "status", got_status, status)
+        out := Result("out", it_index)
+        want := ifx it.binary_out then TextView(binary) else it.out
+        Expect(out == want, it_index, "stdout", out, want)
+        err := Result("err", it_index)
+        Expect(err == it.err, it_index, "stderr", err, it.err)
+    }
+    if failures != 0 { print("commands-m-z: % failures in % cases\n", failures, cases.count); return 1 }
+    print("commands-m-z: all % cases match the Limbo originals\n", cases.count)
+    return 0
+}

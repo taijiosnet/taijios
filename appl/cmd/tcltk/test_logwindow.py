@@ -45,6 +45,28 @@ def private_display():
         stop(server)
 
 
+def tkcmd_reference(env):
+    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c",
+                 "tkcmd < /appl/cmd/tcltk/logwindow_commands.tcl", stdin=subprocess.DEVNULL,
+                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output = bytearray()
+
+    def matched():
+        read_output(app, output)
+        lines = output.splitlines()
+        assert not any(line.startswith(b"#!") for line in lines), output
+        return lines == [f"#{value}".encode() for value in TK_RESULT]
+
+    try:
+        until(matched, "Log Window tkcmd transcript did not match")
+    except AssertionError as failure:
+        raise AssertionError(f"{failure}: {output!r}") from failure
+    finally:
+        stop(app)
+        app.stdout.close()
+        app.stderr.close()
+
+
 def read_output(app, output):
     for stream in select.select([app.stdout, app.stderr], [], [], 0)[0]:
         data = os.read(stream.fileno(), 2048)
@@ -63,8 +85,7 @@ def log_window(env, guest_command):
         os.mkfifo(feed)
         (setup / "wmsetup").write_text(f"{{cat /{feed.relative_to(ROOT)} | {guest_command}; echo logwindow-returned}} &\n")
         app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "/dis/sh.dis", "-c",
-                     # wm/wm starts Rill when it is installed; this test drives the toolbar.
-                     f"bind -b /{setup.relative_to(ROOT)} /lib; wm/wm wm/toolbar", stdin=subprocess.DEVNULL,
+                     f"bind -b /{setup.relative_to(ROOT)} /lib; wm/wm", stdin=subprocess.DEVNULL,
                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             window = until(lambda: command("xdotool", "search", "--onlyvisible", "--name", "^inferno$",
@@ -114,23 +135,23 @@ def log_window(env, guest_command):
 
 
 TASK_LABEL = (80, 575, 174, 595)
-HIDE_CONTROL = (255, 187, 36)
 
 
-def visible(image):
-    return image.getpixel((150, 60)) == BACKGROUND
+def visible(image, hosted):
+    if hosted:
+        return image.getpixel((150, 60)) == BACKGROUND
+    return image.getpixel((150, 120)) == (221, 221, 221)
 
 
-def is_tasked(image):
-    # The toolbar draws its task labels in near-black text.
-    return not visible(image) and any(max(color) < 32 for _, color in image.crop(TASK_LABEL).getcolors())
+def is_tasked(image, hosted):
+    return not visible(image, hosted) and any(color == (0, 0, 0) for _, color in image.crop(TASK_LABEL).getcolors())
 
 
-def exercise_window(env, guest_command):
+def exercise_window(env, guest_command, *, hosted):
     with log_window(env, guest_command) as (capture, pointer, send, eof, _):
         def tasked():
             image = capture()
-            return image if is_tasked(image) else None
+            return image if is_tasked(image, hosted) else None
 
         def click(x, y):
             pointer(x, y, "mousedown", "1", "sleep", "0.12", "mouseup", "1")
@@ -146,34 +167,46 @@ def exercise_window(env, guest_command):
 
         title = until(tasked, "Log Window did not start as a toolbar task").crop(TASK_LABEL)
         send(b"First log line\n")
-        until(lambda: visible(capture()), "incoming text did not pop up Log Window")
-        left, top, right, bottom = color_bounds(capture(), BACKGROUND)
-        assert (right-left, bottom-top) == (408, 374)
-        bar = (left+28, top+70, left+46, top+352)
-        scroll_button = (left+32, top+24, left+53, top+48)
-        popup_button = (left+159, top+24, left+181, top+48)
-        log_body = (left+69, top+78, left+376, top+344)
-        scroll_click = (left+42, top+36)
-        popup_click = (left+170, top+36)
-        # The title bar's yellow Hide control tasks the window.
-        hide = color_bounds(capture().crop((left, 0, right, top)), HIDE_CONTROL)
-        assert hide, "Log Window title bar has no Hide control"
-        task_click = (left + (hide[0]+hide[2])//2, (hide[1]+hide[3])//2)
-        drag_x = left+37
+        until(lambda: visible(capture(), hosted), "incoming text did not pop up Log Window")
+        if hosted:
+            left, top, right, bottom = color_bounds(capture(), BACKGROUND)
+            assert (right-left, bottom-top) == (408, 374)
+            bar = (left+28, top+70, left+46, top+352)
+            scroll_button = (left+32, top+24, left+53, top+48)
+            popup_button = (left+159, top+24, left+181, top+48)
+            log_body = (left+69, top+78, left+376, top+344)
+            scroll_click = (left+42, top+36)
+            popup_click = (left+170, top+36)
+            task_click = (right-28, 12)
+            drag_x = left+37
+        else:
+            bar = (1, 60, 15, 299)
+            scroll_button = (5, 25, 65, 43)
+            popup_button = (68, 25, 135, 43)
+            log_body = (17, 44, 325, 315)
+            scroll_click = (14, 34)
+            popup_click = (89, 34)
+            task_click = (310, 12)
+            drag_x = 7
         initial_bar = capture().crop(bar)
         send(b"".join(f"initial {n:02d}\n".encode() for n in range(44)))
         until(lambda: changed(bar, initial_bar), "Log Window did not scroll after receiving a full page of logs")
 
         toggle(scroll_click, scroll_button, "Scroll did not toggle while stdin was idle")
         bottom = capture().crop(log_body)
-        thumb = color_bounds(capture().crop(bar), (255, 255, 255))
-        assert thumb and thumb[1] > 100, "scrollbar did not follow the end of the stream"
-        drag_y = bar[1] + (thumb[1]+thumb[3])//2
-        target_y = bar[1]+20
+        if hosted:
+            thumb = color_bounds(capture().crop(bar), (255, 255, 255))
+            assert thumb and thumb[1] > 100, "scrollbar did not follow the end of the stream"
+            drag_y = bar[1] + (thumb[1]+thumb[3])//2
+            target_y = bar[1]+20
+        else:
+            drag_y = 254
+            target_y = 76
         pointer(drag_x, drag_y, "mousedown", "1")
-        # Wait for the guest to paint its pressed thumb before sending motion.
-        until(lambda: color_bounds(capture().crop(bar), (188, 213, 231)),
-              "scrollbar thumb did not enter its pressed state")
+        if hosted:
+            # Wait for the guest to paint its pressed thumb before sending motion.
+            until(lambda: color_bounds(capture().crop(bar), (188, 213, 231)),
+                  "scrollbar thumb did not enter its pressed state")
         pointer(drag_x, target_y)
         until(lambda: changed(log_body, bottom), "dragging the scrollbar did not move Log Window text")
         pointer(drag_x, target_y, "mouseup", "1")
@@ -193,7 +226,7 @@ def exercise_window(env, guest_command):
         time.sleep(0.4)
         assert tasked(), "new input raised Log Window while Pop up was off"
         click(100, 583)
-        until(lambda: visible(capture()), "toolbar did not restore Log Window")
+        until(lambda: visible(capture(), hosted), "toolbar did not restore Log Window")
         toggle(popup_click, popup_button, "Pop up did not turn back on")
         click(*task_click)
         hidden_since = None
@@ -212,37 +245,39 @@ def exercise_window(env, guest_command):
 
         until(settled_task, "Log Window did not settle back into its toolbar task")
         send(b"Pop up now\n")
-        until(lambda: visible(capture()), "enabling Pop up did not restore Log Window on input")
-        white = Image.new("RGB", (log_body[2]-log_body[0], log_body[3]-log_body[1]), (255, 255, 255))
-        send((b" " * 55 + b"\n") * 5000)
-        until(lambda: not changed(log_body, white), "Log Window did not follow a long stream")
-        send(b"Stream continued past 256 KiB\n")
-        until(lambda: visible(capture()) and changed(log_body, white),
-              "Log Window lost the end of a long stream")
+        until(lambda: visible(capture(), hosted), "enabling Pop up did not restore Log Window on input")
+        if hosted:
+            white = Image.new("RGB", (log_body[2]-log_body[0], log_body[3]-log_body[1]), (255, 255, 255))
+            send((b" " * 55 + b"\n") * 5000)
+            until(lambda: not changed(log_body, white), "Log Window did not follow a long stream")
+            send(b"Stream continued past 256 KiB\n")
+            until(lambda: visible(capture(), hosted) and changed(log_body, white),
+                  "Log Window lost the end of a long stream")
         before = capture().crop(log_body)
         eof()
         until(lambda: changed(log_body, before), "EOF marker did not appear")
-        assert visible(capture()), "default EOF closed Log Window"
+        assert visible(capture(), hosted), "default EOF closed Log Window"
         return title
 
 
-def exercise_eof_exit(env, guest_command, *, other_title):
+def exercise_eof_exit(env, guest_command, *, hosted, other_title):
     with log_window(env, guest_command) as (capture, _, send, eof, returned):
         def task_title():
             image = capture()
-            return image.crop(TASK_LABEL) if is_tasked(image) else None
+            return image.crop(TASK_LABEL) if is_tasked(image, hosted) else None
 
         title = until(task_title, "Log Window -e did not start as a toolbar task")
         assert ImageChops.difference(title, other_title).getbbox(), "custom title operand did not change the toolbar label"
         send(b"Check EOF exit\n")
-        until(lambda: visible(capture()), "Log Window -e showed no data")
+        until(lambda: visible(capture(), hosted), "Log Window -e showed no data")
         eof()
-        until(lambda: not visible(capture()) and returned(), "Log Window -e did not exit on EOF")
+        until(lambda: not visible(capture(), hosted) and returned(), "Log Window -e did not exit on EOF")
 
 
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--installed", action="store_true", help="use the installed Log Window ZX image")
+    cli.add_argument("--oracle-only", action="store_true", help="compare the model and original Inferno app")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     image = BUILD / "logwindow_stream_test.zx"
@@ -259,16 +294,20 @@ def main():
     result = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
     assert result.stdout.splitlines() == [*TK_RESULT, "0"] and not result.stderr, result
     hosted_image = ROOT / "dis/wm/logwindow.zx" if args.installed else BUILD / "logwindow.zx"
-    if not args.installed:
+    if not args.oracle_only and not args.installed:
         compile_image("logwindow_app", hosted_image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin",
                       "--bind-host", "taijios_args", "--bind-host", "taijios_files")
-    print("Ziran Tk matched the recorded Inferno tkcmd results for Log Window checkbuttons, scrollbar fractions "
-          "and text scroll options")
     with private_display() as env:
-        image_path = f"/{hosted_image.relative_to(ROOT)}"
-        title = exercise_window(env, f"zxrun -p -w {image_path} 'Tk Log Oracle'")
-        exercise_eof_exit(env, f"zxrun -w {image_path} -ge 'Tk Log Exit'", other_title=title)
-        print("Hosted Log Window verified a pipe beyond 256 KiB, viewport changes, task and restore, title and EOF modes")
+        tkcmd_reference(env)
+        print("Inferno and Ziran Tk agree on Log Window checkbuttons, scrollbar fractions and text scroll options")
+        title = exercise_window(env, "wm/logwindow 'Tk Log Oracle'", hosted=False)
+        exercise_eof_exit(env, "wm/logwindow -e 'Tk Log Exit'", hosted=False, other_title=title)
+        print("Inferno Log Window verified live input, scrollbar dragging, both checkbuttons and EOF behavior")
+        if not args.oracle_only:
+            image_path = f"/{hosted_image.relative_to(ROOT)}"
+            title = exercise_window(env, f"zxrun -p -w {image_path} 'Tk Log Oracle'", hosted=True)
+            exercise_eof_exit(env, f"zxrun -w {image_path} -ge 'Tk Log Exit'", hosted=True, other_title=title)
+            print("Hosted Log Window verified a pipe beyond 256 KiB, viewport changes, task and restore, title and EOF modes")
 
 
 if __name__ == "__main__":

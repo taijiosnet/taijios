@@ -39,6 +39,7 @@ y.debug
 /appl/cmd/test.zx
 /appl/cmd/ls.zx
 /appl/cmd/mkdir.zx
+/appl/cmd/pwd.zx
 /appl/cmd/export.zx
 /appl/cmd/mntgen.zx
 /appl/wm/clock.zx
@@ -72,6 +73,7 @@ y.debug
 /dis/test.zx
 /dis/ls.zx
 /dis/mkdir.zx
+/dis/pwd.zx
 /dis/export.zx
 /dis/mntgen.zx
 /dis/coffee.zx

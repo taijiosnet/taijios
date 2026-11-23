@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **752** open rows = **730** on-disk `dis/` files (**146** top-level `dis/*.dis` + **584** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **751** open rows = **729** on-disk `dis/` files (**145** top-level `dis/*.dis` + **584** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -47,7 +47,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 3. Services (104 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (71 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (15), demo (12), ebook (10), math (9).
-6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
+6. WM apps with zx-twins (3 rows) and the rest of dis/wm (55 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
 ## Open rows
@@ -221,7 +221,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 148 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 147 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -304,7 +304,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/prof.dis | appl/cmd/prof.b |  | - |  |
 | dis/ps.dis | appl/cmd/ps.b |  | - |  |
 | dis/puttar.dis | appl/cmd/puttar.b |  | - |  |
-| dis/pwd.dis | appl/cmd/pwd.b |  | - |  |
 | dis/randpass.dis | appl/cmd/randpass.b |  | - |  |
 | dis/raw2iaf.dis | appl/cmd/raw2iaf.b |  | - |  |
 | dis/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
@@ -482,7 +481,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 54 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 55 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -513,6 +512,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/wm/getauthinfo.dis | appl/wm/getauthinfo.b |  | - |  |
 | dis/wm/keyboard.dis | appl/wm/keyboard.b | module/keyboard.m | - |  |
 | dis/wm/logon.dis | appl/wm/logon.b |  | - |  |
+| dis/wm/logwindow.dis | appl/wm/logwindow.b |  | - | zx-twin |
 | dis/wm/man.dis | appl/wm/man.b | module/man.m | - |  |
 | dis/wm/mand.dis | appl/wm/mand.b |  | - |  |
 | dis/wm/mash.dis | appl/wm/mash.b |  | - |  |
@@ -728,13 +728,14 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
 
-### 11. Demo - demonstration apps - 11 rows
+### 11. Demo - demonstration apps - 12 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 | dis/demo/camera/camera.dis | appl/demo/camera/camera.b |  | - |  |
 | dis/demo/camera/readjpg.dis | unknown | module/grid/readjpg.m | - |  |
 | dis/demo/camera/tkinterface.dis | appl/demo/camera/tkinterface.b |  | - |  |
+| dis/demo/cpupool/regpoll.dis | appl/demo/cpupool/regpoll.b | module/grid/regpoll.m | - |  |
 | dis/demo/lego/clockface.dis | appl/demo/lego/clockface.b |  | - |  |
 | dis/demo/lego/firmdl.dis | appl/demo/lego/firmdl.b |  | - |  |
 | dis/demo/lego/legolink.dis | appl/demo/lego/legolink.b |  | - |  |

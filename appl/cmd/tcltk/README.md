@@ -47,7 +47,7 @@ Log Window reads a live guest pipe. It starts as a toolbar task and pops up
 when a message arrives. Scroll follows the newest lines when checked. Clear it
 to keep the current view while new lines arrive, or drag the scrollbar to read
 earlier lines. Clear Pop up to keep a tasked window hidden until you restore it
-from the toolbar. [ZX source](logwindow_app.zi). The Dis version is removed.
+from the toolbar. [ZX source](logwindow_app.zi) · [Inferno source](../../wm/logwindow.b)
 
 Memory shows the guest's `main`, `heap`, and `image` arenas. It reads
 `/dev/memory` on launch and every second. Each row shows used capacity and

@@ -1,0 +1,18 @@
+// Print the guest working directory, replacing the Limbo pwd.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+
+main :: () -> s32 {
+    directory := Io.Cwd();
+    if directory.count == 0 {
+        unused Cli.WriteAll(2, "pwd: ");
+        unused Cli.WriteAll(2, Io.LastError());
+        unused Cli.WriteAll(2, "\n");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    unused Cli.WriteAll(1, directory);
+    unused Cli.WriteAll(1, "\n");
+    return 0;
+}
