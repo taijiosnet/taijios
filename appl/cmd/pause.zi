@@ -1,0 +1,16 @@
+// Wait forever, replacing the Limbo pause.
+using Io :: #import "taijios_io";
+
+// /dev/msec blocks until its next tick, so reading it forever keeps the
+// process alive without doing any work, as the Limbo receive on a channel did.
+#program_export
+main :: () -> s32 {
+    timer: [32]u8
+    while true {
+        handle := Io.OpenFile("/dev/msec", 0)
+        if handle < 0 { return 0 }
+        unused Io.ReadBytes(handle, timer[:])
+        unused Io.CloseFile(handle)
+    }
+    return 0
+}

@@ -5,6 +5,8 @@
 //
 // From the TaijiOS root, after "(cd appl/cmd && mk install)":
 //     ziran run --target=c --root tests/commands tests/commands/m_z_test.zi -- [EMU]
+// EMU defaults to the emulator built from this tree, emu/Linux/o.emu, and
+// to Linux/386/bin/emu when that has not been built.
 #import "std/byte_text_linux"
 #import "std/file"
 #import "std/file_linux"
@@ -27,7 +29,7 @@ ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 
-cases: [182]Case = Case.[
+cases: [194]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -245,6 +247,20 @@ fakenet/2/status
     .{tool = "uudecode", args = "-x", input = "six.uu", err = "cannot open -x\n"},
     .{tool = "uudecode", args = "nosuch", err = "cannot open nosuch\n"},
     .{args = "{ bind fakenet /net/tcp; netstat; unmount /net/tcp }", out = "tcp/2      wao        Established  udp!0.0.0.0!53       udp!9.9.9.9!53\ntcp/1      wao        listen       tcp!1.2.3.4!80       tcp!5.6.7.8!1234\n"},
+    // sleep: only a signed number of seconds is accepted; the rest is usage.
+    .{tool = "sleep", status = "usage", err = "usage: sleep time\n"},
+    .{tool = "sleep", args = "abc", status = "usage", err = "usage: sleep time\n"},
+    .{tool = "sleep", args = "-", status = "usage", err = "usage: sleep time\n"},
+    .{tool = "sleep", args = "1abc", status = "usage", err = "usage: sleep time\n"},
+    .{tool = "sleep", args = "0x10", status = "usage", err = "usage: sleep time\n"},
+    .{tool = "sleep", args = "-- 1", status = "usage", err = "usage: sleep time\n"},
+    .{tool = "sleep", args = "0"},
+    .{tool = "sleep", args = "1 2"},
+    // runas: sets /dev/user and runs the command through the shell.
+    .{tool = "runas", status = "usage", err = "usage: runas user cmd [args...]\n"},
+    .{tool = "runas", args = "user", status = "usage", err = "usage: runas user cmd [args...]\n"},
+    .{args = "runas nobody cat /dev/user", out = "nobody"},
+    .{args = "runas user echo hello", out = "hello\n"},
 ];
 
 failures: s32;
@@ -369,7 +385,7 @@ Result :: (kind: string, index: s64) -> string {
 }
 
 main :: (argc: s32, argv: **u8) -> s32 {
-    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu"
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else (ifx PathExists("emu/Linux/o.emu") then "emu/Linux/o.emu" else "Linux/386/bin/emu")
     binary: Text = Binary()
     if !Prepare(TextView(binary)) { print("cannot prepare %\n", WORK); return 1 }
     script: Text = Script()

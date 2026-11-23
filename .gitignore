@@ -60,6 +60,9 @@ y.debug
 /appl/cmd/rm.zx
 /appl/cmd/uuencode.zx
 /appl/cmd/uudecode.zx
+/appl/cmd/sleep.zx
+/appl/cmd/pause.zx
+/appl/cmd/runas.zx
 /appl/cmd/fs.zx
 /appl/cmd/fs/*.zx
 /appl/wm/clock.zx
@@ -114,6 +117,9 @@ y.debug
 /dis/rm.zx
 /dis/uuencode.zx
 /dis/uudecode.zx
+/dis/sleep.zx
+/dis/pause.zx
+/dis/runas.zx
 /dis/fs.zx
 /dis/fs/*.zx
 /dis/coffee.zx

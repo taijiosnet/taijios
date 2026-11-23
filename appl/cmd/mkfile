@@ -94,7 +94,6 @@ TARG=\
 	nsbuild.dis\
 	os.dis\
 	p.dis\
-	pause.dis\
 	plumb.dis\
 	plumber.dis\
 	prof.dis\
@@ -105,10 +104,8 @@ TARG=\
 	rcmd.dis\
 	rdp.dis\
 	rioimport.dis\
-	runas.dis\
 	sed.dis\
 	sendmail.dis\
-	sleep.dis\
 	sort.dis\
 	src.dis\
 	stack.dis\
@@ -198,6 +195,9 @@ ZXCOMMANDS=$ZXCOMMANDS chmod
 ZXCOMMANDS=$ZXCOMMANDS rm
 ZXCOMMANDS=$ZXCOMMANDS uuencode
 ZXCOMMANDS=$ZXCOMMANDS uudecode
+ZXCOMMANDS=$ZXCOMMANDS sleep
+ZXCOMMANDS=$ZXCOMMANDS pause
+ZXCOMMANDS=$ZXCOMMANDS runas
 ZXCOMMANDS=$ZXCOMMANDS fs
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -314,6 +314,15 @@ uuencode.zx: uuencode.zi taijios_stat.zi $UTILZX
 uudecode.zx: uudecode.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry uudecode:main -o $target uudecode.zi
 
+sleep.zx: sleep.zi zx_daytime.zi taijios_clock.zi $UTILZX
+	zi2zx --root . --bind-host taijios_clock --bind-host taijios_args --bind-host taijios_io --entry sleep:main -o $target sleep.zi
+
+pause.zx: pause.zi
+	zi2zx --root . --entry pause:main -o $target pause.zi
+
+runas.zx: runas.zi taijios_process.zi $ZXLIB/taijios_quote.zi $UTILZX
+	zi2zx --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry runas:main -o $target runas.zi
+
 # Only package-aware ZX targets resolve the Tcl/Tk dependencies.
 $TCLZX:Ppython3 ziran_package_inputs.py check tcl: ziran_package_inputs.py
 	python3 ziran_package_inputs.py write tcl "$target"
@@ -425,6 +434,9 @@ $DISBIN/pwd.zx: pwd.zx mkfile
 $DISBIN/rm.zx: rm.zx mkfile
 $DISBIN/uuencode.zx: uuencode.zx mkfile
 $DISBIN/uudecode.zx: uudecode.zx mkfile
+$DISBIN/sleep.zx: sleep.zx mkfile
+$DISBIN/pause.zx: pause.zx mkfile
+$DISBIN/runas.zx: runas.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
 
 $DISBIN/%.zx: %.zx

@@ -222,7 +222,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 123 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 120 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -294,7 +294,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/nsbuild.dis | appl/cmd/nsbuild.b |  | - |  |
 | dis/os.dis | appl/cmd/os.b |  | - |  |
 | dis/p.dis | appl/cmd/p.b |  | - |  |
-| dis/pause.dis | appl/cmd/pause.b |  | - |  |
 | dis/plumb.dis | appl/cmd/plumb.b |  | - |  |
 | dis/prof.dis | appl/cmd/prof.b |  | - |  |
 | dis/puttar.dis | appl/cmd/puttar.b |  | - |  |
@@ -302,7 +301,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
 | dis/rdp.dis | appl/cmd/rdp.b |  | - |  |
 | dis/rioimport.dis | appl/cmd/rioimport.b |  | - |  |
-| dis/runas.dis | appl/cmd/runas.b |  | - |  |
 | dis/sed.dis | appl/cmd/sed.b |  | - |  |
 | dis/sendmail.dis | appl/cmd/sendmail.b |  | - |  |
 | dis/sh/alphabet.dis | appl/alphabet/alphabet.b | module/alphabet.m | - |  |
@@ -321,7 +319,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - | ported into /dis/sh.zx (appl/cmd/sh/shell_string.zi); loaded only by sh.dis |
 | dis/sh/test.dis | appl/cmd/sh/test.b |  | - | ported into /dis/sh.zx (appl/cmd/sh/shell_small.zi); loaded only by sh.dis |
 | dis/sh/tk.dis | appl/cmd/sh/tk.b | module/tk.m | - | open: sh.zx has no Tk; the module needs a ZX Tk window API (lib/sh/win uses it) |
-| dis/sleep.dis | appl/cmd/sleep.b |  | - |  |
 | dis/sort.dis | appl/cmd/sort.b | module/sort.m | - |  |
 | dis/src.dis | appl/cmd/src.b |  | - |  |
 | dis/stack.dis | appl/cmd/stack.b |  | - |  |

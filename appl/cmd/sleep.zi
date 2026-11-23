@@ -1,0 +1,52 @@
+// Wait for a number of seconds, replacing the Limbo sleep.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Clock :: #import "taijios_clock";
+using Daytime :: #import "zx_daytime";
+
+// The largest whole number of seconds that still fits Limbo's sleep argument.
+Longest :: 2147483647 / 1000;
+
+// A leading sign followed by digits, as the Limbo isvalid accepted.
+Valid :: (text: string) -> bool {
+    at: s64 = 0;
+    if text.count > 0 && (text[0] == #char "-" || text[0] == #char "+") { at = 1 }
+    seen := false;
+    while at < text.count {
+        if text[at] < 48 || text[at] > 57 { return false }
+        seen = true;
+        at += 1;
+    }
+    return seen;
+}
+
+// Wait through /dev/msec, the guest's millisecond timer, which blocks until
+// the next tick. Its value is compared with a deadline, as the other guest
+// waiters do.
+Wait :: (milliseconds: s64) {
+    timer: [32]u8;
+    deadline := Clock.Millis() + milliseconds;
+    while Clock.Millis() < deadline {
+        handle := Io.OpenFile("/dev/msec", 0);
+        if handle < 0 { return }
+        unused Io.ReadBytes(handle, timer[:]);
+        unused Io.CloseFile(handle);
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 {
+        return Cli.Usage("usage: sleep time\n")
+    }
+    text := Args.Operand(0);
+    if !Valid(text) {
+        return Cli.Usage("usage: sleep time\n")
+    }
+    seconds := Daytime.LimboInt(text);
+    if seconds > Longest { seconds = Longest }
+    if seconds > 0 { Wait(seconds * 1000) }
+    return 0;
+}

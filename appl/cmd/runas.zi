@@ -1,0 +1,59 @@
+// Run a command as another user, replacing the Limbo runas.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Proc :: #import "taijios_process";
+using Quote :: #import "taijios_quote";
+using Cli :: #import "zx_cli";
+
+// Report a failure the way the Limbo raiser did: a status word, and one
+// diagnostic line unless it is only a usage error.
+Fail :: (status: string, message: string) -> s32 {
+    if message.count > 0 {
+        unused Cli.WriteAll(2, "runas: ");
+        unused Cli.WriteAll(2, message);
+        unused Cli.WriteAll(2, "\n");
+    }
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 2 {
+        unused Cli.WriteAll(2, "usage: runas user cmd [args...]\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    user := Args.Operand(0);
+    handle := Io.OpenFile("/dev/user", 1);
+    if handle < 0 {
+        message: Vec(u8);
+        BuilderPrint(*message, "cannot open /dev/user: %", Io.LastError());
+        return Fail("error", BuilderFinish(message));
+    }
+    written := Io.WriteBytes(handle, user);
+    unused Io.CloseFile(handle);
+    if written != user.count {
+        message: Vec(u8);
+        BuilderPrint(*message, "cannot set user: %", Io.LastError());
+        return Fail("error", BuilderFinish(message));
+    }
+    // The command and every operand after the user, as sh->run received them.
+    // The ZX shell runs them from a -c word, quoted so that each operand stays
+    // one word and nothing is reinterpreted.
+    script: Vec(u8);
+    unused BuilderAppend(script, "-c");
+    for i: 1..count-1 {
+        unused BuilderAppend(script, " ");
+        Quote.Quote(*script, Args.Operand(i));
+    }
+    operands: Vec(string);
+    unused VecPush(operands, TextDetach(BuilderFinish(script)));
+    outcome := Proc.Run("/dis/sh.zx", operands[:]);
+    if outcome.status < 0 {
+        return Fail("error", outcome.error);
+    }
+    return 0;
+}
