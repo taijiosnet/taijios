@@ -19,7 +19,7 @@ odbcmnt.zx: odbcmnt.zi odbcmnt_model.zi ../../cmd/taijios_args.zi ../../cmd/taij
 $DISBIN/odbcmnt.zx: odbcmnt.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 odbcmnt.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 odbcmnt.zx "$staged" && mv "$staged" "$target"
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES $DISBIN/odbcmnt.zx

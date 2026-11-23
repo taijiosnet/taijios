@@ -19,7 +19,7 @@ regpoll.zx: regpoll.zi regpoll_model.zi ../../cmd/taijios_args.zi ../../cmd/taij
 $DISBIN/regpoll.zx: regpoll.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 regpoll.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 regpoll.zx "$staged" && mv "$staged" "$target"
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES $DISBIN/regpoll.zx

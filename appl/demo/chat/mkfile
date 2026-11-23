@@ -19,7 +19,7 @@ chat.zx: chat.zi chat_model.zi ../../cmd/tcltk/tcltk.zi ../../cmd/tcltk/zx_surfa
 $DISBIN/chat.zx: chat.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 chat.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 chat.zx "$staged" && mv "$staged" "$target"
 
 chatsrv.zx: chatsrv.zi chatsrv_model.zi ../../cmd/taijios_io.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_io --entry chatsrv:main -o $target chatsrv.zi
@@ -27,7 +27,7 @@ chatsrv.zx: chatsrv.zi chatsrv_model.zi ../../cmd/taijios_io.zi mkfile
 $DISBIN/chatsrv.zx: chatsrv.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 chatsrv.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 chatsrv.zx "$staged" && mv "$staged" "$target"
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES $DISBIN/chat.zx $DISBIN/chatsrv.zx

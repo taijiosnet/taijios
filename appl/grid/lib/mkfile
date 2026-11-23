@@ -26,6 +26,6 @@ fbrowse.zx: fbrowse.zi browser.zi ../../cmd/tcltk/tcltk.zi ../../cmd/tcltk/zx_su
 $DISBIN/fbrowse.zx: fbrowse.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 fbrowse.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 fbrowse.zx "$staged" && mv "$staged" "$target"
 
 install:V: $DISBIN/fbrowse.zx

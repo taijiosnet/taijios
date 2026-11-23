@@ -18,7 +18,7 @@ spree.zx: spree.zi spree_core.zi archives.zi lib/allow.zi lib/cardlib.zi lib/obj
 $DEST/spree.zx: spree.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 spree.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 spree.zx "$staged" && mv "$staged" "$target"
 
 clients/cards.zx: clients/cards.zi clients/cards_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_io.zi mkfile
 	(cd clients && ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_io --entry cards:main -o cards.zx cards.zi)
@@ -26,7 +26,7 @@ clients/cards.zx: clients/cards.zi clients/cards_model.zi ../cmd/tcltk/tcltk.zi 
 $DEST/clients/cards.zx: clients/cards.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 clients/cards.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 clients/cards.zx "$staged" && mv "$staged" "$target"
 
 clients/lobby.zx: clients/lobby.zi clients/lobby_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi mkfile
 	(cd clients && ziran bundle --project --root . --define TK_MENU --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_io --bind-host taijios_process --entry lobby:main -o lobby.zx lobby.zi)
@@ -34,7 +34,7 @@ clients/lobby.zx: clients/lobby.zi clients/lobby_model.zi ../cmd/tcltk/tcltk.zi 
 $DEST/clients/lobby.zx: clients/lobby.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 clients/lobby.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 clients/lobby.zx "$staged" && mv "$staged" "$target"
 
 clients/gather.zx: clients/gather.zi clients/gather_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi mkfile
 	(cd clients && ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry gather:main -o gather.zx gather.zi)
@@ -42,7 +42,7 @@ clients/gather.zx: clients/gather.zi clients/gather_model.zi ../cmd/tcltk/tcltk.
 $DEST/clients/gather.zx: clients/gather.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 clients/gather.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 clients/gather.zx "$staged" && mv "$staged" "$target"
 
 clients/othello.zx: clients/othello.zi clients/othello_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi mkfile
 	(cd clients && ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --entry othello:main -o othello.zx othello.zi)
@@ -50,7 +50,7 @@ clients/othello.zx: clients/othello.zi clients/othello_model.zi ../cmd/tcltk/tcl
 $DEST/clients/othello.zx: clients/othello.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 clients/othello.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 clients/othello.zx "$staged" && mv "$staged" "$target"
 
 joinsession.zx: joinsession.zi join_model.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process --entry joinsession:main -o $target joinsession.zi
@@ -58,7 +58,7 @@ joinsession.zx: joinsession.zi join_model.zi ../cmd/taijios_args.zi ../cmd/taiji
 $DEST/joinsession.zx: joinsession.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 joinsession.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 joinsession.zx "$staged" && mv "$staged" "$target"
 
 install:V:	$ALL
 

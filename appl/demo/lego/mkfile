@@ -32,7 +32,7 @@ clockface.zx: clockface.zi clockface_model.zi ../../cmd/taijios_args.zi ../../cm
 $DISBIN/clockface.zx: clockface.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 clockface.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 clockface.zx "$staged" && mv "$staged" "$target"
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES $DISBIN/clockface.zx $DISBIN/firmdl.dis $DISBIN/legolink.dis $DISBIN/rcxsend.dis $DISBIN/timers.dis

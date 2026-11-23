@@ -12,7 +12,7 @@ ebook.zx: ebook.zi reader_model.zi oebpackage.zi mimeimage.zi cssparser.zi style
 $DISBIN/ebook.zx: ebook.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 ebook.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 ebook.zx "$staged" && mv "$staged" "$target"
 
 install:V: $ALL
 

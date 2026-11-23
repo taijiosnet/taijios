@@ -19,7 +19,7 @@ ns.zx: ns.zi ns_model.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../..
 $DISBIN/ns.zx: ns.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 ns.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 ns.zx "$staged" && mv "$staged" "$target"
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
 install:V:	$SHFILES $DISBIN/ns.zx

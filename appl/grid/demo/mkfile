@@ -16,7 +16,7 @@ blur.zx: blur.zi block_fs.zi block_model.zi ../../cmd/tcltk/zx_surface.zi ../../
 $DISBIN/blur.zx: blur.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 blur.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 blur.zx "$staged" && mv "$staged" "$target"
 
 install:V:	$DISBIN/blur.zx
 %.install:V:	$DISBIN/%

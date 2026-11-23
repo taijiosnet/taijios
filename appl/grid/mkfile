@@ -47,7 +47,7 @@ jpg2bit.zx: jpg2bit.zi jpg2bit_model.zi ../cmd/taijios_args.zi ../cmd/taijios_io
 $DISBIN/jpg2bit.zx: jpg2bit.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 jpg2bit.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 jpg2bit.zx "$staged" && mv "$staged" "$target"
 
 usercreatesrv.zx: usercreatesrv.zi usercreatesrv_model.zi ../cmd/taijios_io.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_io --entry usercreatesrv:main -o $target usercreatesrv.zi
@@ -55,7 +55,7 @@ usercreatesrv.zx: usercreatesrv.zi usercreatesrv_model.zi ../cmd/taijios_io.zi m
 $DISBIN/usercreatesrv.zx: usercreatesrv.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 usercreatesrv.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 usercreatesrv.zx "$staged" && mv "$staged" "$target"
 
 register.zx: register.zi register_model.zi lib/announce.zi lib/registry_client.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi ../lib/taijios_quote.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path lib --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry register:main -o $target register.zi
@@ -63,7 +63,7 @@ register.zx: register.zi register_model.zi lib/announce.zi lib/registry_client.z
 $DISBIN/register.zx: register.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 register.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 register.zx "$staged" && mv "$staged" "$target"
 
 find.zx: find.zi find_model.zi lib/registry_client.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi ../lib/taijios_quote.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path lib --module-path ../cmd/tcltk --module-path ../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry find:main -o $target find.zi
@@ -71,7 +71,7 @@ find.zx: find.zi find_model.zi lib/registry_client.zi ../cmd/tcltk/tcltk.zi ../c
 $DISBIN/find.zx: find.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 find.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 find.zx "$staged" && mv "$staged" "$target"
 
 query.zx: query.zi lib/srvbrowse.zi lib/registry_client.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi ../lib/taijios_quote.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path lib --module-path ../cmd/tcltk --module-path ../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry query:main -o $target query.zi
@@ -79,7 +79,7 @@ query.zx: query.zi lib/srvbrowse.zi lib/registry_client.zi ../cmd/tcltk/tcltk.zi
 $DISBIN/query.zx: query.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 query.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 query.zx "$staged" && mv "$staged" "$target"
 
 blurdemo.zx: blurdemo.zi blurdemo_model.zi jpg2bit_model.zi lib/srvbrowse.zi lib/registry_client.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi ../cmd/taijios_stat.zi ../lib/taijios_quote.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path lib --module-path ../cmd/tcltk --module-path ../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --bind-host taijios_stat --entry blurdemo:main -o $target blurdemo.zi
@@ -87,7 +87,7 @@ blurdemo.zx: blurdemo.zi blurdemo_model.zi jpg2bit_model.zi lib/srvbrowse.zi lib
 $DISBIN/blurdemo.zx: blurdemo.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0644 blurdemo.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 blurdemo.zx "$staged" && mv "$staged" "$target"
 
 install:V: $DISBIN/jpg2bit.zx $DISBIN/usercreatesrv.zx $DISBIN/register.zx $DISBIN/find.zx $DISBIN/query.zx $DISBIN/blurdemo.zx
 
