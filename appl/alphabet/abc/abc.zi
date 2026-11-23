@@ -1,0 +1,7 @@
+// /abc/abc -> abc: a new alphabet.
+Al :: #import "alpha_eval";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "abc", "A", Run) }
+
+Run :: (call: *Al.Call) -> s32 { return Value.MkAbc(Al.NewAlphabet()) }

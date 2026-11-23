@@ -1,0 +1,14 @@
+// /abc/eval abc cmd [string...] -> status: evaluate a command in the
+// alphabet, the strings its arguments.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "eval", "rAcs*", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    args: Vec(s32);
+    for call.args[2:] { VecPush(args, Va.MkString(Va.ValueText(it))) }
+    return Al.Eval0(Value.Alphabet(call.args[0]), Va.CmdOf(call.args[1]), "/status", call.report,
+        Va.ReportStart(call.report, "abceval"), args[:]);
+}

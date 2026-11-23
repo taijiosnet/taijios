@@ -1,0 +1,26 @@
+// /abc/autoconvert abc string string cmd -> abc: in the alphabet, convert
+// the first type to the second by the command; {module} means
+// {(src); module $1}.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Sh :: #import "shcmd";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "autoconvert", "AAssc", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    sx := Value.Alphabet(call.args[0]);
+    src := Va.ValueText(call.args[1]);
+    dst := Va.ValueText(call.args[2]);
+    c := Va.CmdOf(call.args[3]);
+    if Sh.Kind(c) == Sh.Block && Sh.Left(c) >= 0 && Sh.Kind(Sh.Left(c)) == Sh.Word {
+        c = Sh.Mk(Sh.Block, Sh.Mk(Sh.Seq, Sh.Mk(Sh.List, Sh.MkWord(src), -1),
+            Sh.Mk(Sh.Adj, Sh.Left(c), Sh.Mk(Sh.Var, Sh.MkWord("1"), -1))), -1);
+    }
+    err := Al.Autoconvert(sx, src, dst, c, call.errc);
+    if err.count > 0 {
+        Va.Report(call.errc, Al.Join("abcautoconvert: ", err));
+        return -1;
+    }
+    return Va.Dup(call.args[0]);
+}

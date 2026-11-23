@@ -1,6 +1,6 @@
 // Guest regression for Alphabet in Ziran: the core (parser, type checker,
-// evaluator, the builtins of "load alphabet") and the modules of the root
-// typeset "/". Each case is a script of alphabet builtin commands; it runs
+// evaluator, the builtins of "load alphabet"), the modules of the root
+// typeset "/" and the abc typeset, whose values are alphabets. Each case is a script of alphabet builtin commands; it runs
 // as /dis/alphabet.zx SCRIPT, and its status, output and diagnostics must
 // be what the Dis "load alphabet" builtin gave for the same script, run
 // with sh. A case with a note says where the Dis original could not be
@@ -112,7 +112,7 @@ block3: [16]Case = Case.[
     .{name = "type-bad", script = "type /nosuch\n", input = "", status = "type declare error", out = "", err = "alphabet: cannot import type /nosuch: / does not hold type nosuch\n"},
 ];
 
-block4: [15]Case = Case.[
+block4: [16]Case = Case.[
     .{name = "types-badts", script = "echo ${types /nosuch}\n", input = "", status = "error", out = "", err = "unknown typeset /nosuch\n"},
     .{name = "usage", script = "echo ${usage /echo}\necho ${usage /seq}\necho ${usage /mount}\n", input = "", status = "", out = "[-n] /string -> /fd\n[-ao] [/status...] -> /status\n[-abc] [-x /string] /wfd /string -> /status\n", err = ""},
     .{name = "usage-nosuch", script = "echo ${usage /nosuch}\n", input = "", status = "error", out = "", err = "module not declared\n"},
@@ -128,9 +128,48 @@ block4: [15]Case = Case.[
     .{name = "autoconvert-loop", script = "autoconvert /string /fd /read\nautoconvert /fd /string /readall\n", input = "", status = "error", out = "", err = "cannot autoconvert /fd to /string via /readall: bad auto-conversion /fd->/string via {(/fd);/readall $1}: ambiguity: self /string|{(/string);/read $1}|{(/fd);/readall $1}, self /string\n"},
     .{name = "autoconvert-badtype", script = "autoconvert /nosuch /fd /read\n", input = "", status = "error", out = "", err = "cannot autoconvert /nosuch to /fd via /read: unknown type /nosuch\n"},
     .{name = "autoconvert-incompat", script = "autoconvert /string /fd /readall\n", input = "", status = "error", out = "", err = "e: error: no way to get from /string to /fd\ne: error: conversion failed for /readall\ne: error: usage: /readall /fd -> /string\ncannot autoconvert /string to /fd via /readall: cannot rewrite transformation {(/string);/readall $1}\n"},
+    .{name = "abc-info", script = "typeset /abc\ninfo\n", input = "", status = "", out = "typeset /\n/auth [-v] [-k /string] [-C /string] /wfd -> /wfd\n/cat [/fd...] -> /fd\n/create /fd /string -> /status\n/dial /string -> /wfd\n/echo [-n] /string -> /fd\n/env /string -> /string\n/export /string -> /wfd\n/fd /string -> /wfd\n/filter /fd /cmd [/string...] -> /fd\n/mount [-abc] [-x /string] /wfd /string -> /status\n/par [/status...] -> /status\n/parse /string -> /cmd\n/pretty /cmd -> /string\n/print /fd /string -> /status\n/read /string -> /fd\n/readall /fd -> /string\n/rewrite [-d /string] /cmd /cmd -> /cmd\n/seq [-ao] [/status...] -> /status\n/unparse /cmd -> /string\n/w2fd /wfd -> /fd\n/wait /status -> /string\n\ntypeset /abc\n/abc/abc -> /abc/abc\n/abc/autoconvert /abc/abc /string /string /cmd -> /abc/abc\n/abc/autodeclare /abc/abc /string -> /abc/abc\n/abc/declare [-qc] /abc/abc /string [/string...] -> /abc/abc\n/abc/declares /abc/abc /cmd -> /abc/abc\n/abc/define /abc/abc /string /cmd -> /abc/abc\n/abc/eval /abc/abc /cmd [/string...] -> /status\n/abc/import /abc/abc /string [/string...] -> /abc/abc\n/abc/rewrite [-s /string] [-r /string] /abc/abc /cmd -> /cmd\n/abc/type /abc/abc /string [/string...] -> /abc/abc\n/abc/typeset /abc/abc /string -> /abc/abc\n/abc/undeclare /abc/abc /string [/string...] -> /abc/abc\n", err = ""},
 ];
 
-CASES :: 79;
+block5: [16]Case = Case.[
+    .{name = "abc-types", script = "typeset /abc\necho ${types /abc}\necho ${types}\n", input = "", status = "", out = "vmods vtypes abc\n/abc/vmods /abc/vtypes /abc/abc /data /wfd /fd /status /string /cmd\n", err = ""},
+    .{name = "abc-eval", script = "typeset /abc\n- {/abc/eval {/abc/autodeclare {/abc/abc} 1} \"{/print {/echo hi} 1}}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "abc-eval-args", script = "typeset /abc\n- {/abc/eval {/abc/autodeclare {/abc/abc} 1} \"{(/string /string); /print {/echo $1} $2} hello 1}\n", input = "", status = "", out = "hello\n", err = ""},
+    .{name = "abc-eval-noauto", script = "typeset /abc\n- {/abc/eval {/abc/abc} \"{/print {/echo hi} 1}}\n", input = "", status = "no value", out = "", err = "alphabet: 1. abceval: error: cannot load /echo: module not declared\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-declare", script = "typeset /abc\n- {/abc/eval {/abc/declare {/abc/declare {/abc/abc} /echo} /print} \"{/print {/echo hi} 1}}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "abc-declare-sig", script = "typeset /abc\n- {/abc/eval {/abc/declare {/abc/abc} /echo '/string -> /fd'} \"{/print {/echo hi} 1}}\n", input = "", status = "no value", out = "", err = "alphabet: 1. abceval: error: cannot load /print: module not declared\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-declare-many", script = "typeset /abc\n- {/abc/eval {/abc/declare {/abc/abc} /echo a b} \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: declare: maximum of two arguments allowed\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-declare-bad", script = "typeset /abc\n- {/abc/eval {/abc/declare {/abc/abc} /nosuch} \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: declare: cannot load /dis/alphabet/main/nosuch.dis: '/dis/alphabet/main/nosuch.dis' does not exist\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-import", script = "typeset /abc\n- {/abc/eval {/abc/import {/abc/autodeclare {/abc/abc} 1} /echo /print} \"{print {echo hi} 1}}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "abc-import-bad", script = "typeset /abc\n- {/abc/eval {/abc/import {/abc/abc} /echo} \"{echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: import: /echo: module not declared\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-type", script = "typeset /abc\n- {/abc/eval {/abc/type {/abc/autodeclare {/abc/abc} 1} /fd /string} \"{(string); /print {/echo $1} 1} hi}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "abc-type-bad", script = "typeset /abc\n- {/abc/eval {/abc/type {/abc/autodeclare {/abc/abc} 1} /nosuch} \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: type: /nosuch: / does not hold type nosuch\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-typeset-bad", script = "typeset /abc\n- {/abc/eval {/abc/typeset {/abc/autodeclare {/abc/abc} 1} /nosuch} \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: typeset: /nosuch: cannot load nosuchtypes.dis: '/dis/alphabet/nosuchtypes.dis' does not exist\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-define", script = "typeset /abc\n- {/abc/eval {/abc/define {/abc/autodeclare {/abc/abc} 1} hello \"{(/string); /print {/echo $1} 1}} \"{hello world}}\n", input = "", status = "", out = "world\n", err = ""},
+    .{name = "abc-define-bad", script = "typeset /abc\n- {/abc/eval {/abc/define {/abc/autodeclare {/abc/abc} 1} /x \"{/echo a}} \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: define: error: bad module name\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-undeclare", script = "typeset /abc\n- {/abc/eval {/abc/undeclare {/abc/declare {/abc/declare {/abc/abc} /echo} /print} /echo} \"{/print {/echo hi} 1}}\n", input = "", status = "no value", out = "", err = "alphabet: 1. abceval: error: cannot load /echo: module not declared\nalphabet: 0. eval: error: command failed\n"},
+];
+
+block6: [16]Case = Case.[
+    .{name = "abc-autoconvert", script = "typeset /abc\n- {/abc/eval {/abc/autoconvert {/abc/autodeclare {/abc/abc} 1} /fd /status \"{(/fd); /print $1 1}} \"{/echo hi}}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "abc-autoconvert-word", script = "typeset /abc\n- {/abc/eval {/abc/autoconvert {/abc/autodeclare {/abc/abc} 1} /string /fd \"{/read}} \"{/print /build/tests/alphabet/main/work/a.txt 1}}\n", input = "", status = "", out = "alpha\nbeta\n", err = ""},
+    .{name = "abc-autoconvert-bad", script = "typeset /abc\n- {/abc/eval {/abc/autoconvert {/abc/autodeclare {/abc/abc} 1} /nosuch /fd \"{/read}} \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: abcautoconvert: unknown type /nosuch\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-rewrite", script = "typeset /abc\n- {/print {/echo {/unparse {/abc/rewrite {/abc/autodeclare {/abc/abc} 1} \"{/print {/echo a} 1}}}} 1}\n", input = "", status = "", out = "{/echo a|/print 1}\n", err = ""},
+    .{name = "abc-rewrite-r", script = "typeset /abc\n- {/print {/echo {/unparse {/abc/rewrite -r /status {/abc/autoconvert {/abc/autodeclare {/abc/abc} 1} /fd /status \"{(/fd); /print $1 1}} \"{/echo a}}}} 1}\n", input = "", status = "", out = "{/echo a|/print 1}\n", err = ""},
+    .{name = "abc-rewrite-s", script = "typeset /abc\n- {/print {/echo {/unparse {/abc/rewrite -s '/string -> /fd' {/abc/autodeclare {/abc/abc} 1} \"{(/string); /echo $1}}}} 1}\n", input = "", status = "", out = "{(/string);/echo $1}\n", err = ""},
+    .{name = "abc-rewrite-s-bad", script = "typeset /abc\n- {/print {/echo {/unparse {/abc/rewrite -s '/fd -> /fd' {/abc/autodeclare {/abc/abc} 1} \"{(/string); /echo $1}}}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: rewrite: '/fd -> /fd' is not compatible with '/string -> /fd'\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-rewrite-s-badsig", script = "typeset /abc\n- {/print {/echo {/unparse {/abc/rewrite -s '/nosuch -> /fd' {/abc/autodeclare {/abc/abc} 1} \"{(/string); /echo $1}}}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: rewrite: bad usage '/nosuch -> /fd': unknown type: /nosuch\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "abc-abc-dup", script = "typeset /abc\n- {(/abc/abc); /seq {/abc/eval $1 \"{/print {/echo one} 1}} {/abc/eval $1 \"{/print {/echo two} 1}}} {/abc/autodeclare {/abc/abc} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /cmd to /abc/abc\nalphabet: 0. eval: error: conversion failed for /seq {/abc/eval $1 \"{/print {/echo one} 1}} {/abc/eval $1 \"{/print {/echo two} 1}}\nalphabet: 0. eval: error: usage: /seq {/abc/eval $1 \"{/print {/echo one} 1}} {/abc/eval $1 \"{/print {/echo two} 1}} /abc/abc -> unknown\n"},
+    .{name = "abc-declares", script = "declares {| declare /echo | import /echo}\n- {/print {echo hi} 1}\necho ${modules}\n", input = "", status = "", out = "hi\n/echo /print echo\n", err = ""},
+    .{name = "abc-declares-typeset", script = "declares {| typeset /abc}\ninfo\n", input = "", status = "", out = "typeset /\n/auth [-v] [-k /string] [-C /string] /wfd -> /wfd\n/cat [/fd...] -> /fd\n/create /fd /string -> /status\n/dial /string -> /wfd\n/echo [-n] /string -> /fd\n/env /string -> /string\n/export /string -> /wfd\n/fd /string -> /wfd\n/filter /fd /cmd [/string...] -> /fd\n/mount [-abc] [-x /string] /wfd /string -> /status\n/par [/status...] -> /status\n/parse /string -> /cmd\n/pretty /cmd -> /string\n/print /fd /string -> /status\n/read /string -> /fd\n/readall /fd -> /string\n/rewrite [-d /string] /cmd /cmd -> /cmd\n/seq [-ao] [/status...] -> /status\n/unparse /cmd -> /string\n/w2fd /wfd -> /fd\n/wait /status -> /string\n\ntypeset /abc\n/abc/abc -> /abc/abc\n/abc/autoconvert /abc/abc /string /string /cmd -> /abc/abc\n/abc/autodeclare /abc/abc /string -> /abc/abc\n/abc/declare [-qc] /abc/abc /string [/string...] -> /abc/abc\n/abc/declares /abc/abc /cmd -> /abc/abc\n/abc/define /abc/abc /string /cmd -> /abc/abc\n/abc/eval /abc/abc /cmd [/string...] -> /status\n/abc/import /abc/abc /string [/string...] -> /abc/abc\n/abc/rewrite [-s /string] [-r /string] /abc/abc /cmd -> /cmd\n/abc/type /abc/abc /string [/string...] -> /abc/abc\n/abc/typeset /abc/abc /string -> /abc/abc\n/abc/undeclare /abc/abc /string [/string...] -> /abc/abc\n", err = ""},
+    .{name = "abc-declares-bad", script = "declares {| declare /nosuch}\n", input = "", status = "bad declaration", out = "", err = "e: declares: 1. evaldecl: declare: cannot load /dis/alphabet/main/nosuch.dis: '/dis/alphabet/main/nosuch.dis' does not exist\ne: declares: 1. evaldecl: error: command failed\nalphabet: declaration failed: declarations failed\n"},
+    .{name = "abc-declares-usage", script = "declares foo\n", input = "", status = "usage", out = "", err = "usage: declares decls\n"},
+    .{name = "abc-declares-type", script = "declares {| type /fd /string}\necho ${usage /print}\n", input = "", status = "", out = "fd string -> /status\n", err = ""},
+    .{name = "abc-declares-mod", script = "typeset /abc\n- {/abc/eval {/abc/declares {/abc/autodeclare {/abc/abc} 1} \"{| declare /echo | import /echo}} \"{/print {echo hi} 1}}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "abc-err-badabc", script = "typeset /abc\n- {/abc/eval /x \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /abc/abc\nalphabet: 0. eval: error: conversion failed for /abc/eval\nalphabet: 0. eval: error: usage: /abc/eval /abc/abc /cmd [/string...] -> /status\n"},
+];
+
+CASES :: 112;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -142,7 +181,11 @@ CaseAt :: (i: s64) -> Case {
 
     if i < 64 { return block3[i - 48] }
 
-    if i < 79 { return block4[i - 64] }
+    if i < 80 { return block4[i - 64] }
+
+    if i < 96 { return block5[i - 80] }
+
+    if i < 112 { return block6[i - 96] }
 
     return block0[0];
 }

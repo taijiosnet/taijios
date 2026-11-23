@@ -1,0 +1,20 @@
+// abc values: the alphabet a value holds, and a new value for one.
+Va :: #import "alpha_values";
+
+// An abc value for alphabet sx, in the typeset's own code.
+MkAbc :: (sx: s32) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("abc");
+        p.dup = Va.SelfDup;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "A", prod);
+    Va.SetSession(v, sx);
+    return v;
+}
+
+Alphabet :: (v: s32) -> s32 { return Va.SessionOf(v) }
+
+#scope_file
+
+prod: s32 = -1;

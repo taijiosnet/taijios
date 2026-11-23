@@ -80,9 +80,23 @@ ZXSOURCES=\
 	main/unparse.zi\
 	main/w2fd.zi\
 	main/wait.zi\
+	abc/abctypes.zi\
+	abc/value.zi\
+	abc/abc.zi\
+	abc/autoconvert.zi\
+	abc/autodeclare.zi\
+	abc/declare.zi\
+	abc/declares.zi\
+	abc/define.zi\
+	abc/eval.zi\
+	abc/import.zi\
+	abc/rewrite.zi\
+	abc/type.zi\
+	abc/typeset.zi\
+	abc/undeclare.zi\
 
 alphabet.zx: $ZXSOURCES mkfile
-	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../lib --module-path main=main --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
+	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../lib --module-path main=main --module-path abc=abc --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
 
 $ROOT/dis/alphabet.zx: alphabet.zx
 	staged=$(mktemp "$target.XXXXXX") &&

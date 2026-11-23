@@ -1,0 +1,12 @@
+// /abc/undeclare abc string [string...] -> abc: forget modules.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "undeclare", "AAss*", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    sx := Value.Alphabet(call.args[0]);
+    for call.args[1:] { unused Al.Undeclare(sx, Va.ValueText(it)) }
+    return Va.Dup(call.args[0]);
+}

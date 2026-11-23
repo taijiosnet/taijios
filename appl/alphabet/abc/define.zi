@@ -1,0 +1,15 @@
+// /abc/define abc string cmd -> abc: name a command as a module.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "define", "AAsc", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    e := Al.Define(Value.Alphabet(call.args[0]), Va.ValueText(call.args[1]), Va.CmdOf(call.args[2]), call.errc);
+    if e.count > 0 {
+        Va.Report(call.errc, Al.Join("define: error: ", e));
+        return -1;
+    }
+    return Va.Dup(call.args[0]);
+}

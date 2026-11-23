@@ -1,0 +1,41 @@
+// The abc typeset: alphabets as values. Its types are abc (an alphabet),
+// vmods and vtypes; its modules, in abc/, change an alphabet and give it
+// back, evaluate in it, or rewrite for it. An abc value is shared, as the
+// Dis value with its reference count was.
+Al :: #import "alpha_eval";
+Ty :: #import "alpha_types";
+Va :: #import "alpha_values";
+Bu :: #import "alpha_builtins";
+Abc :: #import "abc/abc";
+Autoconvert :: #import "abc/autoconvert";
+Autodeclare :: #import "abc/autodeclare";
+Declare :: #import "abc/declare";
+Declares :: #import "abc/declares";
+Define :: #import "abc/define";
+Eval :: #import "abc/eval";
+Import :: #import "abc/import";
+Rewrite :: #import "abc/rewrite";
+Type :: #import "abc/type";
+Typeset :: #import "abc/typeset";
+Undeclare :: #import "abc/undeclare";
+
+Register :: () {
+    reg := Ty.RegisterTypeset("abc", "mtAwcrfs");
+    Ty.RegisterType(reg, #char "m", "vmods");
+    Ty.RegisterType(reg, #char "t", "vtypes");
+    Ty.RegisterType(reg, #char "A", "abc");
+    Abc.Register(reg);
+    Autoconvert.Register(reg);
+    Autodeclare.Register(reg);
+    Declare.Register(reg);
+    Declares.Register(reg);
+    Define.Register(reg);
+    Eval.Register(reg);
+    Import.Register(reg);
+    Rewrite.Register(reg);
+    Type.Register(reg);
+    Typeset.Register(reg);
+    Undeclare.Register(reg);
+    Bu.SetDeclares(Declares.Builtin);
+}
+

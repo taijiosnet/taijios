@@ -1,0 +1,56 @@
+// /abc/declares abc cmd -> abc: run a declaration expression on an
+// alphabet, in an alphabet of its own whose modules are the abc modules
+// by their short names: {| typeset /fs | declare /fs/walk} and the like.
+// It serves the declares builtin too.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "declares", "AAc", Run) }
+
+Run :: (call: *Al.Call) -> s32 { return Declares(call.errc, call.report, call.args[0], Va.CmdOf(call.args[1])) }
+
+// The declares builtin: an alphabet given its declarations, or why not.
+Builtin :: (sx: s32, decls: s32, errc: s32) -> string {
+    report := Va.NewReport(Va.NewSink("declares: ", Va.ErrcSink(errc)));
+    v := Declares(Va.ReportStart(report, "declares"), report, Value.MkAbc(sx), decls);
+    if v < 0 { return "declarations failed" }
+    return "";
+}
+
+#scope_file
+
+decl_alphabet: s32 = -1;
+
+// The alphabet declarations run in, made once.
+DeclAlphabet :: () -> s32 {
+    if decl_alphabet >= 0 { return decl_alphabet }
+    d := Al.NewAlphabet();
+    unused Al.LoadTypeset(d, "/abc", -1);
+    unused Al.ImportType(d, "/abc/abc");
+    unused Al.ImportType(d, "/string");
+    unused Al.ImportType(d, "/cmd");
+    mods := string.["autoconvert", "autodeclare", "declare", "define", "import", "type", "typeset", "undeclare"];
+    sigs := string.["abc string string cmd -> abc", "abc string -> abc", "[-qc] abc string [string...] -> abc",
+        "abc string cmd -> abc", "abc string [string...] -> abc", "abc string [string...] -> abc",
+        "abc string -> abc", "abc string [string...] -> abc"];
+    for mods {
+        qname := Al.Join("/abc/", it);
+        unused Al.Declare(d, qname, sigs[it_index], Al.ONDEMAND);
+        unused Al.ImportModule(d, qname);
+    }
+    decl_alphabet = d;
+    return d;
+}
+
+Declares :: (errc: s32, report: s32, abc: s32, decls: s32) -> s32 {
+    d := DeclAlphabet();
+    // the value as an abc value of the declarations' alphabet
+    av := Value.MkAbc(Value.Alphabet(abc));
+    Va.SetTypec(av, Ty.Typename2c(d, "/abc/abc"));
+    one := s32.[av];
+    v := Al.Eval0(d, decls, "/abc/abc", report, Va.ReportStart(report, "evaldecl"), one[:]);
+    if v < 0 { return -1 }
+    return Value.MkAbc(Value.Alphabet(v));
+}

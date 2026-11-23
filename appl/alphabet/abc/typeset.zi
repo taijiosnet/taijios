@@ -1,0 +1,18 @@
+// /abc/typeset abc string -> abc: load a typeset into the alphabet.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "typeset", "AAs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    name := Va.ValueText(call.args[1]);
+    e := Al.LoadTypeset(Value.Alphabet(call.args[0]), name, call.errc);
+    if e.count > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "typeset: %: %", name, e);
+        Va.Report(call.errc, BuilderFinish(out));
+        return -1;
+    }
+    return Va.Dup(call.args[0]);
+}

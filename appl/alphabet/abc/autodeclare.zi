@@ -1,0 +1,11 @@
+// /abc/autodeclare abc string -> abc: declare modules on first use, or not.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "autodeclare", "AAs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    Al.SetAutodeclare(Value.Alphabet(call.args[0]), Al.LimboInt(Va.ValueText(call.args[1])) != 0);
+    return Va.Dup(call.args[0]);
+}

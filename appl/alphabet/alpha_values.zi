@@ -227,6 +227,11 @@ PlainErrc :: (sink: s32) -> s32 {
     return cast(s32)(errcs.count - 1);
 }
 
+ErrcSink :: (errc: s32) -> s32 {
+    if errc < 0 { return -1 }
+    return errcs[errc].sink;
+}
+
 NewReport :: (sink: s32) -> s32 {
     r: ReportRow;
     r.sink = sink;

@@ -496,9 +496,11 @@ CmdUsage :: (sx: s32, t: []s32) -> string {
 Usage2Sig :: (sx: s32, u: string) -> (sig: Sig, error: string, raised: string) {
     l: UsageLexer;
     l.u = u;
-    t, tok := OptsTok(*l);
+    t: s32;
+    tok: string;
     opts: Vec(s32);
     while true {
+        t, tok = OptsTok(*l);
         if t != #char "[" { break }
         o := l.i;
         t, tok = OptsTok(*l);

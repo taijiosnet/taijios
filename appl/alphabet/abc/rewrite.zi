@@ -1,0 +1,35 @@
+// /abc/rewrite [-s string] [-r string] abc cmd -> cmd: a command rewritten
+// for the alphabet; -r names the type it should give, -s a usage it must
+// be compatible with.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "rewrite", "cAc-ss-rs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    sig := "";
+    rtype := "";
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "s" { sig = Va.ValueText(Al.OptArg(call, i, 0)) }
+        if Al.OptLetter(call, i) == #char "r" { rtype = Va.ValueText(Al.OptArg(call, i, 0)) }
+    }
+    sx := Value.Alphabet(call.args[0]);
+    c, actsig, ok := Al.Rewrite(sx, Va.CmdOf(call.args[1]), rtype, call.errc);
+    if !ok { return -1 }
+    if sig.count > 0 {
+        compatible, err := Al.TypeCompatUsage(sx, sig, actsig);
+        if err.count > 0 {
+            Va.Report(call.errc, Al.Join("rewrite: ", err));
+            return -1;
+        }
+        if !compatible {
+            out: Vec(u8);
+            BuilderPrint(*out, "rewrite: % is not compatible with %", Ty.Q(sig), Ty.Q(actsig));
+            Va.Report(call.errc, BuilderFinish(out));
+            return -1;
+        }
+    }
+    return Va.MkCmdValue(c);
+}

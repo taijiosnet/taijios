@@ -1,0 +1,29 @@
+// /abc/declare [-qc] abc string [string...] -> abc: declare a module, with
+// its usage if given; -q loads it only when used, -c checks it now.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Value :: #import "abc/value";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "declare", "AAss*-q-c", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    flags: s32 = 0;
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "q" { flags |= Al.ONDEMAND }
+        if Al.OptLetter(call, i) == #char "c" { flags |= Al.CHECK }
+    }
+    n := call.args.count;
+    if n > 3 {
+        Va.Report(call.errc, "declare: maximum of two arguments allowed");
+        return -1;
+    }
+    sig := "";
+    if n > 2 { sig = Va.ValueText(call.args[2]) }
+    e, raised := Al.Declare(Value.Alphabet(call.args[0]), Va.ValueText(call.args[1]), sig, flags);
+    if raised.count > 0 { e = raised }
+    if e.count > 0 {
+        Va.Report(call.errc, Al.Join("declare: ", e));
+        return -1;
+    }
+    return Va.Dup(call.args[0]);
+}
