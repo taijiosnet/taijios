@@ -1,6 +1,5 @@
-// Tests for the libraries in appl/lib that replace Limbo modules: csv.zi,
-// rabin.zi, uris.zi, xpointers.zi, xpath.zi, xml_names.zi and the
-// limbo_text.zi helpers they share. Each NAME.limbo.txt holds what the Limbo module
+// Tests for the libraries in appl/lib that replace Limbo modules. Each
+// suite in suites.zi has a NAME.limbo.txt holding what the Limbo module
 // printed for the cases in NAME_cases.zi; the Ziran library must print
 // the same lines.
 //

@@ -1,0 +1,132 @@
+// SHA-1, called as Limbo programs called Keyring's sha1: data is added to a
+// state piece by piece, and the call that asks for the digest ends the
+// message. As in Inferno's libsec, a state used again after its digest
+// was taken is not reset: it goes on from the chaining value, the count
+// and the partial block the digest left behind. Programs relied on that
+// to draw a stream of digests from one state.
+
+DIGEST_LENGTH :: 20;
+MASK :: 0xFFFFFFFF;
+
+State :: struct {
+    length: u64;       // bytes hashed so far
+    h: [5]u64;         // the chaining value, each word below 2^32
+    buffer: [128]u8;   // a partial block, and room to pad it
+    held: s64;         // bytes of a partial block in buffer
+    seeded: bool;
+}
+
+Rotate :: (x: u64, bits: u64) -> u64 { return ((x << bits) | (x >> (32 - bits))) & MASK }
+
+// Hashes data, a whole number of 64-byte blocks.
+Blocks :: (state: *State, data: string) {
+    w: [80]u64;
+    at: s64 = 0;
+    while at < data.count {
+        for i: 0..15 {
+            p := at + i * 4;
+            w[i] = (cast(u64)data[p] << 24) | (cast(u64)data[p + 1] << 16) | (cast(u64)data[p + 2] << 8) | cast(u64)data[p + 3];
+        }
+        for i: 16..79 { w[i] = Rotate(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1) }
+        a := state.h[0];
+        b := state.h[1];
+        c := state.h[2];
+        d := state.h[3];
+        e := state.h[4];
+        for i: 0..79 {
+            f: u64 = 0;
+            k: u64 = 0;
+            if i < 20 {
+                f = ((c ^ d) & b) ^ d;
+                k = 0x5a827999;
+            } else if i < 40 {
+                f = b ^ c ^ d;
+                k = 0x6ed9eba1;
+            } else if i < 60 {
+                f = (b & c) | ((b | c) & d);
+                k = 0x8f1bbcdc;
+            } else {
+                f = b ^ c ^ d;
+                k = 0xca62c1d6;
+            }
+            next := (Rotate(a, 5) + f + e + k + w[i]) & MASK;
+            e = d;
+            d = c;
+            c = Rotate(b, 30);
+            b = a;
+            a = next;
+        }
+        state.h[0] = (state.h[0] + a) & MASK;
+        state.h[1] = (state.h[1] + b) & MASK;
+        state.h[2] = (state.h[2] + c) & MASK;
+        state.h[3] = (state.h[3] + d) & MASK;
+        state.h[4] = (state.h[4] + e) & MASK;
+        at += 64;
+    }
+}
+
+// Adds data to the message in state. With an empty digest more data will
+// follow; with a digest of DIGEST_LENGTH bytes the message ends here and
+// its digest is written there.
+Add :: (state: *State, data: string, digest: []u8) {
+    if !state.seeded {
+        state.h[0] = 0x67452301;
+        state.h[1] = 0xefcdab89;
+        state.h[2] = 0x98badcfe;
+        state.h[3] = 0x10325476;
+        state.h[4] = 0xc3d2e1f0;
+        state.seeded = true;
+    }
+    rest := data;
+    if state.held > 0 {
+        take := 64 - state.held;
+        if rest.count < take { take = rest.count }
+        for i: 0..take - 1 { state.buffer[state.held + i] = rest[i] }
+        rest = rest[take:];
+        state.held += take;
+        if state.held == 64 {
+            Blocks(state, TextView(state.buffer[:64]));
+            state.length += 64;
+            state.held = 0;
+        }
+    }
+    whole := rest.count - rest.count % 64;
+    if whole > 0 {
+        Blocks(state, rest[:whole]);
+        state.length += cast(u64)whole;
+        rest = rest[whole:];
+    }
+    if state.held == 0 {
+        for i: 0..rest.count - 1 { state.buffer[i] = rest[i] }
+    }
+    if digest.count == 0 {
+        state.held += rest.count;
+        return;
+    }
+    // Pad what is left with 0x80, zeros and the bit count to a whole
+    // number of blocks. held is left as it was.
+    count := ifx state.held > 0 then state.held else rest.count;
+    state.length += cast(u64)count;
+    padded := ifx count < 56 then 56 else 120;
+    for i: count..padded - 1 { state.buffer[i] = 0 }
+    state.buffer[count] = 0x80;
+    bits_high := (state.length >> 29) & MASK;
+    bits_low := (state.length << 3) & MASK;
+    for i: 0..3 {
+        shift := cast(u64)(24 - 8 * i);
+        state.buffer[padded + i] = cast(u8)((bits_high >> shift) & 0xFF);
+        state.buffer[padded + 4 + i] = cast(u8)((bits_low >> shift) & 0xFF);
+    }
+    Blocks(state, TextView(state.buffer[:padded + 8]));
+    state.length += cast(u64)(padded + 8);
+    for i: 0..DIGEST_LENGTH - 1 {
+        shift := cast(u64)(24 - 8 * (i % 4));
+        digest[i] = cast(u8)((state.h[i / 4] >> shift) & 0xFF);
+    }
+}
+
+// The digest of one whole message.
+Digest :: (data: string, digest: []u8) {
+    state: State;
+    Add(*state, data, digest);
+}

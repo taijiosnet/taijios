@@ -2611,7 +2611,6 @@ appl	/man/2/alphabet-intro
 appl	/man/2/arg
 appl	/man/2/asn1
 appl	/man/2/attrdb
-appl	/man/2/bloomfilter
 appl	/man/2/bufio
 appl	/man/2/cfg
 appl	/man/2/complete
@@ -3012,7 +3011,6 @@ appropriately	/man/9/types
 approximate	/man/1/sh-file2chan
 approximate	/man/2/geodesy
 approximate	/man/9/canvas
-approximately	/man/2/bloomfilter
 approximation	/man/1/man
 approximation	/man/3/fs
 aprint	/man/2/sys-print
@@ -3368,7 +3366,6 @@ array	/man/10/print
 array	/man/10/strcat
 array	/man/2/0intro
 array	/man/2/asn1
-array	/man/2/bloomfilter
 array	/man/2/bufio
 array	/man/2/bufio-chanfill
 array	/man/2/complete
@@ -5209,7 +5206,6 @@ bit	/man/10/plan9.ini
 bit	/man/10/readnum
 bit	/man/10/styx
 bit	/man/2/asn1
-bit	/man/2/bloomfilter
 bit	/man/2/crc
 bit	/man/2/daytime
 bit	/man/2/dbm
@@ -5305,7 +5301,6 @@ bits	/man/1/sh-expr
 bits	/man/10/ar
 bits	/man/10/devattach
 bits	/man/2/asn1
-bits	/man/2/bloomfilter
 bits	/man/2/convcs
 bits	/man/2/dis
 bits	/man/2/disks
@@ -5567,10 +5562,6 @@ blocksize	/man/1/wm-misc
 blocksize	/man/1/zeros
 bloggs	/man/4/ftpfs
 blood	/man/1/charon
-bloom	/man/2/bloomfilter
-bloomfilter	/man/2/bloomfilter
-bloomfilter.b	/man/2/bloomfilter
-bloomfilter.m	/man/2/bloomfilter
 blowfish	/man/2/keyring-crypt
 blowfishcbc	/man/2/keyring-crypt
 blowfishsetup	/man/2/keyring-crypt
@@ -6590,7 +6581,6 @@ byte	/man/10/strcat
 byte	/man/10/styx
 byte	/man/10/xalloc
 byte	/man/2/asn1
-byte	/man/2/bloomfilter
 byte	/man/2/bufio
 byte	/man/2/bufio-chanfill
 byte	/man/2/convcs
@@ -7317,7 +7307,6 @@ cds	/man/7/cddb
 ce	/man/10/srclist
 ceases	/man/9/canvas
 ceases	/man/9/text
-ceil	/man/2/bloomfilter
 ceil	/man/2/math-fp
 ceiling	/man/1/calc
 cell	/man/1/tktester
@@ -9183,7 +9172,6 @@ combine	/man/3/ssl
 combine	/man/9/bind
 combined	/man/1/ar
 combined	/man/10/iar
-combined	/man/2/bloomfilter
 combined	/man/2/draw-0intro
 combined	/man/3/vga
 combined	/man/5/0intro
@@ -12013,7 +12001,6 @@ create	/man/10/devattach
 create	/man/10/iar
 create	/man/10/styxserver
 create	/man/2/alphabet-intro
-create	/man/2/bloomfilter
 create	/man/2/bufio
 create	/man/2/dbm
 create	/man/2/draw-0intro
@@ -15015,7 +15002,6 @@ determine	/man/10/9load
 determine	/man/10/mk
 determine	/man/10/odbc
 determine	/man/2/asn1
-determine	/man/2/bloomfilter
 determine	/man/2/dividers
 determine	/man/2/prefab-element
 determine	/man/2/registries
@@ -18130,7 +18116,6 @@ elementary	/man/2/math-0intro
 elementary	/man/2/math-elem
 elementborderwidth	/man/9/scrollbar
 elementwise	/man/5/walk
-elems	/man/2/bloomfilter
 eleven	/man/10/2c
 elgamal	/man/2/keyring-gensk
 elgamal	/man/2/security-0intro
@@ -18146,7 +18131,6 @@ elided	/man/2/xml
 elided	/man/4/acme
 elided	/man/4/logfile
 elif	/man/10/2c
-eliminate	/man/2/bloomfilter
 eliminate	/man/2/draw-0intro
 eliminating	/man/10/error
 elimination	/man/2/math-0intro
@@ -19091,7 +19075,6 @@ epoch2date	/man/2/spki
 eponymous	/man/1/secstore
 eponymously	/man/2/alphabet-intro
 eq	/man/1/sh-expr
-eq	/man/2/bloomfilter
 eq	/man/2/draw-display
 eq	/man/2/draw-point
 eq	/man/2/draw-rect
@@ -19335,7 +19318,6 @@ error	/man/2/alphabet-intro
 error	/man/2/arg
 error	/man/2/asn1
 error	/man/2/attrdb
-error	/man/2/bloomfilter
 error	/man/2/bufio
 error	/man/2/cfg
 error	/man/2/complete
@@ -21135,7 +21117,6 @@ extrapolates	/man/9/text
 ezd	/man/9/canvas
 f.f1.b2	/man/1/tktester
 f.fmenu	/man/1/tktester
-f.x	/man/2/bloomfilter
 fa	/man/6/json
 fa	/man/6/sexprs
 fa310	/man/10/plan9.ini
@@ -21331,7 +21312,6 @@ false	/man/10/acid
 false	/man/10/dmainit
 false	/man/10/sleep
 false	/man/2/asn1
-false	/man/2/bloomfilter
 false	/man/2/draw-display
 false	/man/2/draw-image
 false	/man/2/ip
@@ -22520,7 +22500,6 @@ filter	/man/1/alphabet-main
 filter	/man/1/fs
 filter	/man/1/gzip
 filter	/man/1/sh-alphabet
-filter	/man/2/bloomfilter
 filter	/man/2/filter
 filter	/man/2/filter-deflate
 filter	/man/2/filter-slip
@@ -22539,7 +22518,6 @@ filtered	/man/1/fs
 filtering	/man/1/alphabet-fs
 filtering	/man/2/filter-deflate
 filterpath	/man/2/filter
-filters	/man/2/bloomfilter
 filters	/man/2/filter-deflate
 filters	/man/3/tls
 filters	/man/4/registry
@@ -22932,7 +22910,6 @@ fn	/man/1/yacc
 fn	/man/2/arg
 fn	/man/2/asn1
 fn	/man/2/attrdb
-fn	/man/2/bloomfilter
 fn	/man/2/bufio
 fn	/man/2/bufio-chanfill
 fn	/man/2/cfg
@@ -23560,7 +23537,6 @@ forms	/man/9/menu
 forms	/man/9/pack
 forms	/man/9/scrollbar
 forms	/man/9/text
-formula	/man/2/bloomfilter
 forth	/man/4/factotum
 forth	/man/9/menu
 fortran	/man/2/math-0intro
@@ -24485,7 +24461,6 @@ greater	/man/10/dev
 greater	/man/10/memory
 greater	/man/10/strcat
 greater	/man/10/styx
-greater	/man/2/bloomfilter
 greater	/man/2/draw-0intro
 greater	/man/2/itslib
 greater	/man/2/math-fp
@@ -24846,7 +24821,6 @@ hasexcept	/man/6/dis
 hash	/man/1/alphabet-main
 hash	/man/1/secstore
 hash	/man/1/sum
-hash	/man/2/bloomfilter
 hash	/man/2/dbm
 hash	/man/2/dict
 hash	/man/2/dis
@@ -26399,7 +26373,6 @@ import	/man/1/yacc
 import	/man/10/2l
 import	/man/10/dynld
 import	/man/2/0intro
-import	/man/2/bloomfilter
 import	/man/2/bufio
 import	/man/2/dbm
 import	/man/2/dhcpclient
@@ -26544,7 +26517,6 @@ include	/man/2/0intro
 include	/man/2/arg
 include	/man/2/asn1
 include	/man/2/attrdb
-include	/man/2/bloomfilter
 include	/man/2/bufio
 include	/man/2/bufio-chanfill
 include	/man/2/cfg
@@ -26951,7 +26923,6 @@ independent	/man/10/2c
 independent	/man/10/conf
 independent	/man/10/dev
 independent	/man/10/styx
-independent	/man/2/bloomfilter
 independent	/man/2/draw-display
 independent	/man/2/draw-image
 independent	/man/2/styx
@@ -27453,7 +27424,6 @@ init	/man/2/alphabet-intro
 init	/man/2/arg
 init	/man/2/asn1
 init	/man/2/attrdb
-init	/man/2/bloomfilter
 init	/man/2/bufio-chanfill
 init	/man/2/cfg
 init	/man/2/command
@@ -27571,7 +27541,6 @@ initialise	/man/1/miniterm
 initialise	/man/10/conf
 initialise	/man/10/kbdputc
 initialise	/man/2/alphabet-intro
-initialise	/man/2/bloomfilter
 initialise	/man/2/convcs
 initialise	/man/2/debug
 initialise	/man/2/dialog
@@ -28237,7 +28206,6 @@ int	/man/10/xalloc
 int	/man/2/arg
 int	/man/2/asn1
 int	/man/2/attrdb
-int	/man/2/bloomfilter
 int	/man/2/bufio
 int	/man/2/bufio-chanfill
 int	/man/2/cfg
@@ -30379,7 +30347,6 @@ king	/man/2/spree-cardlib
 king	/man/6/keyboard
 kl	/man/10/2l
 klog	/man/3/cons
-kn	/man/2/bloomfilter
 knamelen	/man/10/devattach
 knight	/man/6/keyboard
 knowing	/man/2/draw-screen
@@ -30812,7 +30779,6 @@ len	/man/1/sh-string
 len	/man/10/dmainit
 len	/man/10/print
 len	/man/10/qio
-len	/man/2/bloomfilter
 len	/man/2/dial
 len	/man/2/keyring-sha1
 len	/man/2/styxflush
@@ -31128,7 +31094,6 @@ lib	/man/10/conf
 lib	/man/2/arg
 lib	/man/2/asn1
 lib	/man/2/attrdb
-lib	/man/2/bloomfilter
 lib	/man/2/bufio
 lib	/man/2/cfg
 lib	/man/2/complete
@@ -32110,7 +32075,6 @@ load	/man/2/0intro
 load	/man/2/arg
 load	/man/2/asn1
 load	/man/2/attrdb
-load	/man/2/bloomfilter
 load	/man/2/bufio
 load	/man/2/bufio-chanfill
 load	/man/2/cfg
@@ -32593,7 +32557,6 @@ logind	/man/8/getauthinfo
 logind	/man/8/logind
 logind	/man/8/svc
 logind.b	/man/8/logind
-logm	/man/2/bloomfilter
 logon	/man/1/emu
 logon	/man/1/logon
 logon	/man/1/toolbar
@@ -32609,7 +32572,6 @@ logs.b	/man/8/applylog
 logwindow	/man/1/logwindow
 logwindow	/man/4/logfile
 logwindow.b	/man/1/logwindow
-log₂	/man/2/bloomfilter
 longer	/man/1/acme
 longer	/man/1/miniterm
 longer	/man/1/prof
@@ -33956,7 +33918,6 @@ member	/man/10/mk
 member	/man/10/styxserver
 member	/man/2/alphabet-intro
 member	/man/2/asn1
-member	/man/2/bloomfilter
 member	/man/2/daytime
 member	/man/2/dial
 member	/man/2/dis
@@ -33996,7 +33957,6 @@ member's	/man/2/spree-allow
 member.id	/man/2/spree
 membername	/man/10/mk
 membernamed	/man/2/spree
-membership	/man/2/bloomfilter
 membership	/man/2/prefab-element
 membership	/man/2/sets
 membership	/man/4/kfs
@@ -34374,7 +34334,6 @@ method	/man/1/diff
 method	/man/1/fs
 method	/man/10/0intro
 method	/man/10/5cv
-method	/man/2/bloomfilter
 method	/man/2/bufio
 method	/man/2/draw-font
 method	/man/2/registries
@@ -34987,7 +34946,6 @@ module	/man/2/alphabet-intro
 module	/man/2/arg
 module	/man/2/asn1
 module	/man/2/attrdb
-module	/man/2/bloomfilter
 module	/man/2/bufio
 module	/man/2/cfg
 module	/man/2/command
@@ -36728,7 +36686,6 @@ nimport	/man/10/dynld
 nine	/man/9/canvas
 ninf	/man/2/math-fp
 nist	/man/8/ai2key
-nk	/man/2/bloomfilter
 nl	/man/2/sh
 nlab	/man/6/dis
 nlines	/man/1/tail
@@ -36950,7 +36907,6 @@ none	/man/1/uuencode
 none	/man/10/plan9.ini
 none	/man/10/rune
 none	/man/10/strcat
-none	/man/2/bloomfilter
 none	/man/2/bufio
 none	/man/2/dbm
 none	/man/2/hash
@@ -39883,7 +39839,6 @@ parameters	/man/10/devattach
 parameters	/man/10/intrenable
 parameters	/man/10/qio
 parameters	/man/10/readnum
-parameters	/man/2/bloomfilter
 parameters	/man/2/bufio
 parameters	/man/2/dhcpclient
 parameters	/man/2/draw-image
@@ -40387,7 +40342,6 @@ path	/man/2/0intro
 path	/man/2/arg
 path	/man/2/asn1
 path	/man/2/attrdb
-path	/man/2/bloomfilter
 path	/man/2/bufio
 path	/man/2/bufio-chanfill
 path	/man/2/cfg
@@ -41895,7 +41849,6 @@ positions	/man/9/listbox
 positions	/man/9/pack
 positions	/man/9/text
 positive	/man/10/print
-positive	/man/2/bloomfilter
 positive	/man/2/draw-image
 positive	/man/2/keyring-ipint
 positive	/man/2/math-fp
@@ -41905,7 +41858,6 @@ positive	/man/9/canvas
 positive	/man/9/entry
 positive	/man/9/listbox
 positive	/man/9/text
-positve	/man/2/bloomfilter
 posix	/man/1/m4
 posix	/man/1/tail
 posix	/man/4/tarfs
@@ -42527,7 +42479,6 @@ print	/man/10/qio
 print	/man/10/styxserver
 print	/man/2/arg
 print	/man/2/asn1
-print	/man/2/bloomfilter
 print	/man/2/command
 print	/man/2/dial
 print	/man/2/draw-0intro
@@ -42772,8 +42723,6 @@ privileges	/man/3/ip
 privileges	/man/5/0intro
 privileges	/man/8/cs
 pro	/man/10/plan9.ini
-probabilistic	/man/2/bloomfilter
-probability	/man/2/bloomfilter
 probe	/man/1/charon
 probe	/man/8/ping
 probed	/man/1/charon
@@ -44267,7 +44216,6 @@ queried	/man/1/sh-alphabet
 queried	/man/3/prog
 queried	/man/9/menu
 queried	/man/9/variable
-queries	/man/2/bloomfilter
 queries	/man/2/styxservers
 queries	/man/4/registry
 queries	/man/7/cddb
@@ -44592,7 +44540,6 @@ range	/man/1/unicode
 range	/man/10/0intro
 range	/man/10/plan9.ini
 range	/man/10/xalloc
-range	/man/2/bloomfilter
 range	/man/2/daytime
 range	/man/2/debug
 range	/man/2/dis
@@ -44659,7 +44606,6 @@ rate	/man/1/acme
 rate	/man/1/auplay
 rate	/man/1/prof
 rate	/man/10/9load
-rate	/man/2/bloomfilter
 rate	/man/3/arch
 rate	/man/3/audio
 rate	/man/3/dbg
@@ -47282,7 +47228,6 @@ representing	/man/10/splhi
 representing	/man/2/alphabet-intro
 representing	/man/2/asn1
 representing	/man/2/attrdb
-representing	/man/2/bloomfilter
 representing	/man/2/debug
 representing	/man/2/dhcpclient
 representing	/man/2/dial
@@ -48341,7 +48286,6 @@ return	/man/2/alphabet-intro
 return	/man/2/arg
 return	/man/2/asn1
 return	/man/2/attrdb
-return	/man/2/bloomfilter
 return	/man/2/bufio
 return	/man/2/bufio-chanfill
 return	/man/2/cfg
@@ -48652,7 +48596,6 @@ returns	/man/10/xalloc
 returns	/man/2/alphabet-intro
 returns	/man/2/asn1
 returns	/man/2/attrdb
-returns	/man/2/bloomfilter
 returns	/man/2/bufio-chanfill
 returns	/man/2/cfg
 returns	/man/2/complete
@@ -51484,7 +51427,6 @@ setproc	/man/10/acid
 setrange	/man/2/spree-cardlib
 setroot	/man/1/alphabet-fs
 setroot	/man/1/fs
-sets.m	/man/2/bloomfilter
 sets.m	/man/2/sets
 sets.m	/man/2/spree
 sets.m	/man/2/spree-cardlib
@@ -53133,7 +53075,6 @@ source	/man/10/styxserver
 source	/man/2/arg
 source	/man/2/asn1
 source	/man/2/attrdb
-source	/man/2/bloomfilter
 source	/man/2/bufio
 source	/man/2/cfg
 source	/man/2/complete
@@ -55245,7 +55186,6 @@ string	/man/2/alphabet-intro
 string	/man/2/arg
 string	/man/2/asn1
 string	/man/2/attrdb
-string	/man/2/bloomfilter
 string	/man/2/bufio
 string	/man/2/cfg
 string	/man/2/command
@@ -56040,7 +55980,6 @@ subsequently	/man/8/svc
 subsequently	/man/9/variable
 subset	/man/1/freq
 subset	/man/10/kproc
-subset	/man/2/bloomfilter
 subset	/man/2/factotum
 subset	/man/2/format
 subset	/man/2/sys-self
@@ -56498,7 +56437,6 @@ support	/man/10/devattach
 support	/man/10/dmainit
 support	/man/10/plan9.ini
 support	/man/2/asn1
-support	/man/2/bloomfilter
 support	/man/2/disks
 support	/man/2/format
 support	/man/2/hash
@@ -56918,7 +56856,6 @@ sys	/man/10/odbc
 sys	/man/10/styx
 sys	/man/2/0intro
 sys	/man/2/arg
-sys	/man/2/bloomfilter
 sys	/man/2/bufio
 sys	/man/2/bufio-chanfill
 sys	/man/2/command
@@ -57786,7 +57723,6 @@ test	/man/1/tktester
 test	/man/10/plan9.ini
 test	/man/10/styx
 test	/man/2/asn1
-test	/man/2/bloomfilter
 test	/man/2/draw-example
 test	/man/2/itslib
 test	/man/3/kprof
@@ -60241,7 +60177,6 @@ union	/man/10/2c
 union	/man/10/c2l
 union	/man/10/styx
 union	/man/2/alphabet-intro
-union	/man/2/bloomfilter
 union	/man/2/readdir
 union	/man/2/sets
 union	/man/2/sys-0intro
@@ -62202,7 +62137,6 @@ vctl	/man/2/volume
 vd	/man/1/vacget
 vdpt	/man/1/vacget
 vector	/man/10/intrenable
-vector	/man/2/bloomfilter
 vector	/man/2/keyring-crypt
 vector	/man/2/math-linalg
 vector	/man/2/prefab-element
@@ -62968,7 +62902,6 @@ wide	/man/1/sh-string
 wide	/man/1/wm-sh
 wide	/man/1/xd
 wide	/man/10/error
-wide	/man/2/bloomfilter
 wide	/man/2/keyring-0intro
 wide	/man/2/prefab-element
 wide	/man/2/w3c-css

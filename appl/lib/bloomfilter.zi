@@ -1,0 +1,51 @@
+// Bloom filters as the Limbo Bloomfilter module made them: k bit numbers
+// drawn from SHA-1 digests of the data are set in a filter of 2^logm
+// bits. Data is probably in a collection when every bit of its filter is
+// set in the union of the collection's filters.
+#import "std/vec";
+using Sha1 :: #import "sha1";
+
+// n bits for data: the digests of the data followed by a two-byte counter,
+// taken one after another from the same SHA-1 state.
+HashBits :: (data: string, n: s64, bits: *Vec(u8)) {
+    state: Sha1.State;
+    none: [0]u8;
+    Sha1.Add(*state, data, none[:]);
+    counter: s64 = 0;
+    while bits.count * 8 < n {
+        extra: [2]u8;
+        extra[0] = cast(u8)(counter & 0xFF);
+        extra[1] = cast(u8)((counter >> 8) & 0xFF);
+        counter += 1;
+        digest: [20]u8;
+        Sha1.Add(*state, TextView(extra[:]), digest[:]);
+        BuilderAppend(<<bits, TextView(digest[:]));
+    }
+}
+
+// Replaces filter with the 2^logm-bit filter of data, bit b being bit
+// b mod 8 of byte b / 8. logm is from 3 to 30; false when it is not.
+Filter :: (data: string, logm: s64, k: s64, filter: *Vec(u8)) -> bool {
+    VecClear(<<filter);
+    if logm < 3 || logm > 30 { return false }
+    built: Vec(u8);
+    for 1..(1 << logm) / 8 { VecPush(built, 0) }
+    bits: Vec(u8);
+    HashBits(data, logm * k, *bits);
+    used: s64 = 0;
+    for 1..k {
+        value: s64 = 0;
+        for i: 0..logm - 1 {
+            bit := used + i;
+            if (bits[bit >> 3] & cast(u8)(1 << (bit & 7))) != 0 { value |= 1 << i }
+        }
+        used += logm;
+        built[value >> 3] |= cast(u8)(1 << (value & 7));
+    }
+    VecSwap(<<filter, built);
+    return true;
+}
+
+Holds :: (filter: []u8, bit: s64) -> bool {
+    return (filter[bit >> 3] & cast(u8)(1 << (bit & 7))) != 0;
+}
