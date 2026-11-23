@@ -1,0 +1,66 @@
+// File name completion, as the Limbo Complete module did it from Plan 9's
+// libcomplete. Given the entries of a directory and the start of a name,
+// it finds what can be added to the name and which entries it could mean.
+// The caller reads the directory and gives its entries sorted by name.
+#import "std/vec";
+
+Entry :: struct {
+    name: string;
+    directory: bool;
+}
+
+Completion :: struct {
+    advance: bool;    // whether text adds something to the name
+    complete: bool;   // whether the name now means one entry
+    text: Text;       // what to add: more of the name, then " " after a
+                      // whole file name or "/" after a whole directory name
+    matches: s64;     // how many entries start with the name
+    names: Vec(Text); // those entries, or every entry when none does; a
+                      // directory's name ends in "/"
+}
+
+// The length of the longest start a and b share, at most limit bytes and
+// never part of a UTF-8 sequence.
+CommonLength :: (a: string, b: string, limit: s64) -> s64 {
+    n: s64 = 0;
+    while n < limit && n < a.count && n < b.count && a[n] == b[n] { n += 1 }
+    while n > 0 && n < a.count && (a[n] & 0xC0) == 0x80 { n -= 1 }
+    return n;
+}
+
+// Completes name among entries into result. The answer is "" or why the
+// name is refused: it cannot hold a slash.
+Complete :: (entries: []Entry, name: string, result: *Completion) -> string {
+    result.advance = false;
+    result.complete = false;
+    result.matches = 0;
+    VecClear(result.text.bytes);
+    VecClear(result.names);
+    for name { if it == #char "/" { return "slash character in name argument to complete()" } }
+    first := -1;
+    common: s64 = 0;
+    for entries {
+        if it.name.count < name.count || it.name[:name.count] != name { continue }
+        if first < 0 {
+            first = it_index;
+            common = it.name.count;
+        } else {
+            common = CommonLength(entries[first].name, it.name, common);
+        }
+        result.matches += 1;
+    }
+    if result.matches > 0 {
+        result.complete = result.matches == 1;
+        result.advance = result.complete || common > name.count;
+        BuilderAppend(result.text.bytes, entries[first].name[name.count:common]);
+        if result.complete { VecPush(result.text.bytes, ifx entries[first].directory then #char "/" else #char " ") }
+    }
+    for entries {
+        if result.matches > 0 && (it.name.count < name.count || it.name[:name.count] != name) { continue }
+        listed: Text;
+        BuilderAppend(listed.bytes, it.name);
+        if it.directory { VecPush(listed.bytes, #char "/") }
+        VecPush(result.names, listed);
+    }
+    return "";
+}

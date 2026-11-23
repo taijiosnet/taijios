@@ -1388,7 +1388,6 @@ adt	/man/2/asn1
 adt	/man/2/attrdb
 adt	/man/2/bufio
 adt	/man/2/cfg
-adt	/man/2/complete
 adt	/man/2/crc
 adt	/man/2/daytime
 adt	/man/2/dbm
@@ -1473,7 +1472,6 @@ adts	/man/2/w3c-css
 adts	/man/6/sbl
 adts	/man/8/httpd
 adv7176	/man/3/vid
-advance	/man/2/complete
 advance	/man/2/sys-0intro
 advanced	/man/1/deb
 advanced	/man/10/plan9.ini
@@ -2226,7 +2224,6 @@ analyse	/man/1/yacc
 analyse	/man/3/kprof
 analyser	/man/1/yacc
 analysis	/man/1/blur
-analysis	/man/2/complete
 analysis	/man/2/math-0intro
 aname	/man/1/alphabet-main
 aname	/man/1/listen
@@ -2438,7 +2435,6 @@ appended	/man/1/tee
 appended	/man/1/wm-sh
 appended	/man/10/9load
 appended	/man/10/c2l
-appended	/man/2/complete
 appended	/man/2/security-0intro
 appended	/man/2/tk
 appended	/man/3/ssl
@@ -2613,7 +2609,6 @@ appl	/man/2/asn1
 appl	/man/2/attrdb
 appl	/man/2/bufio
 appl	/man/2/cfg
-appl	/man/2/complete
 appl	/man/2/convcs
 appl	/man/2/crc
 appl	/man/2/daytime
@@ -3368,7 +3363,6 @@ array	/man/2/0intro
 array	/man/2/asn1
 array	/man/2/bufio
 array	/man/2/bufio-chanfill
-array	/man/2/complete
 array	/man/2/convcs
 array	/man/2/crc
 array	/man/2/dbm
@@ -5383,7 +5377,6 @@ blank	/man/10/conf
 blank	/man/10/mk
 blank	/man/10/parsecmd
 blank	/man/10/readnum
-blank	/man/2/complete
 blank	/man/2/string
 blank	/man/3/cons
 blank	/man/3/draw
@@ -6933,7 +6926,6 @@ caller	/man/10/qio
 caller	/man/10/qlock
 caller	/man/10/sleep
 caller	/man/2/command
-caller	/man/2/complete
 caller	/man/2/dial
 caller	/man/2/factotum
 caller	/man/2/ir
@@ -7761,7 +7753,6 @@ character	/man/2/alphabet-intro
 character	/man/2/asn1
 character	/man/2/bufio
 character	/man/2/cfg
-character	/man/2/complete
 character	/man/2/convcs
 character	/man/2/debug
 character	/man/2/draw-0intro
@@ -9544,7 +9535,6 @@ complete	/man/10/odbc
 complete	/man/10/print
 complete	/man/10/styx
 complete	/man/2/asn1
-complete	/man/2/complete
 complete	/man/2/registries
 complete	/man/2/spree-cardlib
 complete	/man/2/styx
@@ -9560,8 +9550,6 @@ complete	/man/5/attach
 complete	/man/6/sexprs
 complete	/man/9/canvas
 complete	/man/9/text
-complete.b	/man/2/complete
-complete.m	/man/2/complete
 completed	/man/1/alphabet-main
 completed	/man/1/blur
 completed	/man/1/sh
@@ -9600,7 +9588,6 @@ completion	/man/1/cprof
 completion	/man/1/mprof
 completion	/man/1/prof
 completion	/man/1/sh
-completion	/man/2/complete
 completion	/man/8/applylog
 completion	/man/8/register
 complex	/man/1/acme
@@ -15559,7 +15546,6 @@ diagnostic	/man/1/tsort
 diagnostic	/man/1/yacc
 diagnostic	/man/2/alphabet-intro
 diagnostic	/man/2/attrdb
-diagnostic	/man/2/complete
 diagnostic	/man/2/dbm
 diagnostic	/man/2/debug
 diagnostic	/man/2/dhcpclient
@@ -15625,7 +15611,6 @@ diagnostics	/man/10/ref
 diagnostics	/man/10/sleep
 diagnostics	/man/2/alphabet-intro
 diagnostics	/man/2/bufio
-diagnostics	/man/2/complete
 diagnostics	/man/2/dbm
 diagnostics	/man/2/dial
 diagnostics	/man/2/diskblocks
@@ -15930,7 +15915,6 @@ dir	/man/10/dev
 dir	/man/10/devattach
 dir	/man/10/styx
 dir	/man/10/styxserver
-dir	/man/2/complete
 dir	/man/2/dbm
 dir	/man/2/debug
 dir	/man/2/dial
@@ -16226,7 +16210,6 @@ directory	/man/10/odbc
 directory	/man/10/srclist
 directory	/man/10/styx
 directory	/man/10/styxserver
-directory	/man/2/complete
 directory	/man/2/dbm
 directory	/man/2/debug
 directory	/man/2/dhcpclient
@@ -18178,7 +18161,6 @@ embedded	/man/9/text
 embedded	/man/9/types
 embodied	/man/4/factotum
 emboldened	/man/1/brutus
-embryonic	/man/2/complete
 emerge	/man/3/tinyfs
 emitted	/man/1/yacc
 employ	/man/1/acme
@@ -19228,7 +19210,6 @@ err	/man/1/yacc
 err	/man/10/dynld
 err	/man/2/asn1
 err	/man/2/attrdb
-err	/man/2/complete
 err	/man/2/debug
 err	/man/2/dhcpclient
 err	/man/2/format
@@ -19320,7 +19301,6 @@ error	/man/2/asn1
 error	/man/2/attrdb
 error	/man/2/bufio
 error	/man/2/cfg
-error	/man/2/complete
 error	/man/2/convcs
 error	/man/2/dbm
 error	/man/2/debug
@@ -20962,14 +20942,12 @@ extend	/man/1/calc
 extend	/man/1/disdep
 extend	/man/1/m4
 extend	/man/10/eve
-extend	/man/2/complete
 extend	/man/2/dhcpclient
 extend	/man/4/factotum
 extended	/man/1/0intro
 extended	/man/1/acme
 extended	/man/1/limbo
 extended	/man/10/9load
-extended	/man/2/complete
 extended	/man/2/disks
 extended	/man/2/spki
 extended	/man/2/w3c-css
@@ -20998,7 +20976,6 @@ extension	/man/1/idea
 extension	/man/1/mash
 extension	/man/10/2c
 extension	/man/10/a.out
-extension	/man/2/complete
 extension	/man/2/spki
 extension	/man/2/spree
 extension	/man/2/tabs
@@ -21817,7 +21794,6 @@ file	/man/2/bufio
 file	/man/2/bufio-chanfill
 file	/man/2/cfg
 file	/man/2/command
-file	/man/2/complete
 file	/man/2/convcs
 file	/man/2/crc
 file	/man/2/daytime
@@ -22119,7 +22095,6 @@ filename	/man/1/uuencode
 filename	/man/1/wm-misc
 filename	/man/2/attrdb
 filename	/man/2/bufio
-filename	/man/2/complete
 filename	/man/2/debug
 filename	/man/2/filter-deflate
 filename	/man/2/keyring-auth
@@ -22264,7 +22239,6 @@ files	/man/2/0intro
 files	/man/2/alphabet-intro
 files	/man/2/attrdb
 files	/man/2/bufio
-files	/man/2/complete
 files	/man/2/convcs
 files	/man/2/daytime
 files	/man/2/dbm
@@ -22460,7 +22434,6 @@ fillbezspline	/man/2/draw-image
 fillbezsplineop	/man/2/draw-image
 filled	/man/1/charon
 filled	/man/10/xalloc
-filled	/man/2/complete
 filled	/man/2/draw-image
 filled	/man/2/prefab-element
 filled	/man/2/security-random
@@ -22718,7 +22691,6 @@ flag	/man/10/print
 flag	/man/10/splhi
 flag	/man/2/alphabet-intro
 flag	/man/2/asn1
-flag	/man/2/complete
 flag	/man/2/debug
 flag	/man/2/dhcpclient
 flag	/man/2/draw-image
@@ -22914,7 +22886,6 @@ fn	/man/2/bufio
 fn	/man/2/bufio-chanfill
 fn	/man/2/cfg
 fn	/man/2/command
-fn	/man/2/complete
 fn	/man/2/convcs
 fn	/man/2/crc
 fn	/man/2/daytime
@@ -23553,7 +23524,6 @@ forward	/man/1/dd
 forward	/man/1/ebook
 forward	/man/1/mux
 forward	/man/1/wm-misc
-forward	/man/2/complete
 forward	/man/2/debug
 forward	/man/2/ir
 forward	/man/2/stringinttab
@@ -23820,7 +23790,6 @@ full	/man/10/qio
 full	/man/10/rune
 full	/man/10/styx
 full	/man/2/asn1
-full	/man/2/complete
 full	/man/2/debug
 full	/man/2/dhcpclient
 full	/man/2/dial
@@ -25800,7 +25769,6 @@ identifies	/man/10/devattach
 identifies	/man/10/mk
 identifies	/man/10/plan9.ini
 identifies	/man/2/asn1
-identifies	/man/2/complete
 identifies	/man/2/draw-font
 identifies	/man/2/factotum
 identifies	/man/2/palmfile
@@ -26311,7 +26279,6 @@ implements	/man/1/sh
 implements	/man/1/sh-alphabet
 implements	/man/1/sh-file2chan
 implements	/man/1/sh-string
-implements	/man/2/complete
 implements	/man/2/debug
 implements	/man/2/dhcpclient
 implements	/man/2/filter-deflate
@@ -26521,7 +26488,6 @@ include	/man/2/bufio
 include	/man/2/bufio-chanfill
 include	/man/2/cfg
 include	/man/2/command
-include	/man/2/complete
 include	/man/2/convcs
 include	/man/2/crc
 include	/man/2/daytime
@@ -27427,7 +27393,6 @@ init	/man/2/attrdb
 init	/man/2/bufio-chanfill
 init	/man/2/cfg
 init	/man/2/command
-init	/man/2/complete
 init	/man/2/convcs
 init	/man/2/crc
 init	/man/2/dbm
@@ -28210,7 +28175,6 @@ int	/man/2/bufio
 int	/man/2/bufio-chanfill
 int	/man/2/cfg
 int	/man/2/command
-int	/man/2/complete
 int	/man/2/convcs
 int	/man/2/crc
 int	/man/2/daytime
@@ -31096,7 +31060,6 @@ lib	/man/2/asn1
 lib	/man/2/attrdb
 lib	/man/2/bufio
 lib	/man/2/cfg
-lib	/man/2/complete
 lib	/man/2/convcs
 lib	/man/2/crc
 lib	/man/2/daytime
@@ -32079,7 +32042,6 @@ load	/man/2/bufio
 load	/man/2/bufio-chanfill
 load	/man/2/cfg
 load	/man/2/command
-load	/man/2/complete
 load	/man/2/convcs
 load	/man/2/crc
 load	/man/2/daytime
@@ -33523,7 +33485,6 @@ match	/man/10/dynld
 match	/man/10/mk
 match	/man/10/plan9.ini
 match	/man/2/asn1
-match	/man/2/complete
 match	/man/2/filepat
 match	/man/2/filter
 match	/man/2/keyring-0intro
@@ -33556,7 +33517,6 @@ matched	/man/1/mk
 matched	/man/1/sh
 matched	/man/1/sh-regex
 matched	/man/10/mk
-matched	/man/2/complete
 matched	/man/2/keyring-0intro
 matched	/man/2/keyset
 matched	/man/2/regex
@@ -34949,7 +34909,6 @@ module	/man/2/attrdb
 module	/man/2/bufio
 module	/man/2/cfg
 module	/man/2/command
-module	/man/2/complete
 module	/man/2/convcs
 module	/man/2/crc
 module	/man/2/dbm
@@ -35706,7 +35665,6 @@ names	/man/2/0intro
 names	/man/2/arg
 names	/man/2/cfg
 names	/man/2/command
-names	/man/2/complete
 names	/man/2/convcs
 names	/man/2/dhcpclient
 names	/man/2/dial
@@ -36575,7 +36533,6 @@ nil	/man/2/attrdb
 nil	/man/2/bufio
 nil	/man/2/cfg
 nil	/man/2/command
-nil	/man/2/complete
 nil	/man/2/convcs
 nil	/man/2/daytime
 nil	/man/2/dbm
@@ -36690,7 +36647,6 @@ nl	/man/2/sh
 nlab	/man/6/dis
 nlines	/man/1/tail
 nm	/man/10/inm
-nmatch	/man/2/complete
 nmembers	/man/2/spree-cardlib
 nname	/man/10/dev
 nname	/man/10/devattach
@@ -38169,7 +38125,6 @@ operation	/man/10/dmainit
 operation	/man/10/plan9.ini
 operation	/man/10/qio
 operation	/man/10/styxserver
-operation	/man/2/complete
 operation	/man/2/dbm
 operation	/man/2/dhcpclient
 operation	/man/2/dis
@@ -40346,7 +40301,6 @@ path	/man/2/bufio
 path	/man/2/bufio-chanfill
 path	/man/2/cfg
 path	/man/2/command
-path	/man/2/complete
 path	/man/2/convcs
 path	/man/2/crc
 path	/man/2/daytime
@@ -41267,7 +41221,6 @@ plain	/man/1/cp
 plain	/man/1/man
 plain	/man/1/wish
 plain	/man/10/print
-plain	/man/2/complete
 plain	/man/2/disks
 plain	/man/2/keyring-ipint
 plain	/man/2/rfc822
@@ -42087,7 +42040,6 @@ prefix	/man/10/panic
 prefix	/man/2/0intro
 prefix	/man/2/alphabet-intro
 prefix	/man/2/asn1
-prefix	/man/2/complete
 prefix	/man/2/disks
 prefix	/man/2/ip
 prefix	/man/2/prof
@@ -43285,7 +43237,6 @@ programs	/man/9/0intro
 programs	/man/9/text
 progress	/man/1/charon
 progress	/man/1/webgrab
-progress	/man/2/complete
 progress	/man/2/tftp
 progresses	/man/1/charon
 projecting	/man/9/canvas
@@ -45801,7 +45752,6 @@ ref	/man/2/bufio
 ref	/man/2/bufio-chanfill
 ref	/man/2/cfg
 ref	/man/2/command
-ref	/man/2/complete
 ref	/man/2/crc
 ref	/man/2/daytime
 ref	/man/2/dbm
@@ -45970,7 +45920,6 @@ reference	/man/2/alphabet-intro
 reference	/man/2/asn1
 reference	/man/2/attrdb
 reference	/man/2/bufio
-reference	/man/2/complete
 reference	/man/2/convcs
 reference	/man/2/daytime
 reference	/man/2/dbm
@@ -47103,7 +47052,6 @@ reports	/man/1/time
 reports	/man/10/mk
 reports	/man/10/styx
 reports	/man/2/alphabet-intro
-reports	/man/2/complete
 reports	/man/3/cons
 reports	/man/4/iostats
 reports	/man/5/read
@@ -47307,7 +47255,6 @@ represents	/man/10/qlock
 represents	/man/10/styxserver
 represents	/man/2/asn1
 represents	/man/2/attrdb
-represents	/man/2/complete
 represents	/man/2/convcs
 represents	/man/2/debug
 represents	/man/2/dis
@@ -48088,7 +48035,6 @@ resulting	/man/2/0intro
 resulting	/man/2/alphabet-intro
 resulting	/man/2/asn1
 resulting	/man/2/bufio
-resulting	/man/2/complete
 resulting	/man/2/dial
 resulting	/man/2/diskblocks
 resulting	/man/2/disks
@@ -48290,7 +48236,6 @@ return	/man/2/bufio
 return	/man/2/bufio-chanfill
 return	/man/2/cfg
 return	/man/2/command
-return	/man/2/complete
 return	/man/2/convcs
 return	/man/2/dbm
 return	/man/2/debug
@@ -48598,7 +48543,6 @@ returns	/man/2/asn1
 returns	/man/2/attrdb
 returns	/man/2/bufio-chanfill
 returns	/man/2/cfg
-returns	/man/2/complete
 returns	/man/2/convcs
 returns	/man/2/crc
 returns	/man/2/daytime
@@ -52588,7 +52532,6 @@ slash	/man/10/2c
 slash	/man/10/a.out
 slash	/man/10/c2l
 slash	/man/10/mk
-slash	/man/2/complete
 slash	/man/2/palmfile
 slash	/man/2/sys-0intro
 slash	/man/3/pnp
@@ -53077,7 +53020,6 @@ source	/man/2/asn1
 source	/man/2/attrdb
 source	/man/2/bufio
 source	/man/2/cfg
-source	/man/2/complete
 source	/man/2/convcs
 source	/man/2/crc
 source	/man/2/daytime
@@ -55016,7 +54958,6 @@ str	/man/10/readnum
 str	/man/10/rune
 str	/man/10/strcat
 str	/man/10/styxserver
-str	/man/2/complete
 str	/man/2/convcs
 str	/man/2/dis
 str	/man/2/draw-font
@@ -55189,7 +55130,6 @@ string	/man/2/attrdb
 string	/man/2/bufio
 string	/man/2/cfg
 string	/man/2/command
-string	/man/2/complete
 string	/man/2/convcs
 string	/man/2/daytime
 string	/man/2/dbm
@@ -56268,7 +56208,6 @@ suffixclass	/man/2/rfc822
 suffixed	/man/1/du
 suffixed	/man/1/tiny
 suffixed	/man/10/atoi
-suffixed	/man/2/complete
 suffixes	/man/8/httpd
 suggest	/man/1/sh
 suggest	/man/2/dhcpclient
@@ -59260,7 +59199,6 @@ tuple	/man/2/asn1
 tuple	/man/2/attrdb
 tuple	/man/2/bufio-chanfill
 tuple	/man/2/cfg
-tuple	/man/2/complete
 tuple	/man/2/convcs
 tuple	/man/2/debug
 tuple	/man/2/dhcpclient
@@ -59898,7 +59836,6 @@ unaffected	/man/5/walk
 unaffected	/man/9/canvas
 unallocated	/man/9/pack
 unaltered	/man/1/wm-sh
-unambiguously	/man/2/complete
 uname	/man/1/listen
 uname	/man/10/styx
 uname	/man/10/styxserver
@@ -60230,7 +60167,6 @@ unique	/man/8/mangaload
 unique	/man/8/prep
 unique	/man/9/canvas
 uniquely	/man/10/intrenable
-uniquely	/man/2/complete
 uniquely	/man/2/registries
 uniquely	/man/2/security-0intro
 uniquely	/man/2/styxservers
@@ -60504,7 +60440,6 @@ unread	/man/1/wm-sh
 unread	/man/10/allocb
 unread	/man/10/qio
 unread	/man/8/collabsrv
-unreadable	/man/2/complete
 unreadable	/man/2/security-0intro
 unrecognised	/man/2/w3c-css
 unrecognized	/man/10/atoi
@@ -61556,7 +61491,6 @@ value	/man/2/asn1
 value	/man/2/attrdb
 value	/man/2/bufio
 value	/man/2/cfg
-value	/man/2/complete
 value	/man/2/convcs
 value	/man/2/crc
 value	/man/2/daytime

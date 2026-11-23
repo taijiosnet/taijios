@@ -1,0 +1,33 @@
+// The cases of the file name completion test: each one printed as the
+// Limbo probe printed it for a directory with these entries, for
+// comparison with complete.limbo.txt.
+using Complete :: #import "complete"
+
+Flag :: (value: bool) -> s64 { return ifx value then 1 else 0 }
+
+Lines :: (out: *Vec(u8)) {
+    names := string.["albums", "alpha", "alpine", "be", "beta", "bin", "dèlta2", "délta", "gamma.txt", "two words", "zeta"]
+    entries: Vec(Complete.Entry)
+    for names {
+        entry: Complete.Entry
+        entry.name = it
+        entry.directory = it == "albums" || it == "bin" || it == "zeta"
+        VecPush(entries, entry)
+    }
+    queries := string.["", "a", "al", "alp", "alph", "alpha", "alphas", "b", "be", "bet", "g", "x", "z", "ze", "zeta", "bin",
+        "d", "dé", "dè", "albums", "t", "two w", "a/b", "/"]
+    for queries {
+        completion: Complete.Completion
+        error := Complete.Complete(entries[:], it, *completion)
+        if error.count > 0 { BuilderPrint(out, "complete % nil <%>\n", it_index, error); continue }
+        BuilderPrint(out, "complete % advance=% complete=% str=<%> nmatch=% err=<>:", it_index, Flag(completion.advance),
+            Flag(completion.complete), TextView(completion.text), completion.matches)
+        for i: 0..completion.names.count - 1 { BuilderPrint(out, " <%>", TextView(completion.names[i])) }
+        BuilderAppend(<<out, "\n")
+    }
+    // An empty directory has nothing to complete or list.
+    none: Vec(Complete.Entry)
+    completion: Complete.Completion
+    unused Complete.Complete(none[:], "a", *completion)
+    BuilderPrint(out, "empty % <>\n", Flag(completion.matches == 0 && completion.names.count == 0))
+}

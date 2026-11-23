@@ -1,0 +1,25 @@
+complete 0 advance=0 complete=0 str=<> nmatch=11 err=<>: <albums/> <alpha> <alpine> <be> <beta> <bin/> <dèlta2> <délta> <gamma.txt> <two words> <zeta/>
+complete 1 advance=1 complete=0 str=<l> nmatch=3 err=<>: <albums/> <alpha> <alpine>
+complete 2 advance=0 complete=0 str=<> nmatch=3 err=<>: <albums/> <alpha> <alpine>
+complete 3 advance=0 complete=0 str=<> nmatch=2 err=<>: <alpha> <alpine>
+complete 4 advance=1 complete=1 str=<a > nmatch=1 err=<>: <alpha>
+complete 5 advance=1 complete=1 str=< > nmatch=1 err=<>: <alpha>
+complete 6 advance=0 complete=0 str=<> nmatch=0 err=<>: <albums/> <alpha> <alpine> <be> <beta> <bin/> <dèlta2> <délta> <gamma.txt> <two words> <zeta/>
+complete 7 advance=0 complete=0 str=<> nmatch=3 err=<>: <be> <beta> <bin/>
+complete 8 advance=0 complete=0 str=<> nmatch=2 err=<>: <be> <beta>
+complete 9 advance=1 complete=1 str=<a > nmatch=1 err=<>: <beta>
+complete 10 advance=1 complete=1 str=<amma.txt > nmatch=1 err=<>: <gamma.txt>
+complete 11 advance=0 complete=0 str=<> nmatch=0 err=<>: <albums/> <alpha> <alpine> <be> <beta> <bin/> <dèlta2> <délta> <gamma.txt> <two words> <zeta/>
+complete 12 advance=1 complete=1 str=<eta/> nmatch=1 err=<>: <zeta/>
+complete 13 advance=1 complete=1 str=<ta/> nmatch=1 err=<>: <zeta/>
+complete 14 advance=1 complete=1 str=</> nmatch=1 err=<>: <zeta/>
+complete 15 advance=1 complete=1 str=</> nmatch=1 err=<>: <bin/>
+complete 16 advance=0 complete=0 str=<> nmatch=2 err=<>: <dèlta2> <délta>
+complete 17 advance=1 complete=1 str=<lta > nmatch=1 err=<>: <délta>
+complete 18 advance=1 complete=1 str=<lta2 > nmatch=1 err=<>: <dèlta2>
+complete 19 advance=1 complete=1 str=</> nmatch=1 err=<>: <albums/>
+complete 20 advance=1 complete=1 str=<wo words > nmatch=1 err=<>: <two words>
+complete 21 advance=1 complete=1 str=<ords > nmatch=1 err=<>: <two words>
+complete 22 nil <slash character in name argument to complete()>
+complete 23 nil <slash character in name argument to complete()>
+empty 1 <>

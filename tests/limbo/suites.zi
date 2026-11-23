@@ -2,20 +2,22 @@
 // NAME.limbo.txt of the lines the Limbo module printed, and a cases
 // module that prints the same lines from the Ziran library.
 using Bloom :: #import "bloomfilter_cases"
+using Complete :: #import "complete_cases"
 using Csv :: #import "csv_cases"
 using Rabin :: #import "rabin_cases"
 using Uris :: #import "uris_cases"
 using Pointers :: #import "xpointers_cases"
 using Golden :: #import "golden"
 
-NAMES: [5]string = .["bloomfilter", "csv", "rabin", "uris", "xpointers"];
+NAMES: [6]string = .["bloomfilter", "complete", "csv", "rabin", "uris", "xpointers"];
 
 Lines :: (suite: s64, out: *Vec(u8)) {
     if suite == 0 { Bloom.Lines(out) }
-    if suite == 1 { Csv.Lines(out) }
-    if suite == 2 { Rabin.Lines(out) }
-    if suite == 3 { Uris.Lines(out) }
-    if suite == 4 { Pointers.Lines(out) }
+    if suite == 1 { Complete.Lines(out) }
+    if suite == 2 { Csv.Lines(out) }
+    if suite == 3 { Rabin.Lines(out) }
+    if suite == 4 { Uris.Lines(out) }
+    if suite == 5 { Pointers.Lines(out) }
 }
 
 // Appends "DIR/NAME.limbo.txt", the file a suite is compared with.
