@@ -1,0 +1,57 @@
+// Stamp input lines with the time they arrived, replacing the Limbo timestamp.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Files :: #import "taijios_files";
+using Cli :: #import "zx_cli";
+using Lines :: #import "zx_lines";
+
+// Milliseconds since the epoch from /dev/time, as Limbo pread read it.
+Now :: () -> s64 {
+    time: [32]u8;
+    size := Files.ReadBytesAt("/dev/time", 0, time[:]);
+    if size <= 0 { return 0; }
+    micros, used := IntegerPrefix(TextView(time[:size]));
+    if used <= 0 { return 0; }
+    return micros / 1000;
+}
+
+// %.10bd: ten digits, zero padded.
+Elapsed :: (out: *Vec(u8), value: s64) {
+    digits: [24]u8;
+    number := FormatInteger(value, digits[:]);
+    for i: number.count..9 { unused BuilderAppend(<<out, "0"); }
+    unused BuilderAppend(<<out, number);
+}
+
+#program_export
+main :: () -> s32 {
+    prefix: Vec(u8);
+    if Args.OperandCount() > 0 {
+        unused BuilderAppend(prefix, Args.Operand(0));
+        unused BuilderAppend(prefix, " ");
+    }
+    note := BuilderFinish(prefix);
+    started := Now();
+    first: Vec(u8);
+    Elapsed(*first, Now() - started);
+    unused BuilderAppend(first, " ");
+    unused BuilderAppend(first, note);
+    unused BuilderAppend(first, "start ");
+    digits: [24]u8;
+    unused BuilderAppend(first, FormatInteger(started, digits[:]));
+    unused BuilderAppend(first, "\n");
+    unused Cli.WriteAll(1, BuilderFinish(first));
+    reader: Lines.LineReader;
+    text: Vec(u8);
+    while Lines.ReadLine(*reader, *text) {
+        line: Vec(u8);
+        Elapsed(*line, Now() - started);
+        unused BuilderAppend(line, " ");
+        unused BuilderAppend(line, note);
+        unused BuilderAppend(line, TextView(text[:]));
+        unused Cli.WriteAll(1, BuilderFinish(line));
+    }
+    return 0;
+}

@@ -26,7 +26,7 @@ WORK :: "build/tests/commands-m-z";
 ALPHA :: "alpha\nbeta\nbeta\ncafé κ\n";
 WORDS :: "one two  three\nfour\tfive\n";
 
-cases: [64]Case = Case.[
+cases: [115]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -95,6 +95,65 @@ cases: [64]Case = Case.[
     .{tool = "sum", args = "empty words bin", out = "2aa280dc      0 empty\n652bf7c4     25 words\n16ad4d37  10240 bin\n"},
     .{tool = "sum", args = "-", status = "error", err = "sum: cannot get status of -: '-' file does not exist\n"},
     .{tool = "sum", args = "a.txt a.txt", out = "78465aa6     25 a.txt\n78465aa6     25 a.txt\n"},
+    // zeros: one block of a byte value, or one random block, written n times.
+    .{tool = "zeros", args = "-v 41 4 2", out = "AAAAAAAA"},
+    .{tool = "zeros", args = "-v 41", out = "A"},
+    .{args = "{ zeros 4 2 | wc -c }", out = "      8\n"},
+    .{args = "{ zeros 4 2 3 | wc -c }", out = "      8\n"},
+    .{args = "{ zeros 10x 2 | wc -c }", out = "     20\n"},
+    .{args = "{ zeros -v 0x7f 2 1 | wc -c }", out = "      2\n"},
+    .{args = "{ zeros -v 41 8 1 | strings }", out = "       0: AAAAAAAA\n"},
+    .{args = "{ zeros -v 0x7f 8 1 | strings }"},
+    .{args = "{ zeros -v 300 8 1 | strings }"},
+    .{args = "{ zeros -v zz 8 1 | strings }"},
+    .{tool = "zeros", args = "0", status = "usage", err = "usage: zeros [-r] [-v value] blocksize [number]\n"},
+    .{tool = "zeros", args = "4 0", status = "usage", err = "usage: zeros [-r] [-v value] blocksize [number]\n"},
+    .{tool = "zeros", args = "abc", status = "usage", err = "usage: zeros [-r] [-v value] blocksize [number]\n"},
+    .{tool = "zeros", args = "4 abc", status = "usage", err = "usage: zeros [-r] [-v value] blocksize [number]\n"},
+    .{tool = "zeros", args = "-x 4 2", status = "unknown option (x)"},
+    .{args = "{ zeros -r 4 2 > r1; sum r1 | sed 's/^[0-9a-f]* /CRC /' }", out = "CRC      8 r1\n"},
+    // One random block written twice: both halves share one checksum.
+    .{args = "{ zeros -r 32 2 > r2; read -o 0 32 < r2 > p1; read -o 32 32 < r2 > p2; sum p1 p2 | sed 's/ p[12]$//' | uniq | wc -l }", out = "      1\n"},
+    // touch: creates or sets the modification time; -c never creates.
+    .{args = "{ touch -t 1000000000 t1; newer t1 a.txt }", status = "older"},
+    .{args = "{ touch -t 1000000000 t1; sleep 1; touch t1; newer t1 a.txt }"},
+    .{args = "{ touch -t abc t3; newer t3 a.txt }", status = "older"},
+    .{tool = "touch", args = "-c t2", status = "touch", err = "touch: t2: cannot change time: 't2' file does not exist\n"},
+    .{tool = "touch", args = "nosuchdir/x", status = "touch", err = "touch: nosuchdir/x: cannot create: 'nosuchdir' file does not exist\n"},
+    .{tool = "touch", status = "usage", err = "usage: touch [-c] [-t time] file ...\n"},
+    .{tool = "touch", args = "-x t1", status = "usage", err = "usage: touch [-c] [-t time] file ...\n"},
+    // strings: runs of at least six printable bytes, eight-wide offsets.
+    .{tool = "strings", args = "a.txt", out = "      16: café κ\n"},
+    .{tool = "strings", input = "a.txt", out = "      16: café κ\n"},
+    .{tool = "strings", args = "''", input = "a.txt", out = "      16: café κ\n"},
+    .{tool = "strings", args = "nosuch", err = "cannot open nosuch\n"},
+    .{tool = "strings", args = "a.txt nosuch", out = "a.txt:\n      16: café κ\nnosuch:\n", err = "cannot open nosuch\n"},
+    .{tool = "strings", args = "s1", out = "       3: abcdef\n"},
+    .{tool = "strings", args = "s2", out = "       0: qaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ...\n      70: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n     102: zzzzzz\n"},
+    .{tool = "strings", args = "short"},
+    .{tool = "strings", args = "s1 short s1", out = "s1:\n       3: abcdef\nshort:\ns1:\n       3: abcdef\n"},
+    // md5sum: digest, a tab and the name; standard input has no name.
+    .{tool = "md5sum", input = "a.txt", out = "927effb95bbe6703d655f813398a1031\n"},
+    .{tool = "md5sum", args = "a.txt", out = "927effb95bbe6703d655f813398a1031\ta.txt\n"},
+    .{tool = "md5sum", args = "bin", out = "c3cd26e07e555c0116db237fbc06d99c\tbin\n"},
+    .{tool = "md5sum", args = "''", status = "error", err = "md5sum: cannot open : empty file name\n"},
+    .{tool = "md5sum", args = "nosuch", status = "error", err = "md5sum: cannot open nosuch: 'nosuch' file does not exist\n"},
+    .{tool = "md5sum", args = "nosuch a.txt", status = "error", out = "927effb95bbe6703d655f813398a1031\ta.txt\n", err = "md5sum: cannot open nosuch: 'nosuch' file does not exist\n"},
+    .{tool = "sha1sum", input = "a.txt", out = "5e5d745a8a9035905fa69c5d3c51e3f1f757077a\n"},
+    .{tool = "sha1sum", args = "a.txt", out = "5e5d745a8a9035905fa69c5d3c51e3f1f757077a\ta.txt\n"},
+    .{tool = "sha1sum", args = "bin", out = "36812e99f2d591c5114a7b09519ea9d7daba2380\tbin\n"},
+    // timestamp: elapsed milliseconds zero-padded to ten digits, then the note.
+    .{args = "{ timestamp note < a.txt | sed 's/[0-9][0-9]*/N/g' }", out = "N note start N\nN note alpha\nN note beta\nN note beta\nN note café κ\n"},
+    .{args = "{ timestamp < /dev/null | sed 's/[0-9][0-9]*/N/g' }", out = "N start N\n"},
+    // ps: every numeric entry of /prog, its first 128 status bytes, in a private namespace.
+    .{args = "{ bind fakeprog /prog; ps | sort; unmount /prog }", out = "proc1 one\nproc2 two\nproc3\nyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n"},
+    // unmount: removes a bind or mount; errors never change the status.
+    .{tool = "unmount", args = "/nonesuch", err = "unmount: '/nonesuch' file does not exist\n"},
+    .{tool = "unmount", args = "a.txt", err = "unmount: not mounted\n"},
+    .{tool = "unmount", err = "Usage: unmount [source] target\n"},
+    .{tool = "unmount", args = "a b c", err = "Usage: unmount [source] target\n"},
+    .{args = "{ bind fakeprog tree/sub; cat tree/sub/1/status; unmount tree/sub; cat tree/sub/1/status }", out = "proc1 one", status = "bad open", err = "cat: cannot open tree/sub/1/status: 'tree/sub/1' does not exist\n"},
+    .{args = "{ bind fakeprog tree/sub; unmount fakeprog tree/sub; cat tree/sub/1/status }", status = "bad open", err = "cat: cannot open tree/sub/1/status: 'tree/sub/1' does not exist\n"},
 ];
 
 failures: s32;
@@ -124,14 +183,49 @@ Binary :: () -> Text {
     return BuilderFinish(bytes)
 }
 
+// ab NUL abcdef NUL 12345 NUL xy NUL: one run of six printable bytes.
+S1 :: () -> string {
+    data: Vec(u8)
+    for "ab" { VecPush(data, it) }
+    VecPush(data, 0)
+    for "abcdef" { VecPush(data, it) }
+    VecPush(data, 0)
+    for "12345" { VecPush(data, it) }
+    VecPush(data, 0)
+    for "xy" { VecPush(data, it) }
+    VecPush(data, 0)
+    return BuilderFinish(data)
+}
+
+// q and a hundred letters, then six z's: the long run splits every 70 bytes.
+S2 :: () -> string {
+    data: Vec(u8)
+    VecPush(data, #char "q")
+    for 1..100 { VecPush(data, #char "a") }
+    VecPush(data, 0)
+    for "zzzzzz" { VecPush(data, it) }
+    VecPush(data, 0)
+    return BuilderFinish(data)
+}
+
 Prepare :: (binary: string) -> bool {
     unused RemoveTree(WORK)
     unused CreateDirectory("build")
     unused CreateDirectory("build/tests")
     if !CreateDirectory(WORK) || !Directory("work") || !Directory("result") ||
-        !Directory("work/tree") || !Directory("work/tree/sub") { return false }
+        !Directory("work/tree") || !Directory("work/tree/sub") || !Directory("work/fakeprog") ||
+        !Directory("work/fakeprog/1") || !Directory("work/fakeprog/2") ||
+        !Directory("work/fakeprog/3") || !Directory("work/fakeprog/4") { return false }
+    one := S1()
+    two := S2()
+    // ps prints only the first 128 bytes of a status file.
+    long: Vec(u8)
+    for 1..130 { VecPush(long, #char "y") }
     return Write("a.txt", ALPHA) && Write("words", WORDS) && Write("empty", "") && Write("bin", binary) &&
-        Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n")
+        Write("-dash", "dash\n") && Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n") &&
+        Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
+        Write("fakeprog/1/status", "proc1 one") && Write("fakeprog/2/status", "proc2 two") &&
+        Write("fakeprog/3/status", "proc3") && Write("fakeprog/4/status", BuilderFinish(long))
 }
 
 // One guest shell script runs every case and keeps each result in a file.

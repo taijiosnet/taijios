@@ -1,0 +1,108 @@
+// Write one block of a byte value repeatedly, replacing the Limbo zeros.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Kr :: #import "taijios_keyring";
+
+Usage :: "usage: zeros [-r] [-v value] blocksize [number]\n";
+
+Space :: (byte: u8) -> bool {
+    return byte == 32 || byte == 9 || byte == 10;
+}
+
+// The Limbo int conversion: an optional sign and decimal digits, stopping at
+// the 32-bit limits.
+Number :: (text: string) -> s64 {
+    at: s64 = 0;
+    while at < text.count && Space(text[at]) { at += 1; }
+    negative := false;
+    if at < text.count && (text[at] == 43 || text[at] == 45) {
+        negative = text[at] == 45;
+        at += 1;
+    }
+    value: s64 = 0;
+    while at < text.count && text[at] >= 48 && text[at] <= 57 {
+        if value < 2147483648 { value = value * 10 + cast(s64)(text[at] - 48); }
+        at += 1;
+    }
+    if negative {
+        if value > 2147483648 { return -2147483648; }
+        return 0 - value;
+    }
+    if value > 2147483647 { return 2147483647; }
+    return value;
+}
+
+// String->toint(text, 16): spaces, an optional sign and hex digits.
+Hex :: (text: string) -> s64 {
+    at: s64 = 0;
+    while at < text.count && Space(text[at]) { at += 1; }
+    negative := false;
+    if at < text.count && (text[at] == 43 || text[at] == 45) {
+        negative = text[at] == 45;
+        at += 1;
+    }
+    value: s64 = 0;
+    start := at;
+    while at < text.count {
+        digit: s64 = -1;
+        byte := text[at];
+        if byte >= 48 && byte <= 57 { digit = cast(s64)(byte - 48); }
+        else if byte >= 97 && byte <= 102 { digit = cast(s64)(byte - 97) + 10; }
+        else if byte >= 65 && byte <= 70 { digit = cast(s64)(byte - 65) + 10; }
+        if digit < 0 { break; }
+        value = value * 16 + digit;
+        at += 1;
+    }
+    if at == start { return 0; }
+    if negative { return 0 - value; }
+    return value;
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan;
+    random := false;
+    value: s64 = 0;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break; }
+        if option == #char "r" { random = true; }
+        else if option == #char "v" {
+            text, has := Arg.Value(*scan);
+            if has { value = Hex(text); }
+        } else {
+            letter: [1]u8;
+            letter[0] = option;
+            message: Vec(u8);
+            BuilderPrint(*message, "unknown option (%)", TextView(letter[:]));
+            unused Args.SetFailure(BuilderFinish(message));
+            return 1;
+        }
+    }
+    count := Args.OperandCount();
+    block: s64 = 1;
+    times: s64 = 1;
+    if scan.next < count { block = Number(Args.Operand(scan.next)); }
+    if scan.next + 1 < count { times = Number(Args.Operand(scan.next + 1)); }
+    if block == 0 || times == 0 { return Cli.Usage(Usage); }
+    data: Vec(u8);
+    if !VecResize(data, block) {
+        unused Args.SetFailure("out of memory: heap");
+        return 1;
+    }
+    if random {
+        filled: s64 = 0;
+        while filled < block {
+            got := Kr.Random(data[filled:]);
+            if got <= 0 { break; }
+            filled += cast(s64)got;
+        }
+    } else {
+        for i: 0..block-1 { data[i] = cast(u8)value; }
+    }
+    for i: 0..times-1 { unused Io.WriteBytes(1, TextView(data[:])); }
+    return 0;
+}

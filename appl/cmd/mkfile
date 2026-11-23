@@ -83,7 +83,6 @@ TARG=\
 	man2html.dis\
 	man2txt.dis\
 	mc.dis\
-	md5sum.dis\
 	mdb.dis\
 	memfs.dis\
 	metamorph.dis\
@@ -101,7 +100,6 @@ TARG=\
 	plumb.dis\
 	plumber.dis\
 	prof.dis\
-	ps.dis\
 	puttar.dis\
 	ramfile.dis\
 	randpass.dis\
@@ -114,14 +112,12 @@ TARG=\
 	runas.dis\
 	sed.dis\
 	sendmail.dis\
-	sha1sum.dis\
 	sleep.dis\
 	sort.dis\
 	src.dis\
 	stack.dis\
 	stackv.dis\
 	stream.dis\
-	strings.dis\
 	styxchat.dis\
 	styxmon.dis\
 	styxlisten.dis\
@@ -130,15 +126,12 @@ TARG=\
 	tcs.dis\
 	telnet.dis\
 	time.dis\
-	timestamp.dis\
 	tkcmd.dis\
-	touch.dis\
 	touchcal.dis\
 	trfs.dis\
 	tsort.dis\
 	unicode.dis\
 	units.dis\
-	unmount.dis\
 	uudecode.dis\
 	uuencode.dis\
 	vacfs.dis\
@@ -153,7 +146,6 @@ TARG=\
 	xargs.dis\
 	xd.dis\
 	yacc.dis\
-	zeros.dis\
 	zxrun.dis\
 
 MODULES=\
@@ -190,6 +182,14 @@ SYSMODULES=\
 DISBIN=$ROOT/dis
 ZXLIB=$ROOT/appl/lib
 ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh env
+ZXCOMMANDS=$ZXCOMMANDS zeros
+ZXCOMMANDS=$ZXCOMMANDS touch
+ZXCOMMANDS=$ZXCOMMANDS strings
+ZXCOMMANDS=$ZXCOMMANDS md5sum
+ZXCOMMANDS=$ZXCOMMANDS sha1sum
+ZXCOMMANDS=$ZXCOMMANDS timestamp
+ZXCOMMANDS=$ZXCOMMANDS ps
+ZXCOMMANDS=$ZXCOMMANDS unmount
 ZXCOMMANDS=$ZXCOMMANDS sum
 ZXCOMMANDS=$ZXCOMMANDS read
 ZXCOMMANDS=$ZXCOMMANDS newer
@@ -263,6 +263,22 @@ ls.zx: ls.zi taijios_stat.zi $UTILZX $RUNESZX $NAMEZX
 
 mkdir.zx: mkdir.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry mkdir:main -o $target mkdir.zi
+zeros.zx: zeros.zi taijios_keyring.zi $UTILZX
+	zi2zx --root . --bind-host taijios_keyring --bind-host taijios_args --bind-host taijios_io --entry zeros:main -o $target zeros.zi
+touch.zx: touch.zi zx_daytime.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry touch:main -o $target touch.zi
+strings.zx: strings.zi $UTILZX
+	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry strings:main -o $target strings.zi
+md5sum.zx: md5sum.zi taijios_keyring.zi $UTILZX
+	zi2zx --root . --bind-host taijios_keyring --bind-host taijios_args --bind-host taijios_io --entry md5sum:main -o $target md5sum.zi
+sha1sum.zx: sha1sum.zi taijios_keyring.zi $UTILZX
+	zi2zx --root . --bind-host taijios_keyring --bind-host taijios_args --bind-host taijios_io --entry sha1sum:main -o $target sha1sum.zi
+timestamp.zx: timestamp.zi zx_lines.zi taijios_files.zi $UTILZX
+	zi2zx --root . --bind-host taijios_files --bind-host taijios_args --bind-host taijios_io --entry timestamp:main -o $target timestamp.zi
+ps.zx: ps.zi taijios_stat.zi taijios_namespace.zi $UTILZX
+	zi2zx --root . --bind-host taijios_namespace --bind-host taijios_args --bind-host taijios_io --entry ps:main -o $target ps.zi
+unmount.zx: unmount.zi taijios_namespace.zi $UTILZX
+	zi2zx --root . --bind-host taijios_namespace --bind-host taijios_args --bind-host taijios_io --entry unmount:main -o $target unmount.zi
 sum.zx: sum.zi taijios_stat.zi $UTILZX
 	zi2zx --root . --bind-host taijios_args --bind-host taijios_io --entry sum:main -o $target sum.zi
 read.zx: read.zi $UTILZX
@@ -375,6 +391,14 @@ $DISBIN/cp.zx: cp.zx mkfile
 $DISBIN/test.zx: test.zx mkfile
 $DISBIN/ls.zx: ls.zx mkfile
 $DISBIN/mkdir.zx: mkdir.zx mkfile
+$DISBIN/zeros.zx: zeros.zx mkfile
+$DISBIN/touch.zx: touch.zx mkfile
+$DISBIN/strings.zx: strings.zx mkfile
+$DISBIN/md5sum.zx: md5sum.zx mkfile
+$DISBIN/sha1sum.zx: sha1sum.zx mkfile
+$DISBIN/timestamp.zx: timestamp.zx mkfile
+$DISBIN/ps.zx: ps.zx mkfile
+$DISBIN/unmount.zx: unmount.zx mkfile
 $DISBIN/sum.zx: sum.zx mkfile
 $DISBIN/read.zx: read.zx mkfile
 $DISBIN/newer.zx: newer.zx mkfile

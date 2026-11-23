@@ -1,0 +1,81 @@
+// Update file modification times, replacing the Limbo touch.
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Daytime :: #import "zx_daytime";
+
+Usage :: "usage: touch [-c] [-t time] file ...\n";
+
+// Change the modification time of an open file, as Limbo fwstat did.
+SetTime :: (handle: s32, when: s64) -> bool {
+    return Fs.Change(handle, .{modified = cast(s32)when}, false, true, false, false);
+}
+
+Report :: (name: string, what: string) {
+    unused Cli.WriteAll(2, "touch: ");
+    unused Cli.WriteAll(2, name);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, what);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, Io.LastError());
+    unused Cli.WriteAll(2, "\n");
+}
+
+// Set the time of one file, creating it when asked to.
+Touch :: (create: bool, name: string, when: s64) -> s32 {
+    metadata: [Fs.BufferSize]u8;
+    if Io.StatPacked(name, metadata[:]) > 0 {
+        handle := Io.OpenFile(name, 0);
+        if handle >= 0 {
+            changed := SetTime(handle, when);
+            unused Io.CloseFile(handle);
+            if changed { return 0; }
+        }
+        create = false;
+    }
+    if !create {
+        Report(name, "cannot change time");
+        return 1;
+    }
+    created := Io.CreateNew(name, 0, 0x1b6);
+    if created < 0 {
+        Report(name, "cannot create");
+        return 1;
+    }
+    unused SetTime(created, when);
+    unused Io.CloseFile(created);
+    return 0;
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan;
+    create := true;
+    when := Daytime.Now();
+    count := Args.OperandCount();
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break; }
+        if option == #char "t" {
+            text, has := Arg.Value(*scan);
+            if !has { return Cli.Usage(Usage); }
+            when = Daytime.LimboInt(text);
+        } else if option == #char "c" {
+            create = false;
+        } else {
+            return Cli.Usage(Usage);
+        }
+    }
+    if scan.next >= count { return Cli.Usage(Usage); }
+    status: s32 = 0;
+    for i: scan.next..count-1 {
+        status += Touch(create, Args.Operand(i), when);
+    }
+    if status != 0 {
+        unused Args.SetFailure("touch");
+        return 1;
+    }
+    return 0;
+}

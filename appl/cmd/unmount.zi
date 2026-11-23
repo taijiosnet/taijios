@@ -1,0 +1,23 @@
+// Remove a mount or bind, replacing the Limbo unmount.
+using Args :: #import "taijios_args";
+using Ns :: #import "taijios_namespace";
+using Cli :: #import "zx_cli";
+
+Usage :: "Usage: unmount [source] target\n";
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count != 1 && count != 2 {
+        unused Cli.WriteAll(2, Usage);
+        return 0;
+    }
+    source := "";
+    if count == 2 { source = Args.Operand(0); }
+    if Ns.Unmount(source, Args.Operand(count - 1)) < 0 {
+        unused Cli.WriteAll(2, "unmount: ");
+        unused Cli.WriteAll(2, Ns.Error());
+        unused Cli.WriteAll(2, "\n");
+    }
+    return 0;
+}

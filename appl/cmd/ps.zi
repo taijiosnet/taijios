@@ -1,0 +1,65 @@
+// List the guest processes, replacing the Limbo ps.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Fs :: #import "taijios_stat";
+using Ns :: #import "taijios_namespace";
+using Cli :: #import "zx_cli";
+
+// Print one process status file, as Limbo read its first 128 bytes. Limbo
+// turned the entry name with `int`, so only its leading digits name the file.
+Status :: (entry: string) {
+    pid: s64 = 0;
+    for i: 0..entry.count-1 {
+        if entry[i] < 48 || entry[i] > 57 { break; }
+        pid = pid * 10 + cast(s64)(entry[i] - 48);
+    }
+    path: Vec(u8);
+    BuilderPrint(*path, "/prog/%/status", pid);
+    handle := Io.OpenFile(BuilderFinish(path), 0);
+    if handle < 0 { return; }
+    data: [128]u8;
+    got := Io.ReadBytes(handle, data[:]);
+    unused Io.CloseFile(handle);
+    if got <= 0 { return; }
+    unused Cli.WriteAll(1, TextView(data[:got]));
+    unused Cli.WriteAll(1, "\n");
+}
+
+#program_export
+main :: () -> s32 {
+    unused Ns.Fork();
+    // The host grants no chdir; the absolute path names the same directory.
+    handle := Io.OpenFile("/prog", 0);
+    if handle < 0 {
+        unused Cli.WriteAll(2, "ps: can't chdir to /prog: ");
+        unused Cli.WriteAll(2, Io.LastError());
+        unused Cli.WriteAll(2, "\n");
+        unused Args.SetFailure("no /prog");
+        return 1;
+    }
+    buffer: [8192]u8;
+    while true {
+        size := Io.ReadBytes(handle, buffer[:]);
+        if size < 0 {
+            unused Cli.WriteAll(2, "ps: error reading /prog: ");
+            unused Cli.WriteAll(2, Io.LastError());
+            unused Cli.WriteAll(2, "\n");
+            unused Args.SetFailure("error on /prog");
+            return 1;
+        }
+        if size == 0 { break; }
+        offset: s64 = 0;
+        while offset < size {
+            info := Fs.Decode(buffer[offset:size]);
+            if info.size == 0 { break; }
+            offset += info.size;
+            if info.name.count > 0 && info.name[0] >= 48 && info.name[0] <= 57 {
+                Status(info.name);
+            }
+        }
+    }
+    unused Io.CloseFile(handle);
+    return 0;
+}
