@@ -94,18 +94,6 @@ TARG=\
 	tables.dis\
 	tabs.dis\
 	timers.dis\
-	tcl_utils.dis\
-#	tcl_tk.dis\
-	tcl_symhash.dis\
-	tcl_string.dis\
-	tcl_strhash.dis\
-	tcl_stack.dis\
-	tcl_modhash.dis\
-	tcl_list.dis\
-	tcl_io.dis\
-	tcl_inthash.dis\
-	tcl_core.dis\
-	tcl_calc.dis\
 	tkclient.dis\
 	titlebar.dis\
 	translate.dis\

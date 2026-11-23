@@ -1,4 +1,4 @@
-# 2. Libraries - dis/lib/** (boot-loaded rows first) - 155 rows
+# 2. Libraries - dis/lib/** (boot-loaded rows first) - 143 rows
 
 Owner: Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane)
 
@@ -136,18 +136,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/lib/styxservers.dis | appl/lib/styxservers.b | module/styxservers.m | - |  |
 | dis/lib/tables.dis | appl/lib/tables.b | module/tables.m | - |  |
 | dis/lib/tabs.dis | appl/lib/tabs.b | module/tabs.m | - |  |
-| dis/lib/tcl_calc.dis | appl/lib/tcl_calc.b |  | - |  |
-| dis/lib/tcl_core.dis | appl/lib/tcl_core.b |  | - |  |
-| dis/lib/tcl_inthash.dis | appl/lib/tcl_inthash.b |  | - |  |
-| dis/lib/tcl_io.dis | appl/lib/tcl_io.b |  | - |  |
-| dis/lib/tcl_list.dis | appl/lib/tcl_list.b |  | - |  |
-| dis/lib/tcl_modhash.dis | appl/lib/tcl_modhash.b |  | - |  |
-| dis/lib/tcl_stack.dis | appl/lib/tcl_stack.b |  | - |  |
-| dis/lib/tcl_strhash.dis | appl/lib/tcl_strhash.b |  | - |  |
-| dis/lib/tcl_string.dis | appl/lib/tcl_string.b |  | - |  |
-| dis/lib/tcl_symhash.dis | appl/lib/tcl_symhash.b |  | - |  |
-| dis/lib/tcl_tk.dis | appl/lib/tcl_tk.b |  | - |  |
-| dis/lib/tcl_utils.dis | appl/lib/tcl_utils.b |  | - |  |
 | dis/lib/timers.dis | appl/lib/timers.b | module/timers.m | - |  |
 | dis/lib/translate.dis | appl/lib/translate.b | module/translate.m | - |  |
 | dis/lib/url.dis | appl/lib/url.b | module/url.m | - |  |

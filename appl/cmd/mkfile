@@ -378,6 +378,9 @@ dir.zx: tcltk/dir_app.zi tcltk/dir_model.zi tcltk/tk_cursor.zi tcltk/tk_window_c
 tcltk.zx: tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_LISTBOX --define TK_MENU --define TK_BITMAP --define TK_PACKAGES --bind-host zx_surface --bind-host taijios_stdin --bind-host taijios_files --entry tcltk:main -o $target tcltk/tcltk.zi
 
+wish.zx: tcltk/wish_app.zi tcltk/tcltk.zi tcltk/zx_surface.zi tclsh_lines.zi taijios_args.zi taijios_stdin.zi taijios_files.zi $TKZX mkfile
+	ziran bundle --project --root tcltk --module-path tcltk --module-path . --define TK_LISTBOX --define TK_MENU --define TK_BITMAP --define TK_PACKAGES --bind-host zx_surface --bind-host taijios_args --bind-host taijios_stdin --bind-host taijios_files --entry wish_app:main -o $target tcltk/wish_app.zi
+
 linbench.zx: tcltk/linbench_app.zi tcltk/linbench_model.zi tcltk/tcltk.zi tcltk/zx_surface.zi taijios_stdin.zi taijios_files.zi taijios_clock.zi $TKZX mkfile
 	ziran bundle --project --root tcltk --module-path tcltk --module-path . --module-path ../wm --define TK_LISTBOX --define TK_NO_CANVAS --bind-host zx_surface --bind-host taijios_files --bind-host taijios_clock --entry linbench_app:main -o $target tcltk/linbench_app.zi
 
@@ -390,7 +393,7 @@ fs.zx: fs.zi fs/fs_eval.zi fs/fs_types.zi fs/fs_trees.zi fs/fs_ops.zi sh/shell_p
 # These commands exist only as ZX bundles, so the ordinary install builds them.
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
-install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-linbench-zx install-graph0-zx install-about-zx install-dir-zx install-utilities-zx install-streams-zx install-file-commands-zx
+install-zx:V: zxrun.install install-cat-zx install-tclsh-zx install-coffee-zx install-man-zx install-logwindow-zx install-memory-zx install-linbench-zx install-graph0-zx install-about-zx install-dir-zx install-wish-zx install-utilities-zx install-streams-zx install-file-commands-zx
 	(cd sh && mk sh.install)
 install-cat-zx:V: $DISBIN/cat.zx
 install-tclsh-zx:V: $DISBIN/tclsh.zx
@@ -402,6 +405,7 @@ install-linbench-zx:V: $DISBIN/math/linbench.zx $DISBIN/tcltk.zx tcltk/linbench.
 install-graph0-zx:V: $DISBIN/math/graph0.zx tcltk/graph0.tcl
 install-about-zx:V: $DISBIN/wm/about.zx $ROOT/icons/inferno.bit
 install-dir-zx:V: $DISBIN/wm/dir.zx
+install-wish-zx:V: $DISBIN/wm/wish.zx
 install-utilities-zx:V: $DISBIN/echo.zx $DISBIN/basename.zx $DISBIN/cleanname.zx
 install-streams-zx:V: $DISBIN/wc.zx $DISBIN/uniq.zx $DISBIN/tr.zx
 install-file-commands-zx:V: $DISBIN/tee.zx $DISBIN/cp.zx $DISBIN/test.zx $DISBIN/ls.zx $DISBIN/mkdir.zx
@@ -420,6 +424,10 @@ $DISBIN/wm/dir.zx: dir.zx mkfile
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 dir.zx "$staged" && mv "$staged" "$target"
+$DISBIN/wm/wish.zx: wish.zx mkfile
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 wish.zx "$staged" && mv "$staged" "$target"
 $DISBIN/tcltk.zx: tcltk.zx mkfile
 $DISBIN/math/linbench.zx: linbench.zx mkfile
 	staged=$(mktemp "$target.XXXXXX") &&

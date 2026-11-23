@@ -1,0 +1,153 @@
+// Port of Inferno's WishPad (appl/wm/wish.b) on TaijiOS Tcl/Tk. See NOTICE.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using Files :: #import "taijios_files"
+using Stdin :: #import "taijios_stdin"
+using Tcl :: #import "tcl/interpreter"
+using Types :: #import "tcl/types"
+using Window :: #import "tcltk"
+using Surface :: #import "zx_surface"
+using Lines :: #import "tclsh_lines"
+
+SCRIPT_LIMIT :: 1048576;
+
+DEFAULT_UI :: #string WISH_UI_END
+frame .wish_bar
+label .wish_bar.prompt -text {wish%}
+entry .wish_bar.cmd -bg white
+button .wish_bar.run -text Run -command {wish_eval}
+label .wish_out -text {Ready}
+proc wish_eval {} {
+    set line [.wish_bar.cmd get]
+    if {[string equal $line {}]} { return }
+    .wish_bar.cmd delete 0 end
+    if {[catch {uplevel #0 $line} res]} {
+        .wish_out configure -text "error: $res"
+    } else {
+        if {[string equal $res {}]} {
+            .wish_out configure -text {ok}
+        } else {
+            .wish_out configure -text $res
+        }
+    }
+}
+pack .wish_bar.prompt -side left -padx 2 -pady 2
+pack .wish_bar.run -side right -padx 2 -pady 2
+pack .wish_bar.cmd -expand 1 -fill x -padx 2 -pady 2
+pack .wish_bar -fill x
+pack .wish_out -fill x -padx 4 -pady 4
+bind .wish_bar.cmd <Key-\n> {wish_eval}
+focus .wish_bar.cmd
+WISH_UI_END;
+
+Options :: struct {
+    keyboard: bool;
+    file: string;
+}
+
+buffer: [4096]u8;
+pending: Text;
+keyboard: bool = true;
+stdin_ended: bool;
+
+Parse :: () -> (options: Options, ok: bool) {
+    opts: Options = .{keyboard = true};
+    index: s32;
+    count := Args.OperandCount();
+    while index < count {
+        arg := Args.Operand(index);
+        if arg == "-k" {
+            opts.keyboard = false;
+            index += 1;
+        } else if arg == "-f" {
+            if index + 1 >= count { return opts, false }
+            opts.file = Args.Operand(index + 1);
+            return opts, true;
+        } else if arg.count > 0 && arg[0] == #char "-" {
+            return opts, false;
+        } else {
+            opts.file = arg;
+            return opts, true;
+        }
+    }
+    return opts, true;
+}
+
+EvalLine :: (tcl: *Tcl.Interpreter, command: string) -> bool {
+    result := Tcl.Eval(tcl, command);
+    output: Text = Tcl.TakeOutput(tcl);
+    if output.bytes.count > 0 { print("%", TextView(output)) }
+    if result.code == .Exit {
+        unused Window.Execute(tcl, "destroy .");
+        return true;
+    }
+    if result.code == .Error {
+        report: Text = Lines.ErrorReport(command, TextView(result.value));
+        print("%\n", TextView(report));
+    } else if result.value.bytes.count > 0 {
+        print("%\n", TextView(result.value));
+    }
+    return false;
+}
+
+Start :: () -> bool {
+    return true;
+}
+
+Tick :: (tcl: *Tcl.Interpreter, event: Surface.SurfaceEvent) -> Window.PollResult {
+    if !keyboard || stdin_ended { return .Idle }
+    count := Stdin.PollBytes(buffer[:]);
+    if count == -2 { return .Idle }
+    if count <= 0 {
+        stdin_ended = true;
+        if pending.bytes.count > 0 {
+            unused EvalLine(tcl, TextView(pending));
+            VecClear(pending.bytes);
+            return .Changed;
+        }
+        return .Idle;
+    }
+    changed := false;
+    start: s64 = 0;
+    data := TextView(buffer[:count]);
+    for i: cast(s64)0..data.count-1 {
+        if data[i] != #char "\n" { continue }
+        if !AppendText(*pending, data[start:i+1]) { return .Failed }
+        start = i + 1;
+        if Lines.Finished(TextView(pending)) {
+            if EvalLine(tcl, TextView(pending)) {
+                VecClear(pending.bytes);
+                return .Changed;
+            }
+            VecClear(pending.bytes);
+            changed = true;
+        }
+    }
+    if start < data.count {
+        if !AppendText(*pending, data[start:]) { return .Failed }
+    }
+    return ifx changed then .Changed else .Idle;
+}
+
+AppendText :: (dst: *Text, src: string) -> bool {
+    for i: cast(s64)0..src.count-1 {
+        if !VecPush(dst.bytes, src[i]) { return false }
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    options, ok := Parse();
+    if !ok { print("usage: wish [-k] [-f file]\n"); return 2 }
+    keyboard = options.keyboard;
+    script: Text;
+    if options.file != "" {
+        if Files.ReadFile(options.file, *script, SCRIPT_LIMIT) != 0 {
+            print("File % cannot be opened for reading\n", options.file);
+            return 1;
+        }
+    }
+    initial := ifx options.file != "" then TextView(script) else DEFAULT_UI;
+    tcl: Tcl.Interpreter;
+    return Window.RunPolled(*tcl, initial, "WishPad", 360, 120, Start, Tick, 25);
+}

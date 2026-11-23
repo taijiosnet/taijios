@@ -8,8 +8,9 @@ and lock. The guest shell and test fixtures live under `appl/cmd`.
 ### Comparison with shipped Inferno Tcl
 
 The Limbo interpreter's `load` resolved `/dis/lib/tcl_<name>.dis` and called
-the module’s `TclLib` interface. Its five libraries are `calc`, `io`, `list`,
-`string` and `tk`; `wm/wish` still uses them. The first four are built into the port, and the optional Tcl/Tk
+the module’s `TclLib` interface. Its five libraries (`calc`, `io`, `list`,
+`string` and `tk`) and legacy `wm/wish` have been removed now that `/dis/tclsh.zx`,
+`/dis/tcltk.zx` and `/dis/wm/wish.zx` replace them. The first four libraries are built into the port, and the optional Tcl/Tk
 app imports its Tk bridge at startup. Hosted ZX resolves imports at startup.
 Loading separately compiled extensions after startup would require a guest API
 for named lookup and invocation.
