@@ -1,0 +1,63 @@
+// palm/palmsrv [-d /dev/eia0] [-s 57600]: serve a Palm device over SLP/CMP/PADP.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Proto :: #import "palm_proto";
+
+USAGE :: "usage: palm/palmsrv [-d /dev/eia0] [-s 57600]\n";
+
+Fail :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "palmsrv: %\n", msg);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+main :: () -> s32 {
+    device := "/dev/eia0";
+    speed := "57600";
+    debug: s32 = 0;
+
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "D" {
+            debug += 1;
+        } else if letter == #char "d" {
+            val, ok := Arg.Value(*scan);
+            if ok { device = val }
+        } else if letter == #char "s" {
+            val, ok := Arg.Value(*scan);
+            if ok { speed = val }
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+
+    dfd := Io.OpenFile(device, 2);
+    if dfd < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", device, Io.LastError());
+        return Fail(BuilderFinish(msg));
+    }
+    ctlpath: Vec(u8);
+    BuilderPrint(*ctlpath, "%ctl", device);
+    cfd := Io.OpenFile(BuilderFinish(ctlpath), 1);
+    if cfd >= 0 {
+        unused Io.WriteBytes(cfd, "f");
+        unused Io.WriteBytes(cfd, "d1");
+        unused Io.WriteBytes(cfd, "r1");
+        unused Io.WriteBytes(cfd, "i8");
+        unused Io.WriteBytes(cfd, "q8192");
+        bcmd: Vec(u8);
+        BuilderPrint(*bcmd, "b%", speed);
+        unused Io.WriteBytes(cfd, BuilderFinish(bcmd));
+        unused Io.CloseFile(cfd);
+    }
+    unused Io.CloseFile(dfd);
+    return Fail("can't create channel /chan/palmsrv: file2chan unavailable in ZX host API");
+}

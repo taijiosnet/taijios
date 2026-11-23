@@ -911,9 +911,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/mpeg/remap8.dis | appl/wm/mpeg/remap8.b |  | - |  |
 | dis/mpeg/scidct.dis | appl/wm/mpeg/scidct.b |  | - |  |
 | dis/mpeg/vlc.dis | appl/wm/mpeg/vlc.b |  | - |  |
-| dis/palm/connex.dis | appl/cmd/palm/connex.b |  | - |  |
-| dis/palm/desklink.dis | appl/cmd/palm/desklink.b |  | - |  |
-| dis/palm/palmsrv.dis | appl/cmd/palm/palmsrv.b |  | - |  |
 
 ### 15. Acme helper binaries outside dis/ - 22 rows
 

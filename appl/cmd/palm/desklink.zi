@@ -1,0 +1,73 @@
+// Desklink DLP client over a palmsrv channel file.
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Proto :: #import "palm_proto";
+
+Client :: struct {
+    fd: s32;
+}
+
+SysInfo :: struct {
+    romversion: u32;
+    locale: u32;
+    product: Text;
+}
+
+Connect :: (c: *Client, srvfile: string, err: *Text) -> bool {
+    VecClear(err.bytes);
+    c.fd = Io.OpenFile(srvfile, 2);
+    if c.fd < 0 {
+        BuilderPrint(*err.bytes, "can't open %: %", srvfile, Io.LastError());
+        return false;
+    }
+    return true;
+}
+
+Hangup :: (c: *Client) {
+    if c.fd >= 0 {
+        unused Io.CloseFile(c.fd);
+        c.fd = -1;
+    }
+}
+
+Exec :: (c: *Client, cmd: u8, argid: u8, arg: []u8, has_arg: bool, minlen: s64, out: *Vec(u8), err: *Text) -> bool {
+    VecClear(<<out);
+    VecClear(err.bytes);
+    req: Vec(u8);
+    Proto.PackDlpReq(cmd, argid, arg, has_arg, *req);
+    if Io.WriteBytes(c.fd, TextView(req[:])) != cast(s32)req.count {
+        BuilderPrint(*err.bytes, "link: %", Io.LastError());
+        return false;
+    }
+    reply: [8192]u8;
+    nb := Io.ReadBytes(c.fd, reply[:]);
+    if nb == 0 {
+        BuilderAppend(err.bytes, "link: hangup");
+        return false;
+    }
+    if nb < 0 {
+        BuilderPrint(*err.bytes, "link: %", Io.LastError());
+        return false;
+    }
+    if !Proto.UnpackDlpReply(cmd, reply[:nb], out, err) { return false }
+    if out.count < minlen {
+        BuilderAppend(err.bytes, "palm: desklink protocol: response too short");
+        return false;
+    }
+    return true;
+}
+
+ReadSysInfo :: (c: *Client, info: *SysInfo, err: *Text) -> bool {
+    empty: [0]u8;
+    body: Vec(u8);
+    if !Exec(c, Proto.T_READ_SYS_INFO, Proto.ARG_ID_BASE, empty[:], false, 14, *body, err) {
+        return false;
+    }
+    info.romversion = Proto.Get4(body[:], 0);
+    info.locale = Proto.Get4(body[:], 4);
+    l := cast(s64)body[9];
+    if 10 + l > body.count { l = body.count - 10 }
+    VecClear(info.product.bytes);
+    BuilderAppend(info.product.bytes, Proto.CStringSlice(body[10:10 + l]));
+    return true;
+}

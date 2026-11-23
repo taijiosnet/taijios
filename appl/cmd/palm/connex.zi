@@ -1,0 +1,35 @@
+// palm/connex: Desklink test client for palmsrv.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Cli :: #import "zx_cli";
+using Dl :: #import "desklink";
+
+Fail :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "tconn: %\n", msg);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+main :: () -> s32 {
+    client: Dl.Client;
+    err: Text;
+    if !Dl.Connect(*client, "/chan/palmsrv", *err) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't init Desklink: %", TextView(err));
+        return Fail(BuilderFinish(msg));
+    }
+    info: Dl.SysInfo;
+    if !Dl.ReadSysInfo(*client, *info, *err) {
+        Dl.Hangup(*client);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't read sys Info: %", TextView(err));
+        return Fail(BuilderFinish(msg));
+    }
+    line: Vec(u8);
+    BuilderPrint(*line, "ROM: % locale: % product: '%'\n", info.romversion, info.locale, TextView(info.product));
+    unused Cli.WriteAll(1, BuilderFinish(line));
+    Dl.Hangup(*client);
+    return 0;
+}
