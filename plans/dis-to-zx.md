@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **845** open rows = **823** on-disk `dis/` files (**148** top-level `dis/*.dis` + **675** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **839** open rows = **817** on-disk `dis/` files (**148** top-level `dis/*.dis` + **669** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -34,9 +34,9 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 ## Next ready order (independent, boot-ordered)
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
-2. Non-boot libraries (186 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
-3. Services (109 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
-4. Legacy misc (96 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
+2. Non-boot libraries (185 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
+4. Legacy misc (95 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
 6. WM apps with zx-twins (7 rows) and the rest of dis/wm (59 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `codex-taijios-zx-graphical-dis-port-3`; last before the `zero.dis` switch.
@@ -52,7 +52,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/zxrun.dis | appl/cmd/zxrun.b | module/zxrun.m | P2 | untracked gitignored local build of tracked appl/cmd/zxrun.b |
 | dis/lib/winplace.dis | unknown |  | - | zx-twin; Limbo source removed; untracked local artifact (not gitignored) |
 
-### 2. Libraries - dis/lib/** (boot-loaded rows first) - 193 rows
+### 2. Libraries - dis/lib/** (boot-loaded rows first) - 192 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -182,7 +182,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/lib/readpng.dis | appl/lib/readpng.b |  | - |  |
 | dis/lib/readxbitmap.dis | appl/lib/readxbitmap.b |  | - |  |
 | dis/lib/regex.dis | appl/lib/regex.b | module/regex.m | - |  |
-| dis/lib/regexutils.dis | unknown |  | - |  |
 | dis/lib/registries.dis | appl/lib/registries.b | module/registries.m | - |  |
 | dis/lib/rfc822.dis | appl/lib/rfc822.b | module/rfc822.m | - |  |
 | dis/lib/riff.dis | appl/lib/riff.b | module/riff.m | - |  |
@@ -250,7 +249,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/lib/writegif.dis | appl/lib/writegif.b |  | - |  |
 | dis/lib/xml.dis | appl/lib/xml.b | module/xml.m | - |  |
 
-### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 149 rows
+### 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 148 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -357,7 +356,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/sh/regex.dis | appl/cmd/sh/regex.b | module/regex.m | - |  |
 | dis/sh/sexprs.dis | appl/cmd/sh/sexprs.b | module/sexprs.m | - |  |
 | dis/sh/sh.dis | appl/cmd/sh/sh.b | module/sh.m | - |  |
-| dis/sh/shmk.dis | unknown |  | - |  |
 | dis/sh/std.dis | appl/cmd/sh/std.b |  | - |  |
 | dis/sh/string.dis | appl/cmd/sh/string.b | module/string.m | - |  |
 | dis/sh/test.dis | appl/cmd/sh/test.b |  | - |  |
@@ -404,7 +402,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/yacc.dis | appl/cmd/yacc.b |  | - |  |
 | dis/zeros.dis | appl/cmd/zeros.b |  | - |  |
 
-### 4. Services - storage, network, name, auth, collab, usb and aux daemons - 109 rows
+### 4. Services - storage, network, name, auth, collab, usb and aux daemons - 106 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -436,15 +434,12 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/auth/rpc.dis | appl/cmd/auth/factotum/rpc.b |  | - |  |
 | dis/auth/rsagen.dis | appl/cmd/auth/rsagen.b |  | - |  |
 | dis/auth/secstore.dis | appl/cmd/auth/secstore.b | module/secstore.m | - |  |
-| dis/auth/sign.dis | unknown |  | - |  |
 | dis/auth/signer.dis | appl/cmd/auth/signer.b |  | - |  |
 | dis/auth/verify.dis | appl/cmd/auth/verify.b |  | - |  |
 | dis/auxi/camera.dis | appl/demo/camera/camera.b |  | - |  |
-| dis/auxi/chatsrv.dis | unknown |  | - |  |
 | dis/auxi/cpuslave.dis | appl/cmd/auxi/cpuslave.b |  | - |  |
 | dis/auxi/fpgaload.dis | appl/cmd/auxi/fpgaload.b |  | - |  |
 | dis/auxi/mangaload.dis | appl/cmd/auxi/mangaload.b |  | - |  |
-| dis/auxi/ns.dis | unknown |  | - |  |
 | dis/auxi/odbcmnt.dis | appl/demo/odbc/odbcmnt.b |  | - |  |
 | dis/auxi/pcmcia.dis | appl/cmd/auxi/pcmcia.b |  | - |  |
 | dis/auxi/rdbgsrv.dis | appl/cmd/auxi/rdbgsrv.b |  | - |  |
@@ -835,7 +830,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/math/primes.dis | appl/math/primes.b |  | - |  |
 | dis/math/sieve.dis | appl/math/sieve.b |  | - |  |
 
-### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 96 rows
+### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 95 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -869,7 +864,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/fs/ls.dis | appl/cmd/fs/ls.b |  | - |  |
 | dis/fs/match.dis | appl/cmd/fs/match.b |  | - |  |
 | dis/fs/merge.dis | appl/cmd/fs/merge.b |  | - |  |
-| dis/fs/merge2.dis | unknown |  | - |  |
 | dis/fs/mergewrite.dis | appl/cmd/fs/mergewrite.b |  | - |  |
 | dis/fs/mode.dis | appl/cmd/fs/mode.b |  | - |  |
 | dis/fs/not.dis | appl/cmd/fs/not.b |  | - |  |
