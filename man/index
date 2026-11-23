@@ -572,7 +572,6 @@ accessing	/man/2/sys-stat
 accessing	/man/4/acme
 accessing	/man/4/ftpfs
 accident	/man/6/colour
-accidents	/man/2/disks
 accommodate	/man/2/prefab-element
 accommodate	/man/3/vga
 accommodate	/man/9/grid
@@ -763,7 +762,6 @@ active	/man/10/dev
 active	/man/10/intrenable
 active	/man/10/odbc
 active	/man/10/xalloc
-active	/man/2/disks
 active	/man/2/math-linalg
 active	/man/2/plumbmsg
 active	/man/2/popup
@@ -1135,7 +1133,6 @@ address	/man/2/debug
 address	/man/2/dhcpclient
 address	/man/2/dial
 address	/man/2/dis
-address	/man/2/disks
 address	/man/2/ether
 address	/man/2/ip
 address	/man/2/registries
@@ -1364,7 +1361,6 @@ adt	/man/2/debug
 adt	/man/2/dhcpclient
 adt	/man/2/dial
 adt	/man/2/dis
-adt	/man/2/disks
 adt	/man/2/dividers
 adt	/man/2/draw-context
 adt	/man/2/draw-display
@@ -1522,7 +1518,6 @@ aggregates	/man/1/mk
 aggregates	/man/10/mk
 aghnsu	/man/10/inm
 agp	/man/10/plan9.ini
-agree	/man/2/disks
 agree	/man/8/collabsrv
 agreed	/man/1/collab-clients
 agreed	/man/2/factotum
@@ -1739,7 +1734,6 @@ allocated	/man/9/panel
 allocates	/man/10/allocb
 allocates	/man/10/dmainit
 allocates	/man/10/xalloc
-allocates	/man/2/disks
 allocates	/man/2/draw-screen
 allocates	/man/2/security-ssl
 allocates	/man/2/sys-0intro
@@ -1871,7 +1865,6 @@ allowing	/man/1/sh
 allowing	/man/1/toolbar
 allowing	/man/10/devattach
 allowing	/man/2/alphabet-intro
-allowing	/man/2/disks
 allowing	/man/2/dividers
 allowing	/man/2/ip
 allowing	/man/2/math-export
@@ -2280,7 +2273,6 @@ anti	/man/2/draw-image
 anti	/man/3/tls
 anticipation	/man/7/db
 anybody	/man/1/ls
-anymore	/man/2/disks
 anyone	/man/10/styxserver
 anyone	/man/2/security-0intro
 anyone	/man/2/sys-stat
@@ -2551,7 +2543,6 @@ appl	/man/2/dhcpclient
 appl	/man/2/dial
 appl	/man/2/dialog
 appl	/man/2/dis
-appl	/man/2/disks
 appl	/man/2/dividers
 appl	/man/2/encoding
 appl	/man/2/env
@@ -2983,7 +2974,6 @@ arc	/man/2/draw-image
 arc	/man/3/draw
 arc	/man/9/canvas
 arc's	/man/9/canvas
-arcane	/man/2/disks
 arch	/man/10/ar
 arch	/man/3/arch
 arch	/man/3/vga
@@ -3267,7 +3257,6 @@ array	/man/2/debug
 array	/man/2/dhcpclient
 array	/man/2/dial
 array	/man/2/dis
-array	/man/2/disks
 array	/man/2/draw-image
 array	/man/2/draw-screen
 array	/man/2/encoding
@@ -3605,7 +3594,6 @@ assumed	/man/10/devattach
 assumed	/man/10/qio
 assumed	/man/2/0intro
 assumed	/man/2/daytime
-assumed	/man/2/disks
 assumed	/man/2/filter-deflate
 assumed	/man/2/sexprs
 assumed	/man/2/spree
@@ -3666,7 +3654,6 @@ asynchronously	/man/1/sh
 asynchronously	/man/1/sh-std
 asynchronously	/man/2/draw-0intro
 asynchronously	/man/2/sh
-ata	/man/2/disks
 ata	/man/3/sd
 atactlrwait	/man/10/seconds
 atan	/man/1/calc
@@ -3831,7 +3818,6 @@ attempts	/man/10/dev
 attempts	/man/10/lock
 attempts	/man/10/qio
 attempts	/man/2/dhcpclient
-attempts	/man/2/disks
 attempts	/man/2/keyring-auth
 attempts	/man/2/newns
 attempts	/man/2/registries
@@ -4503,7 +4489,6 @@ base	/man/10/dynld
 base	/man/10/plan9.ini
 base	/man/2/dial
 base	/man/2/dis
-base	/man/2/disks
 base	/man/2/draw-screen
 base	/man/2/drawmux
 base	/man/2/encoding
@@ -4654,7 +4639,6 @@ bcmflnve123	/man/1/mprof
 bd	/man/9/options
 bdata	/man/10/2l
 bdmpr	/man/8/dhcp
-bear	/man/2/disks
 bears	/man/2/asn1
 bebytestoip	/man/2/keyring-ipint
 becomes	/man/1/bind
@@ -5011,11 +4995,9 @@ binds	/man/8/rstyxd
 bio	/man/10/print
 bios	/man/10/9load
 bios	/man/10/plan9.ini
-bios	/man/2/disks
 bios	/man/3/pnp
 bios	/man/8/prep
 bioses	/man/10/9load
-bioses	/man/2/disks
 bioses	/man/8/prep
 bioss	/man/10/9load
 bishop	/man/6/keyboard
@@ -5137,7 +5119,6 @@ bits	/man/10/devattach
 bits	/man/2/asn1
 bits	/man/2/convcs
 bits	/man/2/dis
-bits	/man/2/disks
 bits	/man/2/draw-0intro
 bits	/man/2/draw-display
 bits	/man/2/draw-image
@@ -5293,7 +5274,6 @@ block	/man/10/odbc
 block	/man/10/plan9.ini
 block	/man/10/qio
 block	/man/10/xalloc
-block	/man/2/disks
 block	/man/2/draw-image
 block	/man/2/keyring-crypt
 block	/man/2/lock
@@ -5451,7 +5431,6 @@ boot	/man/10/5cv
 boot	/man/10/9load
 boot	/man/10/plan9.ini
 boot	/man/10/seconds
-boot	/man/2/disks
 boot	/man/3/boot
 boot	/man/3/cons
 boot	/man/3/dbg
@@ -5463,7 +5442,6 @@ boot	/man/8/bootpd
 boot	/man/8/prep
 boot	/man/8/rdbgsrv
 bootable	/man/10/conf
-bootable	/man/2/disks
 bootable	/man/8/prep
 bootblock	/man/8/prep
 bootconf	/man/2/dhcpclient
@@ -5614,7 +5592,6 @@ bound	/man/9/canvas
 bound	/man/9/entry
 boundaries	/man/1/acme
 boundaries	/man/1/brutus
-boundaries	/man/2/disks
 boundaries	/man/2/keyring-getmsg
 boundaries	/man/2/msgio
 boundaries	/man/2/sexprs
@@ -5888,7 +5865,6 @@ buf	/man/10/styx
 buf	/man/10/styxserver
 buf	/man/2/crc
 buf	/man/2/dial
-buf	/man/2/disks
 buf	/man/2/filter
 buf	/man/2/keyring-crypt
 buf	/man/2/keyring-getmsg
@@ -6392,7 +6368,6 @@ byte	/man/2/crc
 byte	/man/2/dhcpclient
 byte	/man/2/dial
 byte	/man/2/dis
-byte	/man/2/disks
 byte	/man/2/draw-0intro
 byte	/man/2/draw-display
 byte	/man/2/draw-image
@@ -6529,7 +6504,6 @@ bytes	/man/2/convcs
 bytes	/man/2/crc
 bytes	/man/2/dhcpclient
 bytes	/man/2/dis
-bytes	/man/2/disks
 bytes	/man/2/draw-image
 bytes	/man/2/drawmux
 bytes	/man/2/encoding
@@ -6680,7 +6654,6 @@ calculate	/man/8/touchcal
 calculated	/man/1/calc
 calculated	/man/1/m4
 calculated	/man/10/2c
-calculated	/man/2/disks
 calculated	/man/2/styx
 calculated	/man/3/touch
 calculates	/man/1/disdep
@@ -7248,7 +7221,6 @@ cgi.m	/man/8/httpd
 cgreen	/man/3/draw
 cgrey	/man/3/draw
 ch	/man/2/xml
-chain	/man/2/disks
 chain	/man/2/security-0intro
 chained	/man/10/allocb
 chained	/man/8/prep
@@ -7953,8 +7925,6 @@ christian	/man/1/cal
 chroma	/man/2/mpeg
 chromakey	/man/3/tv
 chs	/man/10/9load
-chssrc	/man/2/disks
-chstext	/man/2/disks
 chunk	/man/1/xd
 chunk	/man/2/readdir
 chunk	/man/3/boot
@@ -10282,7 +10252,6 @@ constraints	/man/10/allocb
 constraints	/man/10/kproc
 constraints	/man/10/xalloc
 constraints	/man/2/asn1
-constraints	/man/2/disks
 constraints	/man/2/sys-fversion
 constraints	/man/3/flash
 constraints	/man/9/canvas
@@ -10676,7 +10645,6 @@ control	/man/10/xalloc
 control	/man/2/debug
 control	/man/2/dhcpclient
 control	/man/2/dial
-control	/man/2/disks
 control	/man/2/draw-0intro
 control	/man/2/draw-context
 control	/man/2/draw-image
@@ -10819,7 +10787,6 @@ convenience	/man/1/fs
 convenience	/man/1/sh-alphabet
 convenience	/man/1/tiny
 convenience	/man/2/convcs
-convenience	/man/2/disks
 convenience	/man/2/draw-image
 convenience	/man/2/ip
 convenience	/man/2/sexprs
@@ -12057,7 +12024,6 @@ ctl	/man/10/parsecmd
 ctl	/man/10/plan9.ini
 ctl	/man/2/command
 ctl	/man/2/dial
-ctl	/man/2/disks
 ctl	/man/2/draw-context
 ctl	/man/2/mpeg
 ctl	/man/2/styxservers-nametree
@@ -12091,7 +12057,6 @@ ctl	/man/4/spree
 ctl	/man/8/collabsrv
 ctl	/man/8/dhcp
 ctl	/man/8/prep
-ctlfd	/man/2/disks
 ctlifc	/man/2/dhcpclient
 ctlr	/man/3/vga
 ctrl	/man/10/9load
@@ -12392,12 +12357,9 @@ cyclic	/man/2/sexprs
 cyclic	/man/2/spki
 cyclic	/man/2/w3c-css
 cyclic	/man/2/wmsrv
-cyl	/man/2/disks
 cylinder	/man/10/9load
-cylinder	/man/2/disks
 cylinder	/man/3/sd
 cylinder	/man/8/prep
-cylinders	/man/2/disks
 cylinders	/man/8/prep
 cypher	/man/1/crypt
 cyrillic	/man/6/keyboard
@@ -12508,7 +12470,6 @@ data	/man/2/debug
 data	/man/2/dhcpclient
 data	/man/2/dial
 data	/man/2/dis
-data	/man/2/disks
 data	/man/2/draw-0intro
 data	/man/2/draw-context
 data	/man/2/draw-image
@@ -12942,7 +12903,6 @@ decimal	/man/10/ar
 decimal	/man/10/atoi
 decimal	/man/10/print
 decimal	/man/10/readnum
-decimal	/man/2/disks
 decimal	/man/2/drawmux
 decimal	/man/2/geodesy
 decimal	/man/2/ip
@@ -13038,7 +12998,6 @@ declared	/man/6/sbl
 declares	/man/1/listen
 declares	/man/1/sh-alphabet
 declares	/man/2/alphabet-intro
-declares	/man/2/disks
 declaring	/man/1/alphabet-main
 declaring	/man/10/2c
 decls	/man/2/w3c-css
@@ -13427,7 +13386,6 @@ defined	/man/2/bufio
 defined	/man/2/cfg
 defined	/man/2/convcs
 defined	/man/2/dis
-defined	/man/2/disks
 defined	/man/2/draw-0intro
 defined	/man/2/draw-context
 defined	/man/2/draw-font
@@ -13519,7 +13477,6 @@ defines	/man/2/alphabet-intro
 defines	/man/2/command
 defines	/man/2/convcs
 defines	/man/2/dis
-defines	/man/2/disks
 defines	/man/2/draw-0intro
 defines	/man/2/draw-display
 defines	/man/2/draw-font
@@ -13904,7 +13861,6 @@ dependent	/man/10/kbdputc
 dependent	/man/10/panic
 dependent	/man/10/print
 dependent	/man/10/seconds
-dependent	/man/2/disks
 dependent	/man/2/draw-display
 dependent	/man/2/styxpersist
 dependent	/man/3/cmd
@@ -14237,7 +14193,6 @@ descriptor	/man/2/bufio
 descriptor	/man/2/dhcpclient
 descriptor	/man/2/dial
 descriptor	/man/2/dis
-descriptor	/man/2/disks
 descriptor	/man/2/draw-context
 descriptor	/man/2/draw-display
 descriptor	/man/2/drawmux
@@ -14294,7 +14249,6 @@ descriptors	/man/1/sh-std
 descriptors	/man/10/dev
 descriptors	/man/10/newchan
 descriptors	/man/2/dis
-descriptors	/man/2/disks
 descriptors	/man/2/draw-context
 descriptors	/man/2/secstore
 descriptors	/man/2/styxconv
@@ -14821,7 +14775,6 @@ device	/man/10/readnum
 device	/man/10/sleep
 device	/man/10/splhi
 device	/man/2/dhcpclient
-device	/man/2/disks
 device	/man/2/draw-0intro
 device	/man/2/draw-context
 device	/man/2/draw-display
@@ -14912,7 +14865,6 @@ device's	/man/10/devattach
 device's	/man/10/newchan
 device's	/man/10/parsecmd
 device's	/man/10/plan9.ini
-device's	/man/2/disks
 device's	/man/2/ir
 device's	/man/2/sys-0intro
 device's	/man/3/0intro
@@ -15723,7 +15675,6 @@ directory	/man/10/styxserver
 directory	/man/2/debug
 directory	/man/2/dhcpclient
 directory	/man/2/dial
-directory	/man/2/disks
 directory	/man/2/draw-display
 directory	/man/2/fsproto
 directory	/man/2/ip
@@ -16045,7 +15996,6 @@ disconnects	/man/4/grid-cpu
 disconnects	/man/8/collabsrv
 discontiguous	/man/9/listbox
 discover	/man/10/a.out
-discover	/man/2/disks
 discover	/man/2/security-0intro
 discover	/man/3/dup
 discovered	/man/3/pnp
@@ -16085,7 +16035,6 @@ disk	/man/1/du
 disk	/man/1/zeros
 disk	/man/10/9load
 disk	/man/10/plan9.ini
-disk	/man/2/disks
 disk	/man/3/ds
 disk	/man/3/floppy
 disk	/man/3/logfs
@@ -16096,17 +16045,13 @@ disk	/man/8/kfscmd
 disk	/man/8/mkfs
 disk	/man/8/prep
 disk's	/man/8/prep
-disk.open	/man/2/disks
 diskette	/man/8/prep
 diskettes	/man/8/prep
 diskid	/man/7/cddb
 disks	/man/10/9load
-disks	/man/2/disks
 disks	/man/3/ds
 disks	/man/8/0intro
 disks	/man/8/prep
-disks.b	/man/2/disks
-disks.m	/man/2/disks
 disksize	/man/8/prep
 dismiss	/man/1/mash-tk
 dismiss	/man/10/intrenable
@@ -17039,7 +16984,6 @@ dtag	/man/9/canvas
 dtop	/man/2/spree-cardlib
 dtr	/man/3/eia
 dtt	/man/7/cddb
-dtype	/man/2/disks
 dtype	/man/2/styxservers
 dtype	/man/2/sys-stat
 du	/man/1/du
@@ -17615,7 +17559,6 @@ elsewhere	/man/1/sh
 elsewhere	/man/1/tktester
 elsewhere	/man/10/allocb
 elsewhere	/man/10/iar
-elsewhere	/man/2/disks
 elsewhere	/man/2/drawmux
 elsewhere	/man/2/sys-export
 elsewhere	/man/3/fs
@@ -17639,7 +17582,6 @@ emitted	/man/1/yacc
 employ	/man/1/acme
 employ	/man/1/charon
 employ	/man/2/security-0intro
-employs	/man/2/disks
 empties	/man/10/allocb
 empties	/man/10/qio
 ems	/man/2/w3c-css
@@ -18234,7 +18176,6 @@ entries	/man/10/a.out
 entries	/man/10/dev
 entries	/man/10/devattach
 entries	/man/10/plan9.ini
-entries	/man/2/disks
 entries	/man/2/fsproto
 entries	/man/2/pop3
 entries	/man/2/readdir
@@ -18296,7 +18237,6 @@ entry	/man/2/attrdb
 entry	/man/2/convcs
 entry	/man/2/dialog
 entry	/man/2/dis
-entry	/man/2/disks
 entry	/man/2/factotum
 entry	/man/2/math-linalg
 entry	/man/2/readdir
@@ -18930,7 +18870,6 @@ essential	/man/8/signer
 essentially	/man/2/encoding
 essid	/man/10/plan9.ini
 est	/man/2/daytime
-establish	/man/2/disks
 establish	/man/2/security-0intro
 establish	/man/2/security-login
 establish	/man/2/sys-dial
@@ -19238,7 +19177,6 @@ exactly	/man/10/rune
 exactly	/man/10/strcat
 exactly	/man/10/styx
 exactly	/man/2/asn1
-exactly	/man/2/disks
 exactly	/man/2/filter-deflate
 exactly	/man/2/sh
 exactly	/man/2/spki
@@ -20331,7 +20269,6 @@ extended	/man/1/0intro
 extended	/man/1/acme
 extended	/man/1/limbo
 extended	/man/10/9load
-extended	/man/2/disks
 extended	/man/2/spki
 extended	/man/2/w3c-css
 extended	/man/5/stat
@@ -20455,7 +20392,6 @@ extract	/man/10/iar
 extract	/man/10/odbc
 extract	/man/10/styx
 extract	/man/2/convcs
-extract	/man/2/disks
 extract	/man/2/print
 extract	/man/2/sexprs
 extracted	/man/1/ar
@@ -20470,7 +20406,6 @@ extracted	/man/8/mkfs
 extracting	/man/2/styxservers
 extracts	/man/1/brutus
 extracts	/man/1/gettar
-extracts	/man/2/disks
 extracts	/man/2/keyring-gensk
 extrapolates	/man/9/text
 ezd	/man/9/canvas
@@ -20598,7 +20533,6 @@ fails	/man/1/webgrab
 fails	/man/10/2c
 fails	/man/10/c2l
 fails	/man/2/alphabet-intro
-fails	/man/2/disks
 fails	/man/2/draw-display
 fails	/man/2/env
 fails	/man/2/factotum
@@ -20718,7 +20652,6 @@ faster	/man/3/cons
 faster	/man/4/logfile
 fastest	/man/4/iostats
 fat	/man/10/9load
-fat	/man/2/disks
 fat	/man/3/fs
 fat	/man/4/dossrv
 fat	/man/8/prep
@@ -20774,7 +20707,6 @@ fd	/man/10/styxserver
 fd	/man/2/bufio
 fd	/man/2/dhcpclient
 fd	/man/2/dial
-fd	/man/2/disks
 fd	/man/2/draw-context
 fd	/man/2/draw-display
 fd	/man/2/drawmux
@@ -21156,7 +21088,6 @@ file	/man/2/debug
 file	/man/2/dhcpclient
 file	/man/2/dial
 file	/man/2/dis
-file	/man/2/disks
 file	/man/2/draw-context
 file	/man/2/draw-display
 file	/man/2/draw-font
@@ -21366,7 +21297,6 @@ file's	/man/1/webgrab
 file's	/man/10/conf
 file's	/man/10/mk
 file's	/man/2/dis
-file's	/man/2/disks
 file's	/man/2/fsproto
 file's	/man/2/styxservers
 file's	/man/2/styxservers-nametree
@@ -21588,7 +21518,6 @@ files	/man/2/debug
 files	/man/2/dhcpclient
 files	/man/2/dial
 files	/man/2/dis
-files	/man/2/disks
 files	/man/2/draw-display
 files	/man/2/draw-font
 files	/man/2/ether
@@ -21894,7 +21823,6 @@ finds	/man/1/man
 finds	/man/1/sh-alphabet
 finds	/man/1/strings
 finds	/man/10/9load
-finds	/man/2/disks
 finds	/man/2/spree
 finds	/man/2/wmsrv
 findsym	/man/2/debug
@@ -21936,7 +21864,6 @@ fit	/man/1/mc
 fit	/man/10/dev
 fit	/man/10/print
 fit	/man/2/asn1
-fit	/man/2/disks
 fit	/man/2/prefab-element
 fit	/man/2/styx
 fit	/man/3/ds
@@ -22119,7 +22046,6 @@ floats	/man/10/acid
 floor	/man/1/calc
 floor	/man/2/math-fp
 floppy	/man/10/9load
-floppy	/man/2/disks
 floppy	/man/3/floppy
 floppy	/man/3/sd
 floppy	/man/8/prep
@@ -22205,7 +22131,6 @@ fn	/man/2/dhcpclient
 fn	/man/2/dial
 fn	/man/2/dialog
 fn	/man/2/dis
-fn	/man/2/disks
 fn	/man/2/dividers
 fn	/man/2/draw-0intro
 fn	/man/2/draw-context
@@ -22572,7 +22497,6 @@ format	/man/2/cfg
 format	/man/2/convcs
 format	/man/2/daytime
 format	/man/2/dis
-format	/man/2/disks
 format	/man/2/draw-0intro
 format	/man/2/draw-context
 format	/man/2/draw-display
@@ -22717,7 +22641,6 @@ formatting	/man/1/tktester
 formatting	/man/10/2c
 formatting	/man/10/print
 formatting	/man/10/styx
-formatting	/man/2/disks
 formatting	/man/3/vid
 formatting	/man/8/prep
 formed	/man/1/calc
@@ -22750,7 +22673,6 @@ former	/man/8/prep
 forming	/man/10/a.out
 forming	/man/10/qlock
 forming	/man/2/asn1
-forming	/man/2/disks
 forming	/man/2/draw-display
 forming	/man/2/string
 forming	/man/3/ip
@@ -23246,7 +23168,6 @@ gateway	/man/9/send
 gateways	/man/8/rip
 gather	/man/1/alphabet-fs
 gather	/man/1/fs
-gather	/man/2/disks
 gather	/man/2/draw-image
 gather	/man/2/prof
 gather	/man/2/spree-gather
@@ -23383,7 +23304,6 @@ generators	/man/1/disdep
 generic	/man/10/plan9.ini
 generic	/man/2/alphabet-intro
 generic	/man/2/convcs
-generic	/man/2/disks
 generic	/man/2/xml
 generic	/man/6/proto
 generic	/man/8/mkfs
@@ -23406,8 +23326,6 @@ geom	/man/1/mash-tk
 geometric	/man/2/draw-0intro
 geometric	/man/2/draw-image
 geometrical	/man/2/draw-image
-geometries	/man/2/disks
-geometry	/man/2/disks
 geometry	/man/2/prefab-element
 geometry	/man/3/sd
 geometry	/man/9/canvas
@@ -23844,7 +23762,6 @@ guarantees	/man/9/bind
 guard	/man/10/lock
 guarding	/man/4/lockfs
 guess	/man/1/passwd
-guess	/man/2/disks
 guess	/man/2/keyring-0intro
 guest	/man/4/ftpfs
 gui	/man/1/0intro
@@ -23994,7 +23911,6 @@ hard	/man/1/sh
 hard	/man/10/9load
 hard	/man/10/acid
 hard	/man/10/plan9.ini
-hard	/man/2/disks
 hard	/man/8/prep
 hard	/man/8/virgild
 hardly	/man/1/asm
@@ -24155,7 +24071,6 @@ headers4	/man/3/ip
 heading	/man/1/acme
 heading	/man/1/cook
 heads	/man/2/command
-heads	/man/2/disks
 headstr	/man/10/acid
 heap	/man/1/emu
 heap	/man/1/mprof
@@ -24227,7 +24142,6 @@ helper	/man/2/wmsrv
 helpful	/man/1/unicode
 helpful	/man/8/cs
 helpful	/man/8/rip
-helps	/man/2/disks
 helps	/man/2/registries
 helps	/man/2/styxservers
 helps	/man/8/changelogin
@@ -24245,7 +24159,6 @@ henceforth	/man/1/bind
 henceforth	/man/1/sh-tk
 henceforth	/man/2/sys-bind
 hereby	/man/9/1copyright
-heuristics	/man/2/disks
 hex	/man/1/freq
 hex	/man/1/mdb
 hex	/man/1/unicode
@@ -24772,7 +24685,6 @@ iar	/man/10/iar
 iar	/man/10/inm
 ib	/man/6/man
 ibm	/man/1/dd
-ibm	/man/2/disks
 ibm	/man/3/rtc
 ibm866	/man/2/convcs
 ibm866.cp	/man/2/convcs
@@ -25688,7 +25600,6 @@ include	/man/2/dhcpclient
 include	/man/2/dial
 include	/man/2/dialog
 include	/man/2/dis
-include	/man/2/disks
 include	/man/2/dividers
 include	/man/2/draw-0intro
 include	/man/2/draw-context
@@ -26380,7 +26291,6 @@ inferno	/man/2/command
 inferno	/man/2/convcs
 inferno	/man/2/dhcpclient
 inferno	/man/2/dis
-inferno	/man/2/disks
 inferno	/man/2/draw-0intro
 inferno	/man/2/draw-example
 inferno	/man/2/ip
@@ -26562,7 +26472,6 @@ init	/man/2/debug
 init	/man/2/dhcpclient
 init	/man/2/dialog
 init	/man/2/dis
-init	/man/2/disks
 init	/man/2/dividers
 init	/man/2/draw-context
 init	/man/2/draw-example
@@ -26743,7 +26652,6 @@ initialize	/man/8/prep
 initialized	/man/1/calc
 initialized	/man/1/sh
 initialized	/man/10/a.out
-initialized	/man/2/disks
 initialized	/man/2/draw-display
 initialized	/man/2/geodesy
 initializers	/man/10/2c
@@ -27255,7 +27163,6 @@ instructs	/man/1/acme
 insufficient	/man/2/draw-image
 insufficient	/man/3/draw
 insulate	/man/2/command
-insulate	/man/2/disks
 insulate	/man/2/sys-pctl
 insulate	/man/3/env
 insulating	/man/2/styxservers
@@ -27308,7 +27215,6 @@ int	/man/2/debug
 int	/man/2/dhcpclient
 int	/man/2/dialog
 int	/man/2/dis
-int	/man/2/disks
 int	/man/2/dividers
 int	/man/2/draw-0intro
 int	/man/2/draw-context
@@ -27698,7 +27604,6 @@ interface	/man/2/command
 interface	/man/2/debug
 interface	/man/2/dhcpclient
 interface	/man/2/dial
-interface	/man/2/disks
 interface	/man/2/dividers
 interface	/man/2/draw-0intro
 interface	/man/2/draw-context
@@ -28354,7 +28259,6 @@ invoking	/man/10/error
 invoking	/man/10/parsecmd
 invoking	/man/2/command
 invoking	/man/2/dhcpclient
-invoking	/man/2/disks
 invoking	/man/2/drawmux
 invoking	/man/2/secstore
 invoking	/man/2/sexprs
@@ -28382,7 +28286,6 @@ involving	/man/2/math-0intro
 involving	/man/2/sys-iounit
 involving	/man/3/draw
 in²	/man/1/units
-io	/man/2/disks
 io	/man/3/eia
 io	/man/3/i2c
 io.h	/man/10/0intro
@@ -28857,7 +28760,6 @@ kept	/man/1/alphabet-abc
 kept	/man/1/alphabet-grid
 kept	/man/1/mash-make
 kept	/man/10/9load
-kept	/man/2/disks
 kept	/man/2/keyring-0intro
 kept	/man/2/keyring-sha1
 kept	/man/2/security-0intro
@@ -29469,7 +29371,6 @@ larger	/man/1/tiny
 larger	/man/10/9load
 larger	/man/2/0intro
 larger	/man/2/command
-larger	/man/2/disks
 larger	/man/2/keyring-ipint
 larger	/man/2/prefab-element
 larger	/man/2/styx
@@ -29768,7 +29669,6 @@ length	/man/10/styx
 length	/man/2/asn1
 length	/man/2/convcs
 length	/man/2/dis
-length	/man/2/disks
 length	/man/2/ether
 length	/man/2/ip
 length	/man/2/keyring-crypt
@@ -30055,7 +29955,6 @@ lib	/man/2/dhcpclient
 lib	/man/2/dial
 lib	/man/2/dialog
 lib	/man/2/dis
-lib	/man/2/disks
 lib	/man/2/dividers
 lib	/man/2/encoding
 lib	/man/2/env
@@ -30996,7 +30895,6 @@ load	/man/2/dhcpclient
 load	/man/2/dial
 load	/man/2/dialog
 load	/man/2/dis
-load	/man/2/disks
 load	/man/2/dividers
 load	/man/2/draw-0intro
 load	/man/2/draw-context
@@ -31521,7 +31419,6 @@ looks	/man/1/sh
 looks	/man/10/dynld
 looks	/man/10/newchan
 looks	/man/10/plan9.ini
-looks	/man/2/disks
 looks	/man/2/keyset
 looks	/man/2/spree-cardlib
 looks	/man/2/styx
@@ -31824,8 +31721,6 @@ magic	/man/2/dis
 magic	/man/6/dis
 magic	/man/6/sbl
 magic	/man/8/httpd
-magic0	/man/2/disks
-magic1	/man/2/disks
 magnetic	/man/1/dd
 magnitude	/man/2/keyring-ipint
 magnitude	/man/2/math-fp
@@ -32365,7 +32260,6 @@ master	/man/1/mk
 master	/man/10/9load
 master	/man/10/master
 master	/man/10/mk
-master	/man/2/disks
 master	/man/4/keyfs
 master	/man/8/prep
 master	/man/9/grid
@@ -32694,7 +32588,6 @@ measure	/man/1/sh-string
 measure	/man/1/time
 measure	/man/4/iostats
 measured	/man/1/tail
-measured	/man/2/disks
 measured	/man/2/draw-image
 measured	/man/2/geodesy
 measured	/man/2/sys-stat
@@ -33091,7 +32984,6 @@ messages	/man/10/kproc
 messages	/man/10/plan9.ini
 messages	/man/10/styx
 messages	/man/2/dial
-messages	/man/2/disks
 messages	/man/2/draw-context
 messages	/man/2/factotum
 messages	/man/2/filter
@@ -33536,7 +33428,6 @@ mode	/man/10/styxserver
 mode	/man/2/bufio
 mode	/man/2/convcs
 mode	/man/2/dis
-mode	/man/2/disks
 mode	/man/2/filter-deflate
 mode	/man/2/math-0intro
 mode	/man/2/math-fp
@@ -33592,7 +33483,6 @@ modem	/man/3/plap
 modemctl	/man/1/miniterm
 modeminit	/man/1/miniterm
 modemport	/man/10/plan9.ini
-modern	/man/2/disks
 modern	/man/3/logfs
 modes	/man/1/alphabet-fs
 modes	/man/1/chmod
@@ -33789,7 +33679,6 @@ module	/man/2/debug
 module	/man/2/dhcpclient
 module	/man/2/dialog
 module	/man/2/dis
-module	/man/2/disks
 module	/man/2/draw-0intro
 module	/man/2/draw-context
 module	/man/2/draw-display
@@ -33881,7 +33770,6 @@ module's	/man/2/0intro
 module's	/man/2/alphabet-intro
 module's	/man/2/bufio
 module's	/man/2/dis
-module's	/man/2/disks
 module's	/man/2/prefab-0intro
 module's	/man/2/prof
 module's	/man/2/secstore
@@ -34522,7 +34410,6 @@ names	/man/2/convcs
 names	/man/2/dhcpclient
 names	/man/2/dial
 names	/man/2/dis
-names	/man/2/disks
 names	/man/2/factotum
 names	/man/2/filepat
 names	/man/2/keyring-auth
@@ -35379,7 +35266,6 @@ nil	/man/2/dhcpclient
 nil	/man/2/dial
 nil	/man/2/dialog
 nil	/man/2/dis
-nil	/man/2/disks
 nil	/man/2/draw-0intro
 nil	/man/2/draw-context
 nil	/man/2/draw-display
@@ -35479,7 +35365,6 @@ nobody	/man/2/keyring-auth
 nobody	/man/3/cmd
 nobroken	/man/3/cons
 nocase	/man/9/text
-noctl	/man/2/disks
 node	/man/1/alphabet-abc
 node	/man/1/alphabet-grid
 node	/man/2/ip
@@ -35559,7 +35444,6 @@ non	/man/2/convcs
 non	/man/2/debug
 non	/man/2/dhcpclient
 non	/man/2/dial
-non	/man/2/disks
 non	/man/2/draw-display
 non	/man/2/draw-image
 non	/man/2/draw-point
@@ -35975,7 +35859,6 @@ nt	/man/3/fs
 nt	/man/4/namespace
 nt	/man/7/dbsrv
 ntab	/man/10/devattach
-ntentry	/man/2/disks
 ntest	/man/1/sh-expr
 ntfs	/man/3/fs
 ntfs	/man/8/prep
@@ -36498,7 +36381,6 @@ offset	/man/10/styxserver
 offset	/man/2/bufio
 offset	/man/2/daytime
 offset	/man/2/dis
-offset	/man/2/disks
 offset	/man/2/draw-display
 offset	/man/2/draw-image
 offset	/man/2/spree
@@ -36542,7 +36424,6 @@ offset1	/man/1/cmp
 offset2	/man/1/cmp
 offsets	/man/1/cmp
 offsets	/man/1/cp
-offsets	/man/2/disks
 offsets	/man/2/styx
 offsets	/man/2/styxservers
 offsets	/man/4/acme
@@ -36727,7 +36608,6 @@ opcodes	/man/6/dis
 openctl	/man/3/vga
 opendict	/man/2/translate
 opendicts	/man/2/translate
-opendisk	/man/2/disks
 opened	/man/1/bind
 opened	/man/1/brutus
 opened	/man/1/charon
@@ -36743,7 +36623,6 @@ opened	/man/10/newchan
 opened	/man/10/styxserver
 opened	/man/2/bufio
 opened	/man/2/dial
-opened	/man/2/disks
 opened	/man/2/plumbmsg
 opened	/man/2/pop3
 opened	/man/2/pslib
@@ -36813,7 +36692,6 @@ opens	/man/1/sh
 opens	/man/1/tktester
 opens	/man/10/styxserver
 opens	/man/2/attrdb
-opens	/man/2/disks
 opens	/man/2/factotum
 opens	/man/2/pop3
 opens	/man/2/smtp
@@ -36877,7 +36755,6 @@ operating	/man/1/emu
 operating	/man/10/9load
 operating	/man/10/kprof
 operating	/man/10/plan9.ini
-operating	/man/2/disks
 operating	/man/2/srv
 operating	/man/2/sys-0intro
 operating	/man/2/sys-dup
@@ -36963,7 +36840,6 @@ operations	/man/10/styxserver
 operations	/man/2/alphabet-intro
 operations	/man/2/bufio
 operations	/man/2/dhcpclient
-operations	/man/2/disks
 operations	/man/2/draw-0intro
 operations	/man/2/draw-context
 operations	/man/2/draw-display
@@ -37509,7 +37385,6 @@ ordwr	/man/10/devattach
 ordwr	/man/10/newchan
 ordwr	/man/10/styxserver
 ordwr	/man/2/bufio
-ordwr	/man/2/disks
 ordwr	/man/2/factotum
 ordwr	/man/2/styxservers
 ordwr	/man/2/sys-open
@@ -37522,7 +37397,6 @@ oread	/man/10/devattach
 oread	/man/10/newchan
 oread	/man/10/styxserver
 oread	/man/2/bufio
-oread	/man/2/disks
 oread	/man/2/styxservers
 oread	/man/2/sys-open
 oread	/man/5/open
@@ -37594,7 +37468,6 @@ original	/man/1/wm-misc
 original	/man/10/allocb
 original	/man/10/lock
 original	/man/2/asn1
-original	/man/2/disks
 original	/man/2/draw-context
 original	/man/2/draw-screen
 original	/man/2/filter-deflate
@@ -38161,7 +38034,6 @@ packdir	/man/5/stat
 packdirsize	/man/2/styx
 packed	/man/1/tktester
 packed	/man/2/asn1
-packed	/man/2/disks
 packed	/man/2/draw-image
 packed	/man/2/keyring-getmsg
 packed	/man/2/msgio
@@ -38669,7 +38541,6 @@ parses	/man/10/9load
 parses	/man/10/parsecmd
 parses	/man/2/arg
 parses	/man/2/cfg
-parses	/man/2/disks
 parses	/man/2/factotum
 parses	/man/2/spki
 parses	/man/2/spree
@@ -38819,7 +38690,6 @@ parties	/man/6/auth
 parties	/man/9/1copyright
 partition	/man/10/9load
 partition	/man/10/plan9.ini
-partition	/man/2/disks
 partition	/man/3/flash
 partition	/man/3/ftl
 partition	/man/3/ip
@@ -38829,18 +38699,15 @@ partition	/man/4/kfs
 partition	/man/8/ftl
 partition	/man/8/prep
 partition	/man/8/rdbgsrv
-partition's	/man/2/disks
 partition's	/man/8/prep
 partitioning	/man/10/9load
 partitioning	/man/10/plan9.ini
-partitioning	/man/2/disks
 partitioning	/man/3/ds
 partitions	/man/1/cprof
 partitions	/man/1/math-misc
 partitions	/man/1/mprof
 partitions	/man/1/prof
 partitions	/man/10/9load
-partitions	/man/2/disks
 partitions	/man/3/flash
 partitions	/man/3/floppy
 partitions	/man/3/sd
@@ -39014,7 +38881,6 @@ path	/man/2/dhcpclient
 path	/man/2/dial
 path	/man/2/dialog
 path	/man/2/dis
-path	/man/2/disks
 path	/man/2/dividers
 path	/man/2/draw-0intro
 path	/man/2/draw-context
@@ -39269,7 +39135,6 @@ pc	/man/10/lock
 pc	/man/10/plan9.ini
 pc	/man/2/debug
 pc	/man/2/dis
-pc	/man/2/disks
 pc	/man/3/arch
 pc	/man/3/floppy
 pc	/man/3/i82365
@@ -39319,8 +39184,6 @@ pcmcia0	/man/10/plan9.ini
 pcmciax	/man/10/plan9.ini
 pcmpc100	/man/10/plan9.ini
 pcnet	/man/10/plan9.ini
-pcpart	/man/2/disks
-pcpart.active	/man/2/disks
 pcr	/man/3/lpt
 pcs	/man/10/plan9.ini
 pcs	/man/8/prep
@@ -39354,7 +39217,6 @@ pda	/man/3/pointer
 pdc.minitelfr.com	/man/1/miniterm
 pdriver	/man/2/print
 pdv	/man/2/asn1
-peculiar	/man/2/disks
 peculiar	/man/3/fs
 peculiar	/man/3/touch
 peculiar	/man/6/colour
@@ -39889,7 +39751,6 @@ plain	/man/1/cp
 plain	/man/1/man
 plain	/man/1/wish
 plain	/man/10/print
-plain	/man/2/disks
 plain	/man/2/keyring-ipint
 plain	/man/2/sys-print
 plain	/man/2/tkclient
@@ -39927,7 +39788,6 @@ plan	/man/10/plan9.ini
 plan	/man/10/sleep
 plan	/man/10/styx
 plan	/man/2/dhcpclient
-plan	/man/2/disks
 plan	/man/2/factotum
 plan	/man/2/secstore
 plan	/man/2/styxpersist
@@ -40694,7 +40554,6 @@ prefix	/man/10/panic
 prefix	/man/2/0intro
 prefix	/man/2/alphabet-intro
 prefix	/man/2/asn1
-prefix	/man/2/disks
 prefix	/man/2/ip
 prefix	/man/2/prof
 prefix	/man/2/sh
@@ -40738,7 +40597,6 @@ premultiplied	/man/2/draw-0intro
 premultiplied	/man/6/colour
 prentice	/man/1/yacc
 prep	/man/10/9load
-prep	/man/2/disks
 prep	/man/8/prep
 prepare	/man/10/dmainit
 prepare	/man/4/kfs
@@ -40895,7 +40753,6 @@ prevent	/man/1/man
 prevent	/man/1/sh-tk
 prevent	/man/10/allocb
 prevent	/man/10/styxserver
-prevent	/man/2/disks
 prevent	/man/2/security-0intro
 prevent	/man/2/sys-chdir
 prevent	/man/2/sys-pctl
@@ -40977,7 +40834,6 @@ primary	/man/10/styxserver
 primary	/man/2/attrdb
 primary	/man/2/cfg
 primary	/man/2/convcs
-primary	/man/2/disks
 primary	/man/3/cons
 primary	/man/3/flash
 primary	/man/6/colour
@@ -42330,7 +42186,6 @@ provides	/man/2/crc
 provides	/man/2/debug
 provides	/man/2/dhcpclient
 provides	/man/2/dialog
-provides	/man/2/disks
 provides	/man/2/draw-0intro
 provides	/man/2/draw-context
 provides	/man/2/draw-image
@@ -42483,7 +42338,6 @@ ptr	/man/2/wmclient
 ptr	/man/2/wmlib
 ptr	/man/2/wmsrv
 ptr	/man/8/dns
-ptype	/man/2/disks
 ptype	/man/2/print
 ptype.cfg	/man/2/print
 publication	/man/1/ebook
@@ -43234,7 +43088,6 @@ rdbg	/man/8/rdbgsrv
 rdbg.h	/man/3/dbg
 rdbgsrv	/man/8/rdbgsrv
 rdbgsrv.b	/man/8/rdbgsrv
-rdonly	/man/2/disks
 rdtog	/man/3/usb
 re	/man/1/acme
 re	/man/1/miniterm
@@ -43263,7 +43116,6 @@ reached	/man/1/charon
 reached	/man/1/grid-register
 reached	/man/10/lock
 reached	/man/2/debug
-reached	/man/2/disks
 reached	/man/2/registries
 reached	/man/2/sys-0intro
 reached	/man/3/prog
@@ -43350,7 +43202,6 @@ read	/man/2/bufio-chanfill
 read	/man/2/debug
 read	/man/2/dial
 read	/man/2/dis
-read	/man/2/disks
 read	/man/2/draw-display
 read	/man/2/draw-font
 read	/man/2/draw-image
@@ -43544,7 +43395,6 @@ reading	/man/10/qlock
 reading	/man/2/bufio
 reading	/man/2/daytime
 reading	/man/2/dial
-reading	/man/2/disks
 reading	/man/2/draw-font
 reading	/man/2/env
 reading	/man/2/imagefile
@@ -43611,10 +43461,8 @@ readme	/man/1/acme
 readme	/man/1/itest
 readmsg	/man/2/styx
 readmulti	/man/2/imagefile
-readn	/man/2/disks
 readn	/man/2/sys-read
 readnum	/man/10/readnum
-readonly	/man/2/disks
 readpicfile	/man/2/imagefile
 readpicfile.b	/man/2/imagefile
 readpicpath	/man/2/imagefile
@@ -43668,7 +43516,6 @@ reads	/man/10/plan9.ini
 reads	/man/10/qio
 reads	/man/2/daytime
 reads	/man/2/dis
-reads	/man/2/disks
 reads	/man/2/ether
 reads	/man/2/fsproto
 reads	/man/2/ir
@@ -43781,7 +43628,6 @@ real	/man/9/scrollbar
 real	/man/9/text
 real32	/man/2/math-export
 reality	/man/1/charon
-reality	/man/2/disks
 realloc	/man/10/malloc
 reallocating	/man/10/allocb
 reallocation	/man/3/cmd
@@ -44032,7 +43878,6 @@ record	/man/10/ms2
 record	/man/10/odbc
 record	/man/2/cfg
 record	/man/2/convcs
-record	/man/2/disks
 record	/man/2/ir
 record	/man/2/keyring-getmsg
 record	/man/2/keyring-getstring
@@ -44281,7 +44126,6 @@ ref	/man/2/dhcpclient
 ref	/man/2/dial
 ref	/man/2/dialog
 ref	/man/2/dis
-ref	/man/2/disks
 ref	/man/2/dividers
 ref	/man/2/draw-context
 ref	/man/2/draw-display
@@ -44428,7 +44272,6 @@ reference	/man/2/daytime
 reference	/man/2/dhcpclient
 reference	/man/2/dial
 reference	/man/2/dis
-reference	/man/2/disks
 reference	/man/2/draw-0intro
 reference	/man/2/draw-context
 reference	/man/2/draw-display
@@ -44828,7 +44671,6 @@ relative	/man/1/vacget
 relative	/man/10/dynld
 relative	/man/2/daytime
 relative	/man/2/dis
-relative	/man/2/disks
 relative	/man/2/fsproto
 relative	/man/2/spree
 relative	/man/2/sys-0intro
@@ -44903,7 +44745,6 @@ relevant	/man/1/tktester
 relevant	/man/10/master
 relevant	/man/10/plan9.ini
 relevant	/man/2/0intro
-relevant	/man/2/disks
 relevant	/man/2/factotum
 relevant	/man/2/print
 relevant	/man/2/prof
@@ -45481,7 +45322,6 @@ report	/man/1/uniq
 report	/man/1/webgrab
 report	/man/1/yacc
 report	/man/2/alphabet-intro
-report	/man/2/disks
 report	/man/2/imagefile
 report	/man/2/itslib
 report	/man/2/sys-stat
@@ -45538,7 +45378,6 @@ represent	/man/10/newchan
 represent	/man/10/rune
 represent	/man/2/asn1
 represent	/man/2/debug
-represent	/man/2/disks
 represent	/man/2/draw-display
 represent	/man/2/draw-font
 represent	/man/2/draw-pointer
@@ -45576,7 +45415,6 @@ representation	/man/10/styx
 representation	/man/2/asn1
 representation	/man/2/debug
 representation	/man/2/dis
-representation	/man/2/disks
 representation	/man/2/draw-0intro
 representation	/man/2/draw-display
 representation	/man/2/ether
@@ -45715,7 +45553,6 @@ represents	/man/2/attrdb
 represents	/man/2/convcs
 represents	/man/2/debug
 represents	/man/2/dis
-represents	/man/2/disks
 represents	/man/2/draw-0intro
 represents	/man/2/draw-display
 represents	/man/2/factotum
@@ -45996,7 +45833,6 @@ required	/man/2/alphabet-intro
 required	/man/2/asn1
 required	/man/2/dhcpclient
 required	/man/2/dial
-required	/man/2/disks
 required	/man/2/encoding
 required	/man/2/factotum
 required	/man/2/geodesy
@@ -46120,7 +45956,6 @@ rescueblock	/man/1/sh-std
 rescued	/man/1/sh
 research	/man/1/yacc
 research	/man/3/indir
-resemblance	/man/2/disks
 resemble	/man/1/diff
 resemble	/man/3/usb
 resembling	/man/1/mash
@@ -46467,7 +46302,6 @@ resulting	/man/2/alphabet-intro
 resulting	/man/2/asn1
 resulting	/man/2/bufio
 resulting	/man/2/dial
-resulting	/man/2/disks
 resulting	/man/2/draw-image
 resulting	/man/2/draw-rect
 resulting	/man/2/factotum
@@ -46664,7 +46498,6 @@ return	/man/2/convcs
 return	/man/2/debug
 return	/man/2/dhcpclient
 return	/man/2/dial
-return	/man/2/disks
 return	/man/2/draw-0intro
 return	/man/2/draw-display
 return	/man/2/draw-font
@@ -46793,7 +46626,6 @@ returned	/man/2/crc
 returned	/man/2/debug
 returned	/man/2/dial
 returned	/man/2/dialog
-returned	/man/2/disks
 returned	/man/2/geodesy
 returned	/man/2/imagefile
 returned	/man/2/ip
@@ -46951,7 +46783,6 @@ returns	/man/2/dhcpclient
 returns	/man/2/dial
 returns	/man/2/dialog
 returns	/man/2/dis
-returns	/man/2/disks
 returns	/man/2/dividers
 returns	/man/2/draw-display
 returns	/man/2/draw-font
@@ -47399,7 +47230,6 @@ rooted	/man/1/alphabet-main
 rooted	/man/1/fs
 rooted	/man/1/itest
 rooted	/man/10/conf
-rooted	/man/2/disks
 rooted	/man/2/fsproto
 rooted	/man/2/spree
 rooted	/man/2/sys-export
@@ -47412,7 +47242,6 @@ rooted	/man/8/mkfs
 rootpath	/man/1/emu
 rootpath	/man/2/styxservers
 roots	/man/1/calc
-roots	/man/2/disks
 roots	/man/2/sys-pctl
 roottype	/man/2/venti
 ropen	/man/10/styx
@@ -48045,7 +47874,6 @@ saved	/man/1/tktester
 saved	/man/1/webgrab
 saved	/man/10/intrenable
 saved	/man/2/bufio-chanfill
-saved	/man/2/disks
 saved	/man/2/prof
 saved	/man/2/spree
 saved	/man/3/dbg
@@ -48343,10 +48171,8 @@ scs	/man/8/cs
 scsi	/man/10/conf
 scsi	/man/10/plan9.ini
 scsi	/man/3/sd
-scsiio	/man/2/disks
 scsix	/man/10/plan9.ini
 sd	/man/10/9load
-sd	/man/2/disks
 sd	/man/3/sd
 sd	/man/4/kfs
 sd	/man/8/kfscmd
@@ -48490,9 +48316,7 @@ secrets	/man/4/keyfs
 secrets	/man/4/namespace
 secrets	/man/6/keys
 secrets	/man/8/svc
-secs	/man/2/disks
 secs2time	/man/2/spki
-secsize	/man/2/disks
 secsize	/man/8/ftl
 secstore	/man/1/crypt
 secstore	/man/1/secstore
@@ -48569,14 +48393,12 @@ sections	/man/9/canvas
 sections	/man/9/menu
 sector	/man/10/9load
 sector	/man/10/plan9.ini
-sector	/man/2/disks
 sector	/man/2/draw-image
 sector	/man/3/draw
 sector	/man/3/sd
 sector	/man/8/ftl
 sector	/man/8/prep
 sectors	/man/10/9load
-sectors	/man/2/disks
 sectors	/man/3/sd
 sectors	/man/4/dossrv
 sectors	/man/8/ftl
@@ -48923,7 +48745,6 @@ self	/man/2/bufio
 self	/man/2/cfg
 self	/man/2/debug
 self	/man/2/dhcpclient
-self	/man/2/disks
 self	/man/2/dividers
 self	/man/2/draw-display
 self	/man/2/draw-example
@@ -49680,7 +49501,6 @@ setting	/man/1/tktester
 setting	/man/10/a.out
 setting	/man/10/allocb
 setting	/man/10/plan9.ini
-setting	/man/2/disks
 setting	/man/2/geodesy
 setting	/man/2/itslib
 setting	/man/2/prefab-element
@@ -50642,7 +50462,6 @@ size	/man/10/xalloc
 size	/man/2/0intro
 size	/man/2/dhcpclient
 size	/man/2/dis
-size	/man/2/disks
 size	/man/2/dividers
 size	/man/2/draw-0intro
 size	/man/2/draw-display
@@ -51278,7 +51097,6 @@ source	/man/2/dhcpclient
 source	/man/2/dial
 source	/man/2/dialog
 source	/man/2/dis
-source	/man/2/disks
 source	/man/2/dividers
 source	/man/2/draw-0intro
 source	/man/2/draw-example
@@ -52542,7 +52360,6 @@ started	/man/10/eve
 started	/man/10/ntsrv
 started	/man/10/odbc
 started	/man/2/command
-started	/man/2/disks
 started	/man/2/spree
 started	/man/2/spree-gather
 started	/man/2/styxpersist
@@ -52670,7 +52487,6 @@ stat	/man/10/devattach
 stat	/man/10/newchan
 stat	/man/10/styx
 stat	/man/10/styxserver
-stat	/man/2/disks
 stat	/man/2/fsproto
 stat	/man/2/pop3
 stat	/man/2/readdir
@@ -53042,7 +52858,6 @@ store	/man/1/secstore
 store	/man/10/acid
 store	/man/10/dev
 store	/man/10/styx
-store	/man/2/disks
 store	/man/2/draw-context
 store	/man/2/draw-screen
 store	/man/2/secstore
@@ -53079,7 +52894,6 @@ stored	/man/2/alphabet-intro
 stored	/man/2/asn1
 stored	/man/2/convcs
 stored	/man/2/dhcpclient
-stored	/man/2/disks
 stored	/man/2/draw-0intro
 stored	/man/2/hash
 stored	/man/2/imagefile
@@ -53126,7 +52940,6 @@ stored	/man/9/radiobutton
 storer	/man/6/image
 stores	/man/1/webgrab
 stores	/man/2/0intro
-stores	/man/2/disks
 stores	/man/2/draw-0intro
 stores	/man/2/sets
 stores	/man/2/spree-allow
@@ -53324,7 +53137,6 @@ string	/man/2/dhcpclient
 string	/man/2/dial
 string	/man/2/dialog
 string	/man/2/dis
-string	/man/2/disks
 string	/man/2/dividers
 string	/man/2/draw-0intro
 string	/man/2/draw-context
@@ -54326,7 +54138,6 @@ suffix	/man/1/ebook
 suffix	/man/1/gzip
 suffix	/man/1/tiny
 suffix	/man/1/webgrab
-suffix	/man/2/disks
 suffix	/man/2/draw-image
 suffix	/man/2/spki
 suffix	/man/2/w3c-css
@@ -54505,7 +54316,6 @@ support	/man/10/devattach
 support	/man/10/dmainit
 support	/man/10/plan9.ini
 support	/man/2/asn1
-support	/man/2/disks
 support	/man/2/hash
 support	/man/2/imagefile
 support	/man/2/keyring-ipint
@@ -54609,7 +54419,6 @@ supports	/man/6/colour
 supports	/man/8/httpd
 supports	/man/9/canvas
 suppose	/man/2/alphabet-intro
-supposed	/man/2/disks
 supposedly	/man/4/keyfs
 suppress	/man/1/bind
 suppress	/man/1/rm
@@ -54918,7 +54727,6 @@ sys	/man/2/command
 sys	/man/2/daytime
 sys	/man/2/dhcpclient
 sys	/man/2/dial
-sys	/man/2/disks
 sys	/man/2/draw-0intro
 sys	/man/2/draw-context
 sys	/man/2/draw-display
@@ -55116,7 +54924,6 @@ systems	/man/10/9load
 systems	/man/10/eve
 systems	/man/10/plan9.ini
 systems	/man/2/command
-systems	/man/2/disks
 systems	/man/2/draw-display
 systems	/man/2/encoding
 systems	/man/2/geodesy
@@ -55213,7 +55020,6 @@ table	/man/2/asn1
 table	/man/2/crc
 table	/man/2/daytime
 table	/man/2/dis
-table	/man/2/disks
 table	/man/2/hash
 table	/man/2/prof
 table	/man/2/spree-cardlib
@@ -55242,7 +55048,6 @@ tables	/man/10/dynld
 tables	/man/10/odbc
 tables	/man/10/xalloc
 tables	/man/2/dis
-tables	/man/2/disks
 tables	/man/3/ip
 tables	/man/6/man
 tables	/man/6/sbl
@@ -55413,7 +55218,6 @@ takes	/man/2/arg
 takes	/man/2/attrdb
 takes	/man/2/bufio
 takes	/man/2/dial
-takes	/man/2/disks
 takes	/man/2/draw-image
 takes	/man/2/ether
 takes	/man/2/keyring-certtostr
@@ -55682,7 +55486,6 @@ tenth	/man/10/2c
 tenth	/man/9/canvas
 tenths	/man/3/prog
 tenths	/man/9/canvas
-tentrysize	/man/2/disks
 term	/man/1/sh
 term	/man/1/yacc
 term	/man/2/w3c-css
@@ -55842,7 +55645,6 @@ text	/man/2/asn1
 text	/man/2/bufio
 text	/man/2/convcs
 text	/man/2/daytime
-text	/man/2/disks
 text	/man/2/draw-0intro
 text	/man/2/draw-display
 text	/man/2/draw-font
@@ -56586,7 +56388,6 @@ today's	/man/1/mux
 todir	/man/1/cp
 todir	/man/1/mv
 todo	/man/1/blur
-toffset	/man/2/disks
 tofile	/man/1/cp
 tofile	/man/1/mv
 toggle	/man/1/grid-session
@@ -56782,7 +56583,6 @@ tracing	/man/3/ip
 tracing	/man/3/logfs
 tracing	/man/4/keyfs
 track	/man/1/blur
-track	/man/2/disks
 track	/man/4/dossrv
 track	/man/4/spree
 track	/man/7/cddb
@@ -57066,7 +56866,6 @@ tree	/man/10/devattach
 tree	/man/10/master
 tree	/man/10/ntsrv
 tree	/man/10/styxserver
-tree	/man/2/disks
 tree	/man/2/math-0intro
 tree	/man/2/sexprs
 tree	/man/2/spree
@@ -57427,7 +57226,6 @@ type	/man/2/debug
 type	/man/2/dhcpclient
 type	/man/2/dialog
 type	/man/2/dis
-type	/man/2/disks
 type	/man/2/draw-0intro
 type	/man/2/draw-context
 type	/man/2/draw-display
@@ -57510,7 +57308,6 @@ type	/man/9/variable
 type1	/man/2/asn1
 type2	/man/2/asn1
 type3	/man/2/asn1
-type9	/man/2/disks
 typeable	/man/10/kbdputc
 typechecking	/man/1/sh-alphabet
 typed	/man/1/acme
@@ -57966,7 +57763,6 @@ underlying	/man/10/intrenable
 underlying	/man/2/asn1
 underlying	/man/2/attrdb
 underlying	/man/2/bufio
-underlying	/man/2/disks
 underlying	/man/2/draw-0intro
 underlying	/man/2/drawmux
 underlying	/man/2/security-auth
@@ -58972,7 +58768,6 @@ using	/man/2/convcs
 using	/man/2/debug
 using	/man/2/dhcpclient
 using	/man/2/dial
-using	/man/2/disks
 using	/man/2/draw-example
 using	/man/2/draw-image
 using	/man/2/draw-screen
@@ -59459,7 +59254,6 @@ value	/man/2/dhcpclient
 value	/man/2/dial
 value	/man/2/dialog
 value	/man/2/dis
-value	/man/2/disks
 value	/man/2/draw-0intro
 value	/man/2/draw-context
 value	/man/2/draw-display
@@ -59689,7 +59483,6 @@ values	/man/2/convcs
 values	/man/2/daytime
 values	/man/2/dhcpclient
 values	/man/2/dis
-values	/man/2/disks
 values	/man/2/draw-0intro
 values	/man/2/draw-display
 values	/man/2/draw-image
@@ -60663,7 +60456,6 @@ werrstr	/man/2/sys-werrstr
 wfd	/man/1/alphabet-main
 wfd	/man/1/sh-alphabet
 wfd	/man/2/alphabet-intro
-wfd	/man/2/disks
 wgs84	/man/2/geodesy
 wh	/man/10/odbc
 what's	/man/1/mk
@@ -60860,7 +60652,6 @@ width	/man/1/mc
 width	/man/1/wm-sh
 width	/man/1/xd
 width	/man/10/print
-width	/man/2/disks
 width	/man/2/dividers
 width	/man/2/draw-font
 width	/man/2/draw-image
@@ -61278,7 +61069,6 @@ works	/man/10/acid
 works	/man/10/plan9.ini
 works	/man/10/print
 works	/man/2/dial
-works	/man/2/disks
 works	/man/2/hash
 works	/man/4/ftpfs
 works	/man/6/image
@@ -61562,7 +61352,6 @@ writing	/man/10/plan9.ini
 writing	/man/10/qio
 writing	/man/2/bufio
 writing	/man/2/dial
-writing	/man/2/disks
 writing	/man/2/env
 writing	/man/2/imagefile
 writing	/man/2/keyring-crypt

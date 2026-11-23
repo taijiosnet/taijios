@@ -932,7 +932,7 @@ appl
 		dialog.b
 		dis.b
 		diskblocks.zi
-		disks.b
+		disks.zi
 		dividers.b
 		ecmascript
 			builtin.b
@@ -1528,7 +1528,6 @@ dis
 		dial.dis
 		dialog.dis
 		dis.dis
-		disks.dis
 		dividers.dis
 		drawmux.dis
 		ecmascript.dis
@@ -2133,7 +2132,6 @@ module
 	dial.m
 	dialog.m
 	dis.m
-	disks.m
 	dividers.m
 	draw.m
 	ecmascript.m

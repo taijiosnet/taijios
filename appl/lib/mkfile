@@ -30,7 +30,6 @@ TARG=\
 	dial.dis\
 	dialog.dis\
 	dis.dis\
-	disks.dis\
 	dividers.dis\
 	env.dis\
 	ether.dis\
@@ -190,7 +189,6 @@ keyset.dis:	$ROOT/module/keyset.m
 auth9.dis: $ROOT/module/auth9.m
 factotum.dis:	$ROOT/module/factotum.m
 sexprs.dis:	$ROOT/module/sexprs.m
-disks.dis: $ROOT/module/disks.m
 dhcpclient.dis:	$ROOT/module/dhcp.m
 secstore.dis:	$ROOT/module/secstore.m
 vac.dis:	$ROOT/module/vac.m $ROOT/module/venti.m
