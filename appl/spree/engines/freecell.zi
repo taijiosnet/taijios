@@ -1,0 +1,203 @@
+// Spree FreeCell solitaire engine, ported from appl/spree/engines/freecell.b.
+#import "std/vec"
+using Core :: #import "spree_core"
+using Allow :: #import "allow"
+using CL :: #import "cardlib"
+
+CLICK :: 0;
+
+FreeCellEngine :: struct {
+    cs: CL.CardState;
+    al: Allow.AllowList;
+    open: [8]s32;
+    cells: [4]s32;
+    acepiles: [4]s32;
+    txpiles: [12]s32;
+    deck: s32;
+    suitsout: [4]s32;
+}
+
+ClientType :: () -> string { return "cards" }
+MaxMembers :: () -> s32 { return 1 }
+Propose :: (n: s32) -> string { return ifx n != 1 then "one member only" else "" }
+
+IsRed :: (suit: s32) -> bool { return suit == CL.DIAMONDS || suit == CL.HEARTS }
+
+NewStack :: (c: *Core.Clique, style: string, maxc: s32, stype: string, title: string) -> s32 {
+    s := CL.NewStack(c, 0, -1, .{style = style, maxcards = maxc, conceal = false, title = title});
+    Core.ObjSetAttr(c, s, "type", stype, Core.SetNone());
+    Core.ObjSetAttr(c, s, "actions", "click", Core.SetAll());
+    return s;
+}
+
+AddToAcePile :: (e: *FreeCellEngine, c: *Core.Clique, pile_id: s32) {
+    nc := cast(s32)c.objects[pile_id].children.count;
+    if nc == 0 { return }
+    card := CL.GetCard(c, c.objects[pile_id].children[nc - 1]);
+    target: s32 = -1;
+    for i: 0..3 {
+        anc := cast(s32)c.objects[e.acepiles[i]].children.count;
+        if anc == 0 {
+            if card.number == 0 { target = cast(s32)i; break }
+            continue;
+        }
+        acard := CL.GetCard(c, c.objects[e.acepiles[i]].children[anc - 1]);
+        if acard.suit == card.suit && acard.number == card.number - 1 {
+            target = cast(s32)i;
+            break;
+        }
+    }
+    if target >= 0 {
+        Core.ObjTransfer(c, pile_id, nc - 1, nc, e.acepiles[target], cast(s32)c.objects[e.acepiles[target]].children.count);
+        e.suitsout[card.suit] = card.number;
+    }
+}
+
+MoveFree :: (e: *FreeCellEngine, c: *Core.Clique) {
+    nmoved: s32 = 1;
+    while nmoved > 0 {
+        nmoved = 0;
+        for i: 0..11 {
+            pid := e.txpiles[i];
+            nc := cast(s32)c.objects[pid].children.count;
+            if nc == 0 { continue }
+            card := CL.GetCard(c, c.objects[pid].children[nc - 1]);
+            if e.suitsout[card.suit] != card.number - 1 { continue }
+            safe := true;
+            for j: 0..3 {
+                if IsRed(cast(s32)j) != IsRed(card.suit) && card.number > 1 && e.suitsout[j] < card.number - 1 {
+                    safe = false;
+                    break;
+                }
+            }
+            if safe {
+                AddToAcePile(e, c, pid);
+                nmoved += 1;
+            }
+        }
+    }
+}
+
+Start :: (e: *FreeCellEngine, c: *Core.Clique, member_id: s32) {
+    CL.Init(*e.cs);
+    unused VecResize(e.al.actions, 0);
+    for i: 0..3 { e.suitsout[i] = -1 }
+    ord := CL.JoinMember(*e.cs, c, member_id);
+    Core.ObjSetVisibility(c, e.cs.cmembers[ord].layout_id, Core.SetAll());
+
+    for i: 0..7 { e.open[i] = NewStack(c, "display", 19, "open", "") }
+    for i: 0..3 { e.acepiles[i] = NewStack(c, "pile", 13, "acepile", "") }
+    for i: 0..3 {
+        e.cells[i] = NewStack(c, "pile", 13, "cell", "cell");
+        Core.ObjSetAttr(c, e.cells[i], "showsize", "0", Core.SetAll());
+    }
+    for i: 0..7 { e.txpiles[i] = e.open[i] }
+    for i: 0..3 { e.txpiles[8 + i] = e.cells[i] }
+
+    e.deck = Core.CliqueNewObject(c, 0, Core.SetAll(), "stack");
+    CL.MakeCards(c, e.deck, 0, 13, "");
+
+    CL.AddLayFrame(*e.cs, c, "arena", "", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.FILLY, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "top", "arena", -1, CL.dTOP | CL.EXPAND, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "bot", "arena", -1, CL.dTOP | CL.EXPAND, CL.dTOP);
+    for i: 0..3 { CL.AddLayObj(*e.cs, c, "", "top", -1, CL.dRIGHT, e.acepiles[i]) }
+    for i: 0..3 { CL.AddLayObj(*e.cs, c, "", "top", -1, CL.dLEFT, e.cells[i]) }
+    for i: 0..7 { CL.AddLayObj(*e.cs, c, "", "bot", -1, CL.dLEFT | CL.oDOWN | CL.EXPAND, e.open[i]) }
+
+    CL.Shuffle(c, e.deck);
+    CL.Deal(c, e.deck, 7, e.open[:], 0);
+    MoveFree(e, c);
+    Allow.Add(*e.al, CLICK, member_id, "click %o %d");
+}
+
+Command :: (e: *FreeCellEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*e.al, c, member_id, cmd, *toks);
+    if err.count > 0 { return err }
+    ord := CL.FindMember(*e.cs, member_id);
+    if ord < 0 { return "you are not playing" }
+    sel := *e.cs.cmembers[ord].sel;
+
+    if tag == CLICK {
+        stack_id := CL.ParseInt(TextView(toks[1]));
+        idx := CL.ParseInt(TextView(toks[2]));
+        nc := cast(s32)c.objects[stack_id].children.count;
+        stype: Text;
+        unused Core.ObjGetAttr(c, stack_id, "type", *stype);
+        st := TextView(stype);
+        if CL.SelIsEmpty(sel) || sel.stack_id == stack_id {
+            if idx < 0 || idx >= nc { return "invalid index" }
+            if st != "cell" && st != "open" { return "you can't move cards from there" }
+            if CL.SelIsEmpty(sel) {
+                CL.SelSet(*e.cs, c, sel, stack_id);
+                CL.SelSetRange(*e.cs, c, sel, idx, nc);
+            } else if sel.start == idx && sel.end == nc {
+                CL.SelSet(*e.cs, c, sel, -1);
+            } else {
+                CL.SelSetRange(*e.cs, c, sel, idx, nc);
+            }
+            return "";
+        }
+        from_id := sel.stack_id;
+        if st == "acepile" {
+            if sel.end != sel.start + 1 { return "only one card at a time!" }
+            AddToAcePile(e, c, from_id);
+            CL.SelSet(*e.cs, c, sel, -1);
+            MoveFree(e, c);
+            return "";
+        }
+        if st == "open" {
+            c0 := CL.GetCard(c, c.objects[from_id].children[sel.start]);
+            col := !IsRed(c0.suit);
+            n := c0.number + 1;
+            for i: sel.start..sel.end-1 {
+                c2 := CL.GetCard(c, c.objects[from_id].children[i]);
+                if IsRed(c2.suit) == col { return "bad colour sequence" }
+                if c2.number != n - 1 { return "bad number sequence" }
+                n = c2.number;
+                col = IsRed(c2.suit);
+            }
+            if nc != 0 {
+                top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+                if IsRed(top.suit) == IsRed(c0.suit) || top.number != c0.number + 1 {
+                    return "opposite colours, descending, only";
+                }
+            }
+            rstart := sel.start;
+            rend := sel.end;
+            CL.SelSet(*e.cs, c, sel, -1);
+            // Count free cells/empty piles other than dest
+            fc: [12]s32;
+            nfc: s32 = 0;
+            for i: 0..11 {
+                if c.objects[e.txpiles[i]].children.count == 0 && e.txpiles[i] != stack_id {
+                    fc[nfc] = e.txpiles[i];
+                    nfc += 1;
+                }
+            }
+            if rend - rstart - 1 > nfc { return "not enough free cells" }
+            used: s32 = 0;
+            k := rend - 1;
+            while k >= rstart + 1 {
+                Core.ObjTransfer(c, from_id, k, k + 1, fc[used], 0);
+                used += 1;
+                k -= 1;
+            }
+            Core.ObjTransfer(c, from_id, rstart, rstart + 1, stack_id, cast(s32)c.objects[stack_id].children.count);
+            while used > 0 {
+                used -= 1;
+                Core.ObjTransfer(c, fc[used], 0, 1, stack_id, cast(s32)c.objects[stack_id].children.count);
+            }
+            MoveFree(e, c);
+            return "";
+        }
+        if st == "cell" {
+            if sel.end - sel.start > 1 || nc > 0 { return "only one card allowed there" }
+            CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+            MoveFree(e, c);
+            return "";
+        }
+        return "can't move there";
+    }
+    return "unknown command";
+}

@@ -1,0 +1,167 @@
+// Spree Afghan solitaire engine, ported from appl/spree/engines/afghan.b.
+#import "std/vec"
+using Core :: #import "spree_core"
+using Allow :: #import "allow"
+using CL :: #import "cardlib"
+
+CLICK :: 0;
+REDEAL :: 1;
+
+AfghanEngine :: struct {
+    cs: CL.CardState;
+    al: Allow.AllowList;
+    rows: [10]s32;
+    central: [4]s32;
+    chokey: s32;
+    deck: s32;
+    direction: s32;
+    nredeals: s32;
+}
+
+ClientType :: () -> string { return "cards" }
+MaxMembers :: () -> s32 { return 1 }
+Propose :: (n: s32) -> string { return ifx n != 1 then "one member only" else "" }
+
+NewStack :: (c: *Core.Clique, style: string, maxc: s32, stype: string) -> s32 {
+    s := CL.NewStack(c, 0, -1, .{style = style, maxcards = maxc, conceal = false, title = ""});
+    Core.ObjSetAttr(c, s, "type", stype, Core.SetNone());
+    Core.ObjSetAttr(c, s, "actions", "click", Core.SetAll());
+    return s;
+}
+
+Start :: (e: *AfghanEngine, c: *Core.Clique, member_id: s32) {
+    CL.Init(*e.cs);
+    unused VecResize(e.al.actions, 0);
+    e.direction = 0;
+    e.nredeals = 0;
+    ord := CL.JoinMember(*e.cs, c, member_id);
+    Core.ObjSetVisibility(c, e.cs.cmembers[ord].layout_id, Core.SetAll());
+
+    entry := Core.CliqueNewObject(c, 0, Core.SetAll(), "widget entry");
+    Core.ObjSetAttr(c, entry, "command", "say", Core.SetAll());
+    but := Core.CliqueNewObject(c, 0, Core.SetAll(), "widget button");
+    Core.ObjSetAttr(c, but, "text", "Redeal", Core.SetAll());
+    Core.ObjSetAttr(c, but, "command", "redeal", Core.SetAll());
+    Allow.Add(*e.al, REDEAL, member_id, "redeal");
+    Allow.Add(*e.al, CLICK, member_id, "click %o %d");
+
+    CL.AddLayFrame(*e.cs, c, "topf", "", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.aUPPERCENTRE, CL.dTOP);
+    CL.AddLayObj(*e.cs, c, "", "topf", -1, CL.dLEFT, but);
+    CL.AddLayObj(*e.cs, c, "", "topf", -1, CL.dLEFT | CL.EXPAND | CL.FILLX, entry);
+    CL.AddLayFrame(*e.cs, c, "arena", "", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.FILLY, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "left", "arena", -1, CL.dLEFT | CL.EXPAND, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "central", "arena", -1, CL.dLEFT | CL.EXPAND, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "right", "arena", -1, CL.dLEFT | CL.EXPAND, CL.dTOP);
+
+    for i: 0..9 { e.rows[i] = NewStack(c, "display", 10, "row") }
+    for i: 0..3 { e.central[i] = NewStack(c, "pile", 13, "central") }
+    e.chokey = NewStack(c, "pile", 13, "chokey");
+
+    e.deck = Core.CliqueNewObject(c, 0, Core.SetAll(), "stack");
+    CL.MakeCards(c, e.deck, 0, 13, "");
+    CL.Shuffle(c, e.deck);
+
+    for i: 0..4 { CL.AddLayObj(*e.cs, c, "", "left", -1, CL.dTOP | CL.oRIGHT, e.rows[i]) }
+    for i: 5..9 { CL.AddLayObj(*e.cs, c, "", "right", -1, CL.dTOP | CL.oRIGHT, e.rows[i]) }
+    for i: 0..3 { CL.AddLayObj(*e.cs, c, "", "central", -1, CL.dTOP, e.central[i]) }
+    CL.AddLayObj(*e.cs, c, "", "central", -1, CL.dTOP, e.chokey);
+
+    for i: 0..51 { CL.SetFace(c, c.objects[e.deck].children[i], 1) }
+    top_v := CL.GetCard(c, c.objects[e.deck].children[51]);
+    cj: s32 = 0;
+    k: s32 = 51;
+    while k >= 0 {
+        w := CL.GetCard(c, c.objects[e.deck].children[k]);
+        if w.number == top_v.number && cj < 4 {
+            Core.ObjTransfer(c, e.deck, k, k + 1, e.central[cj], 0);
+            cj += 1;
+        }
+        k -= 1;
+    }
+    for base: 0..1 {
+        off := base * 5;
+        for j: 0..3 { Core.ObjTransfer(c, e.deck, 0, 5, e.rows[off + j], 0) }
+        Core.ObjTransfer(c, e.deck, 0, 4, e.rows[off + 4], 0);
+    }
+}
+
+Redeal :: (e: *AfghanEngine, c: *Core.Clique) {
+    for i: 0..9 { CL.Discard(c, e.rows[i], e.deck, false) }
+    CL.Shuffle(c, e.deck);
+    i: s32 = 0;
+    while c.objects[e.deck].children.count > 0 && i < 5 {
+        n := cast(s32)c.objects[e.deck].children.count;
+        l: s32 = ifx n >= 10 then 5 else n / 2;
+        r: s32 = ifx n >= 10 then 5 else n - l;
+        Core.ObjTransfer(c, e.deck, 0, l, e.rows[i], 0);
+        Core.ObjTransfer(c, e.deck, 0, r, e.rows[i + 5], 0);
+        i += 1;
+    }
+    for m: 0..e.cs.cmembers.count-1 { CL.SelSet(*e.cs, c, *e.cs.cmembers[m].sel, -1) }
+}
+
+Command :: (e: *AfghanEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*e.al, c, member_id, cmd, *toks);
+    if err.count > 0 { return err }
+    ord := CL.FindMember(*e.cs, member_id);
+    if ord < 0 { return "you are not playing" }
+    sel := *e.cs.cmembers[ord].sel;
+
+    if tag == REDEAL {
+        if e.nredeals >= 3 { return "no more redeals" }
+        Redeal(e, c);
+        e.nredeals += 1;
+        return "";
+    }
+    if tag == CLICK {
+        stack_id := CL.ParseInt(TextView(toks[1]));
+        idx := CL.ParseInt(TextView(toks[2]));
+        nc := cast(s32)c.objects[stack_id].children.count;
+        stype: Text;
+        unused Core.ObjGetAttr(c, stack_id, "type", *stype);
+        st := TextView(stype);
+        if CL.SelIsEmpty(sel) || sel.stack_id == stack_id {
+            if idx < 0 || idx >= nc { return "invalid index" }
+            if st != "row" && st != "chokey" { return "you can't move cards from there" }
+            if CL.SelIsEmpty(sel) {
+                CL.SelSet(*e.cs, c, sel, stack_id);
+                CL.SelSetRange(*e.cs, c, sel, nc - 1, nc);
+            } else if sel.start == nc - 1 && sel.end == nc {
+                CL.SelSet(*e.cs, c, sel, -1);
+            } else {
+                CL.SelSetRange(*e.cs, c, sel, nc - 1, nc);
+            }
+            return "";
+        }
+        card := CL.GetCard(c, c.objects[sel.stack_id].children[sel.start]);
+        if st == "central" {
+            top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+            if card.suit != top.suit { return "wrong suit" }
+            if e.direction == 0 {
+                if card.number != (top.number + 1) % 13 && card.number != (top.number + 12) % 13 {
+                    return "out of sequence";
+                }
+                e.direction = card.number - top.number;
+            } else {
+                if card.number != (top.number + e.direction + 13) % 13 { return "out of sequence" }
+            }
+        } else if st == "row" {
+            srct: Text;
+            unused Core.ObjGetAttr(c, sel.stack_id, "type", *srct);
+            if nc == 0 || TextView(srct) == "chokey" { return "you wish!" }
+            top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+            if card.suit != top.suit { return "wrong suit" }
+            if card.number != (top.number + 1) % 13 && card.number != (top.number + 12) % 13 {
+                return "out of sequence";
+            }
+        } else if st == "chokey" {
+            if nc != 0 { return "only one card allowed there" }
+        } else {
+            return "can't move there";
+        }
+        CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+        return "";
+    }
+    return "unknown command";
+}

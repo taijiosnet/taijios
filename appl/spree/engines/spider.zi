@@ -1,0 +1,157 @@
+// Spree Spider solitaire engine, ported from appl/spree/engines/spider.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using Allow :: #import "allow"
+using CL :: #import "cardlib"
+
+CLICK :: 0;
+MORECARDS :: 1;
+
+SpiderEngine :: struct {
+    cs: CL.CardState;
+    al: Allow.AllowList;
+    open: [10]s32;
+    deck: s32;
+    discard: s32;
+    dealbutton: s32;
+}
+
+ClientType :: () -> string { return "cards" }
+MaxMembers :: () -> s32 { return 1 }
+Propose :: (n: s32) -> string { return ifx n != 1 then "one member only" else "" }
+
+SetDealButtonText :: (e: *SpiderEngine, c: *Core.Clique) {
+    t: Text;
+    unused BuilderAppend(t.bytes, "deal more (");
+    Core.AppendInt(*t, c.objects[e.deck].children.count);
+    unused BuilderAppend(t.bytes, " left)");
+    Core.ObjSetAttr(c, e.dealbutton, "text", TextView(t), Core.SetAll());
+}
+
+TurnTop :: (c: *Core.Clique, stack_id: s32) {
+    n := c.objects[stack_id].children.count;
+    if n > 0 { CL.SetFace(c, c.objects[stack_id].children[n - 1], 1) }
+}
+
+NewStack :: (c: *Core.Clique, stype: string) -> s32 {
+    s := CL.NewStack(c, 0, -1, .{style = "display", maxcards = 19, conceal = false, title = ""});
+    Core.ObjSetAttr(c, s, "type", stype, Core.SetNone());
+    Core.ObjSetAttr(c, s, "actions", "click", Core.SetAll());
+    return s;
+}
+
+Start :: (e: *SpiderEngine, c: *Core.Clique, member_id: s32) {
+    CL.Init(*e.cs);
+    unused VecResize(e.al.actions, 0);
+    ord := CL.JoinMember(*e.cs, c, member_id);
+    Core.ObjSetVisibility(c, e.cs.cmembers[ord].layout_id, Core.SetAll());
+
+    for i: 0..9 { e.open[i] = NewStack(c, "open") }
+    e.deck = Core.CliqueNewObject(c, 0, Core.SetAll(), "stack");
+    e.discard = Core.CliqueNewObject(c, 0, Core.SetAll(), "stack");
+    CL.MakeCards(c, e.deck, 0, 13, "0");
+    CL.MakeCards(c, e.deck, 0, 13, "1");
+
+    CL.AddLayFrame(*e.cs, c, "arena", "", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.FILLY, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "top", "arena", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.FILLY, CL.dTOP);
+    for i: 0..9 {
+        CL.AddLayObj(*e.cs, c, "", "top", -1, CL.dLEFT | CL.oDOWN | CL.EXPAND | CL.aUPPERCENTRE, e.open[i]);
+    }
+    CL.AddLayFrame(*e.cs, c, "bot", "arena", -1, CL.dTOP, CL.dTOP);
+    e.dealbutton = Core.CliqueNewObject(c, 0, Core.SetAll(), "widget button");
+    Core.ObjSetAttr(c, e.dealbutton, "command", "morecards", Core.SetAll());
+    Core.ObjSetAttr(c, e.dealbutton, "text", "deal more", Core.SetAll());
+    CL.AddLayObj(*e.cs, c, "", "bot", -1, CL.dLEFT, e.dealbutton);
+
+    CL.Shuffle(c, e.deck);
+    for i: 0..9 {
+        Core.ObjTransfer(c, e.deck, 0, 4, e.open[i], 0);
+        TurnTop(c, e.open[i]);
+    }
+    SetDealButtonText(e, c);
+
+    Allow.Add(*e.al, CLICK, member_id, "click %o %d");
+    Allow.Add(*e.al, MORECARDS, member_id, "morecards");
+}
+
+SelectRange :: (e: *SpiderEngine, c: *Core.Clique, ord: s32, stack_id: s32, start: s32, end: s32) {
+    sel := *e.cs.cmembers[ord].sel;
+    if CL.SelIsEmpty(sel) {
+        CL.SelSet(*e.cs, c, sel, stack_id);
+        CL.SelSetRange(*e.cs, c, sel, start, end);
+    } else if sel.start == start && sel.end == end {
+        CL.SelSet(*e.cs, c, sel, -1);
+    } else {
+        CL.SelSetRange(*e.cs, c, sel, start, end);
+    }
+}
+
+Command :: (e: *SpiderEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*e.al, c, member_id, cmd, *toks);
+    if err.count > 0 { return err }
+    ord := CL.FindMember(*e.cs, member_id);
+    if ord < 0 { return "you are not playing" }
+    sel := *e.cs.cmembers[ord].sel;
+
+    if tag == CLICK {
+        stack_id := CL.ParseInt(TextView(toks[1]));
+        idx := CL.ParseInt(TextView(toks[2]));
+        nc := cast(s32)c.objects[stack_id].children.count;
+        stype: Text;
+        unused Core.ObjGetAttr(c, stack_id, "type", *stype);
+        if CL.SelIsEmpty(sel) || sel.stack_id == stack_id {
+            if idx < 0 || idx >= nc { return "invalid index" }
+            if TextView(stype) != "open" { return "you can't move cards from there" }
+            SelectRange(e, c, ord, stack_id, idx, nc);
+            return "";
+        }
+        if TextView(stype) != "open" { return "can't move there" }
+        src_id := sel.stack_id;
+        c0 := CL.GetCard(c, c.objects[src_id].children[sel.start]);
+        n := c0.number + 1;
+        for i: sel.start..sel.end-1 {
+            c2 := CL.GetCard(c, c.objects[src_id].children[i]);
+            if c2.face == 0 { return "cannot move face down cards" }
+            if c2.number != n - 1 { return "bad number sequence" }
+            n = c2.number;
+        }
+        if nc != 0 {
+            top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+            if top.number != c0.number + 1 { return "descending, only" }
+        }
+        CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+        TurnTop(c, src_id);
+
+        nc = cast(s32)c.objects[stack_id].children.count;
+        if nc >= 13 {
+            last := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+            suit := last.suit;
+            ok_run := true;
+            for i: 0..12 {
+                cc := CL.GetCard(c, c.objects[stack_id].children[nc - cast(s32)i - 1]);
+                if cc.suit != suit || cc.number != cast(s32)i { ok_run = false; break }
+            }
+            if ok_run {
+                Core.ObjTransfer(c, stack_id, nc - 13, nc, e.discard, cast(s32)c.objects[e.discard].children.count);
+                TurnTop(c, stack_id);
+            }
+        }
+        return "";
+    }
+    if tag == MORECARDS {
+        for i: 0..9 {
+            if c.objects[e.open[i]].children.count == 0 { return "spaces must be filled before redeal" }
+        }
+        for i: 0..9 {
+            if c.objects[e.deck].children.count == 0 { break }
+            CL.SelSet(*e.cs, c, sel, -1);
+            CL.SetFace(c, c.objects[e.deck].children[0], 1);
+            Core.ObjTransfer(c, e.deck, 0, 1, e.open[i], cast(s32)c.objects[e.open[i]].children.count);
+        }
+        SetDealButtonText(e, c);
+        return "";
+    }
+    return "unknown command";
+}

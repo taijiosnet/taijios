@@ -1,0 +1,115 @@
+// Table-driven unit tests for spider, afghan, and whist Spree engines.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using Spider :: #import "spider"
+using Afghan :: #import "afghan"
+using Whist :: #import "whist"
+using Canfield :: #import "canfield"
+using FreeCell :: #import "freecell"
+using RD :: #import "racingdemon"
+using Spit :: #import "spit"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    // 1. Spider
+    sc: Core.Clique;
+    Core.CliqueInit(*sc, 1, 0, "Alice");
+    sm := Core.CliqueAddMember(*sc, "Alice");
+    sc.started = true;
+    se: Spider.SpiderEngine;
+    Spider.Start(*se, *sc, sm);
+    Expect(sc.objects[se.deck].children.count == 64, "spider 64 left in deck (104-40)");
+    Expect(Spider.Command(*se, *sc, sm, "morecards") == "", "spider morecards deals 10");
+    Expect(sc.objects[se.deck].children.count == 54, "spider 54 left after deal");
+
+    // 2. Afghan
+    ac: Core.Clique;
+    Core.CliqueInit(*ac, 2, 0, "Alice");
+    am := Core.CliqueAddMember(*ac, "Alice");
+    ac.started = true;
+    ae: Afghan.AfghanEngine;
+    Afghan.Start(*ae, *ac, am);
+    Expect(ac.objects[ae.rows[0]].children.count == 5 && ac.objects[ae.rows[4]].children.count == 4, "afghan initial deal");
+    Expect(Afghan.Command(*ae, *ac, am, "redeal") == "", "afghan redeal 1");
+    Expect(Afghan.Command(*ae, *ac, am, "redeal") == "", "afghan redeal 2");
+    Expect(Afghan.Command(*ae, *ac, am, "redeal") == "", "afghan redeal 3");
+    Expect(Afghan.Command(*ae, *ac, am, "redeal") == "no more redeals", "afghan max 3 redeals");
+
+    // 3. Whist
+    wc: Core.Clique;
+    Core.CliqueInit(*wc, 3, 0, "Alice");
+    wm0 := Core.CliqueAddMember(*wc, "Alice");
+    wm1 := Core.CliqueAddMember(*wc, "Bob");
+    wc.started = true;
+    we: Whist.WhistEngine;
+    wmids: [2]s32 = .[wm0, wm1];
+    Whist.Start(*we, *wc, wmids[:]);
+    Expect(wc.objects[we.hands[0]].children.count == 13 && wc.objects[we.hands[1]].children.count == 13, "whist dealt 13 each");
+    leader_ord := we.turn;
+    leader_mid := wmids[leader_ord];
+    hand_ext := Core.MemberExt(*wc.members[leader_mid], we.hands[leader_ord]);
+    cmd: Text;
+    unused BuilderAppend(cmd.bytes, "click ");
+    Core.AppendInt(*cmd, cast(s64)hand_ext);
+    unused BuilderAppend(cmd.bytes, " 0");
+    Expect(Whist.Command(*we, *wc, leader_mid, TextView(cmd)) == "", "whist leader plays card 0");
+    Expect(wc.objects[we.pile].children.count == 1, "whist 1 card in trick pile");
+
+    // 4. Canfield
+    cc: Core.Clique;
+    Core.CliqueInit(*cc, 4, 0, "Alice");
+    cm := Core.CliqueAddMember(*cc, "Alice");
+    cc.started = true;
+    ce: Canfield.CanfieldEngine;
+    Canfield.Start(*ce, *cc, cm);
+    Expect(cc.objects[ce.spare1].children.count == 24, "canfield 24 left in spare1 (52-28)");
+    Expect(Canfield.Command(*ce, *cc, cm, "top2bot") == "", "canfield top2bot 1");
+    Expect(ce.top2botcount == 2, "canfield top2botcount=2");
+    Expect(Canfield.Command(*ce, *cc, cm, "redeal") == "", "canfield redeal");
+    Expect(ce.top2botcount == 3, "canfield top2botcount reset to 3");
+
+    // 5. FreeCell
+    fc: Core.Clique;
+    Core.CliqueInit(*fc, 5, 0, "Alice");
+    fm := Core.CliqueAddMember(*fc, "Alice");
+    fc.started = true;
+    fe: FreeCell.FreeCellEngine;
+    FreeCell.Start(*fe, *fc, fm);
+    Expect(fc.objects[fe.deck].children.count == 0, "freecell all 52 cards dealt");
+
+    // 6. Racing Demon
+    rc: Core.Clique;
+    Core.CliqueInit(*rc, 6, 0, "Alice");
+    rm0 := Core.CliqueAddMember(*rc, "Alice");
+    rm1 := Core.CliqueAddMember(*rc, "Bob");
+    rm2 := Core.CliqueAddMember(*rc, "Carol");
+    rc.started = true;
+    re: RD.RacingDemonEngine;
+    rmids: [3]s32 = .[rm0, rm1, rm2];
+    RD.Start(*re, *rc, rmids[:]);
+    Expect(rc.objects[re.dmembers[0].pile].children.count == 13, "racingdemon 13 in pile");
+    Expect(rc.objects[re.dmembers[0].spare1].children.count == 35, "racingdemon 35 in spare1");
+
+    // 7. Spit
+    spc: Core.Clique;
+    Core.CliqueInit(*spc, 7, 0, "Alice");
+    spm0 := Core.CliqueAddMember(*spc, "Alice");
+    spm1 := Core.CliqueAddMember(*spc, "Bob");
+    spc.started = true;
+    spe: Spit.SpitEngine;
+    Spit.Start(*spe, *spc, spm0, spm1);
+    Expect(Spit.Command(*spe, *spc, spm0, "spit") == "", "spit starts play");
+    Expect(spe.playing && spc.objects[spe.dmembers[0].centre].children.count == 1, "spit centre dealt");
+
+    if failures == 0 { print("card_engines_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

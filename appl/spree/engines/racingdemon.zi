@@ -1,0 +1,245 @@
+// Spree Racing Demon card game engine, ported from appl/spree/engines/racingdemon.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using Allow :: #import "allow"
+using CL :: #import "cardlib"
+
+CLICK :: 0;
+SAY :: 1;
+SHOW :: 2;
+KING :: 12;
+NACES :: 7;
+MAX_RD_PLAYERS :: 16;
+
+RDMember :: struct {
+    pile: s32;
+    spare1: s32;
+    spare2: s32;
+    open: [4]s32;
+    acepiles: [4]s32;
+}
+
+RacingDemonEngine :: struct {
+    cs: CL.CardState;
+    al: Allow.AllowList;
+    dmembers: [MAX_RD_PLAYERS]RDMember;
+    scores: [MAX_RD_PLAYERS]s32;
+    nplayers: s32;
+    scorelabel: s32;
+}
+
+ClientType :: () -> string { return "cards" }
+MaxMembers :: () -> s32 { return MAX_RD_PLAYERS }
+Propose :: (n: s32) -> string { return ifx n < 3 then "need at least 3 members" else "" }
+
+IsRed :: (suit: s32) -> bool { return suit == CL.DIAMONDS || suit == CL.HEARTS }
+
+NewStack :: (c: *Core.Clique, parent_id: s32, style: string, maxc: s32, stype: string, title: string) -> s32 {
+    s := CL.NewStack(c, parent_id, -1, .{style = style, maxcards = maxc, conceal = false, title = title});
+    Core.ObjSetAttr(c, s, "type", stype, Core.SetNone());
+    Core.ObjSetAttr(c, s, "actions", "click", Core.SetAll());
+    return s;
+}
+
+SetScores :: (e: *RacingDemonEngine, c: *Core.Clique) {
+    s: Text;
+    unused BuilderAppend(s.bytes, "Scores: ");
+    for i: 0..cast(s64)e.nplayers-1 {
+        if i > 0 { unused BuilderAppend(s.bytes, " ") }
+        unused BuilderAppend(s.bytes, TextView(c.members[e.cs.cmembers[i].member_id].name));
+        unused BuilderAppend(s.bytes, ": ");
+        Core.AppendInt(*s, cast(s64)e.scores[i]);
+    }
+    Core.ObjSetAttr(c, e.scorelabel, "text", TextView(s), Core.SetAll());
+}
+
+Deal :: (e: *RacingDemonEngine, c: *Core.Clique) {
+    for i: 0..cast(s64)e.nplayers-1 {
+        d := *e.dmembers[i];
+        CL.Shuffle(c, d.spare1);
+        Core.ObjTransfer(c, d.spare1, 0, 13, d.pile, 0);
+        CL.SetFace(c, c.objects[d.pile].children[12], 1);
+        Core.ObjSetAttr(c, d.pile, "title", "pile [13]", Core.SetAll());
+        for j: 0..3 {
+            Core.ObjTransfer(c, d.spare1, 0, 1, d.open[j], 0);
+            CL.SetFace(c, c.objects[d.open[j]].children[0], 1);
+        }
+    }
+}
+
+EndRound :: (e: *RacingDemonEngine, c: *Core.Clique) {
+    for i: 0..cast(s64)e.nplayers-1 {
+        d := *e.dmembers[i];
+        CL.SelSet(*e.cs, c, *e.cs.cmembers[i].sel, -1);
+        for j: 0..3 {
+            ap := d.acepiles[j];
+            k := cast(s32)c.objects[ap].children.count - 1;
+            while k >= 0 {
+                cid := c.objects[ap].children[k];
+                rb: Text;
+                unused Core.ObjGetAttr(c, cid, "rear", *rb);
+                back := CL.ParseInt(TextView(rb));
+                if back >= 0 && back < e.nplayers {
+                    e.scores[back] += 1;
+                    if CL.GetCard(c, cid).number == KING { e.scores[back] += 5 }
+                    CL.SetFace(c, cid, 0);
+                    Core.ObjTransfer(c, ap, k, k + 1, e.dmembers[back].spare1, cast(s32)c.objects[e.dmembers[back].spare1].children.count);
+                }
+                k -= 1;
+            }
+        }
+        pnc := cast(s32)c.objects[d.pile].children.count;
+        if pnc == 0 { e.scores[i] += 10 }
+        else { e.scores[i] -= pnc }
+        CL.Discard(c, d.pile, d.spare1, true);
+        CL.Discard(c, d.spare2, d.spare1, true);
+        for j: 0..3 { CL.Discard(c, d.open[j], d.spare1, true) }
+    }
+    SetScores(e, c);
+}
+
+OwnerOrd :: (e: *RacingDemonEngine, c: *Core.Clique, stack_id: s32) -> s32 {
+    pid := c.objects[stack_id].parent_id;
+    for i: 0..cast(s64)e.nplayers-1 {
+        if e.cs.cmembers[i].obj_id == pid { return cast(s32)i }
+    }
+    return -1;
+}
+
+Start :: (e: *RacingDemonEngine, c: *Core.Clique, mids: []s32) {
+    CL.Init(*e.cs);
+    unused VecResize(e.al.actions, 0);
+    e.nplayers = cast(s32)(ifx mids.count > MAX_RD_PLAYERS then MAX_RD_PLAYERS else mids.count);
+    pset := Core.SetNone();
+    for i: 0..cast(s64)e.nplayers-1 {
+        unused CL.JoinMember(*e.cs, c, mids[i]);
+        pset = Core.SetAdd(pset, mids[i]);
+        Allow.Add(*e.al, CLICK, mids[i], "click %o %d");
+        e.scores[i] = 0;
+    }
+    Core.ObjSetVisibility(c, e.cs.cmembers[0].layout_id, Core.SetAdd(Core.SetDiff(Core.SetAll(), pset), mids[0]));
+
+    for i: 0..cast(s64)e.nplayers-1 {
+        pobj := e.cs.cmembers[i].obj_id;
+        d := *e.dmembers[i];
+        d.spare1 = NewStack(c, pobj, "pile", 13, "spare1", "");
+        d.spare2 = NewStack(c, pobj, "pile", 13, "spare2", "");
+        d.pile = NewStack(c, pobj, "pile", 13, "pile", "pile");
+        for j: 0..3 { d.open[j] = NewStack(c, pobj, "display", 4, "open", "") }
+        for j: 0..3 { d.acepiles[j] = NewStack(c, pobj, "pile", 13, "acepile", "") }
+        rb: [16]u8;
+        CL.MakeCards(c, d.spare1, 0, 13, FormatInteger(i, rb[:]));
+    }
+
+    e.scorelabel = Core.CliqueNewObject(c, 0, Core.SetAll(), "widget label");
+    SetScores(e, c);
+    Deal(e, c);
+    Allow.Add(*e.al, SAY, -1, "say &");
+    Allow.Add(*e.al, SHOW, -1, "show");
+}
+
+Command :: (e: *RacingDemonEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*e.al, c, member_id, cmd, *toks);
+    if err.count > 0 { return err }
+    ord := CL.FindMember(*e.cs, member_id);
+    if ord < 0 { return "bad member" }
+    sel := *e.cs.cmembers[ord].sel;
+    d := *e.dmembers[ord];
+
+    if tag == SHOW { Core.CliqueShow(c, member_id); return "" }
+    if tag == SAY { return "" }
+    if tag == CLICK {
+        stack_id := CL.ParseInt(TextView(toks[1]));
+        idx := CL.ParseInt(TextView(toks[2]));
+        nc := cast(s32)c.objects[stack_id].children.count;
+        stype: Text;
+        unused Core.ObjGetAttr(c, stack_id, "type", *stype);
+        st := TextView(stype);
+        if CL.SelIsEmpty(sel) || sel.stack_id == stack_id {
+            if nc == 0 && st == "spare1" {
+                CL.Flip(c, d.spare2);
+                Core.ObjTransfer(c, d.spare2, 0, cast(s32)c.objects[d.spare2].children.count, d.spare1, 0);
+                return "";
+            }
+            if idx < 0 || idx >= nc { return "invalid index" }
+            if OwnerOrd(e, c, stack_id) != ord { return "not yours, don't touch!" }
+            if st == "spare2" || st == "pile" {
+                if CL.SelIsEmpty(sel) {
+                    CL.SelSet(*e.cs, c, sel, stack_id);
+                    CL.SelSetRange(*e.cs, c, sel, nc - 1, nc);
+                } else { CL.SelSet(*e.cs, c, sel, -1) }
+                return "";
+            }
+            if st == "open" {
+                if CL.SelIsEmpty(sel) {
+                    CL.SelSet(*e.cs, c, sel, stack_id);
+                    CL.SelSetRange(*e.cs, c, sel, idx, nc);
+                } else { CL.SelSet(*e.cs, c, sel, -1) }
+                return "";
+            }
+            if st == "spare1" {
+                n := ifx nc > 3 then cast(s32)3 else nc;
+                for _: 0..cast(s64)n-1 {
+                    CL.SetFace(c, c.objects[stack_id].children[nc - 1], 1);
+                    Core.ObjTransfer(c, stack_id, nc - 1, nc, d.spare2, cast(s32)c.objects[d.spare2].children.count);
+                    nc -= 1;
+                }
+                return "";
+            }
+            return "you can't move cards from there";
+        }
+        from_id := sel.stack_id;
+        ft: Text;
+        unused Core.ObjGetAttr(c, from_id, "type", *ft);
+        frompile := TextView(ft) == "pile";
+        if st == "acepile" {
+            if sel.end != sel.start + 1 { return "only one card at a time!" }
+            card := CL.GetCard(c, c.objects[from_id].children[sel.start]);
+            if nc == 0 {
+                if card.number != 0 { return "aces only" }
+            } else {
+                top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+                if card.number != top.number + 1 { return "out of sequence" }
+                if card.suit != top.suit { return "wrong suit" }
+            }
+            CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+            if card.number == KING {
+                CL.SetFace(c, c.objects[stack_id].children[c.objects[stack_id].children.count - 1], 0);
+            }
+        } else if st == "open" {
+            if OwnerOrd(e, c, stack_id) != ord { return "not yours, don't touch!" }
+            c0 := CL.GetCard(c, c.objects[from_id].children[sel.start]);
+            col := !IsRed(c0.suit);
+            n := c0.number + 1;
+            for i: sel.start..sel.end-1 {
+                c2 := CL.GetCard(c, c.objects[from_id].children[i]);
+                if IsRed(c2.suit) == col { return "bad colour sequence" }
+                if c2.number != n - 1 { return "bad number sequence" }
+                n = c2.number;
+                col = IsRed(c2.suit);
+            }
+            if nc != 0 {
+                top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+                if IsRed(top.suit) == IsRed(c0.suit) || top.number != c0.number + 1 { return "invalid move" }
+            }
+            CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+        } else {
+            return "can't move there";
+        }
+        if frompile {
+            pnc := cast(s32)c.objects[d.pile].children.count;
+            if pnc == 0 {
+                EndRound(e, c);
+                Deal(e, c);
+            } else {
+                CL.SetFace(c, c.objects[d.pile].children[pnc - 1], 1);
+                pt: Text; unused BuilderAppend(pt.bytes, "pile ["); Core.AppendInt(*pt, cast(s64)pnc); unused BuilderAppend(pt.bytes, "]");
+                Core.ObjSetAttr(c, d.pile, "title", TextView(pt), Core.SetAll());
+            }
+        }
+        return "";
+    }
+    return "unknown command";
+}

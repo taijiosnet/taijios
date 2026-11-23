@@ -1,0 +1,214 @@
+// Spree Canfield solitaire engine, ported from appl/spree/engines/canfield.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using Allow :: #import "allow"
+using CL :: #import "cardlib"
+
+CLICK :: 0;
+TOP2BOT :: 1;
+REDEAL :: 2;
+SHOW :: 3;
+
+CanfieldEngine :: struct {
+    cs: CL.CardState;
+    al: Allow.AllowList;
+    sevens: [7]s32;
+    acepiles: [4]s32;
+    spare1: s32;
+    spare2: s32;
+    top2bot: s32;
+    top2botcount: s32;
+}
+
+ClientType :: () -> string { return "cards" }
+MaxMembers :: () -> s32 { return 1 }
+Propose :: (n: s32) -> string { return ifx n != 1 then "one member only" else "" }
+
+IsRed :: (suit: s32) -> bool { return suit == CL.DIAMONDS || suit == CL.HEARTS }
+
+SetTop2BotText :: (e: *CanfieldEngine, c: *Core.Clique) {
+    t: Text;
+    unused BuilderAppend(t.bytes, "top to bottom (");
+    Core.AppendInt(*t, cast(s64)e.top2botcount);
+    unused BuilderAppend(t.bytes, " left)");
+    Core.ObjSetAttr(c, e.top2bot, "text", TextView(t), Core.SetAll());
+}
+
+NewStack :: (c: *Core.Clique, style: string, maxc: s32, stype: string) -> s32 {
+    s := CL.NewStack(c, 0, -1, .{style = style, maxcards = maxc, conceal = false, title = ""});
+    Core.ObjSetAttr(c, s, "type", stype, Core.SetNone());
+    Core.ObjSetAttr(c, s, "actions", "click", Core.SetAll());
+    return s;
+}
+
+NewButton :: (c: *Core.Clique, cmd: string, text: string) -> s32 {
+    b := Core.CliqueNewObject(c, 0, Core.SetAll(), "widget button");
+    Core.ObjSetAttr(c, b, "command", cmd, Core.SetAll());
+    Core.ObjSetAttr(c, b, "text", text, Core.SetAll());
+    return b;
+}
+
+Deal :: (e: *CanfieldEngine, c: *Core.Clique) {
+    CL.Shuffle(c, e.spare1);
+    for i: 0..6 {
+        Core.ObjTransfer(c, e.spare1, 0, cast(s32)i + 1, e.sevens[i], 0);
+        CL.SetFace(c, c.objects[e.sevens[i]].children[i], 1);
+    }
+}
+
+ClearUp :: (e: *CanfieldEngine, c: *Core.Clique) {
+    for i: 0..6 { CL.Discard(c, e.sevens[i], e.spare1, true) }
+    for i: 0..3 { CL.Discard(c, e.acepiles[i], e.spare1, true) }
+    CL.Discard(c, e.spare2, e.spare1, true);
+}
+
+Start :: (e: *CanfieldEngine, c: *Core.Clique, member_id: s32) {
+    CL.Init(*e.cs);
+    unused VecResize(e.al.actions, 0);
+    e.top2botcount = 3;
+    ord := CL.JoinMember(*e.cs, c, member_id);
+    Core.ObjSetVisibility(c, e.cs.cmembers[ord].layout_id, Core.SetAll());
+
+    entry := Core.CliqueNewObject(c, 0, Core.SetAll(), "widget entry");
+    Core.ObjSetAttr(c, entry, "command", "say", Core.SetAll());
+    CL.AddLayObj(*e.cs, c, "entry", "", -1, CL.dTOP | CL.FILLX, entry);
+    CL.AddLayFrame(*e.cs, c, "arena", "", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.FILLY, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "top", "arena", -1, CL.dTOP | CL.EXPAND, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "mid", "arena", -1, CL.dTOP | CL.EXPAND, CL.dTOP);
+    CL.AddLayFrame(*e.cs, c, "bot", "arena", -1, CL.dTOP | CL.EXPAND, CL.dTOP);
+
+    for i: 0..6 { e.sevens[i] = NewStack(c, "display", 19, "open") }
+    for i: 0..3 { e.acepiles[i] = NewStack(c, "pile", 13, "acepile") }
+    e.spare1 = NewStack(c, "pile", 13, "spare1");
+    e.spare2 = NewStack(c, "pile", 13, "spare2");
+    CL.MakeCards(c, e.spare1, 0, 13, "");
+
+    for i: 0..3 { CL.AddLayObj(*e.cs, c, "", "top", -1, CL.dRIGHT, e.acepiles[i]) }
+    for i: 0..6 { CL.AddLayObj(*e.cs, c, "", "mid", -1, CL.dLEFT | CL.oDOWN | CL.EXPAND, e.sevens[i]) }
+    CL.AddLayFrame(*e.cs, c, "buts", "bot", -1, CL.dLEFT | CL.EXPAND | CL.aUPPERRIGHT, CL.dTOP);
+    e.top2bot = NewButton(c, "top2bot", "top to bottom");
+    CL.AddLayObj(*e.cs, c, "", "buts", -1, CL.dTOP, e.top2bot);
+    CL.AddLayObj(*e.cs, c, "", "buts", -1, CL.dTOP, NewButton(c, "redeal", "redeal"));
+    CL.AddLayObj(*e.cs, c, "", "bot", -1, CL.dLEFT, e.spare1);
+    CL.AddLayObj(*e.cs, c, "", "bot", -1, CL.dLEFT | CL.EXPAND | CL.aCENTRELEFT, e.spare2);
+
+    Deal(e, c);
+    SetTop2BotText(e, c);
+
+    Allow.Add(*e.al, SHOW, -1, "show");
+    Allow.Add(*e.al, CLICK, member_id, "click %o %d");
+    Allow.Add(*e.al, TOP2BOT, member_id, "top2bot");
+    Allow.Add(*e.al, REDEAL, member_id, "redeal");
+}
+
+Command :: (e: *CanfieldEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*e.al, c, member_id, cmd, *toks);
+    if err.count > 0 { return err }
+    ord := CL.FindMember(*e.cs, member_id);
+    if ord < 0 { return "you are not playing" }
+    sel := *e.cs.cmembers[ord].sel;
+
+    if tag == TOP2BOT {
+        if c.objects[e.spare2].children.count != 0 { return "can only top-to-bottom on the whole pile" }
+        if e.top2botcount <= 0 { return "too late" }
+        nc := cast(s32)c.objects[e.spare1].children.count;
+        if nc > 0 {
+            Core.ObjTransfer(c, e.spare1, nc - 1, nc, e.spare1, 0);
+            e.top2botcount -= 1;
+            SetTop2BotText(e, c);
+        }
+        return "";
+    }
+    if tag == REDEAL {
+        ClearUp(e, c);
+        CL.Shuffle(c, e.spare1);
+        Deal(e, c);
+        e.top2botcount = 3;
+        SetTop2BotText(e, c);
+        return "";
+    }
+    if tag == SHOW {
+        Core.CliqueShow(c, member_id);
+        return "";
+    }
+    if tag == CLICK {
+        stack_id := CL.ParseInt(TextView(toks[1]));
+        idx := CL.ParseInt(TextView(toks[2]));
+        nc := cast(s32)c.objects[stack_id].children.count;
+        stype: Text;
+        unused Core.ObjGetAttr(c, stack_id, "type", *stype);
+        st := TextView(stype);
+        if CL.SelIsEmpty(sel) || sel.stack_id == stack_id {
+            if nc == 0 && st == "spare1" {
+                CL.Flip(c, e.spare2);
+                Core.ObjTransfer(c, e.spare2, 0, cast(s32)c.objects[e.spare2].children.count, e.spare1, 0);
+                return "";
+            }
+            if idx < 0 || idx >= nc { return "invalid index" }
+            if st == "spare2" || st == "open" {
+                if CL.SelIsEmpty(sel) {
+                    CL.SelSet(*e.cs, c, sel, stack_id);
+                    CL.SelSetRange(*e.cs, c, sel, idx, nc);
+                } else if sel.start == idx && sel.end == nc {
+                    CL.SelSet(*e.cs, c, sel, -1);
+                } else {
+                    CL.SelSetRange(*e.cs, c, sel, idx, nc);
+                }
+                return "";
+            }
+            if st == "spare1" {
+                n := ifx nc > 3 then cast(s32)3 else nc;
+                for _: 0..cast(s64)n-1 {
+                    CL.SetFace(c, c.objects[stack_id].children[nc - 1], 1);
+                    Core.ObjTransfer(c, stack_id, nc - 1, nc, e.spare2, cast(s32)c.objects[e.spare2].children.count);
+                    nc -= 1;
+                }
+                return "";
+            }
+            return "you can't move cards from there";
+        }
+        from_id := sel.stack_id;
+        if st == "acepile" {
+            if sel.end != sel.start + 1 { return "only one card at a time!" }
+            card := CL.GetCard(c, c.objects[from_id].children[sel.start]);
+            if nc == 0 {
+                if card.number != 0 { return "aces only" }
+            } else {
+                top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+                if card.number != top.number + 1 { return "out of sequence" }
+                if card.suit != top.suit { return "wrong suit" }
+            }
+            CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+        } else if st == "open" {
+            c0 := CL.GetCard(c, c.objects[from_id].children[sel.start]);
+            col := !IsRed(c0.suit);
+            n := c0.number + 1;
+            for i: sel.start..sel.end-1 {
+                c2 := CL.GetCard(c, c.objects[from_id].children[i]);
+                if c2.face == 0 { return "cannot move face-down cards" }
+                if IsRed(c2.suit) == col { return "bad colour sequence" }
+                if c2.number != n - 1 { return "bad number sequence" }
+                n = c2.number;
+                col = IsRed(c2.suit);
+            }
+            if nc != 0 {
+                top := CL.GetCard(c, c.objects[stack_id].children[nc - 1]);
+                if IsRed(top.suit) == IsRed(c0.suit) || top.number != c0.number + 1 { return "invalid move" }
+            } else if c0.number != 12 {
+                return "only kings allowed there";
+            }
+            CL.SelTransfer(*e.cs, c, sel, stack_id, nc);
+        } else {
+            return "can't move there";
+        }
+        ft: Text;
+        if Core.ObjGetAttr(c, from_id, "type", *ft) && TextView(ft) == "open" {
+            fn := c.objects[from_id].children.count;
+            if fn > 0 { CL.SetFace(c, c.objects[from_id].children[fn - 1], 1) }
+        }
+        return "";
+    }
+    return "unknown command";
+}

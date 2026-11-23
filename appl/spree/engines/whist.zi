@@ -1,0 +1,151 @@
+// Spree Whist card game engine, ported from appl/spree/engines/whist.b.
+#import "std/vec"
+#import "std/number_text"
+using Core :: #import "spree_core"
+using Allow :: #import "allow"
+using CL :: #import "cardlib"
+using Tr :: #import "tricks"
+
+CLICK :: 0;
+SAY :: 1;
+
+WhistEngine :: struct {
+    cs: CL.CardState;
+    al: Allow.AllowList;
+    scores: s32;
+    deck: s32;
+    pile: s32;
+    hands: [4]s32;
+    taken: [4]s32;
+    nplayers: s32;
+    leader: s32;
+    turn: s32;
+    trick: Tr.Trick;
+    trick_active: bool;
+}
+
+ClientType :: () -> string { return "cards" }
+MaxMembers :: () -> s32 { return 4 }
+
+Propose :: (n: s32) -> string {
+    if n < 2 { return "need at least two members" }
+    if n > 4 { return "too many members" }
+    return "";
+}
+
+CanPlay :: (e: *WhistEngine, c: *Core.Clique, ord: s32) {
+    Allow.Del(*e.al, CLICK, -1);
+    for i: 0..cast(s64)e.nplayers-1 {
+        mid := e.cs.cmembers[i].member_id;
+        v := Core.SetSingleton(mid);
+        Core.ObjSetAttr(c, e.cs.cmembers[i].obj_id, "status", "", v);
+        Core.ObjSetAttr(c, e.hands[i], "actions", "", v);
+    }
+    if ord >= 0 && ord < e.nplayers {
+        mid := e.cs.cmembers[ord].member_id;
+        Allow.Add(*e.al, CLICK, mid, "click %d %d");
+        v := Core.SetSingleton(mid);
+        Core.ObjSetAttr(c, e.cs.cmembers[ord].obj_id, "status", "Your turn", v);
+        Core.ObjSetAttr(c, e.hands[ord], "actions", "click", v);
+    }
+}
+
+Start :: (e: *WhistEngine, c: *Core.Clique, mids: []s32) {
+    CL.Init(*e.cs);
+    unused VecResize(e.al.actions, 0);
+    e.nplayers = cast(s32)(ifx mids.count > 4 then 4 else mids.count);
+    pset := Core.SetNone();
+    for i: 0..cast(s64)e.nplayers-1 {
+        unused CL.JoinMember(*e.cs, c, mids[i]);
+        pset = Core.SetAdd(pset, mids[i]);
+    }
+    Core.ObjSetVisibility(c, e.cs.cmembers[0].layout_id, Core.SetAdd(Core.SetDiff(Core.SetAll(), pset), mids[0]));
+
+    e.deck = Core.CliqueNewObject(c, 0, Core.SetAll(), "stack");
+    CL.MakeCards(c, e.deck, 0, 13, "");
+    CL.Shuffle(c, e.deck);
+    e.scores = Core.CliqueNewObject(c, 0, Core.SetAll(), "scoretable");
+
+    entry := Core.CliqueNewObject(c, 0, Core.SetAll(), "widget entry");
+    Core.ObjSetAttr(c, entry, "command", "say", Core.SetAll());
+    CL.AddLayObj(*e.cs, c, "entry", "", -1, CL.dTOP | CL.FILLX, entry);
+    CL.AddLayFrame(*e.cs, c, "arena", "", -1, CL.dTOP | CL.EXPAND | CL.FILLX | CL.FILLY, CL.dTOP);
+    CL.MakeTable(*e.cs, c, "arena");
+
+    e.pile = CL.NewStack(c, 0, -1, .{style = "display", maxcards = 4, conceal = false, title = "trick pile"});
+    CL.AddLayObj(*e.cs, c, "", "public", -1, CL.dTOP | CL.oRIGHT, e.pile);
+
+    for i: 0..cast(s64)e.nplayers-1 {
+        mid := mids[i];
+        e.hands[i] = CL.NewStack(c, e.cs.cmembers[i].obj_id, mid, .{style = "display", maxcards = 13, conceal = true, title = ""});
+        e.taken[i] = CL.NewStack(c, e.cs.cmembers[i].obj_id, mid, .{style = "pile", maxcards = 52, conceal = false, title = "tricks"});
+        p: Text; unused BuilderAppend(p.bytes, "p"); Core.AppendInt(*p, i);
+        pf: Text; unused BuilderAppend(pf.bytes, TextView(p)); unused BuilderAppend(pf.bytes, ".f");
+        CL.AddLayFrame(*e.cs, c, TextView(pf), TextView(p), -1, CL.dLEFT | CL.oRIGHT, CL.dTOP);
+        CL.AddLayObj(*e.cs, c, "", TextView(pf), -1, CL.dTOP, e.hands[i]);
+        CL.AddLayObj(*e.cs, c, "", TextView(p), -1, CL.dLEFT | CL.oRIGHT, e.taken[i]);
+    }
+
+    CL.Deal(c, e.deck, 13, e.hands[:e.nplayers], 0);
+    e.leader = Core.CliqueRand(c, e.nplayers);
+    e.turn = e.leader;
+    Tr.InitTrick(*e.trick, e.pile, -1, e.hands[:e.nplayers]);
+    e.trick_active = true;
+    CanPlay(e, c, e.turn);
+
+    titles: Text;
+    for i: 0..cast(s64)e.nplayers-1 {
+        unused BuilderAppend(titles.bytes, TextView(c.members[mids[i]].name));
+        unused BuilderAppend(titles.bytes, " ");
+    }
+    so := Core.CliqueNewObject(c, e.scores, Core.SetAll(), "score");
+    Core.ObjSetAttr(c, so, "score", TextView(titles), Core.SetAll());
+}
+
+Command :: (e: *WhistEngine, c: *Core.Clique, member_id: s32, cmd: string) -> string {
+    toks: Vec(Text);
+    tag, err := Allow.CheckAction(*e.al, c, member_id, cmd, *toks);
+    if err.count > 0 { return err }
+    ord := CL.FindMember(*e.cs, member_id);
+    if ord < 0 { return "you're only watching" }
+
+    if tag == CLICK {
+        stack_id := Core.MemberObj(*c.members[member_id], CL.ParseInt(TextView(toks[1])));
+        if stack_id != e.hands[ord] { return "not yours" }
+        perr := Tr.PlayCard(*e.trick, c, ord, CL.ParseInt(TextView(toks[2])));
+        if perr.count > 0 { return perr }
+        e.turn = (e.turn + 1) % e.nplayers;
+        if e.turn == e.leader {
+            w := e.trick.winner;
+            msg: Text;
+            unused BuilderAppend(msg.bytes, "remark ");
+            unused BuilderAppend(msg.bytes, TextView(c.members[e.cs.cmembers[w].member_id].name));
+            unused BuilderAppend(msg.bytes, " won the trick");
+            empty_o: [0]s32;
+            Core.CliqueAction(c, TextView(msg), empty_o[:], "", Core.SetAll());
+            CL.Discard(c, e.pile, e.taken[w], false);
+            tt: Text;
+            Core.AppendInt(*tt, c.objects[e.taken[w]].children.count / cast(s64)e.nplayers);
+            unused BuilderAppend(tt.bytes, " tricks");
+            Core.ObjSetAttr(c, e.taken[w], "title", TextView(tt), Core.SetAll());
+            sc: Text;
+            for i: 0..cast(s64)e.nplayers-1 {
+                unused BuilderAppend(sc.bytes, ifx cast(s32)i == w then "1 " else "0 ");
+            }
+            so := Core.CliqueNewObject(c, e.scores, Core.SetAll(), "score");
+            Core.ObjSetAttr(c, so, "score", TextView(sc), Core.SetAll());
+            if c.objects[e.hands[w]].children.count > 0 {
+                e.leader = w;
+                e.turn = w;
+                Tr.InitTrick(*e.trick, e.pile, -1, e.hands[:e.nplayers]);
+            } else {
+                Core.CliqueAction(c, "remark one round down, some to go", empty_o[:], "", Core.SetAll());
+                e.turn = -1;
+                e.trick_active = false;
+            }
+        }
+        CanPlay(e, c, e.turn);
+        return "";
+    }
+    return "";
+}
