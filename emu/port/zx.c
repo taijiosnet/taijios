@@ -1381,10 +1381,11 @@ zxprocessworker(void *arg)
 	up->env->fgrp = process->files;
 	process->files = nil;
 	lock(&zxprocesslock);
-	process->pid = ++zxprocesspid;
 	process->hasclock = pthread_getcpuclockid(pthread_self(), &process->cpuclock) == 0;
-	for(link = &zxprocesslist; *link != nil; link = &(*link)->listed)
+	/* Workers can start out of order; the list stays in pid order. */
+	for(link = &zxprocesslist; *link != nil && (*link)->pid < process->pid; link = &(*link)->listed)
 		;
+	process->listed = *link;
 	*link = process;
 	unlock(&zxprocesslock);
 	process->result = zxexecute(process->path, &surface, &process->command);
@@ -1504,6 +1505,10 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 	}
 	unlock(&parent->l);
 	incref(&process->ref);
+	/* Number children in the order they were started. */
+	lock(&zxprocesslock);
+	process->pid = ++zxprocesspid;
+	unlock(&zxprocesslock);
 	kproc("ZX command", zxprocessworker, process, KPDUPPG|KPDUPENVG);
 	poperror();
 	return process;
