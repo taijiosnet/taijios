@@ -1,0 +1,75 @@
+// Unit tests for camera_cdp.zi and tkinterface_model.zi.
+#import "std/vec"
+using Cdp :: #import "camera_cdp"
+using Model :: #import "tkinterface_model"
+
+failures: s32 = 0;
+
+Expect :: (cond: bool, msg: string) {
+    if !cond {
+        print("FAIL: %\n", msg);
+        failures += 1;
+    }
+}
+
+st: Model.CameraUiState;
+
+main :: () -> s32 {
+    // 1. CDP beacon & header & checksum
+    intro: [7]u8 = .[0xa5, 0x5a, 0x00, 0xc8, 0x00, 0x02, 0xc9];
+    Expect(Cdp.BeaconOk(intro[:]), "BeaconOk valid");
+    intro[0] = 0x00;
+    Expect(!Cdp.BeaconOk(intro[:]), "BeaconOk rejects bad byte");
+
+    ack: [13]u8;
+    Cdp.BuildBeaconAck(115200, 1023, 1023, ack[:]);
+    Expect(ack[0] == 0x5a && ack[1] == 0xa5 && ack[12] == Cdp.CheckSum(ack[:], 12), "BeaconAck checksum");
+
+    hdr: [24]u8;
+    sz := Cdp.BuildCdpHeader(hdr[:], Cdp.CDP_GET_STORAGE_STATUS, 0);
+    Expect(sz == 12 && hdr[3] == 8 && hdr[9] == 0x44, "BuildCdpHeader");
+
+    // 2. ThumbToBit produces 60-byte r8g8b8 header + w*h*3 bytes
+    ycbcr: [32]u8;
+    for i: 0..31 { ycbcr[i] = 128 }
+    bit: Vec(u8);
+    Cdp.ThumbToBit(ycbcr[:], 4, 4, *bit);
+    Expect(bit.count == 60 + 4 * 4 * 3, "ThumbToBit size");
+    Expect(TextView(bit[0:12]) == "     r8g8b8 ", "ThumbToBit header");
+
+    // 3. ParseAbilities, ParseStorage, ParseDate, selection, layout & hit-testing
+    Model.ParseStorage(*st, "Picture Memory\n\tused:\t3\n\tfree:\t40\n");
+    Expect(st.taken == 3 && st.remaining == 40, "ParseStorage");
+
+    Model.ParseDate(*st, "date is 05/20/26 14:30:00\n");
+    Expect(TextView(st.cam_time) == "05/20/26 14:30:00", "ParseDate");
+
+    abls := #string END
+i = 0
+ssiz,  Still Image Size:  items: 2  factory: 1
+		High: 1
+		Low: 2
+zpos,  Zoom Position:  min: 0   max: 100   factory:0
+END;
+    Model.ParseAbilities(*st, abls);
+    Expect(st.abilities.count == 2, "ParseAbilities count");
+    Expect(st.abilities[0].dtype == Model.AB_LIST && st.abilities[0].opts.count == 2, "ParseAbilities LIST");
+    Expect(st.abilities[1].dtype == Model.AB_MINMAX && st.abilities[1].max_val == 100, "ParseAbilities MINMAX");
+
+    unused VecResize(st.photos, 2);
+    Model.SetText(*st.photos[0].name, "p0000001");
+    Model.SetText(*st.photos[1].name, "p0000002");
+    Model.LayoutPhotos(*st, 560);
+    Expect(Model.HitPhoto(*st, st.photos[0].x + 10, st.photos[0].y + 10) == 0, "HitPhoto 0");
+    Expect(Model.HitPhoto(*st, st.photos[1].x + 10, st.photos[1].y + 10) == 1, "HitPhoto 1");
+    Model.SelectAll(*st, true);
+    Expect(Model.SelectedCount(*st) == 2, "SelectAll");
+    Model.InvertSelection(*st);
+    Expect(Model.SelectedCount(*st) == 0, "InvertSelection");
+    Model.SelectOnly(*st, 1);
+    Expect(Model.SelectedCount(*st) == 1 && st.photos[1].selected, "SelectOnly");
+
+    if failures > 0 { return 1 }
+    print("camera_test: all checks passed\n");
+    return 0;
+}

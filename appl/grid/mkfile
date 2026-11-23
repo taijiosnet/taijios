@@ -6,7 +6,6 @@ DIRS=\
 
 TARG=\
 		cpupool.dis\
-		readjpg.dis\
 		reglisten.dis\
 		regstyxlisten.dis\
 		remotelogon.dis\
@@ -41,9 +40,6 @@ DISBIN=$ROOT/dis/grid
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
-
-readjpg.dis:	readjpg.b $MODULE $SYS_MODULE
-	limbo $LIMBOFLAGS -c -gw readjpg.b
 
 jpg2bit.zx: jpg2bit.zi jpg2bit_model.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --entry jpg2bit:main -o $target jpg2bit.zi

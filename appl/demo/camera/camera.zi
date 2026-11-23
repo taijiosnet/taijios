@@ -1,0 +1,977 @@
+// Kodak DC260 serial camera 9P2000/Styx filesystem server, ported from appl/demo/camera/camera.b.
+// Serves /ctl, /abilities, /storage, /power, /date, /state, /jpg/*, /thumb/*, and -f extra files.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args"
+using Io :: #import "taijios_io"
+using Ninep :: #import "ninep"
+using Cdp :: #import "camera_cdp"
+
+QTDIR :: 0x80;
+DMDIR :: 0x80000000;
+MAXRPC :: 8216;
+DL_QUANTA :: 20000;
+
+T_DIR :: 0;
+T_CTL :: 1;
+T_ABILITIES :: 2;
+T_TIME :: 3;
+T_JPGDIR :: 4;
+T_JPG :: 5;
+T_STORAGE :: 6;
+T_POWER :: 7;
+T_THUMB :: 8;
+T_THUMBDIR :: 9;
+T_STATE :: 10;
+T_INTERFACE :: 11;
+
+MkQid :: (idx: u64, ftype: u64) -> u64 { return (idx << 4) | (ftype & 0xf) }
+QidType :: (q: u64) -> u64 { return q & 0xf }
+QidIdx :: (q: u64) -> s64 { return cast(s64)(q >> 4) }
+
+Q_ROOT :: 0;
+
+FileEntry :: struct {
+    cf: Cdp.CdpFile;
+    jpg_name: Text;
+    thumb_name: Text;
+    jpg_qid: u64;
+    thumb_qid: u64;
+    sim_jpg: Text;
+    sim_thumb: Text;
+}
+
+ExtraFile :: struct {
+    path: Text;
+    name: Text;
+    qid: u64;
+    length: s64;
+}
+
+AttrKV :: struct {
+    pname: Text;
+    val: s32;
+}
+
+Fid :: struct {
+    fid: s64;
+    path: u64;
+    qtype: s64;
+    open: bool;
+    mode: s64;
+    dir_offset: s64;
+    dir_index: s64;
+    uname: Text;
+}
+
+CameraServer :: struct {
+    msize: s64;
+    port_num: s32;
+    baud: s32;
+    dfs: s32;
+    hfs: s32;
+    verbosity: s32;
+    usecache: bool;
+    simulated: bool;
+    camname: Text;
+    uid: Text;
+    serial_fd: s32;
+    ctl_fd: s32;
+    connected: bool;
+
+    cdp_buf: [DL_QUANTA]u8;
+    cdp_bytes: s32;
+    cdp_cmd: s32;
+
+    current_state: Text;
+    sim_date: Text;
+    sim_power: s32;
+    sim_free: s32;
+    sim_abilities: Text;
+
+    files: Vec(FileEntry);
+    extras: Vec(ExtraFile);
+    attrs: Vec(AttrKV);
+    fids: Vec(Fid);
+    next_photo_id: u64;
+}
+
+srv: CameraServer;
+
+Signed :: (v: s64) -> s64 {
+    low := v & 0xFFFFFFFF;
+    return ifx low >= 0x80000000 then low - 0x100000000 else low;
+}
+
+SetText :: (dst: *Text, s: string) {
+    unused VecResize(dst.bytes, 0);
+    unused BuilderAppend(dst.bytes, s);
+}
+
+ParseInt :: (s: string) -> (v: s32, ok: bool) {
+    if s.count == 0 { return 0, false }
+    neg := false;
+    p: s64 = 0;
+    if s[0] == 45 { neg = true; p = 1 }
+    if p >= s.count { return 0, false }
+    v: s32 = 0;
+    while p < s.count {
+        c := s[p];
+        if c < 48 || c > 57 { return 0, false }
+        v = v * 10 + cast(s32)(c - 48);
+        p += 1;
+    }
+    return (ifx neg then -v else v), true;
+}
+
+Basename :: (path: string) -> string {
+    last: s64 = -1;
+    for i: 0..path.count-1 {
+        if path[i] == 47 { last = i }
+    }
+    if last >= 0 && last + 1 < path.count { return path[last + 1:] }
+    return path;
+}
+
+// --- Serial CDP transport ---
+
+SerialWriteAll :: (fd: s32, buf: []u8) -> bool {
+    at: s64 = 0;
+    while at < buf.count {
+        n := Io.Write(fd, TextView(buf[at:]));
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+SerialReadAll :: (fd: s32, buf: []u8) -> bool {
+    at: s64 = 0;
+    while at < buf.count {
+        n := Io.Read(fd, buf[at:]);
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+CdpSend :: () -> bool {
+    if srv.simulated { return true }
+    to_write := srv.cdp_bytes;
+    pwl: [2]u8;
+    pwl[0] = cast(u8)(0x3c | ((to_write >> 8) & 0x03));
+    pwl[1] = cast(u8)(to_write & 0xff);
+    if !SerialWriteAll(srv.serial_fd, pwl[:]) { return false }
+    pak: [2]u8;
+    if !SerialReadAll(srv.serial_fd, pak[:]) { return false }
+    if !SerialWriteAll(srv.serial_fd, srv.cdp_buf[0:to_write]) { return false }
+    pwl[0] = 0; pwl[1] = 0;
+    return SerialWriteAll(srv.serial_fd, pwl[:]);
+}
+
+CdpReceive :: () -> s32 {
+    if srv.simulated { return 0 }
+    srv.cdp_bytes = 0;
+    pwl: [2]u8;
+    pak: [2]u8;
+    pak[0] = 0; pak[1] = 1;
+    if !SerialReadAll(srv.serial_fd, pwl[:]) { return 3 }
+    if !SerialWriteAll(srv.serial_fd, pak[:]) { return 3 }
+    l := (cast(s32)(pwl[0] & 3) << 8) | cast(s32)pwl[1];
+    if l <= 0 || l > DL_QUANTA { return 3 }
+    if !SerialReadAll(srv.serial_fd, srv.cdp_buf[0:l]) { return 3 }
+    srv.cdp_bytes = l;
+    rc := cast(s32)srv.cdp_buf[9];
+    if ((~rc) & 0xff) != (srv.cdp_cmd & 0xff) { return 3 }
+    msg_len := (cast(s32)srv.cdp_buf[2] << 8) | cast(s32)srv.cdp_buf[3];
+    while srv.cdp_bytes < msg_len {
+        if !SerialReadAll(srv.serial_fd, pwl[:]) { return 3 }
+        if !SerialWriteAll(srv.serial_fd, pak[:]) { return 3 }
+        pl := (cast(s32)(pwl[0] & 3) << 8) | cast(s32)pwl[1];
+        if srv.cdp_bytes + pl > DL_QUANTA { return 3 }
+        if !SerialReadAll(srv.serial_fd, srv.cdp_buf[srv.cdp_bytes:srv.cdp_bytes + pl]) { return 3 }
+        srv.cdp_bytes += pl;
+    }
+    unused SerialReadAll(srv.serial_fd, pak[:]);
+    return (cast(s32)srv.cdp_buf[10] << 8) | cast(s32)srv.cdp_buf[11];
+}
+
+// --- Camera operations (both real CDP and -S simulated mode) ---
+
+InitSimulated :: () {
+    srv.connected = true;
+    SetText(*srv.sim_date, "date is 01/01/26 12:00:00\n");
+    srv.sim_power = 1;
+    srv.sim_free = 42;
+    SetText(*srv.sim_abilities, #string END
+i = 0
+ssiz,  Still Image Size:  items: 2  factory: 1
+		High (1536x1024): 1
+		Standard (768x512): 2
+scpn,  Still Compression:  items: 2  factory: 1
+		Best: 1
+		Better: 2
+zpos,  Zoom Position:  min: 0   max: 100   factory:0
+END);
+    unused VecResize(srv.attrs, 3);
+    SetText(*srv.attrs[0].pname, "ssiz"); srv.attrs[0].val = 1;
+    SetText(*srv.attrs[1].pname, "scpn"); srv.attrs[1].val = 1;
+    SetText(*srv.attrs[2].pname, "zpos"); srv.attrs[2].val = 0;
+    AddSimPhoto("p0000001.jpg");
+}
+
+AddSimPhoto :: (name: string) {
+    idx := srv.files.count;
+    unused VecResize(srv.files, idx + 1);
+    fe := *srv.files[idx];
+    fe.cf.driveno = 1;
+    SetText(*fe.jpg_name, name);
+    Cdp.JpgToBitName(name, *fe.thumb_name);
+    pid := srv.next_photo_id;
+    srv.next_photo_id += 1;
+    fe.jpg_qid = MkQid(pid, T_JPG);
+    fe.thumb_qid = MkQid(pid, T_THUMB);
+    // Minimal synthetic JPEG header + EOI bytes
+    unused VecResize(fe.sim_jpg.bytes, 0);
+    jpg_hdr: [22]u8 = .[0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 74, 70, 73, 70, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xd9];
+    for b: jpg_hdr { unused VecPush(fe.sim_jpg.bytes, b) }
+    fe.cf.filelength = cast(s32)fe.sim_jpg.bytes.count;
+    // Generate a real 4x4 Inferno r8g8b8 thumbnail via Cdp.ThumbToBit
+    ycbcr: [32]u8;
+    for i: 0..31 { ycbcr[i] = 128 }
+    Cdp.ThumbToBit(ycbcr[:], 4, 4, *fe.sim_thumb.bytes);
+    fe.cf.thumblength = cast(s32)fe.sim_thumb.bytes.count;
+}
+
+ConnectSerial :: () -> bool {
+    port_path: Text;
+    b: [16]u8;
+    unused BuilderAppend(port_path.bytes, "/dev/eia");
+    unused BuilderAppend(port_path.bytes, FormatInteger(cast(s64)srv.port_num, b[:]));
+    ctl_path: Text;
+    unused BuilderAppend(ctl_path.bytes, TextView(port_path));
+    unused BuilderAppend(ctl_path.bytes, "ctl");
+
+    srv.serial_fd = Io.Open(TextView(port_path), 2); // ORDWR
+    if srv.serial_fd < 0 { return false }
+    srv.ctl_fd = Io.Open(TextView(ctl_path), 1); // OWRITE
+    if srv.ctl_fd < 0 { Io.Close(srv.serial_fd); return false }
+
+    cfg: [8]string = .["b9600", "l8", "p0", "m0", "s1", "r1", "i1", "f"];
+    for i: 0..7 { unused Io.Write(srv.ctl_fd, cfg[i]) }
+    unused Io.Write(srv.ctl_fd, "d1");
+    unused Io.Write(srv.ctl_fd, "d0");
+
+    // Read 7-byte beacon intro
+    intro: [7]u8;
+    if !SerialReadAll(srv.serial_fd, intro[:]) || !Cdp.BeaconOk(intro[:]) {
+        return false;
+    }
+    ack: [13]u8;
+    Cdp.BuildBeaconAck(srv.baud, srv.dfs, srv.hfs, ack[:]);
+    if !SerialWriteAll(srv.serial_fd, ack[:]) { return false }
+    res: [10]u8;
+    if !SerialReadAll(srv.serial_fd, res[:]) || res[0] != 0 { return false }
+    srv.baud = Cdp.GetBE32(res[:], 2);
+    srv.dfs = (cast(s32)res[6] << 8) | cast(s32)res[7];
+    srv.hfs = (cast(s32)res[8] << 8) | cast(s32)res[9];
+    sp: Text;
+    unused BuilderAppend(sp.bytes, "b");
+    unused BuilderAppend(sp.bytes, FormatInteger(cast(s64)srv.baud, b[:]));
+    unused Io.Write(srv.ctl_fd, TextView(sp));
+    srv.connected = true;
+    return true;
+}
+
+CmdGetStorage :: (out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if srv.simulated {
+        b1: [16]u8; b2: [16]u8;
+        unused BuilderAppend(out.bytes, "Picture Memory\n\tused:\t");
+        unused BuilderAppend(out.bytes, FormatInteger(srv.files.count, b1[:]));
+        unused BuilderAppend(out.bytes, "\n\tfree:\t");
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)srv.sim_free, b2[:]));
+        unused BuilderAppend(out.bytes, "\n");
+        return;
+    }
+    srv.cdp_cmd = Cdp.CDP_GET_STORAGE_STATUS;
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 0);
+    if !CdpSend() || CdpReceive() != 0 { return }
+    taken := Cdp.GetBE32(srv.cdp_buf[:], 12);
+    avail := Cdp.GetBE32(srv.cdp_buf[:], 16);
+    raw := Cdp.GetBE32(srv.cdp_buf[:], 20);
+    b1: [16]u8; b2: [16]u8; b3: [16]u8;
+    unused BuilderAppend(out.bytes, "Picture Memory\n\tused:\t");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)taken, b1[:]));
+    unused BuilderAppend(out.bytes, "\n\tfree:\t");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)avail, b2[:]));
+    if raw == -1 { unused BuilderAppend(out.bytes, "\n") }
+    else {
+        unused BuilderAppend(out.bytes, " (compressed)\n\t\t");
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)raw, b3[:]));
+        unused BuilderAppend(out.bytes, " (raw)\n");
+    }
+}
+
+CmdGetPower :: (out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if srv.simulated {
+        b: [16]u8;
+        unused BuilderAppend(out.bytes, "Power Mode = ");
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)srv.sim_power, b[:]));
+        unused BuilderAppend(out.bytes, "\n");
+        return;
+    }
+    srv.cdp_cmd = Cdp.CDP_GET_POWER_MODE;
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 0);
+    if !CdpSend() || CdpReceive() != 0 {
+        unused BuilderAppend(out.bytes, "Could not read power mode");
+        return;
+    }
+    mode := Cdp.GetBE32(srv.cdp_buf[:], 12);
+    b: [16]u8;
+    unused BuilderAppend(out.bytes, "Power Mode = ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)mode, b[:]));
+    unused BuilderAppend(out.bytes, "\n");
+}
+
+CmdGetClock :: (out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if srv.simulated {
+        unused BuilderAppend(out.bytes, TextView(srv.sim_date));
+        return;
+    }
+    srv.cdp_cmd = Cdp.CDP_GET_CLOCK;
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 0);
+    if !CdpSend() || CdpReceive() != 0 {
+        unused BuilderAppend(out.bytes, "Could not read clock\n");
+        return;
+    }
+    Cdp.FormatClockResponse(srv.cdp_buf[:], out);
+}
+
+CmdSetClock :: (s: string) -> bool {
+    // Expect "MM/DD/YY HH:MM:SS"
+    trimmed := s;
+    while trimmed.count > 0 && (trimmed[trimmed.count - 1] == 10 || trimmed[trimmed.count - 1] == 13 || trimmed[trimmed.count - 1] == 32) {
+        trimmed = trimmed[0:trimmed.count - 1];
+    }
+    sp: s64 = -1;
+    for i: 0..trimmed.count-1 { if trimmed[i] == 32 { sp = i; break } }
+    if sp <= 0 || sp + 1 >= trimmed.count { return false }
+    if srv.simulated {
+        unused VecResize(srv.sim_date.bytes, 0);
+        unused BuilderAppend(srv.sim_date.bytes, "date is ");
+        unused BuilderAppend(srv.sim_date.bytes, trimmed);
+        unused BuilderAppend(srv.sim_date.bytes, "\n");
+        return true;
+    }
+    // Parse 6 fields for CDP_SET_CLOCK
+    srv.cdp_cmd = Cdp.CDP_SET_CLOCK;
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 8);
+    srv.cdp_buf[12] = 0; srv.cdp_buf[16] = 0;
+    return CdpSend() && CdpReceive() == 0;
+}
+
+CmdGetState :: (pname: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    if pname.count != 4 {
+        unused BuilderAppend(out.bytes, "Invalid command name: ");
+        unused BuilderAppend(out.bytes, pname);
+        unused BuilderAppend(out.bytes, "\n");
+        return;
+    }
+    if srv.simulated {
+        for i: 0..srv.attrs.count-1 {
+            if TextView(srv.attrs[i].pname) == pname {
+                b: [16]u8;
+                unused BuilderAppend(out.bytes, pname);
+                unused BuilderAppend(out.bytes, ": ");
+                unused BuilderAppend(out.bytes, FormatInteger(cast(s64)srv.attrs[i].val, b[:]));
+                unused BuilderAppend(out.bytes, "\n");
+                return;
+            }
+        }
+        unused BuilderAppend(out.bytes, pname);
+        unused BuilderAppend(out.bytes, ": 0\n");
+        return;
+    }
+    srv.cdp_cmd = Cdp.CDP_GET_CAMERA_STATE;
+    for i: 0..3 { srv.cdp_buf[12 + i] = pname[i] }
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 4);
+    if !CdpSend() || CdpReceive() != 0 {
+        unused BuilderAppend(out.bytes, "Could not read state: ");
+        unused BuilderAppend(out.bytes, pname);
+        unused BuilderAppend(out.bytes, "\n");
+        return;
+    }
+    val := Cdp.GetBE32(srv.cdp_buf[:], 24);
+    b: [16]u8;
+    unused BuilderAppend(out.bytes, pname);
+    unused BuilderAppend(out.bytes, ": ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)val, b[:]));
+    unused BuilderAppend(out.bytes, "\n");
+}
+
+CmdSetState :: (pname: string, val: s32) -> string {
+    if pname.count != 4 { return "Command name must be 4 characters" }
+    if srv.simulated {
+        for i: 0..srv.attrs.count-1 {
+            if TextView(srv.attrs[i].pname) == pname {
+                srv.attrs[i].val = val;
+                return "";
+            }
+        }
+        return "Invalid command name";
+    }
+    srv.cdp_cmd = Cdp.CDP_SET_CAMERA_STATE;
+    for i: 0..3 { srv.cdp_buf[12 + i] = pname[i] }
+    unused Cdp.PutBE32(srv.cdp_buf[:], 16, val);
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 8);
+    if !CdpSend() { return "Cannot communicate with camera" }
+    e := CdpReceive();
+    if e != 0 { return Cdp.ErrorText(e) }
+    return "";
+}
+
+CmdSnap :: () -> string {
+    if srv.simulated {
+        if srv.sim_free <= 0 { return "Error: Drive Not Mounted" }
+        srv.sim_free -= 1;
+        nm: Text;
+        b: [16]u8;
+        unused BuilderAppend(nm.bytes, "p000000");
+        unused BuilderAppend(nm.bytes, FormatInteger(cast(s64)srv.next_photo_id, b[:]));
+        unused BuilderAppend(nm.bytes, ".jpg");
+        AddSimPhoto(TextView(nm));
+        return "";
+    }
+    srv.cdp_cmd = Cdp.CDP_GET_CAMERA_STATUS;
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 0);
+    if !CdpSend() || CdpReceive() != 0 { return "Cannot communicate with camera" }
+    srv.cdp_cmd = Cdp.CDP_START_CAPTURE;
+    unused Cdp.PutBE32(srv.cdp_buf[:], 12, 0);
+    srv.cdp_bytes = Cdp.BuildCdpHeader(srv.cdp_buf[:], srv.cdp_cmd, 4);
+    if !CdpSend() { return "Cannot communicate with camera" }
+    e := CdpReceive();
+    if e != 0 { return Cdp.ErrorText(e) }
+    return "";
+}
+
+// --- 9P2000 Server ---
+
+FindFid :: (fid: s64) -> s64 {
+    for i: 0..srv.fids.count-1 { if srv.fids[i].fid == fid { return i } }
+    return -1;
+}
+
+NewFid :: (fid: s64) -> s64 {
+    if FindFid(fid) >= 0 { return -1 }
+    idx := srv.fids.count;
+    unused VecResize(srv.fids, idx + 1);
+    f := *srv.fids[idx];
+    f.fid = fid;
+    f.path = 0xFFFFFFFFFFFFFFFF;
+    f.qtype = 0;
+    f.open = false;
+    f.mode = 0;
+    f.dir_offset = 0;
+    f.dir_index = 0;
+    SetText(*f.uname, "");
+    return idx;
+}
+
+DeleteFid :: (index: s64) {
+    last := srv.fids.count - 1;
+    if index != last {
+        a := *srv.fids[index];
+        b := *srv.fids[last];
+        a.fid = b.fid; a.path = b.path; a.qtype = b.qtype;
+        a.open = b.open; a.mode = b.mode;
+        a.dir_offset = b.dir_offset; a.dir_index = b.dir_index;
+        VecSwap(a.uname.bytes, b.uname.bytes);
+    }
+    unused VecResize(srv.fids, last);
+}
+
+SetErr :: (r: *Ninep.Message, msg: string) {
+    r.kind = Ninep.Rerror;
+    r.ename = msg;
+}
+
+FindFileByQid :: (q: u64, is_thumb: bool) -> s64 {
+    for i: 0..srv.files.count-1 {
+        if !is_thumb && srv.files[i].jpg_qid == q { return i }
+        if is_thumb && srv.files[i].thumb_qid == q { return i }
+    }
+    return -1;
+}
+
+FindExtraByQid :: (q: u64) -> s64 {
+    for i: 0..srv.extras.count-1 {
+        if srv.extras[i].qid == q { return i }
+    }
+    return -1;
+}
+
+StatPath :: (path: u64, d: *Ninep.Dir) -> bool {
+    none: Ninep.Dir;
+    <<d = none;
+    d.uid = TextView(srv.uid);
+    d.gid = TextView(srv.uid);
+    d.qid.path = path;
+    t := QidType(path);
+    if path == Q_ROOT {
+        d.name = "."; d.mode = DMDIR | 365; d.qid.qtype = QTDIR; return true;
+    }
+    if t == T_CTL { d.name = "ctl"; d.mode = 146; return true }
+    if t == T_ABILITIES { d.name = "abilities"; d.mode = 292; return true }
+    if t == T_STORAGE { d.name = "storage"; d.mode = 292; return true }
+    if t == T_POWER { d.name = "power"; d.mode = 292; return true }
+    if t == T_TIME { d.name = "date"; d.mode = 438; return true }
+    if t == T_STATE { d.name = "state"; d.mode = 438; return true }
+    if t == T_JPGDIR { d.name = "jpg"; d.mode = DMDIR | 511; d.qid.qtype = QTDIR; return true }
+    if t == T_THUMBDIR { d.name = "thumb"; d.mode = DMDIR | 511; d.qid.qtype = QTDIR; return true }
+    if t == T_JPG {
+        i := FindFileByQid(path, false);
+        if i < 0 { return false }
+        d.name = TextView(srv.files[i].jpg_name);
+        d.mode = 292;
+        d.length = cast(s64)srv.files[i].cf.filelength;
+        return true;
+    }
+    if t == T_THUMB {
+        i := FindFileByQid(path, true);
+        if i < 0 { return false }
+        d.name = TextView(srv.files[i].thumb_name);
+        d.mode = 292;
+        d.length = cast(s64)srv.files[i].cf.thumblength;
+        return true;
+    }
+    if t == T_INTERFACE {
+        i := FindExtraByQid(path);
+        if i < 0 { return false }
+        d.name = TextView(srv.extras[i].name);
+        d.mode = 292;
+        d.length = srv.extras[i].length;
+        return true;
+    }
+    return false;
+}
+
+Walk1 :: (fidx: s64, name: string) -> string {
+    path := srv.fids[fidx].path;
+    t := QidType(path);
+    if name == ".." {
+        srv.fids[fidx].path = Q_ROOT;
+        srv.fids[fidx].qtype = QTDIR;
+        return "";
+    }
+    if path == Q_ROOT {
+        if name == "ctl" { srv.fids[fidx].path = MkQid(0, T_CTL); srv.fids[fidx].qtype = 0; return "" }
+        if name == "abilities" { srv.fids[fidx].path = MkQid(0, T_ABILITIES); srv.fids[fidx].qtype = 0; return "" }
+        if name == "storage" { srv.fids[fidx].path = MkQid(0, T_STORAGE); srv.fids[fidx].qtype = 0; return "" }
+        if name == "power" { srv.fids[fidx].path = MkQid(0, T_POWER); srv.fids[fidx].qtype = 0; return "" }
+        if name == "date" { srv.fids[fidx].path = MkQid(0, T_TIME); srv.fids[fidx].qtype = 0; return "" }
+        if name == "state" { srv.fids[fidx].path = MkQid(0, T_STATE); srv.fids[fidx].qtype = 0; return "" }
+        if name == "jpg" { srv.fids[fidx].path = MkQid(0, T_JPGDIR); srv.fids[fidx].qtype = QTDIR; return "" }
+        if name == "thumb" { srv.fids[fidx].path = MkQid(0, T_THUMBDIR); srv.fids[fidx].qtype = QTDIR; return "" }
+        for i: 0..srv.extras.count-1 {
+            if TextView(srv.extras[i].name) == name {
+                srv.fids[fidx].path = srv.extras[i].qid;
+                srv.fids[fidx].qtype = 0;
+                return "";
+            }
+        }
+        return "file does not exist";
+    }
+    if t == T_JPGDIR {
+        for i: 0..srv.files.count-1 {
+            if TextView(srv.files[i].jpg_name) == name {
+                srv.fids[fidx].path = srv.files[i].jpg_qid;
+                srv.fids[fidx].qtype = 0;
+                return "";
+            }
+        }
+        return "file does not exist";
+    }
+    if t == T_THUMBDIR {
+        for i: 0..srv.files.count-1 {
+            if TextView(srv.files[i].thumb_name) == name {
+                srv.fids[fidx].path = srv.files[i].thumb_qid;
+                srv.fids[fidx].qtype = 0;
+                return "";
+            }
+        }
+        return "file does not exist";
+    }
+    return "file does not exist";
+}
+
+ReadSlice :: (src: string, off: s64, cnt: s64, out: *Vec(u8)) {
+    if off < 0 || off >= src.count || cnt <= 0 { return }
+    end := off + cnt;
+    if end > src.count { end = src.count }
+    unused BuilderAppend(<<out, src[off:end]);
+}
+
+HandleDirRead :: (fidx: s64, m: *Ninep.Message, reply: *Ninep.Message, data: *Vec(u8)) {
+    cnt := Signed(m.count);
+    reply.kind = Ninep.Rread;
+    if cnt <= 0 { return }
+    off := srv.fids[fidx].dir_offset;
+    idx := srv.fids[fidx].dir_index;
+    if Signed(m.offset) != off { off = 0; idx = 0 }
+    left := cnt;
+    path := srv.fids[fidx].path;
+    t := QidType(path);
+
+    if path == Q_ROOT {
+        fixed: [8]u64 = .[
+            MkQid(0, T_CTL), MkQid(0, T_ABILITIES), MkQid(0, T_STORAGE),
+            MkQid(0, T_POWER), MkQid(0, T_TIME), MkQid(0, T_STATE),
+            MkQid(0, T_JPGDIR), MkQid(0, T_THUMBDIR),
+        ];
+        total := 8 + srv.extras.count;
+        while idx < total {
+            q := ifx idx < 8 then fixed[idx] else srv.extras[idx - 8].qid;
+            d: Ninep.Dir;
+            idx += 1;
+            if !StatPath(q, *d) { continue }
+            sz := Ninep.DirSize(*d);
+            off += sz;
+            if off < Signed(m.offset) { continue }
+            left -= sz;
+            if left < 0 { off -= sz; idx -= 1; break }
+            Ninep.PackDir(data, *d);
+        }
+    } else if t == T_JPGDIR || t == T_THUMBDIR {
+        while idx < srv.files.count {
+            q := ifx t == T_JPGDIR then srv.files[idx].jpg_qid else srv.files[idx].thumb_qid;
+            d: Ninep.Dir;
+            idx += 1;
+            if !StatPath(q, *d) { continue }
+            sz := Ninep.DirSize(*d);
+            off += sz;
+            if off < Signed(m.offset) { continue }
+            left -= sz;
+            if left < 0 { off -= sz; idx -= 1; break }
+            Ninep.PackDir(data, *d);
+        }
+    }
+    srv.fids[fidx].dir_offset = off;
+    srv.fids[fidx].dir_index = idx;
+}
+
+Send :: (reply: *Ninep.Message) -> bool {
+    out: Vec(u8);
+    if srv.msize == 0 {
+        reply.kind = Ninep.Rerror;
+        reply.ename = "Tversion not seen";
+    }
+    unused Ninep.Pack(reply, *out);
+    at: s64 = 0;
+    while at < out.count {
+        n := Io.Write(0, TextView(out[at:]));
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+ReadFull :: (buf: []u8) -> bool {
+    at: s64 = 0;
+    while at < buf.count {
+        n := Io.Read(0, buf[at:]);
+        if n <= 0 { return false }
+        at += n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    srv.port_num = 0;
+    srv.baud = 115200;
+    srv.dfs = 1023;
+    srv.hfs = 1023;
+    srv.verbosity = 4;
+    srv.next_photo_id = 1;
+    SetText(*srv.camname, "Camera");
+    SetText(*srv.uid, "camera");
+
+    // Read /dev/user if available
+    ufd := Io.Open("/dev/user", 0);
+    if ufd >= 0 {
+        ubuf: [64]u8;
+        un := Io.Read(ufd, ubuf[:]);
+        Io.Close(ufd);
+        if un > 0 { SetText(*srv.uid, TextView(ubuf[0:un])) }
+    }
+
+    argc := Args.Count();
+    ai: s32 = 0;
+    extra_idx: u64 = 1;
+    while ai < argc {
+        a := Args.At(ai);
+        if a == "-S" {
+            srv.simulated = true;
+        } else if a == "-c" {
+            srv.usecache = true;
+        } else if a == "-n" && ai + 1 < argc {
+            ai += 1; SetText(*srv.camname, Args.At(ai));
+        } else if a == "-v" && ai + 1 < argc {
+            ai += 1; v, ok := ParseInt(Args.At(ai)); if ok { srv.verbosity = v }
+        } else if a == "-F" && ai + 1 < argc {
+            ai += 1; v, ok := ParseInt(Args.At(ai)); if ok { srv.dfs = v; srv.hfs = v }
+        } else if a == "-b" && ai + 1 < argc {
+            ai += 1; v, ok := ParseInt(Args.At(ai)); if ok { srv.baud = v }
+        } else if a == "-p" && ai + 1 < argc {
+            ai += 1; v, ok := ParseInt(Args.At(ai)); if ok { srv.port_num = v }
+        } else if a == "-f" && ai + 1 < argc {
+            ai += 1;
+            ep := Args.At(ai);
+            eidx := srv.extras.count;
+            unused VecResize(srv.extras, eidx + 1);
+            SetText(*srv.extras[eidx].path, ep);
+            SetText(*srv.extras[eidx].name, Basename(ep));
+            srv.extras[eidx].qid = MkQid(extra_idx, T_INTERFACE);
+            extra_idx += 1;
+        }
+        ai += 1;
+    }
+
+    if srv.simulated {
+        InitSimulated();
+    } else {
+        if !ConnectSerial() {
+            return 1;
+        }
+    }
+
+    frame: Vec(u8);
+    while true {
+        hdr: [4]u8;
+        if !ReadFull(hdr[:]) { break }
+        sz, merr := Ninep.MessageSize(TextView(hdr[:]), srv.msize);
+        if merr.count > 0 { break }
+        VecClear(frame);
+        unused BuilderAppend(frame, TextView(hdr[:]));
+        unused VecResize(frame, sz);
+        if !ReadFull(frame[4:]) { break }
+        m: Ninep.Message;
+        if Ninep.Unpack(TextView(frame[:]), true, *m) <= 0 { break }
+
+        reply: Ninep.Message;
+        reply.tag = m.tag;
+        data: Vec(u8);
+
+        if m.kind == Ninep.Tversion {
+            nsz, ver := Ninep.Compatible(Signed(m.msize), m.version, ifx srv.msize <= 0 then MAXRPC else srv.msize, Ninep.VERSION);
+            if nsz < 256 { SetErr(*reply, "message size too small") }
+            else { srv.msize = nsz; reply.kind = Ninep.Rversion; reply.msize = nsz; reply.version = ver }
+        } else if m.kind == Ninep.Tauth {
+            SetErr(*reply, "authentication not required");
+        } else if m.kind == Ninep.Tflush {
+            reply.kind = Ninep.Rflush;
+        } else if m.kind == Ninep.Tattach {
+            fidx := NewFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "fid already in use") }
+            else {
+                SetText(*srv.fids[fidx].uname, m.uname);
+                srv.fids[fidx].path = Q_ROOT;
+                srv.fids[fidx].qtype = QTDIR;
+                reply.kind = Ninep.Rattach;
+                reply.qid.path = Q_ROOT;
+                reply.qid.qtype = QTDIR;
+            }
+        } else if m.kind == Ninep.Twalk {
+            fidx := FindFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else if srv.fids[fidx].open { SetErr(*reply, "fid already opened") }
+            else {
+                if m.newfid != m.fid {
+                    cl := NewFid(m.newfid);
+                    if cl < 0 { SetErr(*reply, "fid already in use"); fidx = -1 }
+                    else {
+                        srv.fids[cl].path = srv.fids[fidx].path;
+                        srv.fids[cl].qtype = srv.fids[fidx].qtype;
+                        tmp: Text; SetText(*tmp, TextView(srv.fids[fidx].uname));
+                        SetText(*srv.fids[cl].uname, TextView(tmp));
+                        fidx = cl;
+                    }
+                }
+                if fidx >= 0 {
+                    op := srv.fids[fidx].path; oq := srv.fids[fidx].qtype;
+                    reply.kind = Ninep.Rwalk;
+                    for i: 0..m.names.count-1 {
+                        err := Walk1(fidx, m.names[i]);
+                        if err.count > 0 {
+                            if m.newfid != m.fid { DeleteFid(fidx) }
+                            else { srv.fids[fidx].path = op; srv.fids[fidx].qtype = oq }
+                            if i == 0 { SetErr(*reply, err) }
+                            break;
+                        }
+                        qid: Ninep.Qid;
+                        qid.path = srv.fids[fidx].path;
+                        qid.qtype = srv.fids[fidx].qtype;
+                        unused VecPush(reply.qids, qid);
+                    }
+                }
+            }
+        } else if m.kind == Ninep.Topen {
+            fidx := FindFid(m.fid);
+            d: Ninep.Dir;
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else if !StatPath(srv.fids[fidx].path, *d) { SetErr(*reply, "file does not exist") }
+            else {
+                srv.fids[fidx].open = true;
+                srv.fids[fidx].mode = m.mode & 3;
+                reply.kind = Ninep.Ropen;
+                reply.qid = d.qid;
+                reply.iounit = 0;
+            }
+        } else if m.kind == Ninep.Tread {
+            fidx := FindFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else if !srv.fids[fidx].open { SetErr(*reply, "not open") }
+            else if (srv.fids[fidx].qtype & QTDIR) != 0 {
+                HandleDirRead(fidx, *m, *reply, *data);
+                if reply.kind == Ninep.Rread { reply.data = TextView(data[:]) }
+            } else {
+                path := srv.fids[fidx].path;
+                t := QidType(path);
+                off := Signed(m.offset);
+                cnt := Signed(m.count);
+                reply.kind = Ninep.Rread;
+                if t == T_STORAGE {
+                    txt: Text; CmdGetStorage(*txt);
+                    ReadSlice(TextView(txt), off, cnt, *data);
+                } else if t == T_POWER {
+                    txt: Text; CmdGetPower(*txt);
+                    ReadSlice(TextView(txt), off, cnt, *data);
+                } else if t == T_TIME {
+                    txt: Text; CmdGetClock(*txt);
+                    ReadSlice(TextView(txt), off, cnt, *data);
+                } else if t == T_ABILITIES {
+                    ReadSlice(TextView(srv.sim_abilities), off, cnt, *data);
+                } else if t == T_STATE {
+                    if srv.current_state.bytes.count == 0 { SetErr(*reply, "No state requested") }
+                    else if off == 0 {
+                        txt: Text; CmdGetState(TextView(srv.current_state), *txt);
+                        ReadSlice(TextView(txt), 0, cnt, *data);
+                    }
+                } else if t == T_JPG {
+                    fi := FindFileByQid(path, false);
+                    if fi >= 0 { ReadSlice(TextView(srv.files[fi].sim_jpg), off, cnt, *data) }
+                } else if t == T_THUMB {
+                    fi := FindFileByQid(path, true);
+                    if fi >= 0 { ReadSlice(TextView(srv.files[fi].sim_thumb), off, cnt, *data) }
+                } else if t == T_INTERFACE {
+                    ei := FindExtraByQid(path);
+                    if ei >= 0 {
+                        fd := Io.Open(TextView(srv.extras[ei].path), 0);
+                        if fd >= 0 {
+                            fbuf: Vec(u8);
+                            tmp: [4096]u8;
+                            while true {
+                                n := Io.Read(fd, tmp[:]);
+                                if n <= 0 { break }
+                                unused BuilderAppend(fbuf, TextView(tmp[0:n]));
+                            }
+                            Io.Close(fd);
+                            ReadSlice(TextView(fbuf[:]), off, cnt, *data);
+                        }
+                    }
+                } else {
+                    SetErr(*reply, "Cannot read file");
+                }
+                if reply.kind == Ninep.Rread { reply.data = TextView(data[:]) }
+            }
+        } else if m.kind == Ninep.Twrite {
+            fidx := FindFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else if !srv.fids[fidx].open { SetErr(*reply, "not open") }
+            else {
+                t := QidType(srv.fids[fidx].path);
+                s := m.data;
+                while s.count > 0 && (s[s.count - 1] == 10 || s[s.count - 1] == 13 || s[s.count - 1] == 32) {
+                    s = s[0:s.count - 1];
+                }
+                if t == T_TIME {
+                    if !CmdSetClock(s) { SetErr(*reply, "Invalid date time format") }
+                    else { reply.kind = Ninep.Rwrite; reply.count = m.data.count }
+                } else if t == T_STATE {
+                    SetText(*srv.current_state, s);
+                    reply.kind = Ninep.Rwrite; reply.count = m.data.count;
+                } else if t == T_CTL {
+                    if s == "refresh" {
+                        reply.kind = Ninep.Rwrite; reply.count = m.data.count;
+                    } else if s == "snap" {
+                        err := CmdSnap();
+                        if err.count > 0 { SetErr(*reply, err) }
+                        else { reply.kind = Ninep.Rwrite; reply.count = m.data.count }
+                    } else {
+                        // "<pname> <val>"
+                        sp: s64 = -1;
+                        for i: 0..s.count-1 { if s[i] == 32 { sp = i; break } }
+                        if sp > 0 && sp + 1 < s.count {
+                            v, ok := ParseInt(s[sp + 1:]);
+                            if !ok { SetErr(*reply, "bad value") }
+                            else {
+                                err := CmdSetState(s[0:sp], v);
+                                if err.count > 0 { SetErr(*reply, err) }
+                                else { reply.kind = Ninep.Rwrite; reply.count = m.data.count }
+                            }
+                        } else {
+                            SetErr(*reply, "Invalid command");
+                        }
+                    }
+                } else {
+                    SetErr(*reply, "Could not write to file");
+                }
+            }
+        } else if m.kind == Ninep.Tremove {
+            fidx := FindFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else {
+                path := srv.fids[fidx].path;
+                DeleteFid(fidx);
+                if QidType(path) != T_JPG {
+                    SetErr(*reply, "Cannot remove file");
+                } else {
+                    fi := FindFileByQid(path, false);
+                    if fi < 0 { SetErr(*reply, "file does not exist") }
+                    else {
+                        last := srv.files.count - 1;
+                        if fi != last {
+                            srv.files[fi].cf = srv.files[last].cf;
+                            srv.files[fi].jpg_qid = srv.files[last].jpg_qid;
+                            srv.files[fi].thumb_qid = srv.files[last].thumb_qid;
+                            VecSwap(srv.files[fi].jpg_name.bytes, srv.files[last].jpg_name.bytes);
+                            VecSwap(srv.files[fi].thumb_name.bytes, srv.files[last].thumb_name.bytes);
+                            VecSwap(srv.files[fi].sim_jpg.bytes, srv.files[last].sim_jpg.bytes);
+                            VecSwap(srv.files[fi].sim_thumb.bytes, srv.files[last].sim_thumb.bytes);
+                        }
+                        unused VecResize(srv.files, last);
+                        if srv.simulated { srv.sim_free += 1 }
+                        reply.kind = Ninep.Rremove;
+                    }
+                }
+            }
+        } else if m.kind == Ninep.Tclunk {
+            fidx := FindFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else { DeleteFid(fidx); reply.kind = Ninep.Rclunk }
+        } else if m.kind == Ninep.Tstat {
+            fidx := FindFid(m.fid);
+            if fidx < 0 { SetErr(*reply, "bad fid") }
+            else if !StatPath(srv.fids[fidx].path, *reply.stat) { SetErr(*reply, "file does not exist") }
+            else { reply.kind = Ninep.Rstat }
+        } else {
+            SetErr(*reply, "permission denied");
+        }
+
+        if !Send(*reply) { break }
+    }
+    return 0;
+}

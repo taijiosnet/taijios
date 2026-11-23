@@ -1,42 +1,42 @@
 <../../../mkconfig
 
-TARG=\
-		camera.dis\
-		camload.bit\
-		camproc.bit\
-		tkinterface.dis\
-
-SHTARG=\
-		runcam.sh\
-
-MODULES=\
-
-SYSMODULES= \
-	arg.m\
-	bufio.m\
-	daytime.m\
-	draw.m\
-	grid/readjpg.m\
-	readdir.m\
-	selectfile.m\
-	string.m\
-	styx.m\
-	styxservers.m\
-	sys.m\
-	tk.m\
-	tkclient.m\
-
 DISBIN=$ROOT/dis/demo/camera
 
-<$ROOT/mkfiles/mkdis
+ALL=\
+	$DISBIN/camera.zx \
+	$DISBIN/tkinterface.zx \
+	$DISBIN/camload.bit \
+	$DISBIN/camproc.bit \
+	$DISBIN/runcam
 
-$DISBIN/%.bit:		%.bit
+all:V: camera.zx tkinterface.zx
+
+camera.zx: camera.zi camera_cdp.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../lib/ninep.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_io --entry camera:main -o $target camera.zi
+
+$DISBIN/camera.zx: camera.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 camera.zx "$staged" && mv "$staged" "$target"
+
+tkinterface.zx: tkinterface.zi tkinterface_model.zi camera_cdp.zi ../../grid/jpg2bit_model.zi ../../cmd/tcltk/tcltk.zi ../../cmd/tcltk/zx_surface.zi ../../cmd/taijios_files.zi ../../cmd/taijios_stdin.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../lib/ninep.zi mkfile
+	ziran bundle --project --root . --define TK_MENU --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --module-path ../../grid --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --entry tkinterface:main -o $target tkinterface.zi
+
+$DISBIN/tkinterface.zx: tkinterface.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 tkinterface.zx "$staged" && mv "$staged" "$target"
+
+$DISBIN/%.bit: %.bit
 	rm -f $target && cp $stem.bit $target
 
-SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES
-%.install:V:	$DISBIN/%
-%.installall:V:	$DISBIN/%
+$DISBIN/runcam: runcam.sh
+	cp runcam.sh $target && chmod a+rx $target
 
-$DISBIN/%:	%.sh
-	cp $stem.sh $target && chmod a+rx $target
+install:V: $ALL
+
+clean:V:
+	rm -f *.zx
+
+nuke:V: clean
+	rm -f $DISBIN/*.zx

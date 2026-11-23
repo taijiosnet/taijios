@@ -1,0 +1,317 @@
+// Kodak DC260 Tk Camera Interface, ported from appl/demo/camera/tkinterface.b.
+// Connects to a mounted camera 9P filesystem (ctl, abilities, storage, date, state, jpg/, thumb/)
+// and decodes JPEG images directly in Ziran via appl/grid/jpg2bit_model.zi.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args"
+using Io :: #import "taijios_io"
+using Ninep :: #import "ninep"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Model :: #import "tkinterface_model"
+using Jpg :: #import "jpg2bit_model"
+
+st: Model.CameraUiState;
+CANVAS_W :: 560;
+CANVAS_H :: 280;
+pending_act: s32 = 0; // 1=snap, 2=refresh, 3=selall1, 4=selall0, 5=invert, 6=reset, 7=click
+pending_x: s32 = 0;
+pending_y: s32 = 0;
+
+ReadFileAll :: (path: string, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    fd := Io.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [4096]u8;
+    while true {
+        n := Io.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(<<out, TextView(buf[0:n]));
+    }
+    Io.Close(fd);
+    return true;
+}
+
+WriteFileStr :: (path: string, data: string) -> bool {
+    fd := Io.Open(path, 1);
+    if fd < 0 { return false }
+    n := Io.Write(fd, data);
+    Io.Close(fd);
+    return n >= 0;
+}
+
+CamPath :: (sub: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, TextView(st.camerapath));
+    unused BuilderAppend(out.bytes, sub);
+}
+
+RefreshStorage :: () {
+    p: Text; CamPath("storage", *p);
+    buf: Vec(u8);
+    if ReadFileAll(TextView(p), *buf) {
+        Model.ParseStorage(*st, TextView(buf[:]));
+    }
+}
+
+RefreshDate :: () {
+    p: Text; CamPath("date", *p);
+    buf: Vec(u8);
+    if ReadFileAll(TextView(p), *buf) {
+        Model.ParseDate(*st, TextView(buf[:]));
+    }
+}
+
+RefreshAbilities :: () {
+    p: Text; CamPath("abilities", *p);
+    buf: Vec(u8);
+    if ReadFileAll(TextView(p), *buf) {
+        Model.ParseAbilities(*st, TextView(buf[:]));
+    }
+}
+
+RefreshFiles :: (send_refresh: bool) {
+    if send_refresh {
+        cp: Text; CamPath("ctl", *cp);
+        unused WriteFileStr(TextView(cp), "refresh");
+    }
+    unused VecResize(st.photos, 0);
+    jp: Text; CamPath("jpg", *jp);
+    fd := Io.Open(TextView(jp), 0);
+    if fd < 0 { return }
+    buf: Vec(u8);
+    tmp: [4096]u8;
+    while true {
+        n := Io.Read(fd, tmp[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(buf, TextView(tmp[0:n]));
+    }
+    Io.Close(fd);
+
+    off: s64 = 0;
+    while off + 2 <= buf.count {
+        d: Ninep.Dir;
+        consumed := Ninep.UnpackDir(TextView(buf[off:]), *d);
+        if consumed <= 0 { break }
+        off += consumed;
+        nm := d.name;
+        if nm.count > 4 && nm[nm.count - 4:] == ".jpg" {
+            nm = nm[0:nm.count - 4];
+        }
+        idx := st.photos.count;
+        unused VecResize(st.photos, idx + 1);
+        Model.SetText(*st.photos[idx].name, nm);
+    }
+    Model.LayoutPhotos(*st, CANVAS_W);
+}
+
+ViewPhoto :: (idx: s32) {
+    if idx < 0 || cast(s64)idx >= st.photos.count { return }
+    jp: Text;
+    unused BuilderAppend(jp.bytes, TextView(st.camerapath));
+    unused BuilderAppend(jp.bytes, "jpg/");
+    unused BuilderAppend(jp.bytes, TextView(st.photos[idx].name));
+    unused BuilderAppend(jp.bytes, ".jpg");
+    buf: Vec(u8);
+    if !ReadFileAll(TextView(jp), *buf) {
+        Model.SetText(*st.status_msg, "Cannot read JPEG file");
+        return;
+    }
+    bit_out: Vec(u8);
+    ok := Jpg.ConvertJpegToBit(buf[:], *bit_out);
+    st.viewed_idx = idx;
+    msg: Text;
+    b1: [16]u8; b2: [16]u8;
+    unused BuilderAppend(msg.bytes, "Viewing ");
+    unused BuilderAppend(msg.bytes, TextView(st.photos[idx].name));
+    unused BuilderAppend(msg.bytes, ".jpg (");
+    unused BuilderAppend(msg.bytes, FormatInteger(buf.count, b1[:]));
+    unused BuilderAppend(msg.bytes, " bytes");
+    if ok {
+        unused BuilderAppend(msg.bytes, ", decoded ");
+        unused BuilderAppend(msg.bytes, FormatInteger(bit_out.count, b2[:]));
+        unused BuilderAppend(msg.bytes, " bit bytes");
+    }
+    unused BuilderAppend(msg.bytes, ")");
+    Model.SetText(*st.status_msg, TextView(msg));
+}
+
+RedrawUI :: (tcl: *Tcl.Interpreter) {
+    b1: [16]u8; b2: [16]u8; b3: [16]u8;
+    cmd: Text;
+    unused BuilderAppend(cmd.bytes, ".top.store.l1 configure -text {Taken: ");
+    unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)st.taken, b1[:]));
+    unused BuilderAppend(cmd.bytes, "  Remaining: ");
+    unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)st.remaining, b2[:]));
+    unused BuilderAppend(cmd.bytes, "}\n.top.time.l1 configure -text {Camera: ");
+    unused BuilderAppend(cmd.bytes, TextView(st.cam_time));
+    unused BuilderAppend(cmd.bytes, "}\n.top.act.mb2 configure -text {Selected (");
+    unused BuilderAppend(cmd.bytes, FormatInteger(cast(s64)Model.SelectedCount(*st), b3[:]));
+    unused BuilderAppend(cmd.bytes, ")}\n.status configure -text {");
+    unused BuilderAppend(cmd.bytes, TextView(st.status_msg));
+    unused BuilderAppend(cmd.bytes, "}\n");
+    unused Window.Execute(tcl, TextView(cmd));
+
+    cid := Tk.Find(".c");
+    if cid < 0 { return }
+    c := *Tk.widgets[cid].canvas;
+    Canvas.DeleteAll(c);
+    Model.LayoutPhotos(*st, CANVAS_W);
+    for i: 0..st.photos.count-1 {
+        ph := *st.photos[i];
+        bg: s32 = ifx ph.selected then 0x2b6cb0 else 0xe2e8f0;
+        fg: s32 = ifx ph.selected then 0xffffff else 0x111111;
+        unused Canvas.Add(c, .Rectangle, .{ph.x, ph.y, ph.x + Model.TILE_W, ph.y + Model.TILE_H}, bg, 0x333333, .Center);
+        unused Canvas.Add(c, .Rectangle, .{ph.x + 8, ph.y + 8, ph.x + Model.TILE_W - 8, ph.y + Model.TILE_H - 24}, 0xffcc00, 0x886600, .Center);
+        lbl: Text;
+        unused BuilderAppend(lbl.bytes, TextView(ph.name));
+        unused BuilderAppend(lbl.bytes, ".jpg");
+        unused Canvas.AddText(c, ph.x + 8, ph.y + Model.TILE_H - 12, .West, TextView(lbl), fg);
+    }
+}
+
+CamAct :: (_: s64, args: []Text, result: *T.Result) {
+    unused result;
+    if args.count == 0 { return }
+    verb := TextView(args[0]);
+    if verb == "snap" { pending_act = 1 }
+    else if verb == "refresh" { pending_act = 2 }
+    else if verb == "selall1" { pending_act = 3 }
+    else if verb == "selall0" { pending_act = 4 }
+    else if verb == "invert" { pending_act = 5 }
+    else if verb == "reset" { pending_act = 6 }
+    else if verb == "click" && args.count >= 3 {
+        px, ok1 := Model.ParseInt(TextView(args[1]));
+        py, ok2 := Model.ParseInt(TextView(args[2]));
+        if ok1 && ok2 { pending_act = 7; pending_x = px; pending_y = py }
+    }
+}
+
+first_draw: bool = true;
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    if first_draw {
+        first_draw = false;
+        RedrawUI(tcl);
+        return .Changed;
+    }
+    if pending_act == 0 { return .Idle }
+    act := pending_act;
+    pending_act = 0;
+    if act == 1 {
+        cp: Text; CamPath("ctl", *cp);
+        if WriteFileStr(TextView(cp), "snap") {
+            RefreshStorage();
+            RefreshFiles(false);
+            Model.SetText(*st.status_msg, "Photo captured");
+        } else {
+            Model.SetText(*st.status_msg, "Could not take photo");
+        }
+    } else if act == 2 {
+        RefreshStorage();
+        RefreshDate();
+        RefreshFiles(true);
+        Model.SetText(*st.status_msg, "Refreshed");
+    } else if act == 3 {
+        Model.SelectAll(*st, true);
+    } else if act == 4 {
+        Model.SelectAll(*st, false);
+    } else if act == 5 {
+        Model.InvertSelection(*st);
+    } else if act == 6 {
+        cp: Text; CamPath("ctl", *cp);
+        for i: 0..st.abilities.count-1 {
+            line: Text; b: [16]u8;
+            unused BuilderAppend(line.bytes, TextView(st.abilities[i].pname));
+            unused BuilderAppend(line.bytes, " ");
+            unused BuilderAppend(line.bytes, FormatInteger(cast(s64)st.abilities[i].factory, b[:]));
+            unused WriteFileStr(TextView(cp), TextView(line));
+        }
+        RefreshStorage();
+        Model.SetText(*st.status_msg, "Camera reset to factory defaults");
+    } else if act == 7 {
+        idx := Model.HitPhoto(*st, pending_x, pending_y);
+        if idx >= 0 {
+            Model.SelectOnly(*st, idx);
+            ViewPhoto(idx);
+        }
+    }
+    RedrawUI(tcl);
+    return .Changed;
+}
+
+CAMERA_UI :: #string END
+frame .top
+frame .top.time
+label .top.time.l1 -text {Camera: --}
+button .top.time.b -text {Refresh} -command {cam_act refresh}
+pack .top.time.l1 -side left -padx 4
+pack .top.time.b -side left -padx 4
+
+frame .top.store
+label .top.store.l1 -text {Taken: 0  Remaining: 0}
+pack .top.store.l1 -side left -padx 4
+
+frame .top.act
+button .top.act.snap -text {Take Photo} -command {cam_act snap}
+menubutton .top.act.mb -text {Settings} -menu .m
+menu .m
+.m add command -label {Refresh All} -command {cam_act refresh}
+.m add command -label {Reset Camera} -command {cam_act reset}
+menubutton .top.act.mb2 -text {Selected (0)} -menu .m2
+menu .m2
+.m2 add command -label {Select All} -command {cam_act selall1}
+.m2 add command -label {Select None} -command {cam_act selall0}
+.m2 add command -label {Invert Selection} -command {cam_act invert}
+.m2 add command -label {Refresh Files} -command {cam_act refresh}
+pack .top.act.snap -side left -padx 4
+pack .top.act.mb -side left -padx 4
+pack .top.act.mb2 -side left -padx 4
+
+pack .top.time -side top -fill x
+pack .top.store -side top -fill x
+pack .top.act -side top -fill x
+pack .top -side top -fill x
+
+canvas .c -width 560 -height 280 -bg #ffffff
+pack .c -side top -fill both -expand 1
+bind .c <ButtonPress-1> {cam_act click %x %y}
+
+label .status -text {Ready}
+pack .status -side bottom -fill x
+END;
+
+main :: () -> s32 {
+    st.usecache = true;
+    st.viewed_idx = -1;
+    Model.SetText(*st.camerapath, "./");
+    Model.SetText(*st.cam_time, "??/??/?? ??:??:??");
+    Model.SetText(*st.status_msg, "Ready");
+
+    argc := Args.Count();
+    i: s32 = 0;
+    while i < argc {
+        a := Args.At(i);
+        if a == "nocache" { st.usecache = false }
+        else if a.count > 0 && a[0] == 47 {
+            Model.SetText(*st.camerapath, a);
+            if a[a.count - 1] != 47 { unused BuilderAppend(st.camerapath.bytes, "/") }
+        }
+        i += 1;
+    }
+
+    RefreshAbilities();
+    RefreshStorage();
+    RefreshDate();
+    RefreshFiles(false);
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "cam_act", CamAct) { return 1 }
+    return Window.RunPolled(*tcl, CAMERA_UI, "Camera", 580, 400, Start, Tick, 50);
+}

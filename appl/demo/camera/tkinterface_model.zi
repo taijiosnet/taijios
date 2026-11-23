@@ -1,0 +1,273 @@
+// Data model for the Kodak DC260 Tk camera interface, ported from appl/demo/camera/tkinterface.b.
+#import "std/vec"
+#import "std/number_text"
+using Cdp :: #import "camera_cdp"
+
+AB_LIST :: 0;
+AB_MINMAX :: 1;
+
+AbilityOpt :: struct {
+    name: Text;
+    val: s32;
+}
+
+Ability :: struct {
+    pname: Text;
+    desc: Text;
+    dtype: s32;
+    factory: s32;
+    min_val: s32;
+    max_val: s32;
+    mul: s32;
+    current: Text;
+    opts: Vec(AbilityOpt);
+}
+
+InfoItem :: struct {
+    key: Text;
+    val: Text;
+}
+
+PhotoItem :: struct {
+    name: Text;       // base name without .jpg
+    selected: bool;
+    is_new: bool;
+    thumb_loaded: bool;
+    thumb_w: s32;
+    thumb_h: s32;
+    x: s32;
+    y: s32;
+}
+
+CameraUiState :: struct {
+    camerapath: Text;
+    usecache: bool;
+    taken: s32;
+    remaining: s32;
+    cam_time: Text;
+    local_time: Text;
+    status_msg: Text;
+    abilities: Vec(Ability);
+    infos: Vec(InfoItem);
+    photos: Vec(PhotoItem);
+    viewed_idx: s32;
+    viewed_w: s32;
+    viewed_h: s32;
+}
+
+TILE_W :: 116;
+TILE_H :: 96;
+TILE_PAD :: 10;
+
+SetText :: (dst: *Text, s: string) {
+    unused VecResize(dst.bytes, 0);
+    unused BuilderAppend(dst.bytes, s);
+}
+
+ParseInt :: (s: string) -> (v: s32, ok: bool) {
+    p: s64 = 0;
+    while p < s.count && (s[p] == 32 || s[p] == 9) { p += 1 }
+    if p >= s.count { return 0, false }
+    neg := false;
+    if s[p] == 45 { neg = true; p += 1 }
+    if p >= s.count || s[p] < 48 || s[p] > 57 { return 0, false }
+    v: s32 = 0;
+    while p < s.count && s[p] >= 48 && s[p] <= 57 {
+        v = v * 10 + cast(s32)(s[p] - 48);
+        p += 1;
+    }
+    return (ifx neg then -v else v), true;
+}
+
+TrimSpace :: (s: string) -> string {
+    a: s64 = 0;
+    b := s.count;
+    while a < b && (s[a] == 32 || s[a] == 9 || s[a] == 10 || s[a] == 13) { a += 1 }
+    while b > a && (s[b - 1] == 32 || s[b - 1] == 9 || s[b - 1] == 10 || s[b - 1] == 13) { b -= 1 }
+    return s[a:b];
+}
+
+// Parse <camerapath>/storage text ("Picture Memory\n\tused:\tN\n\tfree:\tM\n")
+ParseStorage :: (st: *CameraUiState, text: string) {
+    p: s64 = 0;
+    while p < text.count {
+        nl := p;
+        while nl < text.count && text[nl] != 10 { nl += 1 }
+        line := TrimSpace(text[p:nl]);
+        p = ifx nl < text.count then nl + 1 else text.count;
+        if line.count >= 5 && line[0:5] == "used:" {
+            v, ok := ParseInt(line[5:]);
+            if ok { st.taken = v }
+        } else if line.count >= 5 && line[0:5] == "free:" {
+            v, ok := ParseInt(line[5:]);
+            if ok { st.remaining = v }
+        }
+    }
+}
+
+// Parse <camerapath>/date text ("date is MM/DD/YY HH:MM:SS\n")
+ParseDate :: (st: *CameraUiState, text: string) {
+    s := TrimSpace(text);
+    if s.count > 8 && s[0:8] == "date is " {
+        SetText(*st.cam_time, s[8:]);
+    } else if s.count > 0 {
+        SetText(*st.cam_time, s);
+    } else {
+        SetText(*st.cam_time, "??/??/?? ??:??:??");
+    }
+}
+
+// Parse <camerapath>/abilities text into st.abilities and st.infos.
+ParseAbilities :: (st: *CameraUiState, text: string) {
+    unused VecResize(st.abilities, 0);
+    unused VecResize(st.infos, 0);
+
+    // Split into lines
+    lines: Vec(Text);
+    p: s64 = 0;
+    while p < text.count {
+        nl := p;
+        while nl < text.count && text[nl] != 10 { nl += 1 }
+        idx := lines.count;
+        unused VecResize(lines, idx + 1);
+        SetText(*lines[idx], text[p:nl]);
+        p = ifx nl < text.count then nl + 1 else text.count;
+    }
+
+    li: s64 = 0;
+    while li < lines.count {
+        line := TrimSpace(TextView(lines[li]));
+        li += 1;
+        // Look for "<4char>, <desc>: ..."
+        if line.count < 7 || line[4] != 44 { continue }
+        pname := line[0:4];
+        colon: s64 = -1;
+        for j: 5..line.count-1 { if line[j] == 58 { colon = j; break } }
+        if colon < 0 { continue }
+        desc := TrimSpace(line[5:colon]);
+        rest := TrimSpace(line[colon + 1:]);
+
+        if Cdp.FilterAbility(desc) {
+            // Skip child lines if "items: N"
+            if rest.count >= 6 && rest[0:6] == "items:" {
+                nitems, ok := ParseInt(rest[6:]);
+                if ok && nitems > 0 { li += cast(s64)nitems }
+            }
+            continue;
+        }
+
+        if rest.count >= 6 && rest[0:6] == "items:" {
+            nitems, ok := ParseInt(rest[6:]);
+            if !ok || nitems < 0 { nitems = 0 }
+            fact: s32 = 0;
+            // find "factory:"
+            for j: 0..rest.count-8 {
+                if rest[j:j + 8] == "factory:" {
+                    fv, fok := ParseInt(rest[j + 8:]);
+                    if fok { fact = fv }
+                    break;
+                }
+            }
+            aidx := st.abilities.count;
+            unused VecResize(st.abilities, aidx + 1);
+            ab := *st.abilities[aidx];
+            SetText(*ab.pname, pname);
+            SetText(*ab.desc, desc);
+            ab.dtype = AB_LIST;
+            ab.factory = fact;
+            for k: 0..nitems-1 {
+                if li >= lines.count { break }
+                oline := TrimSpace(TextView(lines[li]));
+                li += 1;
+                oc: s64 = -1;
+                for j: 0..oline.count-1 { if oline[j] == 58 { oc = j; break } }
+                if oc > 0 {
+                    oname := TrimSpace(oline[0:oc]);
+                    oval, ook := ParseInt(oline[oc + 1:]);
+                    if ook {
+                        oidx := ab.opts.count;
+                        unused VecResize(ab.opts, oidx + 1);
+                        SetText(*ab.opts[oidx].name, oname);
+                        ab.opts[oidx].val = oval;
+                    }
+                }
+            }
+        } else if rest.count >= 4 && rest[0:4] == "min:" {
+            minv, mok := ParseInt(rest[4:]);
+            maxv: s32 = 100;
+            fact: s32 = 0;
+            for j: 0..rest.count-4 {
+                if rest[j:j + 4] == "max:" {
+                    v, ok := ParseInt(rest[j + 4:]);
+                    if ok { maxv = v }
+                }
+            }
+            for j: 0..rest.count-8 {
+                if rest[j:j + 8] == "factory:" {
+                    v, ok := ParseInt(rest[j + 8:]);
+                    if ok { fact = v }
+                }
+            }
+            mul: s32 = 1;
+            while maxv > 200000 { minv /= 10; maxv /= 10; mul *= 10 }
+            aidx := st.abilities.count;
+            unused VecResize(st.abilities, aidx + 1);
+            ab := *st.abilities[aidx];
+            SetText(*ab.pname, pname);
+            SetText(*ab.desc, desc);
+            ab.dtype = AB_MINMAX;
+            ab.min_val = ifx mok then minv else 0;
+            ab.max_val = maxv;
+            ab.factory = fact;
+            ab.mul = mul;
+        } else {
+            iidx := st.infos.count;
+            unused VecResize(st.infos, iidx + 1);
+            SetText(*st.infos[iidx].key, desc);
+            SetText(*st.infos[iidx].val, rest);
+        }
+    }
+}
+
+SelectAll :: (st: *CameraUiState, val: bool) {
+    for i: 0..st.photos.count-1 { st.photos[i].selected = val }
+}
+
+InvertSelection :: (st: *CameraUiState) {
+    for i: 0..st.photos.count-1 { st.photos[i].selected = !st.photos[i].selected }
+}
+
+SelectOnly :: (st: *CameraUiState, idx: s32) {
+    if idx < 0 || cast(s64)idx >= st.photos.count { return }
+    prev := st.photos[idx].selected;
+    cnt := SelectedCount(st);
+    for i: 0..st.photos.count-1 { st.photos[i].selected = false }
+    st.photos[idx].selected = ifx cnt == 1 && prev then false else true;
+}
+
+SelectedCount :: (st: *CameraUiState) -> s32 {
+    n: s32 = 0;
+    for i: 0..st.photos.count-1 { if st.photos[i].selected { n += 1 } }
+    return n;
+}
+
+LayoutPhotos :: (st: *CameraUiState, canvas_w: s32) {
+    cols := (canvas_w - TILE_PAD) / (TILE_W + TILE_PAD);
+    if cols < 1 { cols = 1 }
+    for i: 0..st.photos.count-1 {
+        c := cast(s32)i % cols;
+        r := cast(s32)i / cols;
+        st.photos[i].x = TILE_PAD + c * (TILE_W + TILE_PAD);
+        st.photos[i].y = TILE_PAD + r * (TILE_H + TILE_PAD);
+    }
+}
+
+HitPhoto :: (st: *CameraUiState, px: s32, py: s32) -> s32 {
+    for i: 0..st.photos.count-1 {
+        ph := *st.photos[i];
+        if px >= ph.x && px <= ph.x + TILE_W && py >= ph.y && py <= ph.y + TILE_H {
+            return cast(s32)i;
+        }
+    }
+    return -1;
+}

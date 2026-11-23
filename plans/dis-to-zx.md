@@ -658,24 +658,20 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 
-### 10. Grid - computing grid family - 6 rows
+### 10. Grid - computing grid family - 5 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 | dis/grid/cpupool.dis | appl/grid/cpupool.b |  | - |  |
 | dis/grid/lib/announce.dis | appl/grid/lib/announce.b | module/grid/announce.m | - |  |
-| dis/grid/readjpg.dis | appl/grid/readjpg.b | module/grid/readjpg.m | - |  |
 | dis/grid/reglisten.dis | appl/grid/reglisten.b |  | - |  |
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
 
-### 11. Demo - demonstration apps - 3 rows
+### 11. Demo - demonstration apps - 0 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/demo/camera/camera.dis | appl/demo/camera/camera.b |  | - |  |
-| dis/demo/camera/readjpg.dis | unknown | module/grid/readjpg.m | - |  |
-| dis/demo/camera/tkinterface.dis | appl/demo/camera/tkinterface.b |  | - |  |
 
 ### 12. Ebook - readers - 10 rows
 
