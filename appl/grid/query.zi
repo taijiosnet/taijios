@@ -8,6 +8,8 @@ using Proc :: #import "taijios_process"
 using Quote :: #import "taijios_quote"
 using Tcl :: #import "tcl/interpreter"
 using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
 using Surface :: #import "zx_surface"
 using Window :: #import "tcltk"
 using Reg :: #import "registry_client"
@@ -20,32 +22,60 @@ button .f.ftop.br -text {Refresh} -command {query_act refresh}
 button .f.ftop.bu -text {Up} -command {query_act up}
 button .f.ftop.bm -text {Mount} -command {query_act mount}
 label .f.ftop.sl -text {Filter:}
-entry .f.ftop.se -bg white -width 14
+entry .f.ftop.se
 button .f.ftop.bs -text {Search} -command {query_act search}
 pack .f.ftop.br .f.ftop.bu .f.ftop.bm .f.ftop.sl .f.ftop.se .f.ftop.bs -side left -padx 2
 label .f.path -text {services/}
 frame .f.flb
-scrollbar .f.flb.sb -command {.f.flb.lb yview}
-listbox .f.flb.lb -yscrollcommand {.f.flb.sb set} -selectmode single -bg white
-bind .f.flb.lb <Double-Button-1> {query_act open}
+scrollbar .f.flb.sb -command {.f.flb.c yview}
+canvas .f.flb.c -relief sunken -borderwidth 2 -bg #ffffff -width 400 -height 280 -yscrollcommand {.f.flb.sb set}
+.f.flb.c bind all <Button-1> {query_sel}
+.f.flb.c bind all <Double-Button-1> {query_act open}
 pack .f.flb.sb -side left -fill y
-pack .f.flb.lb -fill both -expand 1
+pack .f.flb.c -fill both -expand 1
 label .f.status -text {}
 pack .f.ftop -side top -fill x -pady 2
 pack .f.path -side top -fill x
 pack .f.flb -side top -fill both -expand 1
 pack .f.status -side top -fill x
 pack .f -fill both -expand 1
+query_draw
 END_UI;
+
+SELECTED_COLOR :: 0x0000cc;
 
 store: Srv.ServiceStore;
 cur_path: Text;
 cur_qid: s32 = 0;
 items: [Srv.MAX_SERVICES]Srv.DirItem;
 item_count: s32 = 0;
+selected_idx: s32 = -1;
 pending_act: s32 = 0; // 1=refresh, 2=up, 3=open, 4=mount, 5=search
 filter_text: Text;
 status_text: Text;
+
+ListCanvas :: () -> *Canvas.State {
+    return *Tk.widgets[Tk.Find(".f.flb.c")].canvas;
+}
+
+RenderItems :: () {
+    canvas := ListCanvas();
+    Canvas.DeleteAll(canvas);
+    y: s32 = 12;
+    for i: 0..cast(s64)item_count-1 {
+        row: Text;
+        if items[i].is_dir { unused BuilderAppend(row.bytes, "[+] ") }
+        unused BuilderAppend(row.bytes, TextView(items[i].name));
+        fill := ifx cast(s32)i == selected_idx then SELECTED_COLOR else Canvas.BLACK;
+        unused Canvas.AddText(canvas, 8, y, .West, TextView(row), cast(s32)fill);
+        y += 18;
+    }
+    w := ifx canvas.viewport.width > 0 then canvas.viewport.width else 400;
+    canvas.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)(y + 8) * Canvas.FRACTION};
+    canvas.viewport.y = 0;
+    Canvas.ClampViewport(*canvas.viewport);
+    canvas.viewport.resized = true;
+}
 
 FetchServices :: (filter_attr: string) {
     if !Reg.EnsureRegistry() {
@@ -75,19 +105,11 @@ FetchServices :: (filter_attr: string) {
     unused VecResize(status_text.bytes, 0);
 }
 
-RefreshListbox :: (tcl: *Tcl.Interpreter) -> bool {
+RefreshView :: (tcl: *Tcl.Interpreter) -> bool {
     count, _ := Srv.ServicePath2Dir(*store, TextView(cur_path), cur_qid, items[:]);
     item_count = count;
-    unused Window.Execute(tcl, ".f.flb.lb delete 0 end");
-    for i: 0..cast(s64)item_count-1 {
-        cmd: Text;
-        unused BuilderAppend(cmd.bytes, ".f.flb.lb insert end {");
-        if items[i].is_dir { unused BuilderAppend(cmd.bytes, "[+] ") }
-        unused BuilderAppend(cmd.bytes, TextView(items[i].name));
-        unused BuilderAppend(cmd.bytes, "}");
-        unused Window.Execute(tcl, TextView(cmd));
-    }
-    if item_count > 0 { unused Window.Execute(tcl, ".f.flb.lb selection set 0") }
+    selected_idx = ifx item_count > 0 then 0 else -1;
+    RenderItems();
     pcmd: Text;
     unused BuilderAppend(pcmd.bytes, ".f.path configure -text {");
     unused BuilderAppend(pcmd.bytes, TextView(cur_path));
@@ -98,18 +120,6 @@ RefreshListbox :: (tcl: *Tcl.Interpreter) -> bool {
     unused BuilderAppend(scmd.bytes, TextView(status_text));
     unused BuilderAppend(scmd.bytes, "}");
     return Window.Execute(tcl, TextView(scmd));
-}
-
-SelectedIndex :: (tcl: *Tcl.Interpreter) -> s32 {
-    res := Tcl.Eval(tcl, ".f.flb.lb curselection");
-    if res.code != .OK || res.value.bytes.count == 0 { return -1 }
-    s := TextView(res.value);
-    v: s32 = 0;
-    for c: s {
-        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
-        else { break }
-    }
-    return v;
 }
 
 MountSelected :: (sel_idx: s32) {
@@ -171,6 +181,19 @@ MountSelected :: (sel_idx: s32) {
     unused Proc.Start("/dis/wm/dir.zx", ops[:]);
 }
 
+QueryDraw :: (_: s64, args: []Text, result: *T.Result) {
+    RenderItems();
+}
+
+QuerySel :: (_: s64, args: []Text, result: *T.Result) {
+    canvas := ListCanvas();
+    row := cast(s32)(canvas.current - 1);
+    if row >= 0 && row < item_count {
+        selected_idx = row;
+        RenderItems();
+    }
+}
+
 QueryCmd :: (_: s64, args: []Text, result: *T.Result) {
     if args.count == 0 { result.code = .Error; return }
     verb := TextView(args[0]);
@@ -189,7 +212,7 @@ Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
     pending_act = 0;
     if act == 1 {
         FetchServices(TextView(filter_text));
-        unused RefreshListbox(tcl);
+        unused RefreshView(tcl);
         return .Changed;
     }
     if act == 2 {
@@ -197,23 +220,23 @@ Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
         Srv.PrevPath(TextView(cur_path), *parent);
         unused VecResize(cur_path.bytes, 0);
         unused BuilderAppend(cur_path.bytes, TextView(parent));
-        unused RefreshListbox(tcl);
+        unused RefreshView(tcl);
         return .Changed;
     }
     if act == 3 {
-        sel := SelectedIndex(tcl);
+        sel := selected_idx;
         if sel >= 0 && sel < item_count && items[sel].is_dir {
             unused BuilderAppend(cur_path.bytes, TextView(items[sel].name));
             unused BuilderAppend(cur_path.bytes, "/");
             if items[sel].qid != 0 { cur_qid = items[sel].qid }
-            unused RefreshListbox(tcl);
+            unused RefreshView(tcl);
             return .Changed;
         }
         return .Idle;
     }
     if act == 4 {
-        MountSelected(SelectedIndex(tcl));
-        unused RefreshListbox(tcl);
+        MountSelected(selected_idx);
+        unused RefreshView(tcl);
         return .Changed;
     }
     if act == 5 {
@@ -225,7 +248,7 @@ Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
         FetchServices(TextView(filter_text));
         unused VecResize(cur_path.bytes, 0);
         unused BuilderAppend(cur_path.bytes, "services/");
-        unused RefreshListbox(tcl);
+        unused RefreshView(tcl);
         return .Changed;
     }
     return .Idle;
@@ -236,17 +259,12 @@ main :: () -> s32 {
     unused BuilderAppend(cur_path.bytes, "services/");
     FetchServices("");
 
-    script: Text;
-    unused BuilderAppend(script.bytes, QUERY_UI);
     count, _ := Srv.ServicePath2Dir(*store, TextView(cur_path), cur_qid, items[:]);
     item_count = count;
-    for i: 0..cast(s64)item_count-1 {
-        unused BuilderAppend(script.bytes, "\n.f.flb.lb insert end {");
-        if items[i].is_dir { unused BuilderAppend(script.bytes, "[+] ") }
-        unused BuilderAppend(script.bytes, TextView(items[i].name));
-        unused BuilderAppend(script.bytes, "}");
-    }
-    if item_count > 0 { unused BuilderAppend(script.bytes, "\n.f.flb.lb selection set 0") }
+    selected_idx = ifx item_count > 0 then 0 else -1;
+
+    script: Text;
+    unused BuilderAppend(script.bytes, QUERY_UI);
     if status_text.bytes.count > 0 {
         unused BuilderAppend(script.bytes, "\n.f.status configure -text {");
         unused BuilderAppend(script.bytes, TextView(status_text));
@@ -255,6 +273,8 @@ main :: () -> s32 {
     unused BuilderAppend(script.bytes, "\n");
 
     tcl: Tcl.Interpreter;
-    if !Tcl.RegisterCommand(*tcl, "query_act", QueryCmd) { return 1 }
+    if !Tcl.RegisterCommand(*tcl, "query_act", QueryCmd) ||
+       !Tcl.RegisterCommand(*tcl, "query_sel", QuerySel) ||
+       !Tcl.RegisterCommand(*tcl, "query_draw", QueryDraw) { return 1 }
     return Window.RunPolled(*tcl, TextView(script), "Query", 440, 400, Start, Tick, 50);
 }

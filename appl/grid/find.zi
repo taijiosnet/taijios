@@ -9,6 +9,8 @@ using Proc :: #import "taijios_process"
 using Quote :: #import "taijios_quote"
 using Tcl :: #import "tcl/interpreter"
 using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
 using Surface :: #import "zx_surface"
 using Window :: #import "tcltk"
 using Reg :: #import "registry_client"
@@ -17,11 +19,12 @@ using Model :: #import "find_model"
 MAIN_UI :: #string END_MAIN
 frame .f
 frame .f.flb
-scrollbar .f.flb.sb1 -command {.f.flb.lb1 yview}
-listbox .f.flb.lb1 -yscrollcommand {.f.flb.sb1 set} -selectmode single -bg white
-bind .f.flb.lb1 <Double-Button-1> {find_act double}
+scrollbar .f.flb.sb1 -command {.f.flb.c yview}
+canvas .f.flb.c -relief sunken -borderwidth 2 -bg #ffffff -width 280 -height 160 -yscrollcommand {.f.flb.sb1 set}
+.f.flb.c bind all <Button-1> {find_sel}
+.f.flb.c bind all <Double-Button-1> {find_act double}
 pack .f.flb.sb1 -fill y -side left
-pack .f.flb.lb1 -fill both -expand 1
+pack .f.flb.c -fill both -expand 1
 frame .f.fb
 label .f.status -text {}
 pack .f.flb -fill both -expand 1 -side top
@@ -30,12 +33,36 @@ pack .f.status -side top -fill x
 pack .f -fill both -expand 1
 END_MAIN;
 
+SELECTED_COLOR :: 0x0000cc;
+
 cfg: Model.FindConfig;
 services: [Model.MAX_SERVICES]Model.ServiceItem;
 service_count: s32;
 selected_idx: s32 = 0;
 pending_action: s32 = -1; // -1 none, -2 exit, >=0 cmd index
 status_msg: Text;
+
+ListCanvas :: () -> *Canvas.State {
+    return *Tk.widgets[Tk.Find(".f.flb.c")].canvas;
+}
+
+RenderServices :: () {
+    cid := Tk.Find(".f.flb.c");
+    if cid < 0 { return }
+    canvas := *Tk.widgets[cid].canvas;
+    Canvas.DeleteAll(canvas);
+    y: s32 = 12;
+    for i: 0..cast(s64)service_count-1 {
+        fill := ifx cast(s32)i == selected_idx then SELECTED_COLOR else Canvas.BLACK;
+        unused Canvas.AddText(canvas, 8, y, .West, TextView(services[i].name), cast(s32)fill);
+        y += 18;
+    }
+    w := ifx canvas.viewport.width > 0 then canvas.viewport.width else 280;
+    canvas.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)(y + 8) * Canvas.FRACTION};
+    canvas.viewport.y = 0;
+    Canvas.ClampViewport(*canvas.viewport);
+    canvas.viewport.resized = true;
+}
 
 Usage :: () -> s32 {
     print("usage: find [-a attributes] action1 { cmd [args...] } .. actionN { cmd [args...] }\n");
@@ -72,6 +99,19 @@ QueryRegistry :: (attrs: *Reg.AttrList, out_text: *Text) -> (ok: bool, err: stri
     }
     unused IO.Close(fd);
     return true, "";
+}
+
+FindDraw :: (_: s64, args: []Text, result: *T.Result) {
+    RenderServices();
+}
+
+FindSel :: (_: s64, args: []Text, result: *T.Result) {
+    canvas := ListCanvas();
+    row := cast(s32)(canvas.current - 1);
+    if row >= 0 && row < service_count {
+        selected_idx = row;
+        RenderServices();
+    }
 }
 
 FindCmd :: (_: s64, args: []Text, result: *T.Result) {
@@ -142,16 +182,6 @@ Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
         return .Changed;
     }
     if service_count > 0 {
-        res := Tcl.Eval(tcl, ".f.flb.lb1 curselection");
-        if res.code == .OK && res.value.bytes.count > 0 {
-            s := TextView(res.value);
-            idx: s32 = 0;
-            for c: s {
-                if c >= 48 && c <= 57 { idx = idx * 10 + cast(s32)(c - 48) }
-                else { break }
-            }
-            selected_idx = idx;
-        }
         MountAndRun(selected_idx, act);
         if status_msg.bytes.count > 0 {
             cmd: Text;
@@ -195,11 +225,6 @@ main :: () -> s32 {
         unused BuilderAppend(script.bytes, "}\nlabel .f.l2 -text {Please try again later}\nbutton .f.b -text { Close } -command {find_act exit}\npack .f.l1 .f.l2 .f.b -side top -padx 10 -pady 5\npack .f\n");
     } else {
         unused BuilderAppend(script.bytes, MAIN_UI);
-        for i: 0..cast(s64)service_count-1 {
-            unused BuilderAppend(script.bytes, ".f.flb.lb1 insert end {");
-            unused BuilderAppend(script.bytes, TextView(services[i].name));
-            unused BuilderAppend(script.bytes, "}\n");
-        }
         buf: [24]u8;
         for i: 0..cast(s64)cfg.cmd_count-1 {
             si := FormatInteger(i, buf[:]);
@@ -213,10 +238,12 @@ main :: () -> s32 {
             unused BuilderAppend(script.bytes, si);
             unused BuilderAppend(script.bytes, " -side left -padx 5 -pady 5\n");
         }
-        unused BuilderAppend(script.bytes, ".f.flb.lb1 selection set 0\n");
+        unused BuilderAppend(script.bytes, "find_draw\n");
     }
 
     tcl: Tcl.Interpreter;
-    if !Tcl.RegisterCommand(*tcl, "find_act", FindCmd) { return 1 }
+    if !Tcl.RegisterCommand(*tcl, "find_act", FindCmd) ||
+       !Tcl.RegisterCommand(*tcl, "find_sel", FindSel) ||
+       !Tcl.RegisterCommand(*tcl, "find_draw", FindDraw) { return 1 }
     return Window.RunPolled(*tcl, TextView(script), TextView(win_title), 320, 260, Start, Tick, 50);
 }
