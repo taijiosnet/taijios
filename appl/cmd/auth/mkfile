@@ -4,14 +4,12 @@ DIRS=\
 	factotum\
 
 TARG=\
-	ai2key.dis\
 	changelogin.dis\
 	countersigner.dis\
 	convpasswd.dis\
 	createsignerkey.dis\
 	keyfs.dis\
 	keysrv.dis\
-	getpk.dis\
 	logind.dis\
 	mkauthinfo.dis\
 	passwd.dis\
@@ -36,13 +34,16 @@ DISBIN=$ROOT/dis/auth
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
 
-ZXCOMMANDS=aescbc rsagen dsagen
-ZXUTIL=keygen.zi ../zx_cli.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_keyring.zi ../../lib/taijios_quote.zi
+ZXCOMMANDS=aescbc rsagen dsagen getpk ai2key
+ZXUTIL=keygen.zi authinfo.zi ../zx_cli.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_keyring.zi ../taijios_clock.zi ../../lib/taijios_quote.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
+# ai2key reads the clock; the others use the cryptography.
 &.zx: &.zi $ZXUTIL
-	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_keyring --entry $stem:main -o $target $stem.zi
+	bind=taijios_keyring
+	case $stem in ai2key) bind=taijios_clock ;; esac
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host $bind --entry $stem:main -o $target $stem.zi
 
 $DISBIN/%.zx: %.zx
 	staged=$(mktemp "$target.XXXXXX") &&

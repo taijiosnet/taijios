@@ -364,6 +364,8 @@ appl
 		auplay.b
 		auth
 			aescbc.zi
+			ai2key.zi
+			authinfo.zi
 			changelogin.b
 			countersigner.b
 			convpasswd.b
@@ -382,7 +384,7 @@ appl
 					p9any.b
 					pass.b
 				rpc.b
-			getpk.b
+			getpk.zi
 			keyfs.b
 			keygen.zi
 			keysrv.b

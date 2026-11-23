@@ -1,0 +1,200 @@
+// Keyring authinfo files, as Limbo's Keyring readauthinfo read them, and
+// the text forms of their keys and certificate. A file holds five
+// messages, each a four-digit length and a newline before its text: the
+// signer's public key, the certificate of this user's public key, this
+// user's secret key, and the Diffie-Hellman base and modulus.
+//
+// A key's text is its algorithm, its owner and its numbers, one per line,
+// each number in base64. A public key is the first numbers of its secret
+// key: two for rsa, three for elgamal and four for dsa. The numbers are
+// kept as the text they were written in, which Keyring always wrote in
+// one form, so writing them out again gives the same text.
+#import "std/vec";
+#import "std/base64";
+using Io :: #import "taijios_io";
+using Quote :: #import "taijios_quote";
+
+MAXMSG :: 4096;
+FORMAT_ERROR :: "input or format error";
+
+Algorithm :: struct {
+    name: string;
+    public: s64;    // numbers in a public key
+    secret: s64;    // numbers in a secret key
+    signature: s64; // numbers in a signature
+}
+
+ALGORITHMS: [3]Algorithm = .[
+    .{name = "rsa", public = 2, secret = 8, signature = 1},
+    .{name = "elgamal", public = 3, secret = 4, signature = 2},
+    .{name = "dsa", public = 4, secret = 5, signature = 2},
+];
+
+Key :: struct {
+    algorithm: s64; // index in ALGORITHMS
+    owner: string;
+    numbers: Vec(string);
+}
+
+Certificate :: struct {
+    algorithm: s64;
+    hash: string;
+    signer: string;
+    expires: u64;
+    numbers: Vec(string);
+}
+
+Authinfo :: struct {
+    data: Vec(u8); // the file's bytes, which the fields below view
+    signer: Key;   // spk
+    certificate: Certificate;
+    secret: Key;   // mysk
+    alpha: string;
+    p: string;
+}
+
+// The text up to the next newline from at, and where the text after it
+// starts; the whole rest when there is no newline.
+Line :: (text: string, at: *s64) -> string {
+    start := <<at;
+    end := start;
+    while end < text.count && text[end] != #char "\n" { end += 1 }
+    <<at = ifx end < text.count then end + 1 else end;
+    return text[start:end];
+}
+
+FindAlgorithm :: (name: string) -> s64 {
+    for ALGORITHMS { if it.name == name { return it_index } }
+    return -1;
+}
+
+// Reads count numbers; false when one is missing or empty.
+Numbers :: (text: string, at: *s64, count: s64, numbers: *Vec(string)) -> bool {
+    for 1..count {
+        number := Line(text, at);
+        if number.count == 0 { return false }
+        VecPush(<<numbers, number);
+    }
+    return true;
+}
+
+// A key's text: secret chooses a secret key's numbers over a public one's.
+ParseKey :: (text: string, secret: bool, key: *Key) -> bool {
+    at: s64 = 0;
+    key.algorithm = FindAlgorithm(Line(text, *at));
+    if key.algorithm < 0 { return false }
+    key.owner = Line(text, *at);
+    if key.owner.count == 0 { return false }
+    algorithm := ALGORITHMS[key.algorithm];
+    return Numbers(text, *at, ifx secret then algorithm.secret else algorithm.public, *key.numbers);
+}
+
+ParseCertificate :: (text: string, certificate: *Certificate) -> bool {
+    at: s64 = 0;
+    certificate.algorithm = FindAlgorithm(Line(text, *at));
+    if certificate.algorithm < 0 { return false }
+    certificate.hash = Line(text, *at);
+    if certificate.hash.count == 0 { return false }
+    certificate.signer = Line(text, *at);
+    if certificate.signer.count == 0 { return false }
+    // The expiry is read as strtoul did, then the byte after it skipped.
+    value: u64 = 0;
+    while at < text.count && text[at] >= #char "0" && text[at] <= #char "9" {
+        value = value * 10 + cast(u64)(text[at] - #char "0");
+        at += 1;
+    }
+    if at < text.count { at += 1 }
+    certificate.expires = value & 0xFFFFFFFF;
+    return Numbers(text, *at, ALGORITHMS[certificate.algorithm].signature, *certificate.numbers);
+}
+
+// The next message from at, or false when it is cut short, too long or a
+// remote error.
+Message :: (data: string, at: *s64) -> (text: string, ok: bool) {
+    if data.count - <<at < 5 { return "", false }
+    header := data[<<at:<<at + 5];
+    if header[0] == #char "!" { return "", false }
+    length: s64 = 0;
+    for 0..3 {
+        c := header[it];
+        if c < #char "0" || c > #char "9" { break }
+        length = length * 10 + cast(s64)(c - #char "0");
+    }
+    <<at += 5;
+    if length >= MAXMSG || data.count - <<at < length { return "", false }
+    text := data[<<at:<<at + length];
+    <<at += length;
+    return text, true;
+}
+
+// Reads an authinfo file. On failure error holds the reason: the file's
+// own error, or "'path': input or format error".
+Read :: (path: string, info: *Authinfo, error: *Vec(u8)) -> bool {
+    fd := Io.Open(path, 0);
+    if fd < 0 {
+        BuilderAppend(<<error, Io.Error());
+        return false;
+    }
+    chunk: [8192]u8;
+    while true {
+        n := Io.Read(fd, chunk[:]);
+        if n <= 0 { break }
+        BuilderAppend(info.data, TextView(chunk[:n]));
+    }
+    unused Io.Close(fd);
+    data := TextView(info.data[:]);
+    at: s64 = 0;
+    ok := true;
+    texts: [5]string;
+    for i: 0..4 {
+        text, found := Message(data, *at);
+        if !found { ok = false; break }
+        texts[i] = text;
+    }
+    ok = ok && ParseKey(texts[0], false, *info.signer) && ParseCertificate(texts[1], *info.certificate) &&
+        ParseKey(texts[2], true, *info.secret) && texts[3].count > 0 && texts[4].count > 0;
+    if !ok {
+        Quote.Quote(error, path);
+        BuilderPrint(error, ": %", FORMAT_ERROR);
+        return false;
+    }
+    alpha_at: s64 = 0;
+    info.alpha = Line(texts[3], *alpha_at);
+    p_at: s64 = 0;
+    info.p = Line(texts[4], *p_at);
+    return true;
+}
+
+// Appends a public key's text; from a secret key it takes the public numbers.
+PublicText :: (out: *Vec(u8), key: *Key) {
+    algorithm := ALGORITHMS[key.algorithm];
+    BuilderPrint(out, "%\n%\n", algorithm.name, key.owner);
+    for i: 0..algorithm.public - 1 { BuilderPrint(out, "%\n", key.numbers[i]) }
+}
+
+SecretText :: (out: *Vec(u8), key: *Key) {
+    BuilderPrint(out, "%\n%\n", ALGORITHMS[key.algorithm].name, key.owner);
+    for i: 0..key.numbers.count - 1 { BuilderPrint(out, "%\n", key.numbers[i]) }
+}
+
+CertificateText :: (out: *Vec(u8), certificate: *Certificate) {
+    BuilderPrint(out, "%\n%\n%\n%\n", ALGORITHMS[certificate.algorithm].name, certificate.hash, certificate.signer,
+        cast(s64)certificate.expires);
+    for i: 0..certificate.numbers.count - 1 { BuilderPrint(out, "%\n", certificate.numbers[i]) }
+}
+
+// Appends a base64 number in upper-case hexadecimal, as Limbo's IPint
+// iptostr(16) wrote it: no leading zeros, and 0 for zero.
+Hex :: (out: *Vec(u8), base64: string) {
+    bytes: Vec(u8);
+    unused Base64DecodeInto(base64, *bytes);
+    digits := "0123456789ABCDEF";
+    started := false;
+    for bytes {
+        high := it >> 4;
+        if started || high != 0 { VecPush(<<out, digits[high]); started = true }
+        low := it & 15;
+        if started || low != 0 { VecPush(<<out, digits[low]); started = true }
+    }
+    if !started { VecPush(<<out, #char "0") }
+}

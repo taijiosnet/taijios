@@ -1,0 +1,58 @@
+// getpk [-asu] file...: prints, for each authinfo file, the SHA-1 of its
+// user's public key in hexadecimal, or with -a the key itself; -s takes
+// the signer's key instead and -u adds the key's owner. With more than
+// one file each line starts with the file's name.
+using Args :: #import "taijios_args";
+using Crypto :: #import "taijios_keyring";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Info :: #import "authinfo";
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    all := false;
+    signer := false;
+    owner := false;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "a" { all = true }
+        else if option == #char "s" { signer = true }
+        else if option == #char "u" { owner = true }
+        else { return Cli.Usage("usage: usage: getpk [-asu] file...\n") }
+    }
+    if scan.next >= Args.OperandCount() { return Cli.Usage("usage: usage: getpk [-asu] file...\n") }
+    several := Args.OperandCount() - scan.next > 1;
+    while scan.next < Args.OperandCount() {
+        path := Args.Operand(scan.next);
+        scan.next += 1;
+        info: Info.Authinfo;
+        error: Vec(u8);
+        if !Info.Read(path, *info, *error) {
+            message: Vec(u8);
+            BuilderPrint(*message, "getpk: cannot read %: %\n", path, TextView(error[:]));
+            unused Cli.WriteAll(2, TextView(message[:]));
+            continue;
+        }
+        key := ifx signer then *info.signer else *info.secret;
+        text: Vec(u8);
+        Info.PublicText(*text, key);
+        line: Vec(u8);
+        if several { BuilderPrint(*line, "%: ", path) }
+        if all {
+            BuilderAppend(line, TextView(text[:]));
+        } else {
+            digest: [20]u8;
+            unused Crypto.Digest(Crypto.SHA1, TextView(text[:]), digest[:]);
+            digits := "0123456789abcdef";
+            for digest {
+                VecPush(line, digits[it >> 4]);
+                VecPush(line, digits[it & 15]);
+            }
+        }
+        if owner { BuilderPrint(*line, " %", key.owner) }
+        VecPush(line, #char "\n");
+        unused Cli.WriteAll(1, TextView(line[:]));
+    }
+    return 0;
+}

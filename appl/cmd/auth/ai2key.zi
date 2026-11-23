@@ -1,0 +1,141 @@
+// ai2key [-t 'attr=value ...'] keyfile ...: prints each authinfo file as an
+// infauth key for factotum, with domain, server and service guessed from
+// the file's name: default stands for any server, a!b for server b, and
+// a!b!c for server b and service c; a name with a dot is also the domain.
+// A file whose certificate has expired is skipped with a warning; one that
+// cannot be read ends the command.
+using Args :: #import "taijios_args";
+using Clock :: #import "taijios_clock";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Quote :: #import "taijios_quote";
+using Info :: #import "authinfo";
+
+USAGE :: "usage: ai2key [-t 'attr=value attr=value ...'] keyfile ...\n";
+
+// The last part of a path that has one, as sys->tokenize gave it.
+FileName :: (path: string) -> string {
+    end := path.count;
+    while end > 0 && path[end - 1] == #char "/" { end -= 1 }
+    start := end;
+    while start > 0 && path[start - 1] != #char "/" { start -= 1 }
+    return path[start:end];
+}
+
+// The parts of text between separators, empty parts left out.
+Fields :: (text: string, separator: u8) -> Vec(string) {
+    fields: Vec(string);
+    start: s64 = 0;
+    for i: 0..text.count {
+        if i < text.count && text[i] != separator { continue }
+        if i > start { VecPush(fields, text[start:i]) }
+        start = i + 1;
+    }
+    return fields;
+}
+
+Server :: (out: *Vec(u8), name: string) {
+    dotted := Fields(name, #char ".");
+    if dotted.count > 1 {
+        BuilderAppend(<<out, "dom=");
+        Quote.Quote(out, name);
+        BuilderAppend(<<out, " ");
+    }
+    BuilderAppend(<<out, "server=");
+    Quote.Quote(out, name);
+}
+
+Locations :: (out: *Vec(u8), file: string) {
+    if file == "default" { BuilderAppend(<<out, "dom=* server=*"); return }
+    parts := Fields(file, #char "!");
+    if parts.count == 2 { Server(out, parts[1]); return }
+    if parts.count == 3 {
+        Server(out, parts[1]);
+        BuilderAppend(<<out, " service=");
+        Quote.Quote(out, parts[2]);
+        return;
+    }
+    Server(out, file);
+}
+
+// Appends text with each newline as ^ and the ^s at its end dropped.
+Joined :: (out: *Vec(u8), text: string) {
+    end := text.count;
+    while end > 1 && text[end - 1] == #char "\n" { end -= 1 }
+    for text[:end] { VecPush(<<out, ifx it == #char "\n" then #char "^" else it) }
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    tag := "";
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option != #char "t" { return Cli.Usage(USAGE) }
+        value, ok := Arg.Value(*scan);
+        if !ok { return Cli.Usage(USAGE) }
+        tag = value;
+    }
+    if scan.next >= Args.OperandCount() { return Cli.Usage(USAGE) }
+    now := cast(u64)(Clock.UnixMillis() / 1000);
+    // The Limbo command put another space before the tag for each file.
+    spaces: s64 = 0;
+    while scan.next < Args.OperandCount() {
+        path := Args.Operand(scan.next);
+        scan.next += 1;
+        info: Info.Authinfo;
+        error: Vec(u8);
+        if !Info.Read(path, *info, *error) {
+            message: Vec(u8);
+            BuilderPrint(*message, "ai2key: cannot read %: %\n", path, TextView(error[:]));
+            unused Cli.WriteAll(2, TextView(message[:]));
+            unused Args.SetFailure("error");
+            return 1;
+        }
+        expires := info.certificate.expires;
+        if expires != 0 && expires <= now {
+            message: Vec(u8);
+            BuilderPrint(*message, "ai2key: %: certificate expired -- key ignored\n", path);
+            unused Cli.WriteAll(2, TextView(message[:]));
+            continue;
+        }
+        if tag.count > 0 { spaces += 1 }
+        line: Vec(u8);
+        BuilderAppend(line, "key proto=infauth");
+        if tag.count > 0 {
+            for 1..spaces { VecPush(line, #char " ") }
+            BuilderAppend(line, tag);
+        }
+        VecPush(line, #char " ");
+        Locations(*line, FileName(path));
+        hash := ifx info.certificate.hash == "sha" then "sha1" else info.certificate.hash;
+        BuilderPrint(*line, " sigalg=%-% user=", Info.ALGORITHMS[info.certificate.algorithm].name, hash);
+        Quote.Quote(*line, info.secret.owner);
+        BuilderAppend(line, " signer=");
+        Quote.Quote(*line, info.signer.owner);
+        text: Vec(u8);
+        BuilderAppend(line, " pk=");
+        Info.PublicText(*text, *info.secret);
+        Joined(*line, TextView(text[:]));
+        VecClear(text);
+        BuilderAppend(line, " !sk=");
+        Info.SecretText(*text, *info.secret);
+        Joined(*line, TextView(text[:]));
+        VecClear(text);
+        BuilderAppend(line, " spk=");
+        Info.PublicText(*text, *info.signer);
+        Joined(*line, TextView(text[:]));
+        VecClear(text);
+        BuilderAppend(line, " cert=");
+        Info.CertificateText(*text, *info.certificate);
+        Joined(*line, TextView(text[:]));
+        BuilderAppend(line, " dh-alpha=");
+        Info.Hex(*line, info.alpha);
+        BuilderAppend(line, " dh-p=");
+        Info.Hex(*line, info.p);
+        if expires != 0 { BuilderPrint(*line, " expires=%", expires) }
+        VecPush(line, #char "\n");
+        unused Cli.WriteAll(1, TextView(line[:]));
+    }
+    return 0;
+}
