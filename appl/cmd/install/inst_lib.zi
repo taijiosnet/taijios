@@ -1,0 +1,501 @@
+// Shared package archive installer logic (replaces appl/cmd/install/inst.b).
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Keyring :: #import "taijios_keyring";
+Util :: #import "install_util";
+Arch :: #import "arch_lib";
+Wrap :: #import "wrap_lib";
+#import "std/format"
+#import "std/vec"
+
+InstState :: struct {
+    tflag: bool;
+    uflag: bool;
+    hflag: bool;
+    vflag: bool;
+    fflag: bool;
+    force: bool;
+    stoponerr: bool;
+    aborted: bool;
+    abort_reason: Text;
+    root: Text;
+    has_w: bool;
+    w: Wrap.Wrapped;
+    has_oldw: bool;
+    oldw: Wrap.Wrapped;
+}
+
+MakeText :: (s: string) -> Text {
+    t: Text;
+    unused BuilderAppend(t.bytes, s);
+    return t;
+}
+
+SetText :: (dst: *Text, s: string) {
+    VecClear(dst.bytes);
+    unused BuilderAppend(dst.bytes, s);
+}
+
+Warn :: (s: string) {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "inst: %\n", s);
+    Util.WriteErr(TextView(eb[:]));
+}
+
+Werr :: (st: *InstState, s: string) {
+    Warn(s);
+    if st.stoponerr {
+        st.aborted = true;
+        SetText(*st.abort_reason, "werr");
+    }
+}
+
+SkipFile :: (f: string, why: string) {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "skipping %: %\n", f, why);
+    Util.WriteErr(TextView(eb[:]));
+}
+
+SkipRmFile :: (f: string, why: string) {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "not removing %: %\n", f, why);
+    Util.WriteErr(TextView(eb[:]));
+}
+
+FilePrefix :: (prefix: string, s: string) -> bool {
+    n := prefix.count;
+    m := s.count;
+    if n > m || s[:n] != prefix { return false }
+    if m > n && s[n] != 47 { return false }
+    return true;
+}
+
+Selected :: (s: string, prefixes: *Vec(Text)) -> bool {
+    for i: 0..prefixes.count - 1 {
+        if FilePrefix(TextView(prefixes.*[i]), s) { return true }
+    }
+    return false;
+}
+
+ParentPath :: (name: string) -> string {
+    slash: s64 = -1;
+    for i: 0..name.count - 1 {
+        if name[i] == 47 { slash = i }
+    }
+    if slash > 0 { return name[:slash] }
+    return "/";
+}
+
+ApplyFdMeta :: (fd: s32, mode: u32, mtime: s32, uid: string, gid: string, set_m: bool, set_t: bool, set_u: bool, set_g: bool) -> bool {
+    info: Stat.Info;
+    info.mode = mode;
+    info.modified = mtime;
+    info.owner = uid;
+    info.group = gid;
+    return Stat.Change(fd, info, set_m, set_t, set_u, set_g);
+}
+
+ApplyPathMeta :: (path: string, mode: u32, mtime: s32, uid: string, gid: string, set_m: bool, set_t: bool, set_u: bool, set_g: bool) -> bool {
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    ok := ApplyFdMeta(fd, mode, mtime, uid, gid, set_m, set_t, set_u, set_g);
+    unused IO.Close(fd);
+    return ok;
+}
+
+CreateWithParent :: (name: string, rw: s32, mode: u32) -> s32 {
+    fd := IO.Create(name, rw, cast(s32)mode);
+    if fd < 0 {
+        p := ParentPath(name);
+        de: Util.DirEntry;
+        if !Util.StatEntry(p, *de) { return -1 }
+        omode := de.mode;
+        unused ApplyPathMeta(p, omode | 0x92, 0, "", "", true, false, false, false);
+        fd = IO.Create(name, rw, cast(s32)mode);
+        unused ApplyPathMeta(p, omode, 0, "", "", true, false, false, false);
+    }
+    return fd;
+}
+
+RemoveForce :: (name: string) -> bool {
+    if IO.Remove(name) >= 0 { return true }
+    de: Util.DirEntry;
+    if !Util.StatEntry(name, *de) { return false }
+    omode := de.mode;
+    unused ApplyPathMeta(name, omode | 0x92, 0, "", "", true, false, false, false);
+    if IO.Remove(name) >= 0 { return true }
+    unused ApplyPathMeta(name, omode, 0, "", "", true, false, false, false);
+    return false;
+}
+
+Mkdirs :: (basedir_in: string, name: string) {
+    basedir: Vec(u8);
+    unused BuilderAppend(basedir, basedir_in);
+    i: s64 = 0;
+    while i < name.count {
+        while i < name.count && name[i] == 47 { i += 1 }
+        if i >= name.count { break }
+        start := i;
+        while i < name.count && name[i] != 47 { i += 1 }
+        fd := CreateWithParent(TextView(basedir[:]), 0, 0x1FD | Stat.Directory);
+        if fd >= 0 { unused IO.Close(fd) }
+        if i >= name.count { break }
+        unused BuilderAppend(basedir, "/");
+        unused BuilderAppend(basedir, name[start:i]);
+    }
+}
+
+Mkdir :: (st: *InstState, name: string, hdr: *Arch.Ahdr) {
+    if st.vflag {
+        mtpt := "/n/remote";
+        s := name;
+        if name.count >= mtpt.count && name[:mtpt.count] == mtpt {
+            s = name[mtpt.count:];
+        }
+        ob: Vec(u8);
+        BuilderPrint(*ob, "installing directory %\n", s);
+        Util.WriteOut(TextView(ob[:]));
+    }
+    fd := CreateWithParent(name, 0, hdr.mode);
+    if fd < 0 {
+        err_s := IO.Error();
+        de: Util.DirEntry;
+        if !Util.StatEntry(name, *de) || (de.mode & Stat.Directory) == 0 {
+            wb: Vec(u8);
+            BuilderPrint(*wb, "can't make directory %: %", name, err_s);
+            Werr(st, TextView(wb[:]));
+            return;
+        }
+    } else {
+        unused IO.Close(fd);
+    }
+    set_t := st.tflag || st.uflag;
+    set_u := st.uflag;
+    if !ApplyPathMeta(name, hdr.mode, hdr.mtime, TextView(hdr.uid), TextView(hdr.gid), true, set_t, set_u, set_u) {
+        wb: Vec(u8);
+        BuilderPrint(*wb, "can't set modes for %: %", name, IO.Error());
+        Warn(TextView(wb[:]));
+    }
+    if st.uflag {
+        de: Util.DirEntry;
+        if !Util.StatEntry(name, *de) {
+            wb: Vec(u8);
+            BuilderPrint(*wb, "can't reread modes for %: %", name, IO.Error());
+            Warn(TextView(wb[:]));
+        } else {
+            if TextView(hdr.uid) != TextView(de.owner) {
+                wb: Vec(u8);
+                BuilderPrint(*wb, "%: uid mismatch % %", name, TextView(hdr.uid), TextView(de.owner));
+                Warn(TextView(wb[:]));
+            }
+            if TextView(hdr.gid) != TextView(de.group) {
+                wb: Vec(u8);
+                BuilderPrint(*wb, "%: gid mismatch % %", name, TextView(hdr.gid), TextView(de.group));
+                Warn(TextView(wb[:]));
+            }
+        }
+    }
+}
+
+Extract :: (st: *InstState, ar: *Arch.Archive, name: string, hdr: *Arch.Ahdr) -> bool {
+    sfd := CreateWithParent(name, 1, hdr.mode | 0x92);
+    if sfd < 0 {
+        if !st.fflag || !RemoveForce(name) {
+            wb: Vec(u8);
+            BuilderPrint(*wb, "can't make file %: %", name, IO.Error());
+            Werr(st, TextView(wb[:]));
+            unused Arch.Drain(ar, hdr.length);
+            return !st.aborted;
+        }
+        sfd = CreateWithParent(name, 1, hdr.mode | 0x92);
+        if sfd < 0 {
+            wb: Vec(u8);
+            BuilderPrint(*wb, "can't make file %: %", name, IO.Error());
+            Werr(st, TextView(wb[:]));
+            unused Arch.Drain(ar, hdr.length);
+            return !st.aborted;
+        }
+    }
+    err_t := Arch.GetFileToFd(ar, sfd, hdr.length);
+    es := TextView(err_t);
+    if es.count > 0 {
+        if es.count >= 9 && es[:9] == "premature" {
+            unused IO.Close(sfd);
+            Warn(es);
+            st.aborted = true;
+            SetText(*st.abort_reason, "fatal");
+            return false;
+        }
+        Warn(es);
+    }
+    set_t := st.tflag || st.uflag;
+    set_u := st.uflag;
+    if !ApplyFdMeta(sfd, hdr.mode, hdr.mtime, TextView(hdr.uid), TextView(hdr.gid), true, set_t, set_u, set_u) {
+        unused IO.Close(sfd);
+        if !ApplyPathMeta(name, hdr.mode, hdr.mtime, TextView(hdr.uid), TextView(hdr.gid), true, set_t, set_u, set_u) {
+            wb: Vec(u8);
+            BuilderPrint(*wb, "can't set modes for %: %", name, IO.Error());
+            Warn(TextView(wb[:]));
+        }
+    } else {
+        unused IO.Close(sfd);
+    }
+    if st.uflag {
+        de: Util.DirEntry;
+        if !Util.StatEntry(name, *de) {
+            wb: Vec(u8);
+            BuilderPrint(*wb, "can't reread modes for %: %", name, IO.Error());
+            Warn(TextView(wb[:]));
+        } else {
+            if TextView(de.owner) != TextView(hdr.uid) {
+                wb: Vec(u8);
+                BuilderPrint(*wb, "%: uid mismatch % %", name, TextView(hdr.uid), TextView(de.owner));
+                Warn(TextView(wb[:]));
+            }
+            if TextView(de.group) != TextView(hdr.gid) {
+                wb: Vec(u8);
+                BuilderPrint(*wb, "%: gid mismatch % %", name, TextView(hdr.gid), TextView(de.group));
+                Warn(TextView(wb[:]));
+            }
+        }
+    }
+    return !st.aborted;
+}
+
+DoRemove :: (st: *InstState, s: string) {
+    p: Vec(u8);
+    Wrap.PathCat(TextView(st.root), s, *p);
+    ps := TextView(p[:]);
+    digest: [16]u8;
+    digest1: [16]u8;
+    dummy: [1]u8;
+    if !Wrap.Md5File(ps, digest[:]) { return }
+    unused Wrap.Md5FileA(ps, digest1[:]);
+    ok := false;
+    if st.has_oldw {
+        ok, _ = Wrap.GetFileInfo(*st.oldw, s, true, digest[:], false, dummy[:], true, digest1[:]);
+    }
+    if !st.force && !ok {
+        SkipRmFile(ps, "locally modified");
+    } else {
+        if st.vflag {
+            ob: Vec(u8);
+            BuilderPrint(*ob, "rm %\n", ps);
+            Util.WriteOut(TextView(ob[:]));
+        }
+        unused RemoveForce(ps);
+    }
+}
+
+Finish :: (st: *InstState) -> s32 {
+    if !st.aborted {
+        rdata: Vec(u8);
+        if Wrap.UpdateRemove(*st.w, 0, *rdata) {
+            pos: s64 = 0;
+            while pos < rdata.count {
+                start := pos;
+                while pos < rdata.count && rdata[pos] != 10 { pos += 1 }
+                end := pos;
+                if pos < rdata.count { pos += 1 }
+                line := TextView(rdata[start:end]);
+                if line.count > 0 { DoRemove(st, line) }
+            }
+        }
+    }
+    if st.has_w { Wrap.End(*st.w); st.has_w = false }
+    if st.has_oldw { Wrap.End(*st.oldw); st.has_oldw = false }
+    if st.aborted {
+        ar := TextView(st.abort_reason);
+        if ar != "fatal" {
+            unused Args.SetFailure(ar);
+            return 1;
+        }
+        return 0;
+    }
+    Util.WriteErr("done\n");
+    return 0;
+}
+
+RunInst :: (argv: []string) -> s32 {
+    st: InstState;
+    st.fflag = true;
+    st.stoponerr = true;
+    SetText(*st.root, "/");
+
+    idx: s64 = 0;
+    while idx < argv.count {
+        a := argv[idx];
+        if a.count < 2 || a[0] != 45 { break }
+        if a == "--" { idx += 1; break }
+        j: s64 = 1;
+        while j < a.count {
+            c := a[j];
+            if c == 102 { st.fflag = false; j += 1 }
+            else if c == 104 { st.hflag = true; j += 1 }
+            else if c == 116 { st.tflag = true; j += 1 }
+            else if c == 117 { st.uflag = true; j += 1 }
+            else if c == 118 { st.vflag = true; j += 1 }
+            else if c == 70 { st.force = true; j += 1 }
+            else if c == 99 { st.stoponerr = false; j += 1 }
+            else if c == 114 {
+                if j + 1 < a.count {
+                    SetText(*st.root, a[j + 1:]);
+                    break;
+                }
+                idx += 1;
+                if idx >= argv.count {
+                    Warn("root missing");
+                    return 0;
+                }
+                SetText(*st.root, argv[idx]);
+                break;
+            } else {
+                Util.WriteErr("Usage: inst [-h] [-u] [-v] [-f] [-c] [-F] [-r dest-root] [file ...]\n");
+                unused Args.SetFailure(" usage");
+                return 1;
+            }
+        }
+        idx += 1;
+    }
+
+    if idx >= argv.count {
+        Util.WriteErr("Usage: inst [-h] [-u] [-v] [-f] [-c] [-F] [-r dest-root] [file ...]\n");
+        unused Args.SetFailure(" usage");
+        return 1;
+    }
+
+    archfile := argv[idx];
+    ar: Arch.Archive;
+    if !Arch.OpenArch(archfile, *ar) {
+        wb: Vec(u8);
+        BuilderPrint(*wb, "can't access %: %", archfile, IO.Error());
+        Warn(TextView(wb[:]));
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    if !Wrap.OpenWrapHdr(archfile, TextView(st.root), false, *st.w) {
+        Arch.CloseArch(*ar);
+        Warn("no such package found");
+        return 0;
+    }
+    st.has_w = true;
+    if Wrap.UpdateCount(*st.w) != 1 {
+        Arch.CloseArch(*ar);
+        Wrap.End(*st.w);
+        Warn("strange package: more than one piece");
+        return 0;
+    }
+    if !st.force {
+        st.has_oldw = Wrap.OpenWrap(TextView(st.w.name), TextView(st.root), false, *st.oldw);
+    }
+    utime := Wrap.UpdateUtime(*st.w, 0);
+    if !st.force && utime != 0 && (!st.has_oldw || st.oldw.tfull < utime) {
+        tfull: s32 = ifx st.has_oldw then st.oldw.tfull else -1;
+        uts: Vec(u8);
+        Wrap.Now2String(utime, 0, *uts);
+        wb: Vec(u8);
+        BuilderPrint(*wb, "need % version of % already installed (pkg %)", TextView(uts[:]), TextView(st.w.name), tfull);
+        Warn(TextView(wb[:]));
+        Arch.CloseArch(*ar);
+        Wrap.End(*st.w);
+        if st.has_oldw { Wrap.End(*st.oldw) }
+        return 0;
+    }
+
+    prefixes: Vec(Text);
+    for i: idx + 1..argv.count - 1 {
+        VecPush(prefixes, MakeText(argv[i]));
+    }
+
+    digest: [16]u8;
+    digest0: [16]u8;
+    digest1: [16]u8;
+    dummy: [1]u8;
+
+    while !st.aborted && Arch.GetHdr(*ar) {
+        aname := TextView(ar.hdr.name);
+        why := "";
+        docopy := false;
+        full_p: Vec(u8);
+        BuilderPrint(*full_p, "%/%", TextView(st.root), aname);
+        if st.force {
+            docopy = true;
+        } else if (ar.hdr.mode & Stat.Directory) != 0 {
+            docopy = true;
+        } else if !Wrap.Md5File(TextView(full_p[:]), digest[:]) {
+            docopy = true;
+        } else {
+            unused Wrap.Md5FileA(TextView(full_p[:]), digest1[:]);
+            ok := false;
+            t: s32 = 0;
+            if st.has_oldw {
+                ok, t = Wrap.GetFileInfo(*st.oldw, aname, true, digest[:], false, dummy[:], true, digest1[:]);
+            }
+            if ok {
+                if t > Wrap.UpdateTime(*st.w, 0) {
+                    docopy = false;
+                    why = "version from newer package exists";
+                } else {
+                    docopy = true;
+                }
+            } else {
+                ok2 := false;
+                if st.has_oldw {
+                    ok2, _ = Wrap.GetFileInfo(*st.oldw, aname, false, dummy[:], false, dummy[:], false, dummy[:]);
+                }
+                if ok2 {
+                    docopy = false;
+                    why = "locally modified";
+                } else {
+                    docopy = false;
+                    why = "locally created";
+                }
+            }
+        }
+        if !docopy {
+            unused Wrap.Md5Sum(*ar, digest0[:], ar.hdr.length);
+            if Wrap.MemCmp(digest[:], digest0[:], 16) != 0 {
+                SkipFile(aname, why);
+            }
+            continue;
+        }
+        if prefixes.count > 0 {
+            if !Selected(aname, *prefixes) {
+                unused Arch.Drain(*ar, ar.hdr.length);
+                continue;
+            }
+            if !st.hflag {
+                Mkdirs(TextView(st.root), aname);
+            }
+        }
+        dest_p: Vec(u8);
+        Wrap.PathCat(TextView(st.root), aname, *dest_p);
+        dest_s := TextView(dest_p[:]);
+        if st.hflag {
+            ob: Vec(u8);
+            unused BuilderAppend(ob, dest_s);
+            unused BuilderAppend(ob, " ");
+            Util.AppendOctal(*ob, cast(u64)ar.hdr.mode);
+            BuilderPrint(*ob, " % % % %\n", TextView(ar.hdr.uid), TextView(ar.hdr.gid), cast(u64)cast(u32)ar.hdr.mtime, ar.hdr.length);
+            Util.WriteOut(TextView(ob[:]));
+            unused Arch.Drain(*ar, ar.hdr.length);
+            continue;
+        }
+        if (ar.hdr.mode & Stat.Directory) != 0 {
+            Mkdir(*st, dest_s, *ar.hdr);
+        } else {
+            unused Extract(*st, *ar, dest_s, *ar.hdr);
+        }
+    }
+
+    if !st.aborted && TextView(ar.err).count > 0 {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "%\n", TextView(ar.err));
+        Util.WriteErr(TextView(eb[:]));
+        st.aborted = true;
+        SetText(*st.abort_reason, "eof");
+    }
+    Arch.CloseArch(*ar);
+    return Finish(*st);
+}

@@ -1,0 +1,13 @@
+// Package archive installer entry point (replaces appl/cmd/install/inst.b).
+Args :: #import "taijios_args";
+Inst :: #import "inst_lib";
+#import "std/vec"
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    argv: Vec(string);
+    for i: 0..argc - 1 {
+        VecPush(argv, Args.Operand(cast(s32)i));
+    }
+    return Inst.RunInst(argv[:]);
+}

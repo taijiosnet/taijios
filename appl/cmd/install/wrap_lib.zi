@@ -750,6 +750,19 @@ PutWrapFile :: (out_fd: s32, name: string, time: s32, elem: string, file: string
     unused Arch.PutFileToFd(out_fd, file, d.length);
 }
 
+PutWrapBytes :: (out_fd: s32, name: string, time: s32, elem: string, data: []u8, uid: string, gid: string) {
+    ts: Vec(u8);
+    Now2String(time, 0, *ts);
+    s: Vec(u8);
+    BuilderPrint(*s, "/wrap/%/%/%", name, TextView(ts[:]), elem);
+    hdr: Vec(u8);
+    Arch.PutHdr(*hdr, TextView(s[:]), 0x124, uid, gid, time, data.count); // 0444
+    unused IO.Write(out_fd, TextView(hdr[:]));
+    if data.count > 0 {
+        unused IO.Write(out_fd, TextView(data));
+    }
+}
+
 PutWrap :: (out_fd: s32, name: string, time: s32, desc: string, utime: s32, pkg: bool, uid: string, gid: string) {
     if utime == 0 && !pkg {
         Util.WriteErr("bad precondition in putwrap()");

@@ -1,0 +1,329 @@
+// Determine which packages need installing and install them (replaces appl/cmd/install/install.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Namespace :: #import "taijios_namespace";
+Util :: #import "install_util";
+Inst :: #import "inst_lib";
+#import "std/format"
+#import "std/vec"
+
+MTPT :: "/n/remote";
+
+Product :: struct {
+    name: Text;
+    pkgs: Vec(Text);
+}
+
+instprods: Vec(Product);
+xpkgs: [6]string = .["inferno", "utils", "src", "ipaq", "minitel", "sds"];
+ypkgs: Vec(Text);
+
+debug: bool = false;
+force: bool = false;
+exitemu: bool = false;
+uflag: bool = false;
+local_only: bool = true;
+global_all: bool = true;
+installdir: Vec(u8);
+platform: Vec(u8);
+lcplatform: Vec(u8);
+root: Vec(u8);
+
+Fatal :: (s: string) -> s32 {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "install: %\n", s);
+    Util.WriteErr(TextView(eb[:]));
+    return 1;
+}
+
+Usage :: () -> s32 {
+    return Fatal("Usage: install [-d] [-F] [-s] [-u] [-i installdir ] [-p platform ] [-r root]");
+}
+
+ToLower :: (s: string, out: *Vec(u8)) {
+    VecClear(out.*);
+    for i: 0..s.count - 1 {
+        c := cast(u8)s[i];
+        if c >= 65 && c <= 90 { c += 32 }
+        VecPush(out.*, c);
+    }
+}
+
+EnsureReqDirs :: () -> bool {
+    reqdirs: [5]string = .["/mnt", "/mnt/wrap", "/n", "/n/remote", "/tmp"];
+    for i: 0..4 {
+        d := reqdirs[i];
+        de: Util.DirEntry;
+        if !Util.StatEntry(d, *de) {
+            fd := IO.Create(d, 0, cast(s32)(Stat.Directory | 0x1FD));
+            if fd < 0 {
+                // Non-fatal if parent is read-only during -d or custom root tests
+                continue;
+            }
+            unused IO.Close(fd);
+        }
+    }
+    return true;
+}
+
+MakeText :: (s: string) -> Text {
+    t: Text;
+    unused BuilderAppend(t.bytes, s);
+    return t;
+}
+
+DoWraps :: (d: string) {
+    VecClear(instprods);
+    dl: Util.DirList;
+    if !Util.ReadDirSorted(d, *dl) { return }
+    for i: 0..dl.entries.count - 1 {
+        if (Util.EntryMode(*dl, i) & Stat.Directory) != 0 {
+            ename_t := Util.EntryName(*dl, i);
+            ename := TextView(ename_t);
+            lc: Vec(u8);
+            ToLower(ename, *lc);
+            prod: Product;
+            prod.name = MakeText(TextView(lc[:]));
+            sub: Vec(u8);
+            BuilderPrint(*sub, "%/%", d, ename);
+            sdl: Util.DirList;
+            if Util.ReadDirSorted(TextView(sub[:]), *sdl) {
+                for j: 0..sdl.entries.count - 1 {
+                    jn := Util.EntryName(*sdl, j);
+                    VecPush(prod.pkgs, MakeText(TextView(jn)));
+                }
+            }
+            VecPush(instprods, prod);
+        }
+    }
+}
+
+IsInstalled :: (pkg: string, prd: string) -> bool {
+    for i: 0..instprods.count - 1 {
+        if TextView(instprods[i].name) == prd {
+            for j: 0..instprods[i].pkgs.count - 1 {
+                if TextView(instprods[i].pkgs[j]) == pkg { return true }
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
+IsWanted :: (pr: string) -> bool {
+    if !local_only || global_all { return true }
+    if ypkgs.count > 0 {
+        for i: 0..ypkgs.count - 1 {
+            if TextView(ypkgs[i]) == pr { return true }
+        }
+        return false;
+    }
+    for i: 0..5 {
+        if xpkgs[i] == pr { return true }
+    }
+    lcp := TextView(lcplatform[:]);
+    if pr == lcp { return true }
+    if lcp.count <= pr.count && pr[:lcp.count] == lcp { return true }
+    return false;
+}
+
+InstallPkg :: (d: string) {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "installing package %\n", d);
+    Util.WriteErr(TextView(eb[:]));
+    if debug { return }
+    args: Vec(string);
+    if force { VecPush(args, "-F") }
+    if uflag { VecPush(args, "-u") }
+    VecPush(args, "-t");
+    VecPush(args, "-v");
+    VecPush(args, "-r");
+    VecPush(args, TextView(root[:]));
+    VecPush(args, d);
+    unused Inst.RunInst(args[:]);
+}
+
+DoProds :: (d: string) {
+    dl: Util.DirList;
+    if !Util.ReadDirSorted(d, *dl) { return }
+    for i: 0..dl.entries.count - 1 {
+        if (Util.EntryMode(*dl, i) & Stat.Directory) != 0 {
+            ename_t := Util.EntryName(*dl, i);
+            ename := TextView(ename_t);
+            lc: Vec(u8);
+            ToLower(ename, *lc);
+            pr := TextView(lc[:]);
+            if !IsWanted(pr) { continue }
+            sub: Vec(u8);
+            BuilderPrint(*sub, "%/%", d, ename);
+            sdl: Util.DirList;
+            if Util.ReadDirSorted(TextView(sub[:]), *sdl) {
+                for j: 0..sdl.entries.count - 1 {
+                    pk_t := Util.EntryName(*sdl, j);
+                    raw_pk := TextView(pk_t);
+                    pk := raw_pk;
+                    if pk.count >= 4 && pk[pk.count - 3:] == ".gz" {
+                        pk = pk[:pk.count - 3];
+                    } else if pk.count >= 5 && (pk[pk.count - 4:] == ".tgz" || pk[pk.count - 4:] == ".9gz") {
+                        pk = pk[:pk.count - 4];
+                    }
+                    if !IsInstalled(pk, pr) {
+                        fp: Vec(u8);
+                        BuilderPrint(*fp, "%/%", TextView(sub[:]), raw_pk);
+                        InstallPkg(TextView(fp[:]));
+                    }
+                }
+            }
+        }
+    }
+}
+
+Shutdown :: () {
+    fd := IO.Open("/dev/sysctl", 1);
+    if fd < 0 {
+        unused Fatal("cannot shutdown emu");
+        return;
+    }
+    if IO.Write(fd, "halt") < 0 {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "shutdown: write failed: %\n", IO.Error());
+        unused Fatal(TextView(eb[:]));
+    }
+    unused IO.Close(fd);
+}
+
+main :: () -> s32 {
+    unused EnsureReqDirs();
+    unused BuilderAppend(installdir, "/install");
+    unused BuilderAppend(platform, "Plan9");
+    unused BuilderAppend(root, "/usr/inferno");
+
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 100 { debug = true }
+        else if c == 70 { force = true }
+        else if c == 115 { exitemu = true }
+        else if c == 105 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("install directory missing") }
+            VecClear(installdir);
+            unused BuilderAppend(installdir, v);
+        } else if c == 112 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("platform missing") }
+            VecClear(platform);
+            unused BuilderAppend(platform, v);
+        } else if c == 80 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("package missing") }
+            VecPush(ypkgs, MakeText(v));
+        } else if c == 114 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("inferno root missing") }
+            VecClear(root);
+            unused BuilderAppend(root, v);
+        } else if c == 117 { uflag = true }
+        else if c == 103 { global_all = false }
+        else { return Usage() }
+    }
+    if scan.next < Args.OperandCount() { return Usage() }
+
+    ToLower(TextView(platform[:]), *lcplatform);
+    indir := TextView(installdir[:]);
+    de: Util.DirEntry;
+    if !Util.StatEntry(indir, *de) {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "cannot open install directory %", indir);
+        return Fatal(TextView(eb[:]));
+    }
+
+    nt := TextView(lcplatform[:]) == "nt";
+    rt := TextView(root[:]);
+    if nt {
+        if rt.count < 3 || rt[1] != 58 || rt[2] != 47 {
+            eb: Vec(u8);
+            BuilderPrint(*eb, "root % not of the form ?:/.......", rt);
+            return Fatal(TextView(eb[:]));
+        }
+    } else {
+        if rt.count == 0 || rt[0] != 47 {
+            eb: Vec(u8);
+            BuilderPrint(*eb, "root % must be an absolute path name", rt);
+            return Fatal(TextView(eb[:]));
+        }
+    }
+
+    // Attempt #U* bind to /n/remote if available; otherwise operate directly on root
+    bound_u := false;
+    if !nt && Namespace.Bind("#U*", MTPT, Namespace.Replace | Namespace.AllowCreate) >= 0 {
+        mroot: Vec(u8);
+        BuilderPrint(*mroot, "%/%", MTPT, rt);
+        if Util.StatEntry(TextView(mroot[:]), *de) {
+            if (de.mode & Stat.Directory) == 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "inferno root % is not a directory", rt);
+                return Fatal(TextView(eb[:]));
+            }
+            bound_u = true;
+        }
+    }
+    if bound_u {
+        mroot: Vec(u8);
+        BuilderPrint(*mroot, "%/%", MTPT, rt);
+        mtmp: Vec(u8);
+        BuilderPrint(*mtmp, "%/tmp", TextView(mroot[:]));
+        if !Util.StatEntry(TextView(mtmp[:]), *de) {
+            fd := IO.Create(TextView(mtmp[:]), 0, cast(s32)(0x1FD | Stat.Directory));
+            if fd >= 0 { unused IO.Close(fd) }
+        }
+        if Namespace.Bind(TextView(mroot[:]), MTPT, Namespace.Replace | Namespace.AllowCreate) >= 0 {
+            VecClear(root);
+            unused BuilderAppend(root, MTPT);
+        }
+    } else {
+        // Direct guest path mode (when root is inside the current guest namespace)
+        if Util.StatEntry(rt, *de) {
+            if (de.mode & Stat.Directory) == 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "inferno root % is not a directory", rt);
+                return Fatal(TextView(eb[:]));
+            }
+        } else {
+            fd := IO.Create(rt, 0, cast(s32)(0x1FD | Stat.Directory));
+            if fd < 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "cannot create inferno root %: %", rt, IO.Error());
+                return Fatal(TextView(eb[:]));
+            }
+            unused IO.Close(fd);
+        }
+        rtmp: Vec(u8);
+        BuilderPrint(*rtmp, "%/tmp", rt);
+        if Util.StatEntry(TextView(rtmp[:]), *de) {
+            if (de.mode & Stat.Directory) == 0 {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "inferno root tmp % is not a directory", TextView(rtmp[:]));
+                return Fatal(TextView(eb[:]));
+            }
+        } else {
+            fd := IO.Create(TextView(rtmp[:]), 0, cast(s32)(0x1FD | Stat.Directory));
+            if fd >= 0 { unused IO.Close(fd) }
+        }
+    }
+
+    wdir: Vec(u8);
+    BuilderPrint(*wdir, "%/wrap", TextView(root[:]));
+    DoWraps(TextView(wdir[:]));
+    DoProds(indir);
+    if !nt {
+        Util.WriteOut("installation complete\n");
+    }
+    if exitemu {
+        Shutdown();
+    }
+    return 0;
+}

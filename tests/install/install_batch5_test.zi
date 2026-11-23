@@ -1,0 +1,164 @@
+// Guest parity test for install batch 5: create, inst, install, eproto, log.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/install tests/install/install_batch5_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/inst5";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+DestFile :: (rel: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/dest/%", WORK, rel);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".dis";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) ||
+        !CreateDirectory("build/dis-legacy-math/inst5/src") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/src/sub") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/dest") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/indir") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/indir/inferno") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/mnt") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/mnt/wrap") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/tmp") ||
+        !CreateDirectory("build/dis-legacy-math/inst5/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    unused WriteEntireFile("build/dis-legacy-math/inst5/src/hello.txt", "hello world\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst5/src/gone.txt", "remove me\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst5/src/sub/item.txt", "nested 42\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst5/proto",
+        "hello.txt\ngone.txt\nsub\n\titem.txt\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst5/rem_list", "/gone.txt\n");
+
+    root: Text = WorkingDirectory();
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    BuilderPrint(*script, "bind -bc /%/mnt /mnt\n", WORK);
+    BuilderPrint(*script, "bind -bc /%/tmp /tmp\n", WORK);
+
+    // 1. create -x (dry list)
+    BuilderPrint(*script, "/dis/install/create% -x -s /%/src -p /%/proto demo > result/create_x.out >[2] result/create_x.err\n", suffix, WORK, WORK);
+
+    // 2. create base package archive (redirect to base.arch so 'demo' doesn't exist in cwd during create)
+    BuilderPrint(*script, "/dis/install/create% -o -t 1700000000 -d 'demo base' -s /%/src -p /%/proto demo > base.arch >[2] result/create_pkg.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "mv base.arch demo\n");
+
+    // If testing .dis, mount demo on /mnt/wrap via archfs.zx so wrap.dis openmount finds /mnt/wrap/wrap/demo
+    if suffix == ".dis" {
+        BuilderPrint(*script, "/dis/install/archfs.zx -s -m /mnt/wrap /%/demo /wrap &\n", WORK);
+        BuilderPrint(*script, "sleep 1\n");
+    }
+
+    // 3. inst -h (header list) and inst (extract into dest)
+    BuilderPrint(*script, "/dis/install/inst% -h -r /%/dest demo > result/inst_h.out >[2] result/inst_h.err\n", suffix, WORK);
+    BuilderPrint(*script, "/dis/install/inst% -r /%/dest demo > result/inst.out >[2] result/inst.err\n", suffix, WORK);
+    if suffix == ".dis" {
+        BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
+    }
+    BuilderPrint(*script, "mv demo /%/indir/inferno/1700000200\n", WORK);
+
+    // 4. Modify src/hello.txt, remove src/gone.txt, create -u update archive, and apply with inst
+    BuilderPrint(*script, "echo 'hello updated' > /%/src/hello.txt\n", WORK);
+    BuilderPrint(*script, "rm /%/src/gone.txt\n", WORK);
+    BuilderPrint(*script, "/dis/install/create% -u -o -t 1700000100 -d 'demo patch' -R /%/rem_list -r /%/dest -s /%/src -p /%/proto demo > upd.arch >[2] result/create_upd.err\n", suffix, WORK, WORK, WORK, WORK);
+    BuilderPrint(*script, "mv upd.arch demo\n");
+    if suffix == ".dis" {
+        BuilderPrint(*script, "/dis/install/archfs.zx -s -m /mnt/wrap /%/demo /wrap &\n", WORK);
+        BuilderPrint(*script, "sleep 1\n");
+        BuilderPrint(*script, "/dis/install/inst% -r /%/dest demo > result/inst_upd.out >[2] result/inst_upd.err\n", suffix, WORK);
+        BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
+    } else {
+        BuilderPrint(*script, "/dis/install/inst% -r /%/dest demo > result/inst_upd.out >[2] result/inst_upd.err\n", suffix, WORK);
+    }
+
+    // 5. install -d (dry-run package discovery)
+    BuilderPrint(*script, "/dis/install/install% -d -i /%/indir -r %/%/dest > result/install_d.out >[2] result/install_d.err\n", suffix, WORK, TextView(root), WORK);
+
+    // 6. eproto and log (ZX CLI endpoints)
+    if suffix == ".zx" {
+        BuilderPrint(*script, "/dis/install/eproto.zx -r /%/src /%/proto > result/eproto.out >[2] result/eproto.err\n", WORK, WORK);
+        BuilderPrint(*script, "/dis/install/log.zx -u alice -g sys /%/src/hello.txt > result/log.out >[2] result/log.err\n", WORK);
+    }
+
+    unused WriteEntireFile("build/dis-legacy-math/inst5/script", BuilderFinish(script));
+
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Contains(Result("create_x.out"), "/hello.txt\t"), "create -x hello.txt");
+    Expect(Contains(Result("create_x.out"), "/sub/item.txt\t"), "create -x sub/item.txt");
+    Expect(Contains(Result("create_pkg.err"), "file system made\n"), "create base stderr");
+
+    Expect(Contains(Result("inst_h.out"), "/hello.txt "), "inst -h hello.txt");
+    Expect(Contains(Result("inst.err"), "done\n"), "inst base done");
+    Expect(DestFile("sub/item.txt") == "nested 42\n", "inst extracted sub/item.txt");
+    Expect(DestFile("wrap/demo/1700000000/desc") == "demo base\n", "inst extracted wrap desc");
+
+    Expect(Contains(Result("create_upd.err"), "file system made\n"), "create -u stderr");
+    Expect(Contains(Result("inst_upd.err"), "done\n"), "inst update done");
+    Expect(DestFile("hello.txt") == "hello updated\n", "inst update updated hello.txt");
+    Expect(DestFile("gone.txt") == "<missing>", "inst update removed gone.txt");
+
+    Expect(Contains(Result("install_d.err"), "installing package "), "install -d stderr");
+    Expect(Contains(Result("install_d.out"), "installation complete\n"), "install -d stdout");
+
+    if suffix == ".zx" {
+        Expect(Contains(Result("eproto.out"), "/hello.txt\n") && Contains(Result("eproto.out"), "/sub/item.txt\n"), "eproto output");
+        Expect(Contains(Result("log.out"), " a ") && Contains(Result("log.out"), " alice sys "), "log output");
+    }
+
+    if failures != 0 {
+        print("install_batch5_test: % failures\n", failures);
+        return 1;
+    }
+    print("install_batch5_test: all checks passed\n");
+    return 0;
+}

@@ -1,0 +1,53 @@
+// Proto tree walker module (replaces appl/cmd/install/eproto.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Util :: #import "install_util";
+Proto :: #import "proto_lib";
+#import "std/format"
+#import "std/vec"
+
+main :: () -> s32 {
+    root: Vec(u8);
+    unused BuilderAppend(root, "/");
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 114 { // -r
+            v, ok := Arg.Value(*scan);
+            if !ok {
+                Util.WriteErr("usage: install/eproto [-r root] protofile\n");
+                unused Args.SetFailure("usage");
+                return 1;
+            }
+            VecClear(root);
+            unused BuilderAppend(root, v);
+        } else {
+            Util.WriteErr("usage: install/eproto [-r root] protofile\n");
+            unused Args.SetFailure("usage");
+            return 1;
+        }
+    }
+    if scan.next >= Args.OperandCount() {
+        Util.WriteErr("usage: install/eproto [-r root] protofile\n");
+        unused Args.SetFailure("usage");
+        return 1;
+    }
+    protofile := Args.Operand(scan.next);
+    res: Proto.ProtoResult;
+    if !Proto.RdProto(protofile, TextView(root[:]), *res) {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "fs: eproto: cannot open %\n", protofile);
+        Util.WriteErr(TextView(eb[:]));
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    out: Vec(u8);
+    ni := Proto.ItemCount(*res);
+    for i: 0..ni - 1 {
+        np := Proto.ItemNewPath(*res, i);
+        BuilderPrint(*out, "%\n", TextView(np));
+    }
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

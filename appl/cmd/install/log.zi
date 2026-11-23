@@ -1,0 +1,54 @@
+// Emit install log lines for paths (replaces appl/cmd/install/log.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Clock :: #import "taijios_clock";
+Quote :: #import "taijios_quote";
+Util :: #import "install_util";
+#import "std/format"
+#import "std/vec"
+
+main :: () -> s32 {
+    uid: Vec(u8);
+    gid: Vec(u8);
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 117 { // -u
+            v, ok := Arg.Value(*scan);
+            if !ok { return 1 }
+            VecClear(uid);
+            unused BuilderAppend(uid, v);
+        } else if c == 103 { // -g
+            v, ok := Arg.Value(*scan);
+            if !ok { return 1 }
+            VecClear(gid);
+            unused BuilderAppend(gid, v);
+        } else {
+            return 1;
+        }
+    }
+    now := cast(u64)cast(u32)(Clock.UnixMillis() / 1000);
+    out: Vec(u8);
+    seq: u64 = 0;
+    argc := Args.OperandCount();
+    for i: scan.next..argc - 1 {
+        p := Args.Operand(cast(s32)i);
+        d: Util.DirEntry;
+        if !Util.StatEntry(p, *d) { continue }
+        u_s := ifx uid.count > 0 then TextView(uid[:]) else TextView(d.owner);
+        g_s := ifx gid.count > 0 then TextView(gid[:]) else TextView(d.group);
+        BuilderPrint(*out, "% % a ", now, seq);
+        Quote.Quote(*out, p);
+        unused BuilderAppend(out, " - - ");
+        Util.AppendOctal(*out, cast(u64)d.mode);
+        unused BuilderAppend(out, " ");
+        Quote.Quote(*out, u_s);
+        unused BuilderAppend(out, " ");
+        Quote.Quote(*out, g_s);
+        BuilderPrint(*out, " % %\n", cast(u64)cast(u32)d.mtime, d.length);
+        seq += 1;
+    }
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}
