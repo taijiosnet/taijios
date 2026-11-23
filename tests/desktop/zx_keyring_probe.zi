@@ -132,14 +132,25 @@ main :: () -> s32 {
     count = K.RsaGenerate(512, 17, 4, rsa[:]);
     if count <= 0 || Line(rsa[:count], 7) == "" || Line(rsa[:count], 8) != "" { return Fail("RSA key") }
     n := Line(rsa[:count], 0);
+    // d comes as libsec computes it, possibly negative; reduce it modulo (p-1)(q-1).
+    pm: [256]u8; qm: [256]u8; phi: [512]u8; d: [512]u8;
+    pm_count := K.Big(K.Subtract, Line(rsa[:count], 3), "1", "", pm[:]);
+    qm_count := K.Big(K.Subtract, Line(rsa[:count], 4), "1", "", qm[:]);
+    phi_count := ifx pm_count > 0 && qm_count > 0 then K.Big(K.Multiply, TextView(pm[:pm_count]), TextView(qm[:qm_count]), "", phi[:]) else -1;
+    d_count := ifx phi_count > 0 then K.Big(K.Modulo, Line(rsa[:count], 2), TextView(phi[:phi_count]), "", d[:]) else -1;
+    if d_count <= 0 { return Fail("RSA private exponent") }
     sealed: [256]u8;
     opened: [256]u8;
     sealed_count := K.Big(K.PowerModulo, A, Line(rsa[:count], 1), n, sealed[:]);
     // libsec, like the Limbo Keyring, can give the modulus a bit more or less than asked.
     bits := K.BigBits(n);
     if bits < 511 || bits > 513 || sealed_count <= 0 || Same(sealed[:sealed_count], A) { return Fail("RSA encryption") }
-    opened_count := K.Big(K.PowerModulo, TextView(sealed[:sealed_count]), Line(rsa[:count], 2), n, opened[:]);
+    opened_count := K.Big(K.PowerModulo, TextView(sealed[:sealed_count]), TextView(d[:d_count]), n, opened[:]);
     if opened_count <= 0 || !Same(opened[:opened_count], A) { return Fail("RSA decryption") }
+
+    small: [256]u8;
+    if K.RsaGenerate(16, 3, 0, small[:]) <= 0 || K.RsaGenerate(4, 2, 0, small[:]) != -1 ||
+       K.EgGenerate(16, 0, small[:]) <= 0 { return Fail("small keys and default rounds") }
 
     // DSA and ElGamal: a signature verifies for its message and key only.
     dsa: [2048]u8;

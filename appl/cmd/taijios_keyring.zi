@@ -76,8 +76,11 @@ BigPrime :: (bits: s32, accuracy: s32, out: []u8) -> s32 #foreign host_api;
 BigIsPrime :: (a: string, rounds: s32) -> bool #foreign host_api;
 
 // RSA. The key lines are n, e, d, p, q, d mod (p-1), d mod (q-1) and the CRT
-// coefficient. Encrypt or verify with Big(PowerModulo, m, e, n), and decrypt
-// or sign with Big(PowerModulo, c, d, n).
+// coefficient. d is given as libsec computes it and can be negative, as the
+// Limbo Keyring module prints it. Encrypt or verify with
+// Big(PowerModulo, m, e, n); to decrypt or sign, reduce d modulo (p-1)(q-1)
+// first and use Big(PowerModulo, c, d, n). Sizes run from 8 to 8192 bits;
+// 0 rounds selects libsec's default.
 RsaGenerate :: (bits: s32, exponent_bits: s32, rounds: s32, out: []u8) -> s32 #foreign host_api;
 
 // DSA. The key lines are p, q, alpha, key and secret. An empty `p` makes a
@@ -88,6 +91,7 @@ DsaSign :: (p: string, q: string, alpha: string, secret: string, m: string, out:
 DsaVerify :: (p: string, q: string, alpha: string, key: string, r: string, s: string, m: string) -> bool #foreign host_api;
 
 // ElGamal. The key lines are p, alpha, key and secret; a signature is r and s.
+// Sizes run from 8 to 8192 bits.
 EgGenerate :: (bits: s32, rounds: s32, out: []u8) -> s32 #foreign host_api;
 EgSign :: (p: string, alpha: string, secret: string, m: string, out: []u8) -> s32 #foreign host_api;
 EgVerify :: (p: string, alpha: string, key: string, r: string, s: string, m: string) -> bool #foreign host_api;

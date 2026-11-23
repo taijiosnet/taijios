@@ -19,7 +19,7 @@ enum {
 	TextBytes = 8192,	/* longest number: 32768 bits */
 	ReplyBytes = 8 * TextBytes,	/* a kernel proc's stack is too small for this */
 	Held = 16,
-	MinKeyBits = 64,
+	MinKeyBits = 8,	/* libsec's prime search can loop forever on smaller sizes */
 	MaxKeyBits = 8192,
 };
 
@@ -333,24 +333,12 @@ generate(char *text, const char *function, const HostValue *args, int n, HostVal
 		if(n != 4 || !isint(args) || !isint(args+1) || !isint(args+2) || !isbytes(args+3))
 			return 0;
 		if(args[0].integer < MinKeyBits || args[0].integer > MaxKeyBits || args[1].integer < 2 ||
-		   args[1].integer > args[0].integer || args[2].integer < 1 || args[2].integer > 64)
+		   args[1].integer > args[0].integer || args[2].integer < 0 || args[2].integer > 64)
 			return s32(result, -1);
+		/* Rounds 0 selects libsec's default. d is reported as rsagen computes
+		 * it, which can be negative, as the Limbo Keyring module prints it. */
 		rsa = rsagen(args[0].integer, args[1].integer, args[2].integer);
-		if(rsa != nil && mpcmp(rsa->dk, mpzero) < 0){
-			/* rsagen keeps d from the extended gcd, which can be negative. Its own
-			 * decryption uses only d mod p-1 and d mod q-1; guests may use d itself. */
-			mpint *phi = keep(&numbers, mpnew(0)), *pm = keep(&numbers, mpnew(0)), *qm = keep(&numbers, mpnew(0));
-
-			if(phi != nil && pm != nil && qm != nil){
-				mpsub(rsa->p, mpone, pm);
-				mpsub(rsa->q, mpone, qm);
-				mpmul(pm, qm, phi);
-				mpmod(rsa->dk, phi, pm);
-				mpassign(pm, rsa->dk);
-			}
-			release(&numbers);
-		}
-		if(rsa != nil && mpcmp(rsa->dk, mpzero) > 0){
+		if(rsa != nil){
 			used = append(text, 0, rsa->pub.n, 16);
 			used = append(text, used, rsa->pub.ek, 16);
 			used = append(text, used, rsa->dk, 16);
