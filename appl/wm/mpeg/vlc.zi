@@ -1,0 +1,308 @@
+// Construct expanded VLC (variable length code) tables from description files (replaces appl/wm/mpeg/vlc.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "std/format"
+#import "std/vec"
+
+Sv :: struct {
+    s: s32;
+    v: Text;
+    has_v: bool;
+}
+
+PairStr :: struct {
+    bs: Text;
+    val: Text;
+}
+
+MakeText :: (s: string) -> Text {
+    t: Text;
+    unused BuilderAppend(t.bytes, s);
+    return t;
+}
+
+CopyTextInto :: (dst: *Text, s: string) {
+    VecClear(dst.bytes);
+    unused BuilderAppend(dst.bytes, s);
+}
+
+WriteOut :: (s: string) {
+    if s.count > 0 { unused Io.Write(1, s) }
+}
+
+WriteErr :: (s: string) {
+    if s.count > 0 { unused Io.Write(2, s) }
+}
+
+Usage :: (prog: string) {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "usage: % [-cfp] [-u undef] [stem]\n", prog);
+    WriteErr(TextView(eb[:]));
+}
+
+AppendHexLower :: (out: *Vec(u8), v_in: s32) {
+    if v_in == 0 {
+        VecPush(out.*, 48);
+        return;
+    }
+    hex := "0123456789abcdef";
+    uv := cast(u32)v_in;
+    tmp: [8]u8;
+    n: s64 = 0;
+    while uv > 0 {
+        tmp[n] = cast(u8)hex[cast(s64)(uv & 15)];
+        n += 1;
+        uv = uv >> 4;
+    }
+    while n > 0 {
+        n -= 1;
+        VecPush(out.*, tmp[n]);
+    }
+}
+
+ErrorMsg :: (prog: string, s: string) {
+    eb: Vec(u8);
+    BuilderPrint(*eb, "%: error: %\n", prog, s);
+    WriteErr(TextView(eb[:]));
+}
+
+Value :: (prog: string, s: string) -> (val: s32, ok: bool) {
+    v: s32 = 0;
+    for i: 0..s.count - 1 {
+        c := s[i];
+        if c == 48 { // '0'
+            v = v << 1;
+        } else if c == 49 { // '1'
+            v = (v << 1) | 1;
+        } else {
+            mb: Vec(u8);
+            BuilderPrint(*mb, "bad bitstream: %", s);
+            ErrorMsg(prog, TextView(mb[:]));
+            return 0, false;
+        }
+    }
+    return v, true;
+}
+
+IsTokSep :: (c: u8) -> bool {
+    return c == 32 || c == 9 || c == 10;
+}
+
+main :: () -> s32 {
+    prog := "vlc";
+    argc := Args.OperandCount();
+    sargs_b: Vec(u8);
+    unused BuilderAppend(sargs_b, prog);
+    for ai: 0..cast(s64)argc - 1 {
+        VecPush(sargs_b, 32);
+        unused BuilderAppend(sargs_b, Args.Operand(cast(s32)ai));
+    }
+    sargs := TextView(sargs_b[:]);
+
+    complete := false;
+    xfixed := false;
+    paren := false;
+    undef_t := MakeText("UNDEF");
+
+    idx: s32 = 0;
+    while idx < argc {
+        a := Args.Operand(idx);
+        if a.count == 0 || a[0] != 45 { break } // '-'
+        stop_flag := false;
+        x: s64 = 1;
+        while x < a.count {
+            c := a[x];
+            if c == 99 { // 'c'
+                complete = true;
+            } else if c == 102 { // 'f'
+                xfixed = true;
+            } else if c == 112 { // 'p'
+                paren = true;
+            } else if c == 117 { // 'u'
+                x += 1;
+                if x == a.count {
+                    idx += 1;
+                    if idx >= argc {
+                        Usage(prog);
+                        return 0;
+                    }
+                    undef_t = Args.Operand(idx);
+                } else {
+                    undef_t = a[x:];
+                }
+                stop_flag = true;
+                break;
+            } else {
+                Usage(prog);
+                return 0;
+            }
+            x += 1;
+        }
+        unused stop_flag;
+        idx += 1;
+    }
+
+    vlc := "vlc";
+    if idx < argc {
+        if idx + 1 < argc {
+            Usage(prog);
+            return 0;
+        }
+        vlc = Args.Operand(idx);
+    }
+
+    // Read all stdin
+    raw: Vec(u8);
+    buf: [4096]u8;
+    while true {
+        n := Io.Read(0, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw, TextView(buf[:n]));
+    }
+    input := TextView(raw[:]);
+    il: Vec(PairStr);
+    pos: s64 = 0;
+    while pos < input.count {
+        start := pos;
+        while pos < input.count && input[pos] != 10 { pos += 1 }
+        if pos < input.count { pos += 1 }
+        line := input[start:pos];
+        if line.count > 0 && line[0] == 35 { continue } // '#'
+        // tokenize by " \t\n"
+        t_start: [4]s64;
+        t_end: [4]s64;
+        nt: s64 = 0;
+        i: s64 = 0;
+        while i < line.count {
+            while i < line.count && IsTokSep(cast(u8)line[i]) { i += 1 }
+            if i >= line.count { break }
+            if nt < 4 { t_start[nt] = i }
+            while i < line.count && !IsTokSep(cast(u8)line[i]) { i += 1 }
+            if nt < 4 { t_end[nt] = i }
+            nt += 1;
+        }
+        if nt != 2 {
+            eb: Vec(u8);
+            BuilderPrint(*eb, "%: bad input: %", prog, line);
+            WriteErr(TextView(eb[:]));
+            return 0;
+        }
+        p: PairStr;
+        p.bs = MakeText(line[t_start[0]:t_end[0]]);
+        p.val = MakeText(line[t_start[1]:t_end[1]]);
+        VecPush(il, p);
+    }
+
+    // expand (matching vlc.b's list reversal order: il was prepended, then expand prepends)
+    nl: Vec(PairStr);
+    max_bits: s32 = 0;
+    for i: 0..il.count - 1 {
+        bs := TextView(il[i].bs);
+        val := TextView(il[i].val);
+        n := cast(s32)bs.count;
+        if n > max_bits { max_bits = n }
+        if n > 0 && bs[bs.count - 1] == 115 { // 's'
+            t := bs[:bs.count - 1];
+            p1: PairStr;
+            unused BuilderAppend(p1.bs.bytes, t);
+            VecPush(p1.bs.bytes, 49); // '1'
+            VecPush(p1.val.bytes, 45); // '-'
+            unused BuilderAppend(p1.val.bytes, val);
+            VecPush(nl, p1);
+
+            p0: PairStr;
+            unused BuilderAppend(p0.bs.bytes, t);
+            VecPush(p0.bs.bytes, 48); // '0'
+            unused BuilderAppend(p0.val.bytes, val);
+            VecPush(nl, p0);
+        } else {
+            p: PairStr;
+            p.bs = MakeText(bs);
+            p.val = MakeText(val);
+            VecPush(nl, p);
+        }
+    }
+
+    bits := max_bits;
+    size: s32 = cast(s32)1 << bits;
+    table: Vec(Sv);
+    VecClear(table); for _: 0..(cast(s64)size) - 1 { VecPush(table, .{}) }
+    for i: 0..cast(s64)size - 1 {
+        table[i].s = 0;
+        table[i].has_v = false;
+    }
+
+    // maketable iterates nl in reverse (matching prepended list order in vlc.b)
+    ri := nl.count - 1;
+    while ri >= 0 {
+        bs := TextView(nl[ri].bs);
+        val := TextView(nl[ri].val);
+        z := cast(s32)bs.count;
+        if xfixed && z != bits {
+            mb: Vec(u8);
+            BuilderPrint(*mb, "string % too short", bs);
+            ErrorMsg(prog, TextView(mb[:]));
+            return 0;
+        }
+        s := bits - z;
+        bval, ok := Value(prog, bs);
+        if !ok { return 0 }
+        v := bval << s;
+        n := cast(s32)1 << s;
+        for _: 0..cast(s64)n - 1 {
+            if table[cast(s64)v].has_v {
+                mb: Vec(u8);
+                unused BuilderAppend(mb, "repeat match for ");
+                AppendHexLower(*mb, v);
+                ErrorMsg(prog, TextView(mb[:]));
+                return 0;
+            }
+            table[cast(s64)v].s = z;
+            CopyTextInto(*table[cast(s64)v].v, val);
+            table[cast(s64)v].has_v = true;
+            v += 1;
+        }
+        ri -= 1;
+    }
+
+    out: Vec(u8);
+    BuilderPrint(*out, "# %\n", sargs);
+    BuilderPrint(*out, "%_size: con %;\n", vlc, size);
+    BuilderPrint(*out, "%_bits: con %;\n", vlc, bits);
+    BuilderPrint(*out, "%_table:= array[] of {\n", vlc);
+    undef_s := TextView(undef_t);
+    for i: 0..cast(s64)size - 1 {
+        if table[i].has_v {
+            tv := TextView(table[i].v);
+            if xfixed {
+                if paren {
+                    BuilderPrint(*out, "\t(%),\n", tv);
+                } else {
+                    BuilderPrint(*out, "\t%,\n", tv);
+                }
+            } else {
+                BuilderPrint(*out, "\t(%, %),\n", table[i].s, tv);
+            }
+        } else if !complete {
+            if xfixed {
+                if paren {
+                    BuilderPrint(*out, "\t(%),\n", undef_s);
+                } else {
+                    BuilderPrint(*out, "\t%,\n", undef_s);
+                }
+            } else {
+                BuilderPrint(*out, "\t(0, %),\n", undef_s);
+            }
+        } else {
+            WriteOut(TextView(out[:]));
+            mb: Vec(u8);
+            unused BuilderAppend(mb, "no match for ");
+            AppendHexLower(*mb, cast(s32)i);
+            ErrorMsg(prog, TextView(mb[:]));
+            return 0;
+        }
+    }
+    unused BuilderAppend(out, "};\n");
+    WriteOut(TextView(out[:]));
+    return 0;
+}

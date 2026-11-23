@@ -1,0 +1,180 @@
+// Floating-point 8x8 Inverse Discrete Cosine Transform (replaces appl/wm/mpeg/fltidct.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "std/format"
+#import "std/vec"
+
+a0 :: 1.414;
+a1 :: 0.707;
+a2 :: 0.541;
+a3 :: 0.707;
+a4 :: 1.307;
+a5 :: -0.383;
+
+s1 :: 1.0196;
+s2 :: 1.0823;
+s3 :: 1.2026;
+s4 :: 1.4142;
+s5 :: 1.8000;
+s6 :: 2.6131;
+s7 :: 5.1258;
+
+scale :: 0.0625;
+
+Init :: () {
+}
+
+Ridct :: (zin: []float64, zout: []float64) {
+    r: [64]float64;
+
+    // transform horizontally
+    for y: 0..7 {
+        eighty := y << 3;
+        if zin[eighty + 1] == 0.0 &&
+           zin[eighty + 2] == 0.0 && zin[eighty + 3] == 0.0 &&
+           zin[eighty + 4] == 0.0 && zin[eighty + 5] == 0.0 &&
+           zin[eighty + 6] == 0.0 && zin[eighty + 7] == 0.0 {
+            v := zin[eighty] * a0;
+            r[eighty + 0] = v;
+            r[eighty + 1] = v;
+            r[eighty + 2] = v;
+            r[eighty + 3] = v;
+            r[eighty + 4] = v;
+            r[eighty + 5] = v;
+            r[eighty + 6] = v;
+            r[eighty + 7] = v;
+            continue;
+        }
+
+        // step 5
+        in1 := s1 * zin[eighty + 1];
+        in3 := s3 * zin[eighty + 3];
+        in5 := s5 * zin[eighty + 5];
+        in7 := s7 * zin[eighty + 7];
+        f2 := s2 * zin[eighty + 2];
+        f3 := s6 * zin[eighty + 6];
+        f5 := in1 + in7;
+        f7 := in5 + in3;
+
+        // step 4
+        g2 := f2 - f3;
+        g4 := in5 - in3;
+        g6 := in1 - in7;
+        g7 := f5 + f7;
+
+        // step 3.5
+        t := (g4 + g6) * a5;
+
+        // step 3
+        f0 := a0 * zin[eighty + 0];
+        f1 := s4 * zin[eighty + 4];
+        f3 += f2;
+        f2 = a1 * g2;
+
+        // step 2
+        g0 := f0 + f1;
+        g1 := f0 - f1;
+        g3 := f2 + f3;
+        g4 = t - a2 * g4;
+        g5 := a3 * (f5 - f7);
+        g6 = a4 * g6 + t;
+
+        // step 1
+        f0 = g0 + g3;
+        f1 = g1 + f2;
+        f2 = g1 - f2;
+        f3 = g0 - g3;
+        f5 = g5 - g4;
+        f6 := g5 + g6;
+        f7 = g6 + g7;
+
+        // step 6
+        r[eighty + 0] = f0 + f7;
+        r[eighty + 1] = f1 + f6;
+        r[eighty + 2] = f2 + f5;
+        r[eighty + 3] = f3 - g4;
+        r[eighty + 4] = f3 + g4;
+        r[eighty + 5] = f2 - f5;
+        r[eighty + 6] = f1 - f6;
+        r[eighty + 7] = f0 - f7;
+    }
+
+    // transform vertically
+    for x: 0..7 {
+        // step 5
+        in1 := scale * s1 * r[x + 8];
+        in3 := scale * s3 * r[x + 24];
+        in5 := scale * s5 * r[x + 40];
+        in7 := scale * s7 * r[x + 56];
+        f2 := scale * s2 * r[x + 16];
+        f3 := scale * s6 * r[x + 48];
+        f5 := in1 + in7;
+        f7 := in5 + in3;
+
+        // step 4
+        g2 := f2 - f3;
+        g4 := in5 - in3;
+        g6 := in1 - in7;
+        g7 := f5 + f7;
+
+        // step 3.5
+        t := (g4 + g6) * a5;
+
+        // step 3
+        f0 := scale * a0 * r[x];
+        f1 := scale * s4 * r[x + 32];
+        f3 += f2;
+        f2 = a1 * g2;
+
+        // step 2
+        g0 := f0 + f1;
+        g1 := f0 - f1;
+        g3 := f2 + f3;
+        g4 = t - a2 * g4;
+        g5 := a3 * (f5 - f7);
+        g6 = a4 * g6 + t;
+
+        // step 1
+        f0 = g0 + g3;
+        f1 = g1 + f2;
+        f2 = g1 - f2;
+        f3 = g0 - g3;
+        f5 = g5 - g4;
+        f6 := g5 + g6;
+        f7 = g6 + g7;
+
+        // step 6
+        zout[x] = f0 + f7;
+        zout[x + 8] = f1 + f6;
+        zout[x + 16] = f2 + f5;
+        zout[x + 24] = f3 - g4;
+        zout[x + 32] = f3 + g4;
+        zout[x + 40] = f2 - f5;
+        zout[x + 48] = f1 - f6;
+        zout[x + 56] = f0 - f7;
+    }
+}
+
+Idct :: (b: []s32) {
+    tmp: [64]float64;
+    for i: 0..63 { tmp[i] = cast(float64)b[i] }
+    Ridct(tmp[:], tmp[:]);
+    for i: 0..63 {
+        v := tmp[i];
+        b[i] = ifx v >= 0.0 then cast(s32)(v + 0.5) else cast(s32)(v - 0.5);
+    }
+}
+
+main :: () -> s32 {
+    Init();
+    b: [64]s32;
+    for i: 0..63 { b[i] = 0 }
+    b[0] = 1024;
+    b[1] = 128;
+    b[8] = -64;
+    Idct(b[:]);
+    out: Vec(u8);
+    BuilderPrint(*out, "% % % %\n", b[0], b[1], b[8], b[63]);
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

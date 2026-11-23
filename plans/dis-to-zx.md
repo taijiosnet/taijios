@@ -46,7 +46,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
-4. Legacy misc (48 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
+4. Legacy misc (32 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (10), demo (3), ebook (0), math (0).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
@@ -699,7 +699,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 
-### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 48 rows
+### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 32 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -735,22 +735,6 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/fs/walk.dis | appl/cmd/fs/walk.b |  | - |  |
 | dis/fs/write.dis | appl/cmd/fs/write.b |  | - |  |
 | dis/lego/clock.dis | appl/cmd/lego/clock.b |  | - | blocked: needs Tk/spawn in ZX |
-| dis/mpeg/decode.dis | appl/wm/mpeg/decode.b |  | - |  |
-| dis/mpeg/decode4.dis | appl/wm/mpeg/decode4.b |  | - |  |
-| dis/mpeg/fixidct.dis | appl/wm/mpeg/fixidct.b |  | - |  |
-| dis/mpeg/fltidct.dis | appl/wm/mpeg/fltidct.b |  | - |  |
-| dis/mpeg/makergbvmap.dis | appl/wm/mpeg/makergbvmap.b |  | - |  |
-| dis/mpeg/mpeg.dis | appl/wm/mpeg/mpeg.b | module/mpeg.m | - |  |
-| dis/mpeg/mpegio.dis | appl/wm/mpeg/mpegio.b |  | - |  |
-| dis/mpeg/refidct.dis | appl/wm/mpeg/refidct.b |  | - |  |
-| dis/mpeg/remap.dis | appl/wm/mpeg/remap.b |  | - |  |
-| dis/mpeg/remap1.dis | appl/wm/mpeg/remap1.b |  | - |  |
-| dis/mpeg/remap2.dis | appl/wm/mpeg/remap2.b |  | - |  |
-| dis/mpeg/remap24.dis | appl/wm/mpeg/remap24.b |  | - |  |
-| dis/mpeg/remap4.dis | appl/wm/mpeg/remap4.b |  | - |  |
-| dis/mpeg/remap8.dis | appl/wm/mpeg/remap8.b |  | - |  |
-| dis/mpeg/scidct.dis | appl/wm/mpeg/scidct.b |  | - |  |
-| dis/mpeg/vlc.dis | appl/wm/mpeg/vlc.b |  | - |  |
 
 ### 15. Acme helper binaries outside dis/ - 22 rows
 

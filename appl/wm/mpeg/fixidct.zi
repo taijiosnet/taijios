@@ -1,0 +1,177 @@
+// Fixed-point 8x8 Inverse Discrete Cosine Transform (replaces appl/wm/mpeg/fixidct.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "std/format"
+#import "std/vec"
+
+B0 :: 16;
+B1 :: 16;
+M :: 1 << B0;
+N :: 1 << B1;
+
+// int(a * real(1<<16))
+A0 :: 92667;  // int(1.414 * 65536.0)
+A1 :: 46333;  // int(0.707 * 65536.0)
+A2 :: 35454;  // int(0.541 * 65536.0)
+A3 :: 46333;  // int(0.707 * 65536.0)
+A4 :: 85655;  // int(1.307 * 65536.0)
+A5 :: -25100; // int(-0.383 * 65536.0)
+
+S1 :: 66820;  // int(1.0196 * 65536.0)
+S2 :: 70929;  // int(1.0823 * 65536.0)
+S3 :: 78813;  // int(1.2026 * 65536.0)
+S4 :: 92681;  // int(1.4142 * 65536.0)
+S5 :: 117964; // int(1.8000 * 65536.0)
+S6 :: 171252; // int(2.6131 * 65536.0)
+S7 :: 335924; // int(5.1258 * 65536.0)
+
+S :: 4;
+
+Init :: () {
+}
+
+Idct :: (b: []s32) {
+    r: [64]s32;
+
+    // transform horizontally
+    for y: 0..7 {
+        eighty := y << 3;
+        if b[eighty + 1] == 0 &&
+           b[eighty + 2] == 0 && b[eighty + 3] == 0 &&
+           b[eighty + 4] == 0 && b[eighty + 5] == 0 &&
+           b[eighty + 6] == 0 && b[eighty + 7] == 0 {
+            v := b[eighty] * A0;
+            r[eighty + 0] = v;
+            r[eighty + 1] = v;
+            r[eighty + 2] = v;
+            r[eighty + 3] = v;
+            r[eighty + 4] = v;
+            r[eighty + 5] = v;
+            r[eighty + 6] = v;
+            r[eighty + 7] = v;
+            continue;
+        }
+
+        // step 5
+        in1 := S1 * b[eighty + 1];
+        in3 := S3 * b[eighty + 3];
+        in5 := S5 * b[eighty + 5];
+        in7 := S7 * b[eighty + 7];
+        f2 := S2 * b[eighty + 2];
+        f3 := S6 * b[eighty + 6];
+        f5 := in1 + in7;
+        f7 := in5 + in3;
+
+        // step 4
+        g2 := f2 - f3;
+        g4 := in5 - in3;
+        g6 := in1 - in7;
+        g7 := f5 + f7;
+
+        // step 3.5
+        t := ((g4 + g6) >> B0) * A5;
+
+        // step 3
+        f0 := A0 * b[eighty + 0];
+        f1 := S4 * b[eighty + 4];
+        f3 += f2;
+        f2 = A1 * (g2 >> B0);
+
+        // step 2
+        g0 := f0 + f1;
+        g1 := f0 - f1;
+        g3 := f2 + f3;
+        g4 = t - A2 * (g4 >> B0);
+        g5 := A3 * ((f5 - f7) >> B0);
+        g6 = A4 * (g6 >> B0) + t;
+
+        // step 1
+        f0 = g0 + g3;
+        f1 = g1 + f2;
+        f2 = g1 - f2;
+        f3 = g0 - g3;
+        f5 = g5 - g4;
+        f6 := g5 + g6;
+        f7 = g6 + g7;
+
+        // step 6
+        r[eighty + 0] = f0 + f7;
+        r[eighty + 1] = f1 + f6;
+        r[eighty + 2] = f2 + f5;
+        r[eighty + 3] = f3 - g4;
+        r[eighty + 4] = f3 + g4;
+        r[eighty + 5] = f2 - f5;
+        r[eighty + 6] = f1 - f6;
+        r[eighty + 7] = f0 - f7;
+    }
+
+    // transform vertically
+    sh := cast(s32)(B1 + S);
+    for x: 0..7 {
+        // step 5
+        in1 := S1 * (r[x + 8] >> sh);
+        in3 := S3 * (r[x + 24] >> sh);
+        in5 := S5 * (r[x + 40] >> sh);
+        in7 := S7 * (r[x + 56] >> sh);
+        f2 := S2 * (r[x + 16] >> sh);
+        f3 := S6 * (r[x + 48] >> sh);
+        f5 := in1 + in7;
+        f7 := in5 + in3;
+
+        // step 4
+        g2 := f2 - f3;
+        g4 := in5 - in3;
+        g6 := in1 - in7;
+        g7 := f5 + f7;
+
+        // step 3.5
+        t := ((g4 + g6) >> B0) * A5;
+
+        // step 3
+        f0 := A0 * (r[x] >> sh);
+        f1 := S4 * (r[x + 32] >> sh);
+        f3 += f2;
+        f2 = A1 * (g2 >> B0);
+
+        // step 2
+        g0 := f0 + f1;
+        g1 := f0 - f1;
+        g3 := f2 + f3;
+        g4 = t - A2 * (g4 >> B0);
+        g5 := A3 * ((f5 - f7) >> B0);
+        g6 = A4 * (g6 >> B0) + t;
+
+        // step 1
+        f0 = g0 + g3;
+        f1 = g1 + f2;
+        f2 = g1 - f2;
+        f3 = g0 - g3;
+        f5 = g5 - g4;
+        f6 := g5 + g6;
+        f7 = g6 + g7;
+
+        // step 6
+        b[x] = (f0 + f7) >> B1;
+        b[x + 8] = (f1 + f6) >> B1;
+        b[x + 16] = (f2 + f5) >> B1;
+        b[x + 24] = (f3 - g4) >> B1;
+        b[x + 32] = (f3 + g4) >> B1;
+        b[x + 40] = (f2 - f5) >> B1;
+        b[x + 48] = (f1 - f6) >> B1;
+        b[x + 56] = (f0 - f7) >> B1;
+    }
+}
+
+main :: () -> s32 {
+    Init();
+    b: [64]s32;
+    for i: 0..63 { b[i] = 0 }
+    b[0] = 1024;
+    b[1] = 128;
+    b[8] = -64;
+    Idct(b[:]);
+    out: Vec(u8);
+    BuilderPrint(*out, "% % % %\n", b[0], b[1], b[8], b[63]);
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

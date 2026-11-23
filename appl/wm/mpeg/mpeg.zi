@@ -1,0 +1,154 @@
+// MPEG-1 player and frame decoder/remapper controller (replaces appl/wm/mpeg/mpeg.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "mpeg_types"
+Mio :: #import "mpegio";
+Dec :: #import "decode";
+Dec4 :: #import "decode4";
+Remap1 :: #import "remap1";
+Remap2 :: #import "remap2";
+Remap4 :: #import "remap4";
+Remap8 :: #import "remap";
+Remap24 :: #import "remap24";
+#import "std/format"
+#import "std/vec"
+
+STOPPED :: 0;
+PLAYING :: 1;
+STEPPING :: 2;
+PAUSED :: 3;
+
+task_cfg: [16]string = .[
+    "canvas .c",
+    "frame .b",
+    "button .b.File -text File -command {send cmd file}",
+    "button .b.Stop -text Stop -command {send cmd stop}",
+    "button .b.Pause -text Pause -command {send cmd pause}",
+    "button .b.Step -text Step -command {send cmd step}",
+    "button .b.Play -text Play -command {send cmd play}",
+    "frame .f",
+    "label .f.file -text {File:}",
+    "label .f.name",
+    "pack .f.file .f.name -side left",
+    "pack .b.File .b.Stop .b.Pause .b.Step .b.Play -side left",
+    "pack .f -fill x",
+    "pack .b -anchor w",
+    "pack .c -side bottom -fill both -expand 1",
+    "pack propagate . 0"
+];
+
+ParseInt :: (s: string) -> s32 {
+    i: s64 = 0;
+    neg := false;
+    if i < s.count && s[i] == 45 { neg = true; i += 1 }
+    v: s32 = 0;
+    while i < s.count && s[i] >= 48 && s[i] <= 57 {
+        v = v * 10 + cast(s32)(s[i] - 48);
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+RemapFrame :: (depth: s32, f: *YCbCr, out_buf: *Plane) -> *Plane {
+    if depth == 1 { return Remap1.Remap(f, out_buf) }
+    if depth == 2 { return Remap2.Remap(f, out_buf) }
+    if depth == 4 { return Remap4.Remap(f, out_buf) }
+    if depth == 24 { return Remap24.Remap(f, out_buf) }
+    return Remap8.Remap(f, out_buf);
+}
+
+PlayFile :: (file: string, depth_in: s32, out_summary: *Vec(u8)) -> bool {
+    fd := Io.Open(file, 0);
+    if fd < 0 { return false }
+    depth := ifx depth_in <= 0 then 8 else depth_in;
+    use_dec4 := depth == 1 || depth == 2 || depth == 4;
+
+    Mio.Init();
+    m: Mpegi;
+    Mio.Prepare(fd, file, *m);
+    Mio.StreamInit(*m, VIDEO_STR0);
+    p: Picture;
+    if !Mio.GetPicture(*m, 1, *p) || m.failed {
+        unused Io.Close(fd);
+        return false;
+    }
+
+    frames_state: DecoderFrames;
+    out_buf: Plane;
+    if use_dec4 {
+        Dec4.Init(*m, *frames_state);
+    } else {
+        Dec.Init(*m, *frames_state);
+    }
+    if depth == 1 { Remap1.Init(*m, *out_buf) } else if depth == 2 { Remap2.Init(*m, *out_buf) } else if depth == 4 { Remap4.Init(*m, *out_buf) } else if depth == 24 { Remap24.Init(*m, *out_buf) } else { Remap8.Init(*m, *out_buf) }
+
+    has_pf := false;
+    pf: *YCbCr;
+    frames: s32 = 0;
+    last_bytes: s64 = 0;
+    first_b0: s32 = 0;
+
+    while true {
+        f: *YCbCr;
+        if use_dec4 {
+            if p.ptype == IPIC { f = Dec4.Idecode(*p, *frames_state) } else if p.ptype == PPIC { f = Dec4.Pdecode(*p, *frames_state) } else { f = Dec4.Bdecode(*p, *frames_state) }
+        } else {
+            if p.ptype == IPIC { f = Dec.Idecode(*p, *frames_state) } else if p.ptype == PPIC { f = Dec.Pdecode(*p, *frames_state) } else { f = Dec.Bdecode(*p, *frames_state) }
+        }
+        if p.ptype == BPIC {
+            pix := RemapFrame(depth, f, *out_buf);
+            if frames == 0 && pix.b.count > 0 { first_b0 = cast(s32)pix.b[0] }
+            frames += 1;
+            last_bytes = pix.b.count;
+        } else {
+            if has_pf {
+                pix := RemapFrame(depth, pf, *out_buf);
+                if frames == 0 && pix.b.count > 0 { first_b0 = cast(s32)pix.b[0] }
+                frames += 1;
+                last_bytes = pix.b.count;
+            }
+            pf = f;
+            has_pf = true;
+        }
+        if !Mio.GetPicture(*m, 1, *p) || m.failed {
+            if has_pf {
+                pix := RemapFrame(depth, pf, *out_buf);
+                if frames == 0 && pix.b.count > 0 { first_b0 = cast(s32)pix.b[0] }
+                frames += 1;
+                last_bytes = pix.b.count;
+            }
+            break;
+        }
+    }
+    unused Io.Close(fd);
+    BuilderPrint(out_summary, "depth=% frames=% bytes=% b0=%\n", depth, frames, last_bytes, first_b0);
+    return true;
+}
+
+main :: () -> s32 {
+    unused task_cfg;
+    depth: s32 = 8;
+    tkarg := "";
+    file := "";
+    argc := Args.OperandCount();
+    idx: s32 = 0;
+    while idx < argc {
+        a := Args.Operand(idx);
+        if a == "-x" && idx + 1 < argc {
+            idx += 1;
+            tkarg = Args.Operand(idx);
+        } else if a == "-d" && idx + 1 < argc {
+            idx += 1;
+            depth = ParseInt(Args.Operand(idx));
+        } else if a.count > 0 && a[0] != 45 {
+            file = a;
+        }
+        idx += 1;
+    }
+    unused tkarg;
+    if file.count == 0 { return 0 }
+    out: Vec(u8);
+    if !PlayFile(file, depth, *out) { return 1 }
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

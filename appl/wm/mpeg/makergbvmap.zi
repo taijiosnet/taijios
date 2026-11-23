@@ -1,0 +1,35 @@
+// Generate RGBV 256-entry colormap table (replaces appl/wm/mpeg/makergbvmap.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "std/format"
+#import "std/vec"
+
+Cmap2Rgb :: (i: s32) -> (r: s32, g: s32, b: s32) {
+    inv := 255 - i;
+    r_idx := inv >> 6;
+    v := (inv >> 4) & 3;
+    j := (15 + r_idx - v - (i & 15)) & 15;
+    g_idx := j >> 2;
+    b_idx := j & 3;
+    den := r_idx;
+    if g_idx > den { den = g_idx }
+    if b_idx > den { den = b_idx }
+    if den == 0 {
+        c := v * 17;
+        return c, c, c;
+    }
+    num := 17 * (4 * den + v);
+    return (r_idx * num) / den, (g_idx * num) / den, (b_idx * num) / den;
+}
+
+main :: () -> s32 {
+    out: Vec(u8);
+    unused BuilderAppend(out, "rgbvmap := array[3*256] of {\n");
+    for i: 0..255 {
+        r, g, b := Cmap2Rgb(cast(s32)i);
+        BuilderPrint(*out, "\tbyte\t%,byte\t%,byte\t%,\n", r, g, b);
+    }
+    unused BuilderAppend(out, "};\n");
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

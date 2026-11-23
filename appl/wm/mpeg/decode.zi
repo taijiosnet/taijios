@@ -1,0 +1,686 @@
+// Full YCbCr MPEG-1 video picture decoder (replaces appl/wm/mpeg/decode.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "mpeg_types"
+Mio :: #import "mpegio";
+Idct :: #import "scidct";
+#import "std/format"
+#import "std/vec"
+
+CLOFF :: 256;
+
+intra_tab: [64]s32 = .[
+    8, 16, 19, 22, 26, 27, 29, 34,
+    16, 16, 22, 24, 27, 29, 34, 37,
+    19, 22, 26, 27, 29, 34, 34, 38,
+    22, 22, 26, 27, 29, 34, 37, 40,
+    22, 26, 27, 29, 32, 35, 40, 48,
+    26, 27, 29, 32, 35, 40, 48, 58,
+    26, 27, 29, 34, 38, 46, 56, 69,
+    27, 29, 35, 38, 46, 56, 69, 83
+];
+
+zig: [64]s32 = .[
+    0, 1, 8, 16, 9, 2, 3, 10, 17,
+    24, 32, 25, 18, 11, 4, 5,
+    12, 19, 26, 33, 40, 48, 41, 34,
+    27, 20, 13, 6, 7, 14, 21, 28,
+    35, 42, 49, 56, 57, 50, 43, 36,
+    29, 22, 15, 23, 30, 37, 44, 51,
+    58, 59, 52, 45, 38, 31, 39, 46,
+    53, 60, 61, 54, 47, 55, 62, 63
+];
+
+intraQ: [64]s32;
+nintraQ: [64]s32;
+rtmp: [6][64]s32;
+rflag: [6]s32;
+rforw: s32;
+dforw: s32;
+rback: s32;
+dback: s32;
+rforw2: s32;
+dforw2: s32;
+rback2: s32;
+dback2: s32;
+ydb: s32;
+ydf: s32;
+cdb: s32;
+cdf: s32;
+vflags: s32;
+past: [3]s32;
+pinit: [3]s32 = .[1024, 1024, 1024];
+clamp: [CLOFF + 256 + CLOFF]u8;
+width: s32;
+height: s32;
+w2: s32;
+h2: s32;
+mpi: s32;
+mps: s32;
+yadj: s32;
+cadj: s32;
+yskip: s32;
+
+Rs_idx: [2]s32; // 0 = I_frame, 1 = Ps0_frame, 2 = Ps1_frame
+R_idx: s32;
+pn: s32;
+rn: s32;
+mbr: s32;
+ybase: s32;
+cbase: s32;
+
+GetFrameByIdx :: (frames: *DecoderFrames, idx: s32) -> *YCbCr {
+    if idx == 0 { return *frames.I_frame }
+    if idx == 1 { return *frames.Ps0_frame }
+    if idx == 2 { return *frames.Ps1_frame }
+    return *frames.B0_frame;
+}
+
+InitPlane :: (v: *Plane, n: s64, val: u8) {
+    VecClear(v.b);
+    for _: 0..n - 1 { VecPush(v.b, val) }
+}
+
+InitFrame :: (f: *YCbCr) {
+    ny := cast(s64)(width * height);
+    nc := cast(s64)(w2 * h2);
+    InitPlane(*f.Y, ny, 0);
+    InitPlane(*f.Cb, nc, 128);
+    InitPlane(*f.Cr, nc, 128);
+}
+
+Init :: (m: *Mpegi, frames: *DecoderFrames) {
+    Idct.Init();
+    width = m.width;
+    height = m.height;
+    w2 = width >> 1;
+    h2 = height >> 1;
+    mps = width >> 4;
+    mpi = (mps * height) >> 4;
+    yskip = 8 * width;
+    yadj = 16 * width - (width - 16);
+    cadj = 8 * w2 - (w2 - 8);
+    InitFrame(*frames.I_frame);
+    InitFrame(*frames.Ps0_frame);
+    InitFrame(*frames.Ps1_frame);
+    InitFrame(*frames.B0_frame);
+    Rs_idx[0] = 1;
+    Rs_idx[1] = 2;
+    R_idx = 1;
+    pn = 0;
+    rn = 0;
+    for i: 0..CLOFF - 1 { clamp[i] = 0 }
+    for i: 0..255 { clamp[i + CLOFF] = cast(u8)i }
+    for i: CLOFF + 256..CLOFF + 256 + CLOFF - 1 { clamp[i] = 255 }
+    if !m.has_intra {
+        for i: 0..63 { intraQ[i] = intra_tab[i] }
+    } else {
+        for i: 0..63 { intraQ[cast(s64)zig[i]] = m.intra[i] }
+    }
+    if !m.has_nintra {
+        for i: 0..63 { nintraQ[i] = 16 }
+    } else {
+        for i: 0..63 { nintraQ[cast(s64)zig[i]] = m.nintra[i] }
+    }
+}
+
+InvQIntra :: (a: *PairArray, q: s32, b: []s32) {
+    b[0] = a.items[0].b * 8;
+    for k: 1..63 { b[k] = 0 }
+    n: s64 = 1;
+    i: s32 = 1;
+    while n < a.items.count {
+        r := a.items[n].a;
+        l := a.items[n].b;
+        n += 1;
+        i += r;
+        x := zig[cast(s64)i];
+        i += 1;
+        if l > 0 {
+            v := (l * q * intraQ[cast(s64)x]) >> 3;
+            b[cast(s64)x] = ifx v > 2047 then 2047 else ((v - 1) | 1);
+        } else {
+            v := (l * q * intraQ[cast(s64)x] + 7) >> 3;
+            b[cast(s64)x] = ifx v < -2048 then -2048 else (v | 1);
+        }
+    }
+}
+
+InvQNintra :: (a: *PairArray, q: s32, b: []s32) {
+    for k: 0..63 { b[k] = 0 }
+    i: s32 = 0;
+    for n: 0..a.items.count - 1 {
+        r := a.items[n].a;
+        l := a.items[n].b;
+        i += r;
+        if l == 0 {
+            i += 1;
+            continue;
+        }
+        x := zig[cast(s64)i];
+        i += 1;
+        if l > 0 {
+            v := (((l << 1) + 1) * q * nintraQ[cast(s64)x]) >> 4;
+            b[cast(s64)x] = ifx v > 2047 then 2047 else ((v - 1) | 1);
+        } else {
+            v := ((((l << 1) - 1) * q * nintraQ[cast(s64)x]) + 15) >> 4;
+            b[cast(s64)x] = ifx v < -2048 then -2048 else (v | 1);
+        }
+    }
+}
+
+Ydistr :: (a: []s32, v: *Plane, base_in: s32) {
+    x: s64 = 0;
+    base := base_in;
+    for _: 0..7 {
+        n := cast(s64)base;
+        for _: 0..7 {
+            v.b[n] = clamp[cast(s64)(a[x] + CLOFF)];
+            n += 1;
+            x += 1;
+        }
+        base += width;
+    }
+}
+
+Cdistr :: (a: []s32, v: *Plane, base_in: s32) {
+    x: s64 = 0;
+    base := base_in;
+    for _: 0..7 {
+        n := cast(s64)base;
+        for _: 0..7 {
+            v.b[n] = clamp[cast(s64)(a[x] + CLOFF)];
+            n += 1;
+            x += 1;
+        }
+        base += w2;
+    }
+}
+
+InvQIntraBlock :: (mb: *MacroBlock, q: s32, pred: s32, d: *YCbCr) {
+    dc0 := ifx pred != 0 then past[0] else pinit[0];
+    p := dc0;
+    for i: 0..3 {
+        InvQIntra(*mb.rls[i], q, rtmp[i][:]);
+        p += rtmp[i][0];
+        rtmp[i][0] = p;
+        Idct.Idct(rtmp[i][:]);
+    }
+    past[0] = p;
+    for i: 4..5 {
+        p = ifx pred != 0 then past[i - 3] else pinit[i - 3];
+        InvQIntra(*mb.rls[i], q, rtmp[i][:]);
+        p += rtmp[i][0];
+        rtmp[i][0] = p;
+        past[i - 3] = p;
+        Idct.Idct(rtmp[i][:]);
+    }
+    Ydistr(rtmp[0][:], *d.Y, ybase);
+    Ydistr(rtmp[1][:], *d.Y, ybase + 8);
+    Ydistr(rtmp[2][:], *d.Y, ybase + yskip);
+    Ydistr(rtmp[3][:], *d.Y, ybase + 8 + yskip);
+    Cdistr(rtmp[4][:], *d.Cb, cbase);
+    Cdistr(rtmp[5][:], *d.Cr, cbase);
+}
+
+InvQNintraBlock :: (mb: *MacroBlock, q: s32) {
+    for i: 0..5 {
+        if mb.rls[i].has_data {
+            InvQNintra(*mb.rls[i], q, rtmp[i][:]);
+            Idct.Idct(rtmp[i][:]);
+            rflag[i] = 1;
+        } else {
+            rflag[i] = 0;
+        }
+    }
+}
+
+NextMb :: () {
+    mbr -= 1;
+    if mbr == 0 {
+        ybase += yadj;
+        cbase += cadj;
+        mbr = mps;
+    } else {
+        ybase += 16;
+        cbase += 8;
+    }
+}
+
+CopyBlock :: (s: *Plane, d: *Plane, b_in: s32, n: s32, w: s32) {
+    b := b_in;
+    for _: 0..7 {
+        for j: 0..cast(s64)n - 1 {
+            d.b[cast(s64)b + j] = s.b[cast(s64)b + j];
+        }
+        b += w;
+    }
+}
+
+CopyBlockDisp :: (s: *Plane, d: *Plane, b_in: s32, n: s32, w: s32, p_in: s32) {
+    b := b_in;
+    p := p_in + b_in;
+    for _: 0..7 {
+        for j: 0..cast(s64)n - 1 {
+            d.b[cast(s64)b + j] = s.b[cast(s64)p + j];
+        }
+        b += w;
+        p += w;
+    }
+}
+
+InterpBlock :: (s0: *Plane, s1: *Plane, d: *Plane, b_in: s32, n: s32, w: s32, p0: s32, p1: s32) {
+    b := b_in;
+    for _: 0..7 {
+        dx := cast(s64)b;
+        s0x := cast(s64)(b + p0);
+        s1x := cast(s64)(b + p1);
+        for _: 0..cast(s64)n - 1 {
+            d.b[dx] = cast(u8)((cast(s32)s0.b[s0x] + cast(s32)s1.b[s1x] + 1) >> 1);
+            dx += 1;
+            s0x += 1;
+            s1x += 1;
+        }
+        b += w;
+    }
+}
+
+DeltaBlock :: (s: *Plane, r: []s32, d: *Plane, b_in: s32, w: s32, o: s32) {
+    rx: s64 = 0;
+    b := b_in;
+    for _: 0..7 {
+        dx := cast(s64)b;
+        sx := cast(s64)(b + o);
+        for _: 0..7 {
+            d.b[dx] = clamp[cast(s64)(CLOFF + cast(s32)s.b[sx] + r[rx])];
+            dx += 1;
+            sx += 1;
+            rx += 1;
+        }
+        b += w;
+    }
+}
+
+DeltaInterpBlock :: (s0: *Plane, s1: *Plane, r: []s32, d: *Plane, b_in: s32, w: s32, o0: s32, o1: s32) {
+    rx: s64 = 0;
+    b := b_in;
+    for _: 0..7 {
+        dx := cast(s64)b;
+        s0x := cast(s64)(b + o0);
+        s1x := cast(s64)(b + o1);
+        for _: 0..7 {
+            avg := (cast(s32)s0.b[s0x] + cast(s32)s1.b[s1x] + 1) >> 1;
+            d.b[dx] = clamp[cast(s64)(CLOFF + avg + r[rx])];
+            dx += 1;
+            s0x += 1;
+            s1x += 1;
+            rx += 1;
+        }
+        b += w;
+    }
+}
+
+DispBlock :: (s: *Plane, d: *Plane, n: s64, b: s32, w: s32, o: s32) {
+    if rflag[n] != 0 {
+        DeltaBlock(s, rtmp[n][:], d, b, w, o);
+    } else {
+        CopyBlockDisp(s, d, b, 8, w, o);
+    }
+}
+
+GenBlock :: (s0: *Plane, s1: *Plane, d: *Plane, n: s64, b: s32, w: s32, o0: s32, o1: s32) {
+    if rflag[n] != 0 {
+        DeltaInterpBlock(s0, s1, rtmp[n][:], d, b, w, o0, o1);
+    } else {
+        InterpBlock(s0, s1, d, b, 8, w, o0, o1);
+    }
+}
+
+CopyMb :: (R_ptr: *YCbCr, P_ptr: *YCbCr) {
+    CopyBlock(*R_ptr.Y, *P_ptr.Y, ybase, 16, width);
+    CopyBlock(*R_ptr.Y, *P_ptr.Y, ybase + yskip, 16, width);
+    CopyBlock(*R_ptr.Cb, *P_ptr.Cb, cbase, 8, w2);
+    CopyBlock(*R_ptr.Cr, *P_ptr.Cr, cbase, 8, w2);
+}
+
+DeltaMb :: (R_ptr: *YCbCr, P_ptr: *YCbCr) {
+    DispBlock(*R_ptr.Y, *P_ptr.Y, 0, ybase, width, 0);
+    DispBlock(*R_ptr.Y, *P_ptr.Y, 1, ybase + 8, width, 0);
+    DispBlock(*R_ptr.Y, *P_ptr.Y, 2, ybase + yskip, width, 0);
+    DispBlock(*R_ptr.Y, *P_ptr.Y, 3, ybase + 8 + yskip, width, 0);
+    DispBlock(*R_ptr.Cb, *P_ptr.Cb, 4, cbase, w2, 0);
+    DispBlock(*R_ptr.Cr, *P_ptr.Cr, 5, cbase, w2, 0);
+}
+
+CopyMbForw :: (N_ptr: *YCbCr, B_ptr: *YCbCr) {
+    CopyBlockDisp(*N_ptr.Y, *B_ptr.Y, ybase, 16, width, ydf);
+    CopyBlockDisp(*N_ptr.Y, *B_ptr.Y, ybase + yskip, 16, width, ydf);
+    CopyBlockDisp(*N_ptr.Cb, *B_ptr.Cb, cbase, 8, w2, cdf);
+    CopyBlockDisp(*N_ptr.Cr, *B_ptr.Cr, cbase, 8, w2, cdf);
+}
+
+CopyMbBack :: (M_ptr: *YCbCr, B_ptr: *YCbCr) {
+    CopyBlockDisp(*M_ptr.Y, *B_ptr.Y, ybase, 16, width, ydb);
+    CopyBlockDisp(*M_ptr.Y, *B_ptr.Y, ybase + yskip, 16, width, ydb);
+    CopyBlockDisp(*M_ptr.Cb, *B_ptr.Cb, cbase, 8, w2, cdb);
+    CopyBlockDisp(*M_ptr.Cr, *B_ptr.Cr, cbase, 8, w2, cdb);
+}
+
+CopyMbBackForw :: (M_ptr: *YCbCr, N_ptr: *YCbCr, B_ptr: *YCbCr) {
+    InterpBlock(*M_ptr.Y, *N_ptr.Y, *B_ptr.Y, ybase, 16, width, ydb, ydf);
+    InterpBlock(*M_ptr.Y, *N_ptr.Y, *B_ptr.Y, ybase + yskip, 16, width, ydb, ydf);
+    InterpBlock(*M_ptr.Cb, *N_ptr.Cb, *B_ptr.Cb, cbase, 8, w2, cdb, cdf);
+    InterpBlock(*M_ptr.Cr, *N_ptr.Cr, *B_ptr.Cr, cbase, 8, w2, cdb, cdf);
+}
+
+DeltaMbForw :: (N_ptr: *YCbCr, B_ptr: *YCbCr) {
+    DispBlock(*N_ptr.Y, *B_ptr.Y, 0, ybase, width, ydf);
+    DispBlock(*N_ptr.Y, *B_ptr.Y, 1, ybase + 8, width, ydf);
+    DispBlock(*N_ptr.Y, *B_ptr.Y, 2, ybase + yskip, width, ydf);
+    DispBlock(*N_ptr.Y, *B_ptr.Y, 3, ybase + 8 + yskip, width, ydf);
+    DispBlock(*N_ptr.Cb, *B_ptr.Cb, 4, cbase, w2, cdf);
+    DispBlock(*N_ptr.Cr, *B_ptr.Cr, 5, cbase, w2, cdf);
+}
+
+DeltaMbBack :: (M_ptr: *YCbCr, B_ptr: *YCbCr) {
+    DispBlock(*M_ptr.Y, *B_ptr.Y, 0, ybase, width, ydb);
+    DispBlock(*M_ptr.Y, *B_ptr.Y, 1, ybase + 8, width, ydb);
+    DispBlock(*M_ptr.Y, *B_ptr.Y, 2, ybase + yskip, width, ydb);
+    DispBlock(*M_ptr.Y, *B_ptr.Y, 3, ybase + 8 + yskip, width, ydb);
+    DispBlock(*M_ptr.Cb, *B_ptr.Cb, 4, cbase, w2, cdb);
+    DispBlock(*M_ptr.Cr, *B_ptr.Cr, 5, cbase, w2, cdb);
+}
+
+DeltaMbBackForw :: (M_ptr: *YCbCr, N_ptr: *YCbCr, B_ptr: *YCbCr) {
+    GenBlock(*M_ptr.Y, *N_ptr.Y, *B_ptr.Y, 0, ybase, width, ydb, ydf);
+    GenBlock(*M_ptr.Y, *N_ptr.Y, *B_ptr.Y, 1, ybase + 8, width, ydb, ydf);
+    GenBlock(*M_ptr.Y, *N_ptr.Y, *B_ptr.Y, 2, ybase + yskip, width, ydb, ydf);
+    GenBlock(*M_ptr.Y, *N_ptr.Y, *B_ptr.Y, 3, ybase + 8 + yskip, width, ydb, ydf);
+    GenBlock(*M_ptr.Cb, *N_ptr.Cb, *B_ptr.Cb, 4, cbase, w2, cdb, cdf);
+    GenBlock(*M_ptr.Cr, *N_ptr.Cr, *B_ptr.Cr, 5, cbase, w2, cdb, cdf);
+}
+
+DeltaMbInterp :: (M_ptr: *YCbCr, N_ptr: *YCbCr, B_ptr: *YCbCr) {
+    f := vflags & (MB_MF | MB_MB);
+    if f == MB_MF {
+        DeltaMbForw(N_ptr, B_ptr);
+    } else if f == MB_MB {
+        DeltaMbBack(M_ptr, B_ptr);
+    } else if f == (MB_MF | MB_MB) {
+        DeltaMbBackForw(M_ptr, N_ptr, B_ptr);
+    }
+}
+
+InterpMb :: (M_ptr: *YCbCr, N_ptr: *YCbCr, B_ptr: *YCbCr) {
+    f := vflags & (MB_MF | MB_MB);
+    if f == MB_MF {
+        CopyMbForw(N_ptr, B_ptr);
+    } else if f == MB_MB {
+        CopyMbBack(M_ptr, B_ptr);
+    } else if f == (MB_MF | MB_MB) {
+        CopyMbBackForw(M_ptr, N_ptr, B_ptr);
+    }
+}
+
+Idecode :: (p: *Picture, frames: *DecoderFrames) -> *YCbCr {
+    n: s32 = 0;
+    mbr = mps;
+    ybase = 0;
+    cbase = 0;
+    for i: 0..p.slices.count - 1 {
+        pred: s32 = 0;
+        sl := *p.slices[i];
+        for j: 0..sl.blocks.count - 1 {
+            mb := *sl.blocks[j];
+            InvQIntraBlock(mb, mb.qscale, pred, *frames.I_frame);
+            NextMb();
+            n += 1;
+            pred = 1;
+        }
+    }
+    R_idx = 0;
+    Rs_idx[cast(s64)rn] = 0;
+    rn ^= 1;
+    return *frames.I_frame;
+}
+
+Pdecode :: (p: *Picture, frames: *DecoderFrames) -> *YCbCr {
+    rforwp: s32 = 0;
+    dforwp: s32 = 0;
+    md: s32 = 0;
+    p_idx := ifx pn == 0 then cast(s32)1 else cast(s32)2;
+    P_ptr := GetFrameByIdx(frames, p_idx);
+    R_ptr := GetFrameByIdx(frames, R_idx);
+    N_ptr := R_ptr;
+    B_ptr := P_ptr;
+    pn ^= 1;
+    fs := cast(s32)1 << p.forwfc;
+    fsr := fs << 5;
+    fsmin := -(fs << 4);
+    fsmax := (fs << 4) - 1;
+    n: s32 = 0;
+    mbr = mps;
+    ybase = 0;
+    cbase = 0;
+    for i: 0..p.slices.count - 1 {
+        pred: s32 = 0;
+        ipred: s32 = 0;
+        sl := *p.slices[i];
+        for j: 0..sl.blocks.count - 1 {
+            mb := *sl.blocks[j];
+            while n < mb.addr {
+                CopyMb(R_ptr, P_ptr);
+                ipred = 0;
+                pred = 0;
+                NextMb();
+                n += 1;
+            }
+            if (mb.flags & MB_I) != 0 {
+                InvQIntraBlock(mb, mb.qscale, ipred, P_ptr);
+                ipred = 1;
+                pred = 0;
+            } else {
+                if (mb.flags & MB_MF) != 0 {
+                    if fs == 1 || mb.mhfc == 0 {
+                        md = mb.mhfc;
+                    } else if mb.mhfc < 0 {
+                        md = (mb.mhfc + 1) * fs - mb.mhfr - 1;
+                    } else {
+                        md = (mb.mhfc - 1) * fs + mb.mhfr + 1;
+                    }
+                    if pred != 0 { md += rforwp }
+                    if md > fsmax { rforw = md - fsr } else if md < fsmin { rforw = md + fsr } else { rforw = md }
+                    rforwp = rforw;
+
+                    if fs == 1 || mb.mvfc == 0 {
+                        md = mb.mvfc;
+                    } else if mb.mvfc < 0 {
+                        md = (mb.mvfc + 1) * fs - mb.mvfr - 1;
+                    } else {
+                        md = (mb.mvfc - 1) * fs + mb.mvfr + 1;
+                    }
+                    if pred != 0 { md += dforwp }
+                    if md > fsmax { dforw = md - fsr } else if md < fsmin { dforw = md + fsr } else { dforw = md }
+                    dforwp = dforw;
+
+                    if (p.flags & FPFV) != 0 {
+                        rforw2 = rforw;
+                        dforw2 = dforw;
+                        rforw <<= 1;
+                        dforw <<= 1;
+                        ydf = rforw2 + dforw2 * width;
+                        cdf = (rforw2 >> 1) + (dforw2 >> 1) * w2;
+                    } else {
+                        rforw2 = ifx rforw < 0 then ((rforw + 1) >> 1) else (rforw >> 1);
+                        dforw2 = ifx dforw < 0 then ((dforw + 1) >> 1) else (dforw >> 1);
+                        ydf = (rforw >> 1) + (dforw >> 1) * width;
+                        cdf = (rforw2 >> 1) + (dforw2 >> 1) * w2;
+                    }
+                    pred = 1;
+                    if mb.has_rls {
+                        InvQNintraBlock(mb, mb.qscale);
+                        DeltaMbForw(N_ptr, B_ptr);
+                    } else {
+                        CopyMbForw(N_ptr, B_ptr);
+                    }
+                } else {
+                    InvQNintraBlock(mb, mb.qscale);
+                    DeltaMb(R_ptr, P_ptr);
+                    pred = 0;
+                }
+                ipred = 0;
+            }
+            NextMb();
+            n += 1;
+        }
+    }
+    while n < mpi {
+        CopyMb(R_ptr, P_ptr);
+        NextMb();
+        n += 1;
+    }
+    R_idx = p_idx;
+    Rs_idx[cast(s64)rn] = p_idx;
+    rn ^= 1;
+    return P_ptr;
+}
+
+Bdecode2 :: (p: *Picture, frames: *DecoderFrames, f0: *YCbCr, f1: *YCbCr) -> *YCbCr {
+    rforwp: s32 = 0;
+    dforwp: s32 = 0;
+    rbackp: s32 = 0;
+    dbackp: s32 = 0;
+    md: s32 = 0;
+    M_ptr := f0;
+    N_ptr := f1;
+    B_ptr := *frames.B0_frame;
+    fs := cast(s32)1 << p.forwfc;
+    fsr := fs << 5;
+    fsmin := -(fs << 4);
+    fsmax := (fs << 4) - 1;
+    bs := cast(s32)1 << p.backfc;
+    bsr := bs << 5;
+    bsmin := -(bs << 4);
+    bsmax := (bs << 4) - 1;
+    n: s32 = 0;
+    mbr = mps;
+    ybase = 0;
+    cbase = 0;
+    for i: 0..p.slices.count - 1 {
+        ipred: s32 = 0;
+        rback = 0; rforw = 0; dback = 0; dforw = 0;
+        rbackp = 0; rforwp = 0; dbackp = 0; dforwp = 0;
+        rback2 = 0; rforw2 = 0; dback2 = 0; dforw2 = 0;
+        ydb = 0; ydf = 0; cdb = 0; cdf = 0;
+        sl := *p.slices[i];
+        for j: 0..sl.blocks.count - 1 {
+            mb := *sl.blocks[j];
+            while n < mb.addr {
+                InterpMb(M_ptr, N_ptr, B_ptr);
+                NextMb();
+                ipred = 0;
+                n += 1;
+            }
+            if (mb.flags & MB_I) != 0 {
+                InvQIntraBlock(mb, mb.qscale, ipred, B_ptr);
+                ipred = 1;
+                rback = 0; rforw = 0; dback = 0; dforw = 0;
+                rbackp = 0; rforwp = 0; dbackp = 0; dforwp = 0;
+                rback2 = 0; rforw2 = 0; dback2 = 0; dforw2 = 0;
+                ydb = 0; ydf = 0; cdb = 0; cdf = 0;
+            } else {
+                if (mb.flags & MB_MF) != 0 {
+                    if fs == 1 || mb.mhfc == 0 { md = mb.mhfc } else if mb.mhfc < 0 { md = (mb.mhfc + 1) * fs - mb.mhfr - 1 } else { md = (mb.mhfc - 1) * fs + mb.mhfr + 1 }
+                    md += rforwp;
+                    if md > fsmax { rforw = md - fsr } else if md < fsmin { rforw = md + fsr } else { rforw = md }
+                    rforwp = rforw;
+
+                    if fs == 1 || mb.mvfc == 0 { md = mb.mvfc } else if mb.mvfc < 0 { md = (mb.mvfc + 1) * fs - mb.mvfr - 1 } else { md = (mb.mvfc - 1) * fs + mb.mvfr + 1 }
+                    md += dforwp;
+                    if md > fsmax { dforw = md - fsr } else if md < fsmin { dforw = md + fsr } else { dforw = md }
+                    dforwp = dforw;
+
+                    if (p.flags & FPFV) != 0 {
+                        rforw2 = rforw;
+                        dforw2 = dforw;
+                        rforw <<= 1;
+                        dforw <<= 1;
+                        ydf = rforw2 + dforw2 * width;
+                        cdf = (rforw2 >> 1) + (dforw2 >> 1) * w2;
+                    } else {
+                        rforw2 = ifx rforw < 0 then ((rforw + 1) >> 1) else (rforw >> 1);
+                        dforw2 = ifx dforw < 0 then ((dforw + 1) >> 1) else (dforw >> 1);
+                        ydf = (rforw >> 1) + (dforw >> 1) * width;
+                        cdf = (rforw2 >> 1) + (dforw2 >> 1) * w2;
+                    }
+                }
+                if (mb.flags & MB_MB) != 0 {
+                    if bs == 1 || mb.mhbc == 0 { md = mb.mhbc } else if mb.mhbc < 0 { md = (mb.mhbc + 1) * bs - mb.mhbr - 1 } else { md = (mb.mhbc - 1) * bs + mb.mhbr + 1 }
+                    md += rbackp;
+                    if md > bsmax { rback = md - bsr } else if md < bsmin { rback = md + bsr } else { rback = md }
+                    rbackp = rback;
+
+                    if bs == 1 || mb.mvbc == 0 { md = mb.mvbc } else if mb.mvbc < 0 { md = (mb.mvbc + 1) * bs - mb.mvbr - 1 } else { md = (mb.mvbc - 1) * bs + mb.mvbr + 1 }
+                    md += dbackp;
+                    if md > bsmax { dback = md - bsr } else if md < bsmin { dback = md + bsr } else { dback = md }
+                    dbackp = dback;
+
+                    if (p.flags & FPBV) != 0 {
+                        rback2 = rback;
+                        dback2 = dback;
+                        rback <<= 1;
+                        dback <<= 1;
+                        ydb = rback2 + dback2 * width;
+                        cdb = (rback2 >> 1) + (dback2 >> 1) * w2;
+                    } else {
+                        rback2 = ifx rback < 0 then ((rback + 1) >> 1) else (rback >> 1);
+                        dback2 = ifx dback < 0 then ((dback + 1) >> 1) else (dback >> 1);
+                        ydb = (rback >> 1) + (dback >> 1) * width;
+                        cdb = (rback2 >> 1) + (dback2 >> 1) * w2;
+                    }
+                }
+                vflags = mb.flags;
+                if mb.has_rls {
+                    InvQNintraBlock(mb, mb.qscale);
+                    DeltaMbInterp(M_ptr, N_ptr, B_ptr);
+                } else {
+                    InterpMb(M_ptr, N_ptr, B_ptr);
+                }
+                ipred = 0;
+            }
+            NextMb();
+            n += 1;
+        }
+    }
+    while n < mpi {
+        InterpMb(M_ptr, N_ptr, B_ptr);
+        NextMb();
+        n += 1;
+    }
+    return B_ptr;
+}
+
+Bdecode :: (p: *Picture, frames: *DecoderFrames) -> *YCbCr {
+    return Bdecode2(p, frames, GetFrameByIdx(frames, Rs_idx[cast(s64)(rn ^ 1)]), GetFrameByIdx(frames, Rs_idx[cast(s64)rn]));
+}
+
+main :: () -> s32 {
+    if Args.OperandCount() <= 0 { return 0 }
+    path := Args.Operand(0);
+    fd := Io.Open(path, 0);
+    if fd < 0 { return 1 }
+    m: Mpegi;
+    Mio.Prepare(fd, path, *m);
+    Mio.StreamInit(*m, VIDEO_STR0);
+    p: Picture;
+    ok := Mio.GetPicture(*m, 1, *p);
+    unused Io.Close(fd);
+    if !ok || m.failed { return 1 }
+    frames: DecoderFrames;
+    Init(*m, *frames);
+    f := Idecode(*p, *frames);
+    out: Vec(u8);
+    BuilderPrint(*out, "Y=% % % Cb=% Cr=%\n", cast(s32)f.Y.b[0], cast(s32)f.Y.b[1], cast(s32)f.Y.b[255], cast(s32)f.Cb.b[0], cast(s32)f.Cr.b[0]);
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

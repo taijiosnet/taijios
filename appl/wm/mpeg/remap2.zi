@@ -1,0 +1,107 @@
+// 2-bit error-diffused luminance remapper (replaces appl/wm/mpeg/remap2.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "mpeg_types"
+#import "std/format"
+#import "std/vec"
+
+CLOFF :: 255;
+
+width: s32;
+height: s32;
+w4: s32;
+elum: Vec(s32);
+clamp4: [CLOFF + 256 + CLOFF]s32;
+
+Init :: (m: *Mpegi, out_buf: *Plane) {
+    width = m.width;
+    height = m.height;
+    w4 = width >> 2;
+    VecClear(out_buf.b); for _: 0..(cast(s64)(w4 * height)) - 1 { VecPush(out_buf.b, 0) }
+    VecClear(elum); for _: 0..(cast(s64)(width + 1)) - 1 { VecPush(elum, 0) }
+    for i: 0..CLOFF - 1 {
+        clamp4[i] = 0;
+    }
+    for i: 0..255 {
+        clamp4[i + CLOFF] = cast(s32)i >> 6;
+    }
+    for i: CLOFF + 256..CLOFF + 256 + CLOFF - 1 {
+        clamp4[i] = 255 >> 6;
+    }
+}
+
+Remap :: (p: *YCbCr, out_buf: *Plane) -> *Plane {
+    Y := *p.Y;
+    for e: 0..cast(s64)width {
+        elum[e] = 0;
+    }
+    m: s64 = 0;
+    n: s64 = 0;
+    for _: 0..cast(s64)height - 1 {
+        el: s32 = 0;
+        ex: s64 = 0;
+        for _: 0..cast(s64)w4 - 1 {
+            y := (256 - cast(s32)Y.b[n]) + elum[ex];
+            n += 1;
+            l := clamp4[cast(s64)(y + CLOFF)] << 6;
+            b := l;
+            y -= l;
+            t := (3 * y) >> 4;
+            elum[ex] = t + el;
+            elum[ex + 1] += t;
+            el = y - 3 * t;
+            ex += 1;
+
+            y = (256 - cast(s32)Y.b[n]) + elum[ex];
+            n += 1;
+            l = clamp4[cast(s64)(y + CLOFF)];
+            b |= l << 4;
+            y -= l << 6;
+            t = (3 * y) >> 4;
+            elum[ex] = t + el;
+            elum[ex + 1] += t;
+            el = y - 3 * t;
+            ex += 1;
+
+            y = (256 - cast(s32)Y.b[n]) + elum[ex];
+            n += 1;
+            l = clamp4[cast(s64)(y + CLOFF)];
+            b |= l << 2;
+            y -= l << 6;
+            t = (3 * y) >> 4;
+            elum[ex] = t + el;
+            elum[ex + 1] += t;
+            el = y - 3 * t;
+            ex += 1;
+
+            y = (256 - cast(s32)Y.b[n]) + elum[ex];
+            n += 1;
+            l = clamp4[cast(s64)(y + CLOFF)];
+            out_buf.b[m] = cast(u8)(b | l);
+            m += 1;
+            y -= l << 6;
+            t = (3 * y) >> 4;
+            elum[ex] = t + el;
+            elum[ex + 1] += t;
+            el = y - 3 * t;
+            ex += 1;
+        }
+    }
+    return out_buf;
+}
+
+main :: () -> s32 {
+    m: Mpegi;
+    m.width = 16;
+    m.height = 2;
+    out_buf: Plane;
+    Init(*m, *out_buf);
+    p: YCbCr;
+    VecClear(p.Y.b); for _: 0..(32) - 1 { VecPush(p.Y.b, 0) }
+    for i: 0..31 { p.Y.b[i] = cast(u8)(i * 8) }
+    res := Remap(*p, *out_buf);
+    out: Vec(u8);
+    BuilderPrint(*out, "len=% % % % %\n", res.b.count, cast(s32)res.b[0], cast(s32)res.b[1], cast(s32)res.b[2], cast(s32)res.b[3]);
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

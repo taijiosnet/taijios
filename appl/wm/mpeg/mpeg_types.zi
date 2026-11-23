@@ -1,0 +1,166 @@
+// Shared MPEG ISO 11172 data structures and constants (replaces appl/wm/mpeg/mpegio.m types).
+#import "std/vec"
+
+MBSZ :: 8192;
+
+PICTURE_SC :: 0x100;
+SLICE1_SC :: 0x101;
+SLICEN_SC :: 0x1AF;
+USER_SC :: 0x1B2;
+SEQUENCE_SC :: 0x1B3;
+EXTENSION_SC :: 0x1B5;
+SEQUENCE_EC :: 0x1B7;
+GROUP_SC :: 0x1B8;
+STREAM_EC :: 0x1B9;
+PACK_SC :: 0x1BA;
+SYSHD_SC :: 0x1BB;
+STREAM_BASE :: 0x1BC;
+PRIVSTREAM2 :: 0x1BF;
+AUDIO_STR0 :: 0x1C0;
+VIDEO_STR0 :: 0x1E0;
+
+MEXCEPT :: "mpeg: ";
+X_FORMAT :: "fmt error";
+X_READ :: "read error";
+X_WRITE :: "write error";
+X_EOF :: "premature eof";
+
+UNDEF :: 100;
+
+CONSTRAINED :: 1;
+CLOSED :: 2;
+BROKEN :: 4;
+
+FPFV :: 1;
+FPBV :: 2;
+GSTART :: 4;
+
+IPIC :: 1;
+PPIC :: 2;
+BPIC :: 3;
+DPIC :: 4;
+
+MB_Q :: 1;
+MB_MF :: 2;
+MB_MB :: 4;
+MB_P :: 8;
+MB_I :: 16;
+
+Pair :: struct {
+    a: s32;
+    b: s32;
+}
+
+Triple :: struct {
+    a: s32;
+    b: s32;
+    c: s32;
+}
+
+Stream :: struct {
+    id: u8;
+    scale: u8;
+    bound: s32;
+    fd: s32;
+}
+
+PairArray :: struct {
+    has_data: bool;
+    items: Vec(Pair);
+}
+
+MacroBlock :: struct {
+    flags: s32;
+    qscale: s32;
+    mhfc: s32;
+    mhfr: s32;
+    mvfc: s32;
+    mvfr: s32;
+    mhbc: s32;
+    mhbr: s32;
+    mvbc: s32;
+    mvbr: s32;
+    pcode: s32;
+    has_rls: bool;
+    rls: [6]PairArray;
+    addr: s32;
+}
+
+Slice :: struct {
+    blocks: Vec(MacroBlock);
+}
+
+Picture :: struct {
+    seek: s32;
+    eos: s32;
+    temporal: s32;
+    ptype: s32;
+    vbvdelay: s32;
+    flags: s32;
+    forwfc: s32;
+    backfc: s32;
+    slices: Vec(Slice);
+    addr: s32;
+}
+
+Plane :: struct {
+    b: Vec(u8);
+}
+
+YCbCr :: struct {
+    Y: Plane;
+    Cb: Plane;
+    Cr: Plane;
+}
+
+DecoderFrames :: struct {
+    I_frame: YCbCr;
+    B0_frame: YCbCr;
+    Ps0_frame: YCbCr;
+    Ps1_frame: YCbCr;
+}
+
+Mpegi :: struct {
+    fd: s32;
+    name: Text;
+    error: Text;
+    failed: bool;
+    fail_kind: Text;
+    looked: s32;
+    value: s32;
+    // info
+    width: s32;
+    height: s32;
+    aspect: s32;
+    frames: s32;
+    rate: s32;
+    vbv: s32;
+    flags: s32;
+    has_intra: bool;
+    intra: [64]s32;
+    has_nintra: bool;
+    nintra: [64]s32;
+    smpte: s32;
+    // real buffer
+    seek: s32;
+    index: s32;
+    buf_size: s32;
+    buff: [MBSZ]u8;
+    // stream buffer
+    sid: s32;
+    slim: s32;
+    sresid: s32;
+    sbits: s32;
+    svalue: s32;
+
+    packt0: s32;
+    packt1: s32;
+    packmr: s32;
+    syssz: s32;
+    boundmr: s32;
+    syspar: s32;
+    nstream: s32;
+    streams: Vec(Stream);
+    log_fd: s32;
+}
+

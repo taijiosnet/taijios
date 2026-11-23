@@ -1,0 +1,80 @@
+// Reference full 2D Inverse Discrete Cosine Transform (replaces appl/wm/mpeg/refidct.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "std/format"
+#import "std/vec"
+
+PI :: 3.14159265358979323846;
+SQRT_EIGHTH :: 0.35355339059327376220;
+
+coeff: [64]float64;
+inited: bool;
+
+Cos :: (x: float64) -> float64 {
+    r := x;
+    two_pi := 2.0 * PI;
+    while r > PI { r -= two_pi }
+    while r < -PI { r += two_pi }
+    if r < 0.0 { r = -r }
+    r2 := r * r;
+    term: float64 = 1.0;
+    sum: float64 = 1.0;
+    for k: 1..12 {
+        denom := cast(float64)(2 * k - 1) * cast(float64)(2 * k);
+        term = -term * r2 / denom;
+        sum += term;
+    }
+    return sum;
+}
+
+InitIdct :: () {
+    for f: 0..7 {
+        s := ifx f == 0 then SQRT_EIGHTH else 0.5;
+        a := cast(float64)f * (PI / 8.0);
+        for t: 0..7 {
+            coeff[f * 8 + t] = s * Cos(a * (cast(float64)t + 0.5));
+        }
+    }
+    inited = true;
+}
+
+Init :: () {
+    InitIdct();
+}
+
+Idct :: (block: []s32) {
+    if !inited { InitIdct() }
+    tmp: [64]float64;
+    for i: 0..7 {
+        for j: 0..7 {
+            p: float64 = 0.0;
+            for k: 0..7 {
+                p += coeff[k * 8 + j] * cast(float64)block[8 * i + k];
+            }
+            tmp[8 * i + j] = p;
+        }
+    }
+    for j: 0..7 {
+        for i: 0..7 {
+            p: float64 = 0.0;
+            for k: 0..7 {
+                p += coeff[k * 8 + i] * tmp[8 * k + j];
+            }
+            block[8 * i + j] = ifx p >= 0.0 then cast(s32)(p + 0.5) else cast(s32)(p - 0.5);
+        }
+    }
+}
+
+main :: () -> s32 {
+    Init();
+    b: [64]s32;
+    for i: 0..63 { b[i] = 0 }
+    b[0] = 1024;
+    b[1] = 128;
+    b[8] = -64;
+    Idct(b[:]);
+    out: Vec(u8);
+    BuilderPrint(*out, "% % % %\n", b[0], b[1], b[8], b[63]);
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}

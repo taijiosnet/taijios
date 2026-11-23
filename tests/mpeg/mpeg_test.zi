@@ -1,0 +1,220 @@
+// Guest parity test for dis/mpeg (16 modules):
+//   vlc, makergbvmap, fixidct, fltidct, refidct, scidct,
+//   mpegio, decode, decode4, remap, remap1, remap2, remap4, remap8, remap24, mpeg.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/mpeg tests/mpeg/mpeg_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/mpeg";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+// Build a valid minimal 16x16 1-frame (I-picture) MPEG-1 video elementary stream:
+// - Sequence Header (00 00 01 B3):
+//   width=16 (0x010), height=16 (0x010) -> 0x01, 0x00, 0x10
+//   aspect=1, frames=1 -> 0x11
+//   rate=1000 (18 bits), marker=1, vbv=32 (10 bits), constrained=1, intra_flag=0, nintra_flag=0:
+//   18 bits rate (0x003E8): 0000 0000 0011 1110 10
+//   1 bit marker: 1
+//   10 bits vbv (0x020): 00 0010 0000
+//   3 bits flags (1, 0, 0): 100
+//   Total 32 bits: 00000000 00111110 10100001 00000100 = 0x00, 0x3E, 0xA1, 0x04
+// - Picture Header (00 00 01 00):
+//   temporal=0 (10 bits: 0000000000)
+//   ptype=1 (IPIC, 3 bits: 001)
+//   vbvdelay=0xFFFF (16 bits: 1111111111111111)
+//   extra_bit=0 (1 bit: 0)
+//   pad=00 (2 bits)
+//   Total 32 bits: 00000000 00001111 11111111 11111000 = 0x00, 0x0F, 0xFF, 0xF8
+// - Slice 1 Header (00 00 01 01):
+//   qscale=8 (5 bits: 01000)
+//   extra_bit=0 (1 bit: 0)
+//   macroblock:
+//     mai=1 (1 bit: 1)
+//     mbi=0 (MB_I, 1 bit: 1)
+//     6 blocks (4 Y + Cb + Cr), each DC diff=0 + EOB:
+//       Y DC size=0 -> ydc code "100" (3 bits), EOB -> "10" (2 bits) -> 5 bits per Y block * 4 = 20 bits:
+//       10010 10010 10010 10010
+//       C DC size=0 -> cdc code "00" (2 bits), EOB -> "10" (2 bits) -> 4 bits per C block * 2 = 8 bits:
+//       0010 0010
+//      Followed by 23 zero bits (end of slice) + padding!
+//   Let's pack the slice bitstream after 00 00 01 01:
+//     qscale(01000) + extra(0) + mai(1) + mbi(1) = 0100 0011 = 0x43
+//     Y0(10010) + Y1(10010) + Y2(10010) + Y3(10010) + Cb(0010) = 10010100 10100101 00100010 = 0x94, 0xA5, 0x22
+//     Cr(0010) + 0000 = 00100000 = 0x20
+//     followed by 0x00, 0x00, 0x00 (24 zero bits for speekn(23) == 0)
+// - Sequence End Code (00 00 01 B7)
+WriteSampleMpeg :: (path: string) -> bool {
+    bytes: [28]u8 = .[
+        // Sequence header
+        0x00, 0x00, 0x01, 0xB3,
+        0x01, 0x00, 0x10, 0x11,
+        0x00, 0x3E, 0xA1, 0x04,
+        // Picture header (I-frame)
+        0x00, 0x00, 0x01, 0x00,
+        0x00, 0x0F, 0xFF, 0xF8,
+        // Slice 1
+        0x00, 0x00, 0x01, 0x01,
+        0x43, 0x94, 0xA5, 0x22
+    ];
+    tail: [8]u8 = .[
+        0x20, 0x00, 0x00, 0x00,
+        // Sequence end
+        0x00, 0x00, 0x01, 0xB7
+    ];
+    buf: Vec(u8);
+    unused BuilderAppend(buf, TextView(bytes[:]));
+    unused BuilderAppend(buf, TextView(tail[:]));
+    return WriteEntireFile(path, TextView(buf[:]));
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".zx";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/mpeg/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    Expect(WriteSampleMpeg("build/dis-legacy-math/mpeg/sample.mpg"), "write sample.mpg");
+    unused WriteEntireFile("build/dis-legacy-math/mpeg/c4.vlc", "# test vlc\n0s\t1,16\n1s\t2,5\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    BuilderPrint(*script, "bind -b /dis/mpeg /dis\n");
+
+    if suffix == ".dis" {
+        drv: Vec(u8);
+        BuilderPrint(*drv, "implement MpegDrv;\n");
+        BuilderPrint(*drv, "include \"sys.m\"; sys: Sys;\n");
+        BuilderPrint(*drv, "include \"draw.m\";\n");
+        BuilderPrint(*drv, "include \"mpegio.m\"; mio: Mpegio; Mpegi: import mio;\n");
+        BuilderPrint(*drv, "MpegDrv: module { init: fn(nil: ref Draw->Context, nil: list of string); };\n");
+        BuilderPrint(*drv, "run_idct(path: string): string {\n");
+        BuilderPrint(*drv, "  m := load IDCT path;\n");
+        BuilderPrint(*drv, "  m->init();\n");
+        BuilderPrint(*drv, "  b := array[64] of { * => 0 };\n");
+        BuilderPrint(*drv, "  b[0] = 1024; b[1] = 128; b[8] = -64;\n");
+        BuilderPrint(*drv, "  m->idct(b);\n");
+        BuilderPrint(*drv, "  return sys->sprint(\"%%d %%d %%d %%d\\n\", b[0], b[1], b[8], b[63]);\n");
+        BuilderPrint(*drv, "}\n");
+        BuilderPrint(*drv, "init(nil: ref Draw->Context, nil: list of string) {\n");
+        BuilderPrint(*drv, "  sys = load Sys Sys->PATH;\n");
+        BuilderPrint(*drv, "  sys->print(\"fix: %%s\", run_idct(IDCT->XPATH));\n");
+        BuilderPrint(*drv, "  sys->print(\"flt: %%s\", run_idct(IDCT->FPATH));\n");
+        BuilderPrint(*drv, "  sys->print(\"ref: %%s\", run_idct(IDCT->RPATH));\n");
+        BuilderPrint(*drv, "  sys->print(\"sci: %%s\", run_idct(IDCT->SPATH));\n");
+        BuilderPrint(*drv, "  mio = load Mpegio Mpegio->PATH;\n");
+        BuilderPrint(*drv, "  mio->init();\n");
+        BuilderPrint(*drv, "  fd := sys->open(\"/%/sample.mpg\", Sys->OREAD);\n", WORK);
+        BuilderPrint(*drv, "  mi := mio->prepare(fd, \"sample.mpg\");\n");
+        BuilderPrint(*drv, "  mi.streaminit(Mpegio->VIDEO_STR0);\n");
+        BuilderPrint(*drv, "  p := mi.getpicture(1);\n");
+        BuilderPrint(*drv, "  sys->print(\"mio: %%dx%%d ptype=%%d slices=%%d mbs=%%d\\n\", mi.width, mi.height, p.ptype, len p.slices, len p.slices[0].blocks);\n");
+        BuilderPrint(*drv, "  dec := load Mpegd Mpegd->PATH;\n");
+        BuilderPrint(*drv, "  dec->init(mi);\n");
+        BuilderPrint(*drv, "  f := dec->Idecode(p);\n");
+        BuilderPrint(*drv, "  sys->print(\"dec: Y=%%d %%d %%d Cb=%%d Cr=%%d\\n\", int f.Y[0], int f.Y[1], int f.Y[255], int f.Cb[0], int f.Cr[0]);\n");
+        BuilderPrint(*drv, "  dec4 := load Mpegd Mpegd->PATH4;\n");
+        BuilderPrint(*drv, "  dec4->init(mi);\n");
+        BuilderPrint(*drv, "  f4 := dec4->Idecode(p);\n");
+        BuilderPrint(*drv, "  sys->print(\"dec4: Y=%%d %%d %%d\\n\", int f4.Y[0], int f4.Y[1], int f4.Y[255]);\n");
+        BuilderPrint(*drv, "  r1 := load Remap Remap->PATH1; r1->init(mi); b1 := r1->remap(f);\n");
+        BuilderPrint(*drv, "  r2 := load Remap Remap->PATH2; r2->init(mi); b2 := r2->remap(f);\n");
+        BuilderPrint(*drv, "  r4 := load Remap Remap->PATH4; r4->init(mi); b4 := r4->remap(f);\n");
+        BuilderPrint(*drv, "  r8 := load Remap \"/dis/mpeg/remap8.dis\"; r8->init(mi); b8 := r8->remap(f);\n");
+        BuilderPrint(*drv, "  rm := load Remap Remap->PATH; rm->init(mi); bm := rm->remap(f);\n");
+        BuilderPrint(*drv, "  r24 := load Remap Remap->PATH24; r24->init(mi); b24 := r24->remap(f);\n");
+        BuilderPrint(*drv, "  sys->print(\"remaps: %%d:%%d %%d:%%d %%d:%%d %%d:%%d %%d:%%d %%d:%%d\\n\", len b1, int b1[0], len b2, int b2[0], len b4, int b4[0], len b8, int b8[0], len bm, int bm[0], len b24, int b24[0]);\n");
+        BuilderPrint(*drv, "}\n");
+        unused WriteEntireFile("build/dis-legacy-math/mpeg/drv.b", BuilderFinish(drv));
+        limbo_cmd: [6]string = .["Linux/386/bin/limbo", "-Imodule", "-Iappl/wm/mpeg", "-o", "build/dis-legacy-math/mpeg/drv.dis", "build/dis-legacy-math/mpeg/drv.b"];
+        lrun: ProcessRun;
+        Expect(RunProcess(.{arguments = limbo_cmd[:], capture_output = true}, *lrun), "compile limbo mpeg driver");
+        BuilderPrint(*script, "vlc -cfp c4 < /%/c4.vlc > result/vlc.out\n", WORK);
+        BuilderPrint(*script, "/%/drv.dis > result/drv.out\n", WORK);
+    } else {
+        BuilderPrint(*script, "vlc -cfp c4 < /%/c4.vlc > result/vlc.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/makergbvmap.zx > result/rgbvmap.out\n");
+        BuilderPrint(*script, "/dis/mpeg/fixidct.zx > result/fixidct.out\n");
+        BuilderPrint(*script, "/dis/mpeg/fltidct.zx > result/fltidct.out\n");
+        BuilderPrint(*script, "/dis/mpeg/refidct.zx > result/refidct.out\n");
+        BuilderPrint(*script, "/dis/mpeg/scidct.zx > result/scidct.out\n");
+        BuilderPrint(*script, "/dis/mpeg/mpegio.zx /%/sample.mpg > result/mpegio.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/decode.zx /%/sample.mpg > result/decode.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/decode4.zx /%/sample.mpg > result/decode4.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 1 /%/sample.mpg > result/mpeg1.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 2 /%/sample.mpg > result/mpeg2.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 4 /%/sample.mpg > result/mpeg4.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 8 /%/sample.mpg > result/mpeg8.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 24 /%/sample.mpg > result/mpeg24.out\n", WORK);
+        BuilderPrint(*script, "/dis/mpeg/remap8.zx > result/remap8.out\n");
+    }
+    BuilderPrint(*script, "echo halt > /dev/sysctl\n");
+    unused WriteEntireFile("build/dis-legacy-math/mpeg/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    expected_c4, ok_c4 := ReadEntireFile("appl/wm/mpeg/c4.tab");
+    Expect(ok_c4 && Result("vlc.out") == expected_c4, "vlc -cfp c4 matches c4.tab");
+
+    if suffix == ".dis" {
+        dout := Result("drv.out");
+        Expect(dout == "fix: 137 133 138 117\nflt: 139 136 141 117\nref: 139 136 141 117\nsci: 139 136 141 117\nmio: 16x16 ptype=1 slices=1 mbs=1\ndec: Y=128 128 128 Cb=128 Cr=128\ndec4: Y=128 128 128\nremaps: 32:255 64:170 128:136 256:119 256:119 768:128\n", "dis mpeg driver parity");
+    } else {
+        rgbv := Result("rgbvmap.out");
+        Expect(rgbv.count == 6913 && rgbv[0:58] == "rgbvmap := array[3*256] of {\n\tbyte\t255,byte\t255,byte\t255,\n", "zx makergbvmap matches rgbvmap.m");
+        Expect(Result("fixidct.out") == "137 133 138 117\n", "zx fixidct");
+        Expect(Result("fltidct.out") == "139 136 141 117\n", "zx fltidct");
+        Expect(Result("refidct.out") == "139 136 141 117\n", "zx refidct");
+        Expect(Result("scidct.out") == "139 136 141 117\n", "zx scidct");
+        Expect(Result("mpegio.out") == "16x16 ptype=1 slices=1 mbs=1\n", "zx mpegio");
+        Expect(Result("decode.out") == "Y=128 128 128 Cb=128 Cr=128\n", "zx decode");
+        Expect(Result("decode4.out") == "Y=128 128 128\n", "zx decode4");
+        Expect(Result("mpeg1.out") == "depth=1 frames=1 bytes=32 b0=255\n", "zx mpeg -d 1 (remap1)");
+        Expect(Result("mpeg2.out") == "depth=2 frames=1 bytes=64 b0=170\n", "zx mpeg -d 2 (remap2)");
+        Expect(Result("mpeg4.out") == "depth=4 frames=1 bytes=128 b0=136\n", "zx mpeg -d 4 (remap4)");
+        Expect(Result("mpeg8.out") == "depth=8 frames=1 bytes=256 b0=119\n", "zx mpeg -d 8 (remap)");
+        Expect(Result("mpeg24.out") == "depth=24 frames=1 bytes=768 b0=128\n", "zx mpeg -d 24 (remap24)");
+        Expect(Result("remap8.out") == "len=8 153 153 182 165\n", "zx remap8");
+    }
+
+    if failures != 0 {
+        print("mpeg_test: % failures\n", failures);
+        return 1;
+    }
+    print("mpeg_test: all checks passed\n");
+    return 0;
+}

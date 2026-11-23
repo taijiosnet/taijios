@@ -1,47 +1,42 @@
 <../../../mkconfig
 
-TARG=\
-	decode.dis\
-	decode4.dis\
-	fixidct.dis\
-	fltidct.dis\
-	makergbvmap.dis\
-	mpegio.dis\
-	refidct.dis\
-	remap.dis\
-	remap1.dis\
-	remap2.dis\
-	remap4.dis\
-	remap24.dis\
-	remap8.dis\
-	scidct.dis\
-	vlc.dis\
+ZI2ZX=zi2zx
+ZXBIN=$ROOT/dis/mpeg
+ZIFLAGS=--root . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_io
 
-MODULES=\
-	closest.m\
-	mpegio.m\
-	rgbvmap.m\
+ZXCOMMANDS=\
+	decode\
+	decode4\
+	fixidct\
+	fltidct\
+	makergbvmap\
+	mpeg\
+	mpegio\
+	refidct\
+	remap\
+	remap1\
+	remap2\
+	remap4\
+	remap8\
+	remap24\
+	scidct\
+	vlc\
 
-SYSMODULES=\
-	bufio.m\
-	draw.m\
-	math.m\
-	sys.m\
-	tk.m\
-	wmlib.m\
+ZXTARGETS=${ZXCOMMANDS:%=%.zx}
+ZXINSTALL=${ZXCOMMANDS:%=$ZXBIN/%.zx}
 
-DISBIN=$ROOT/dis/mpeg
+all:V:		$ZXTARGETS
 
-<$ROOT/mkfiles/mkdis
+install:V:	$ZXINSTALL
 
-all:V:		mpeg.dis
+clean:V:
+	rm -f *.zx *.dis *.sbl
 
-install:V:	$ROOT/dis/mpeg/mpeg.dis
+nuke:V:		clean
+	cd $ZXBIN; rm -f $ZXTARGETS
 
-$ROOT/dis/mpeg/mpeg.dis:	mpeg.dis
-	rm -f $target && cp mpeg.dis $target
+%.zx:	%.zi
+	$ZI2ZX $ZIFLAGS --entry $stem:main -o $target $stem.zi
 
-mpeg.dis:	$MODULES $SYS_MODULE
-
-nuke:V:
-	rm -f $ROOT/dis/mpeg/mpeg.dis
+$ZXBIN/%.zx:	%.zx
+	install -m 0755 $stem.zx $target

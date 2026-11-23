@@ -1,0 +1,993 @@
+// MPEG ISO 11172 IO and bitstream parser module (replaces appl/wm/mpeg/mpegio.b).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+#import "mpeg_types"
+Tabs :: #import "mpeg_tabs";
+#import "std/format"
+#import "std/vec"
+
+mbif: [2]s32 = .[
+    16,
+    17
+];
+
+mbpf: [7]s32 = .[
+    2,
+    8,
+    9,
+    10,
+    11,
+    16,
+    17
+];
+
+mbbf: [11]s32 = .[
+    2,
+    4,
+    6,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17
+];
+
+c_bits: [7]s32 = .[
+    5,
+    4,
+    4,
+    2,
+    2,
+    2,
+    2
+];
+
+patcode: [6]s32 = .[
+    32, 16, 8, 4, 2, 1
+];
+
+bits_mask: [33]s32 = .[
+    0,
+    0x1, 0x3, 0x7, 0xF,
+    0x1F, 0x3F, 0x7F, 0xFF,
+    0x1FF, 0x3FF, 0x7FF, 0xFFF,
+    0x1FFF, 0x3FFF, 0x7FFF, 0xFFFF,
+    0x1FFFF, 0x3FFFF, 0x7FFFF, 0xFFFFF,
+    0x1FFFFF, 0x3FFFFF, 0x7FFFFF, 0xFFFFFF,
+    0x1FFFFFF, 0x3FFFFFF, 0x7FFFFFF, 0xFFFFFFF,
+    0x1FFFFFFF, 0x3FFFFFFF, 0x7FFFFFFF, -1
+];
+
+sign_mask: [9]s32 = .[
+    0,
+    0x1, 0x2, 0x4, 0x8,
+    0x10, 0x20, 0x40, 0x80
+];
+
+CopyTextInto :: (dst: *Text, s: string) {
+    VecClear(dst.bytes);
+    unused BuilderAppend(dst.bytes, s);
+}
+
+AppendHexLower :: (out: *Vec(u8), v_in: s32) {
+    if v_in == 0 {
+        VecPush(out.*, 48);
+        return;
+    }
+    hex := "0123456789abcdef";
+    uv := cast(u32)v_in;
+    tmp: [8]u8;
+    n: s64 = 0;
+    while uv > 0 {
+        tmp[n] = cast(u8)hex[cast(s64)(uv & 15)];
+        n += 1;
+        uv = uv >> 4;
+    }
+    while n > 0 {
+        n -= 1;
+        VecPush(out.*, tmp[n]);
+    }
+}
+
+Init :: () {
+    Tabs.InitTables();
+}
+
+Raisex :: (m: *Mpegi, s: string) {
+    m.failed = true;
+    VecClear(m.fail_kind.bytes);
+    unused BuilderAppend(m.fail_kind.bytes, MEXCEPT);
+    unused BuilderAppend(m.fail_kind.bytes, s);
+}
+
+FmtErr :: (m: *Mpegi, s: string) {
+    CopyTextInto(*m.error, s);
+    Raisex(m, X_FORMAT);
+}
+
+Prepare :: (fd: s32, name: string, m: *Mpegi) {
+    Tabs.InitTables();
+    m.fd = fd;
+    CopyTextInto(*m.name, name);
+    VecClear(m.error.bytes);
+    m.failed = false;
+    VecClear(m.fail_kind.bytes);
+    m.seek = 0;
+    m.looked = 0;
+    m.index = 0;
+    m.buf_size = 0;
+    m.width = 0;
+    m.height = 0;
+    m.aspect = 0;
+    m.frames = 0;
+    m.rate = 0;
+    m.vbv = 0;
+    m.flags = 0;
+    m.has_intra = false;
+    m.has_nintra = false;
+    m.smpte = 0;
+    m.sid = 0;
+    m.slim = 0;
+    m.sresid = 0;
+    m.sbits = 0;
+    m.svalue = 0;
+    m.nstream = 0;
+    VecClear(m.streams);
+    m.log_fd = -1;
+}
+
+Fill :: (m: *Mpegi) {
+    if m.failed { return }
+    n := cast(s32)Io.Read(m.fd, m.buff[:]);
+    if n < 0 {
+        CopyTextInto(*m.error, "read failed");
+        Raisex(m, X_READ);
+        return;
+    }
+    if n == 0 {
+        Raisex(m, X_EOF);
+        return;
+    }
+    m.seek += n;
+    m.index = 0;
+    m.buf_size = n;
+}
+
+Tell :: (m: *Mpegi) -> s32 {
+    return m.seek - m.buf_size + m.index;
+}
+
+SkipN :: (m: *Mpegi, n_in: s32) {
+    n := n_in;
+    while !m.failed {
+        r := m.buf_size - m.index;
+        if r >= n {
+            m.index += n;
+            return;
+        }
+        n -= r;
+        Fill(m);
+    }
+}
+
+GetB :: (m: *Mpegi) -> s32 {
+    if m.index == m.buf_size {
+        Fill(m);
+        if m.failed { return 0 }
+    }
+    b := cast(s32)m.buff[cast(s64)m.index];
+    m.index += 1;
+    return b;
+}
+
+GetW :: (m: *Mpegi) -> s32 {
+    t := GetB(m);
+    return (t << 8) | GetB(m);
+}
+
+Get22 :: (m: *Mpegi, s: string) -> s32 {
+    u := GetB(m);
+    if (u & 0x80) == 0 {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "% mark 0", s);
+        FmtErr(m, TextView(eb[:]));
+        return 0;
+    }
+    v := GetB(m);
+    w := GetB(m);
+    if (w & 1) == 0 {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "% mark 1", s);
+        FmtErr(m, TextView(eb[:]));
+        return 0;
+    }
+    return ((u & 0x7F) << 15) | (v << 7) | (w >> 1);
+}
+
+GetSc :: (m: *Mpegi) -> s32 {
+    if GetB(m) != 0 || GetB(m) != 0 {
+        FmtErr(m, "start code 0s");
+        return 0;
+    }
+    c := GetB(m);
+    while !m.failed && c == 0 {
+        c = GetB(m);
+    }
+    if c != 1 {
+        FmtErr(m, "start code 1");
+        return 0;
+    }
+    return 0x100 | GetB(m);
+}
+
+NextSc :: (m: *Mpegi) -> s32 {
+    if m.looked != 0 {
+        m.looked = 0;
+        return m.value;
+    }
+    return GetSc(m);
+}
+
+PeekSc :: (m: *Mpegi) -> s32 {
+    if m.looked == 0 {
+        m.value = GetSc(m);
+        m.looked = 1;
+    }
+    return m.value;
+}
+
+XNextSc :: (m: *Mpegi, x: s32) {
+    c := NextSc(m);
+    if c != x {
+        eb: Vec(u8);
+        unused BuilderAppend(eb, "startcode ");
+        AppendHexLower(*eb, x);
+        unused BuilderAppend(eb, ", got ");
+        AppendHexLower(*eb, c);
+        FmtErr(m, TextView(eb[:]));
+    }
+}
+
+PackHdr :: (m: *Mpegi) {
+    t := GetB(m);
+    if (t & 0xF1) != 0x21 {
+        FmtErr(m, "pack tag");
+        return;
+    }
+    m.packt0 = (t >> 1) & 7;
+    v := GetB(m) << 22;
+    t = GetB(m);
+    if (t & 1) == 0 {
+        FmtErr(m, "packt mark 1");
+        return;
+    }
+    v |= ((t & -2) << 15) | (GetB(m) << 7);
+    t = GetB(m);
+    if (t & 1) == 0 {
+        FmtErr(m, "packt mark 2");
+        return;
+    }
+    m.packt1 = v | (t >> 1);
+    m.packmr = Get22(m, "packmr");
+}
+
+SysHdr :: (m: *Mpegi) {
+    l := GetW(m);
+    if l != m.syssz {
+        FmtErr(m, "syshdr size mismatch");
+        return;
+    }
+    SkipN(m, l);
+}
+
+Stamps :: (m: *Mpegi) -> s32 {
+    n: s32 = 1;
+    c := GetB(m);
+    while !m.failed && c == 0xFF {
+        n += 1;
+        c = GetB(m);
+    }
+    if (c >> 6) == 1 {
+        unused GetB(m);
+        c = GetB(m);
+        n += 2;
+    }
+    tag := c >> 4;
+    if tag == 2 {
+        SkipN(m, 4);
+        n += 4;
+    } else if tag == 3 {
+        SkipN(m, 9);
+        n += 9;
+    } else if c != 0xF {
+        FmtErr(m, "stamps");
+    }
+    return n;
+}
+
+StartSys :: (m: *Mpegi) {
+    XNextSc(m, PACK_SC);
+    PackHdr(m);
+    XNextSc(m, SYSHD_SC);
+    m.syssz = GetW(m);
+    m.boundmr = Get22(m, "boundmr");
+    m.syspar = GetW(m);
+    if (m.syspar & 0x20) == 0 || GetB(m) != 0xFF {
+        FmtErr(m, "syspar");
+        return;
+    }
+    t := m.syssz - 6;
+    if t <= 0 || (t % 3) != 0 {
+        FmtErr(m, "syssz");
+        return;
+    }
+    t /= 3;
+    m.nstream = t;
+    VecClear(m.streams);
+    for _: 0..cast(s64)t - 1 {
+        v := GetB(m);
+        if (v & 0x80) == 0 {
+            FmtErr(m, "streamid");
+            return;
+        }
+        w := GetB(m);
+        if (w & 0xC0) != 0xC0 {
+            FmtErr(m, "stream mark");
+            return;
+        }
+        st: Stream;
+        st.id = cast(u8)v;
+        st.scale = cast(u8)((w >> 5) & 1);
+        st.bound = ((w & 0x1F) << 8) | GetB(m);
+        st.fd = -1;
+        VecPush(m.streams, st);
+    }
+}
+
+GetFd :: (m: *Mpegi, c: s32) -> s32 {
+    id := cast(u8)c;
+    for i: 0..m.streams.count - 1 {
+        if m.streams[i].id == id {
+            return m.streams[i].fd;
+        }
+    }
+    return -1;
+}
+
+Cpn :: (m: *Mpegi, fd: s32, n_in: s32) {
+    n := n_in;
+    while !m.failed {
+        r := m.buf_size - m.index;
+        if r >= n {
+            s := TextView(m.buff[cast(s64)m.index:cast(s64)(m.index + n)]);
+            if Io.Write(fd, s) < 0 {
+                Raisex(m, X_WRITE);
+                return;
+            }
+            m.index += n;
+            return;
+        }
+        s := TextView(m.buff[cast(s64)m.index:cast(s64)(m.index + r)]);
+        if Io.Write(fd, s) < 0 {
+            Raisex(m, X_WRITE);
+            return;
+        }
+        Fill(m);
+        n -= r;
+    }
+}
+
+PacketCp :: (m: *Mpegi) -> s32 {
+    while !m.failed {
+        c := NextSc(m);
+        if m.failed || c == STREAM_EC { break }
+        if c == PACK_SC {
+            PackHdr(m);
+        } else if c == SYSHD_SC {
+            SysHdr(m);
+        } else {
+            if c < STREAM_BASE {
+                eb: Vec(u8);
+                unused BuilderAppend(eb, "stream code ");
+                AppendHexLower(*eb, c);
+                FmtErr(m, TextView(eb[:]));
+                return 0;
+            }
+            l := GetW(m);
+            fd := GetFd(m, c);
+            if fd >= 0 {
+                if c != PRIVSTREAM2 {
+                    l -= Stamps(m);
+                }
+                if m.log_fd >= 0 {
+                    lb: Vec(u8);
+                    AppendHexLower(*lb, c & 0xFF);
+                    BuilderPrint(*lb, " % %\n", Tell(m), l);
+                    unused Io.Write(m.log_fd, TextView(lb[:]));
+                }
+                Cpn(m, fd, l);
+            } else {
+                SkipN(m, l);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+Sseek :: (m: *Mpegi) {
+    while !m.failed {
+        c := NextSc(m);
+        if m.failed || c == STREAM_EC { break }
+        if c == PACK_SC {
+            PackHdr(m);
+        } else if c == SYSHD_SC {
+            SysHdr(m);
+        } else {
+            if c < STREAM_BASE {
+                eb: Vec(u8);
+                unused BuilderAppend(eb, "stream code ");
+                AppendHexLower(*eb, c);
+                FmtErr(m, TextView(eb[:]));
+                return;
+            }
+            l := GetW(m);
+            if c == m.sid {
+                if c != PRIVSTREAM2 {
+                    l -= Stamps(m);
+                }
+                n := m.buf_size - m.index;
+                if l <= n {
+                    m.slim = m.index + l;
+                    m.sresid = 0;
+                } else {
+                    m.slim = m.buf_size;
+                    m.sresid = l - n;
+                }
+                return;
+            } else {
+                SkipN(m, l);
+            }
+        }
+    }
+    FmtErr(m, "end of stream");
+}
+
+Sfill :: (m: *Mpegi) {
+    r := m.sresid;
+    if r < 0 {
+        Fill(m);
+        m.slim = m.buf_size;
+    } else if r > 0 {
+        Fill(m);
+        if r <= m.buf_size {
+            m.slim = r;
+            m.sresid = 0;
+        } else {
+            m.slim = m.buf_size;
+            m.sresid = r - m.buf_size;
+        }
+    } else {
+        Sseek(m);
+    }
+}
+
+SgetB :: (m: *Mpegi) -> s32 {
+    if m.index == m.slim {
+        Sfill(m);
+        if m.failed { return 0 }
+    }
+    b := cast(s32)m.buff[cast(s64)m.index];
+    m.index += 1;
+    return b;
+}
+
+SgetN :: (m: *Mpegi, n: s32) -> s32 {
+    b := m.sbits;
+    v := m.svalue;
+    if b < n {
+        while b < n && !m.failed {
+            v = (v << 8) | SgetB(m);
+            b += 8;
+        }
+        m.svalue = v;
+    }
+    b -= n;
+    m.sbits = b;
+    return (v >> b) & bits_mask[cast(s64)n];
+}
+
+SdiffN :: (m: *Mpegi, n: s32) -> s32 {
+    i := SgetN(m, n);
+    if (i & sign_mask[cast(s64)n]) != 0 {
+        return i;
+    }
+    return i - bits_mask[cast(s64)n];
+}
+
+SpeekN :: (m: *Mpegi, n: s32) -> s32 {
+    b := m.sbits;
+    v := m.svalue;
+    if b < n {
+        while b < n && !m.failed {
+            v = (v << 8) | SgetB(m);
+            b += 8;
+        }
+        m.sbits = b;
+        m.svalue = v;
+    }
+    return (v >> (b - n)) & bits_mask[cast(s64)n];
+}
+
+Smarker :: (m: *Mpegi) {
+    if SgetN(m, 1) == 0 {
+        FmtErr(m, "marker");
+    }
+}
+
+SgetSc :: (m: *Mpegi) -> s32 {
+    b := m.sbits;
+    if b >= 8 {
+        if b >= 16 {
+            if b >= 24 {
+                v24 := m.svalue & 0xFFFFFF;
+                if v24 == 0 {
+                } else if v24 == 1 {
+                    m.sbits = 0;
+                    return 0x100 | SgetB(m);
+                } else {
+                    FmtErr(m, "start code 0s - 3");
+                    return 0;
+                }
+            } else if (m.svalue & 0xFFFF) != 0 {
+                FmtErr(m, "start code 0s - 2");
+                return 0;
+            }
+        } else if (m.svalue & 0xFF) != 0 || SgetB(m) != 0 {
+            FmtErr(m, "start code 0s - 1");
+            return 0;
+        }
+    } else if SgetB(m) != 0 || SgetB(m) != 0 {
+        FmtErr(m, "start code 0s");
+        return 0;
+    }
+    m.sbits = 0;
+    c := SgetB(m);
+    while !m.failed && c == 0 {
+        c = SgetB(m);
+    }
+    if c != 1 {
+        FmtErr(m, "start code 1");
+        return 0;
+    }
+    return 0x100 | SgetB(m);
+}
+
+SnextSc :: (m: *Mpegi) -> s32 {
+    if m.looked != 0 {
+        m.looked = 0;
+        return m.value;
+    }
+    return SgetSc(m);
+}
+
+SpeekSc :: (m: *Mpegi) -> s32 {
+    if m.looked == 0 {
+        m.value = SgetSc(m);
+        m.looked = 1;
+    }
+    return m.value;
+}
+
+SseekSc :: (m: *Mpegi) {
+    n: s32 = 0;
+    while !m.failed {
+        c := SgetB(m);
+        if m.failed { return }
+        if c == 0 {
+            n += 1;
+        } else if c == 1 {
+            if n >= 2 {
+                m.value = 0x100 | SgetB(m);
+                m.looked = 1;
+                return;
+            }
+            n = 0;
+        } else {
+            n = 0;
+        }
+    }
+}
+
+Svlc :: (m: *Mpegi, a: []Pair, n: s32, s: string) -> s32 {
+    idx := SpeekN(m, n);
+    p := a[cast(s64)idx];
+    if p.b == UNDEF {
+        eb: Vec(u8);
+        BuilderPrint(*eb, "% vlc", s);
+        FmtErr(m, TextView(eb[:]));
+        return 0;
+    }
+    m.sbits -= p.a;
+    return p.b;
+}
+
+LookupCTable :: (r: s32, idx: s32) -> Pair {
+    i := cast(s64)idx;
+    if r == 0 { return Tabs.c1_table[i] }
+    if r == 1 { return Tabs.c2_table[i] }
+    if r == 2 { return Tabs.c3_table[i] }
+    if r == 3 { return Tabs.c4_table[i] }
+    if r == 4 { return Tabs.c5_table[i] }
+    if r == 5 { return Tabs.c6_table[i] }
+    return Tabs.c7_table[i];
+}
+
+Sdct :: (m: *Mpegi, a: []Triple, s: string) -> Pair {
+    idx := SpeekN(m, Tabs.rl0f_bits);
+    tr := a[cast(s64)idx];
+    b := tr.a;
+    l := tr.b;
+    r := tr.c;
+    m.sbits -= b;
+    if r < 0 {
+        if r == Tabs.EOB {
+        } else if r == Tabs.ESC {
+            r = SgetN(m, 6);
+            l = SgetN(m, 8);
+            if l == 0 {
+                l = SgetN(m, 8);
+                if l < 128 {
+                    eb: Vec(u8);
+                    BuilderPrint(*eb, "% esc +7", s);
+                    FmtErr(m, TextView(eb[:]));
+                }
+            } else if l == 128 {
+                l = SgetN(m, 8) - 256;
+                if l > -128 {
+                    eb: Vec(u8);
+                    BuilderPrint(*eb, "% esc -7", s);
+                    FmtErr(m, TextView(eb[:]));
+                }
+            } else {
+                l = (l << 24) >> 24;
+            }
+        } else if r == Tabs.C0 {
+            tr0 := Tabs.c0_table[cast(s64)SpeekN(m, Tabs.c0_bits)];
+            b = tr0.a;
+            l = tr0.b;
+            r = tr0.c;
+            if r == UNDEF {
+                eb: Vec(u8);
+                BuilderPrint(*eb, "% c0 vlc", s);
+                FmtErr(m, TextView(eb[:]));
+            }
+            m.sbits -= b;
+        } else {
+            r_idx := Tabs.C1 - r;
+            pr := LookupCTable(r_idx, SgetN(m, c_bits[cast(s64)r_idx]));
+            l = pr.a;
+            r = pr.b;
+        }
+    }
+    return .{a = r, b = l};
+}
+
+StreamInit :: (m: *Mpegi, c: s32) {
+    m.sid = c;
+    s := PeekSc(m);
+    if s == PACK_SC {
+        StartSys(m);
+        f := false;
+        id := cast(u8)m.sid;
+        for i: 0..m.streams.count - 1 {
+            if m.streams[i].id == id {
+                f = true;
+                break;
+            }
+        }
+        if !f {
+            eb: Vec(u8);
+            AppendHexLower(*eb, c);
+            unused BuilderAppend(eb, ": stream not found");
+            FmtErr(m, TextView(eb[:]));
+            return;
+        }
+        Sseek(m);
+    } else if s == SEQUENCE_SC {
+        m.sresid = -1;
+        m.slim = m.buf_size;
+    } else {
+        eb: Vec(u8);
+        unused BuilderAppend(eb, "start code = ");
+        AppendHexLower(*eb, s);
+        FmtErr(m, TextView(eb[:]));
+        return;
+    }
+    m.sbits = 0;
+}
+
+SeqHdr :: (m: *Mpegi) {
+    c := SgetB(m);
+    d := SgetB(m);
+    m.width = (c << 4) | (d >> 4);
+    m.height = ((d & 0xF) << 8) | SgetB(m);
+    c = SgetB(m);
+    m.aspect = c >> 4;
+    m.frames = c & 0xF;
+    m.rate = SgetN(m, 18);
+    Smarker(m);
+    m.vbv = SgetN(m, 10);
+    m.flags = 0;
+    if SgetN(m, 1) != 0 {
+        m.flags |= CONSTRAINED;
+    }
+    if SgetN(m, 1) != 0 {
+        m.has_intra = true;
+        for i: 0..63 { m.intra[i] = SgetN(m, 8) }
+    }
+    if SgetN(m, 1) != 0 {
+        m.has_nintra = true;
+        for i: 0..63 { m.nintra[i] = SgetN(m, 8) }
+    }
+    if SpeekSc(m) == EXTENSION_SC { SseekSc(m) }
+    if SpeekSc(m) == USER_SC { SseekSc(m) }
+}
+
+GrpHdr :: (m: *Mpegi) {
+    v := SgetB(m) << 17;
+    v |= SgetB(m) << 9;
+    v |= SgetB(m) << 1;
+    c := SgetB(m);
+    m.smpte = v | (c >> 7);
+    if (c & (1 << 6)) != 0 {
+        m.flags |= CLOSED;
+    } else {
+        m.flags &= -1 ^ CLOSED;
+    }
+    if (c & (1 << 5)) != 0 {
+        m.flags |= BROKEN;
+    } else {
+        m.flags &= -1 ^ BROKEN;
+    }
+    if SpeekSc(m) == EXTENSION_SC { SseekSc(m) }
+    if SpeekSc(m) == USER_SC { SseekSc(m) }
+}
+
+SliceParse :: (m: *Mpegi, p: *Picture, s_out: *Slice) {
+    VecClear(s_out.blocks);
+    unused SnextSc(m);
+    q := SgetN(m, 5);
+    while !m.failed && SgetN(m, 1) != 0 {
+        unused SgetN(m, 8);
+    }
+    x := p.addr;
+    while !m.failed && SpeekN(m, 23) != 0 {
+        while !m.failed && SpeekN(m, 11) == 0xF {
+            m.sbits -= 11;
+        }
+        while !m.failed && SpeekN(m, 11) == 0x8 {
+            x += 33;
+            m.sbits -= 11;
+        }
+        inc := Svlc(m, Tabs.mai_table[:], Tabs.mai_bits, "mai");
+        x += inc;
+        b: MacroBlock;
+        b.addr = x;
+        b.flags = 0;
+        b.qscale = 0;
+        b.mhfc = 0; b.mhfr = 0; b.mvfc = 0; b.mvfr = 0;
+        b.mhbc = 0; b.mhbr = 0; b.mvbc = 0; b.mvbr = 0;
+        b.pcode = 0;
+        b.has_rls = false;
+        for ri: 0..5 {
+            b.rls[ri].has_data = false;
+        }
+        if p.ptype == IPIC {
+            b.flags = mbif[cast(s64)Svlc(m, Tabs.mbi_table[:], Tabs.mbi_bits, "mbi")];
+        } else if p.ptype == PPIC {
+            b.flags = mbpf[cast(s64)Svlc(m, Tabs.mbp_table[:], Tabs.mbp_bits, "mbp")];
+        } else if p.ptype == BPIC {
+            b.flags = mbbf[cast(s64)Svlc(m, Tabs.mbb_table[:], Tabs.mbb_bits, "mbb")];
+        } else if p.ptype == DPIC {
+            if SgetN(m, 1) == 0 {
+                FmtErr(m, "mbd flags");
+                return;
+            }
+            b.flags = MB_I;
+        } else {
+            FmtErr(m, "ptype");
+            return;
+        }
+        if (b.flags & MB_Q) != 0 {
+            q = SgetN(m, 5);
+        }
+        b.qscale = q;
+        if (b.flags & MB_MF) != 0 {
+            ii := Svlc(m, Tabs.motion_table[:], Tabs.motion_bits, "mhfc");
+            b.mhfc = ii;
+            if ii != 0 && p.forwfc != 0 {
+                b.mhfr = SgetN(m, p.forwfc);
+            }
+            ii = Svlc(m, Tabs.motion_table[:], Tabs.motion_bits, "mvfc");
+            b.mvfc = ii;
+            if ii != 0 && p.forwfc != 0 {
+                b.mvfr = SgetN(m, p.forwfc);
+            }
+        }
+        if (b.flags & MB_MB) != 0 {
+            ii := Svlc(m, Tabs.motion_table[:], Tabs.motion_bits, "mhbc");
+            b.mhbc = ii;
+            if ii != 0 && p.backfc != 0 {
+                b.mhbr = SgetN(m, p.backfc);
+            }
+            ii = Svlc(m, Tabs.motion_table[:], Tabs.motion_bits, "mvbc");
+            b.mvbc = ii;
+            if ii != 0 && p.backfc != 0 {
+                b.mvbr = SgetN(m, p.backfc);
+            }
+        }
+        pcode: s32 = 0;
+        if (b.flags & MB_I) != 0 {
+            pcode = 0x3F;
+        } else if (b.flags & MB_P) != 0 {
+            pcode = Svlc(m, Tabs.cbp_table[:], Tabs.cbp_bits, "cbp");
+        }
+        b.pcode = pcode;
+        if pcode != 0 {
+            b.has_rls = true;
+            for j: 0..5 {
+                if (pcode & patcode[j]) != 0 {
+                    b.rls[j].has_data = true;
+                    if (b.flags & MB_I) != 0 {
+                        L := ifx j < 4 then Svlc(m, Tabs.ydc_table[:], Tabs.ydc_bits, "ydc") else Svlc(m, Tabs.cdc_table[:], Tabs.cdc_bits, "cdc");
+                        if L != 0 {
+                            L = SdiffN(m, L);
+                        }
+                        VecPush(b.rls[j].items, .{a = 0, b = L});
+                    } else {
+                        VecPush(b.rls[j].items, Sdct(m, Tabs.rl0f_table[:], "rl0f"));
+                    }
+                    if p.ptype != DPIC {
+                        while !m.failed {
+                            pr := Sdct(m, Tabs.rl0n_table[:], "rl0n");
+                            if pr.a == Tabs.EOB { break }
+                            VecPush(b.rls[j].items, pr);
+                        }
+                    }
+                }
+            }
+        }
+        VecPush(s_out.blocks, b);
+    }
+    p.addr = x;
+    if s_out.blocks.count == 0 {
+        FmtErr(m, "macroblock");
+    }
+}
+
+Detail :: (m: *Mpegi, p: *Picture) {
+    VecClear(p.slices);
+    p.addr = -1;
+    while !m.failed {
+        c := SpeekSc(m);
+        if m.failed || c < SLICE1_SC || c > SLICEN_SC { break }
+        sl: Slice;
+        SliceParse(m, p, *sl);
+        VecPush(p.slices, sl);
+    }
+    if p.slices.count == 0 {
+        FmtErr(m, "slice sc");
+    }
+}
+
+SkipDetail :: (m: *Mpegi) {
+    while !m.failed {
+        c := SpeekSc(m);
+        if m.failed || c < SLICE1_SC || c > SLICEN_SC { break }
+        m.looked = 0;
+        SseekSc(m);
+    }
+}
+
+PictureParse :: (m: *Mpegi, detail: s32, p: *Picture) {
+    VecClear(p.slices);
+    p.temporal = SgetN(m, 10);
+    p.ptype = SgetN(m, 3);
+    p.vbvdelay = SgetN(m, 16);
+    p.flags = 0;
+    if p.ptype == PPIC || p.ptype == BPIC {
+        if SgetN(m, 1) != 0 {
+            p.flags |= FPFV;
+        }
+        p.forwfc = SgetN(m, 3);
+        if p.forwfc == 0 {
+            FmtErr(m, "forwfc");
+            return;
+        }
+        p.forwfc -= 1;
+        if p.ptype == BPIC {
+            if SgetN(m, 1) != 0 {
+                p.flags |= FPBV;
+            }
+            p.backfc = SgetN(m, 3);
+            if p.backfc == 0 {
+                FmtErr(m, "backfc");
+                return;
+            }
+            p.backfc -= 1;
+        } else {
+            p.backfc = 0;
+        }
+    } else {
+        p.forwfc = 0;
+        p.backfc = 0;
+    }
+    while !m.failed && SgetN(m, 1) != 0 {
+        unused SgetN(m, 8);
+    }
+    if SpeekSc(m) == EXTENSION_SC { SseekSc(m) }
+    if SpeekSc(m) == USER_SC { SseekSc(m) }
+    p.seek = Tell(m) - 3;
+    if m.sresid < 0 {
+        p.eos = -1;
+    } else {
+        p.eos = m.seek - m.buf_size + m.slim + m.sresid;
+    }
+    if detail != 0 {
+        Detail(m, p);
+    } else {
+        SkipDetail(m);
+    }
+}
+
+GetPicture :: (m: *Mpegi, detail: s32, p_out: *Picture) -> bool {
+    g := false;
+    while !m.failed {
+        c := SnextSc(m);
+        if m.failed { return false }
+        if c == SEQUENCE_SC {
+            SeqHdr(m);
+        } else if c == GROUP_SC {
+            GrpHdr(m);
+            g = true;
+        } else if c == PICTURE_SC {
+            PictureParse(m, detail, p_out);
+            if g {
+                p_out.flags |= GSTART;
+            }
+            return !m.failed;
+        } else if c == SEQUENCE_EC {
+            return false;
+        } else {
+            eb: Vec(u8);
+            unused BuilderAppend(eb, "start code ");
+            AppendHexLower(*eb, c);
+            FmtErr(m, TextView(eb[:]));
+            return false;
+        }
+    }
+    return false;
+}
+
+main :: () -> s32 {
+    Init();
+    if Args.OperandCount() <= 0 { return 0 }
+    path := Args.Operand(0);
+    fd := Io.Open(path, 0);
+    if fd < 0 { return 1 }
+    m: Mpegi;
+    Prepare(fd, path, *m);
+    StreamInit(*m, VIDEO_STR0);
+    p: Picture;
+    ok := GetPicture(*m, 1, *p);
+    unused Io.Close(fd);
+    if !ok || m.failed { return 1 }
+    out: Vec(u8);
+    BuilderPrint(*out, "%x% ptype=% slices=% mbs=%\n", m.width, m.height, p.ptype, p.slices.count, p.slices[0].blocks.count);
+    unused Io.Write(1, TextView(out[:]));
+    return 0;
+}
