@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **839** open rows = **817** on-disk `dis/` files (**148** top-level `dis/*.dis` + **669** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **837** open rows = **815** on-disk `dis/` files (**148** top-level `dis/*.dis` + **667** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -34,7 +34,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 ## Next ready order (independent, boot-ordered)
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
-2. Non-boot libraries (185 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+2. Non-boot libraries (183 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (106 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (95 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
 5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (24), grid (17), demo (17), ebook (10), math (22).
@@ -52,7 +52,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/zxrun.dis | appl/cmd/zxrun.b | module/zxrun.m | P2 | untracked gitignored local build of tracked appl/cmd/zxrun.b |
 | dis/lib/winplace.dis | unknown |  | - | zx-twin; Limbo source removed; untracked local artifact (not gitignored) |
 
-### 2. Libraries - dis/lib/** (boot-loaded rows first) - 192 rows
+### 2. Libraries - dis/lib/** (boot-loaded rows first) - 190 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -241,8 +241,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/lib/virgil.dis | appl/lib/virgil.b |  | - |  |
 | dis/lib/volume.dis | appl/lib/volume.b | module/volume.m | - |  |
 | dis/lib/w3c/css.dis | appl/lib/w3c/css.b | module/css.m | - |  |
-| dis/lib/w3c/uris.dis | appl/lib/w3c/uris.b | module/uris.m | - |  |
-| dis/lib/w3c/xpointers.dis | appl/lib/w3c/xpointers.b | module/xpointers.m | - |  |
 | dis/lib/wait.dis | appl/lib/wait.b | module/wait.m | - |  |
 | dis/lib/watchvars.dis | appl/lib/watchvars.b | module/watchvars.m | - |  |
 | dis/lib/workdir.dis | appl/lib/workdir.b | module/workdir.m | - |  |
@@ -766,12 +764,11 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
 | dis/grid/usercreatesrv.dis | appl/grid/usercreatesrv.b |  | - |  |
 
-### 11. Demo - demonstration apps - 17 rows
+### 11. Demo - demonstration apps - 15 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
 | dis/demo/camera/camera.dis | appl/demo/camera/camera.b |  | - |  |
-| dis/demo/camera/jpg2bit.dis | appl/grid/jpg2bit.b |  | - |  |
 | dis/demo/camera/readjpg.dis | unknown | module/grid/readjpg.m | - |  |
 | dis/demo/camera/tkinterface.dis | appl/demo/camera/tkinterface.b |  | - |  |
 | dis/demo/chat/chat.dis | appl/demo/chat/chat.b |  | - |  |
@@ -784,7 +781,6 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 | dis/demo/lego/timers.dis | appl/demo/lego/timers.b | module/timers.m | - |  |
 | dis/demo/ns/ns.dis | appl/demo/ns/ns.b |  | - |  |
 | dis/demo/odbc/odbcmnt.dis | appl/demo/odbc/odbcmnt.b |  | - |  |
-| dis/demo/readjpg.dis | appl/grid/readjpg.b (copy rule) | module/grid/readjpg.m | - |  |
 | dis/demo/whiteboard/wbsrv.dis | appl/demo/whiteboard/wbsrv.b |  | - |  |
 | dis/demo/whiteboard/whiteboard.dis | appl/demo/whiteboard/whiteboard.b |  | - |  |
 
