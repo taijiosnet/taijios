@@ -1,0 +1,94 @@
+// Test primality of Mersenne numbers 2^p - 1 (replaces appl/math/mersenne.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+Big :: #import "bigint";
+#import "std/format"
+#import "std/vec"
+
+ISqrt :: (n: s64) -> s64 {
+    v := n;
+    r: s64 = 0;
+    t: s64 = 1 << 30;
+    while t > 0 {
+        if t + r <= v {
+            v -= t + r;
+            r = (r >> 1) | t;
+        } else {
+            r = r >> 1;
+        }
+        t = t >> 2;
+    }
+    return r;
+}
+
+IsPrime :: (n: s64) -> bool {
+    if n < 2 { return false }
+    if n == 2 { return true }
+    if (n & 1) == 0 { return false }
+    s := ISqrt(n);
+    i: s64 = 3;
+    while i <= s {
+        if n % i == 0 { return false }
+        i += 2;
+    }
+    return true;
+}
+
+BigPow :: (b_in: *Big.BigInt, n_in: s64) -> Big.BigInt {
+    zero := Big.FromInt(0);
+    one := Big.FromInt(1);
+    if (Big.Cmp(b_in, *zero) == 0 && n_in != 0) || Big.Cmp(b_in, *one) == 0 || n_in == 1 {
+        return Big.Clone(b_in);
+    }
+    if n_in == 0 { return Big.FromInt(1) }
+    c := Big.Clone(b_in);
+    b := Big.FromInt(1);
+    n := n_in;
+    while n > 0 {
+        while (n & 1) == 0 {
+            n = n >> 1;
+            nc := Big.Mul(*c, *c);
+            Big.CopyInto(*c, *nc);
+        }
+        n -= 1;
+        nb := Big.Mul(*c, *b);
+        Big.CopyInto(*b, *nb);
+    }
+    return b;
+}
+
+Lucas :: (p: s64) -> bool {
+    zero := Big.FromInt(0);
+    one := Big.FromInt(1);
+    two := Big.FromInt(2);
+    twop := BigPow(*two, p);
+    bigp := Big.Sub(*twop, *one);
+    u := Big.FromInt(4);
+    for _: 2..p - 1 {
+        u2 := Big.Mul(*u, *u);
+        if Big.Cmp(*u2, *two) <= 0 {
+            nu := Big.Sub(*two, *u2);
+            Big.CopyInto(*u, *nu);
+        } else {
+            um2 := Big.Sub(*u2, *two);
+            nu := Big.Mod(*um2, *bigp);
+            Big.CopyInto(*u, *nu);
+        }
+    }
+    return Big.Cmp(*u, *zero) == 0;
+}
+
+main :: () -> s32 {
+    p: s64 = 3;
+    if Args.OperandCount() > 0 {
+        p = MathUtil.ParseInt(Args.Operand(0));
+    }
+    out: Vec(u8);
+    if IsPrime(p) && (p == 2 || Lucas(p)) {
+        BuilderPrint(*out, "2^%-1 is prime\n", p);
+    } else {
+        BuilderPrint(*out, "2^%-1 is not prime\n", p);
+    }
+    MathUtil.WriteOut(TextView(out[:]));
+    return 0;
+}

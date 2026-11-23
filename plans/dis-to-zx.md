@@ -778,11 +778,8 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/math/hist0.dis | appl/math/hist0.b |  | - |  |
 | dis/math/linalg.dis | appl/math/linalg.b | module/linalg.m | - |  |
 | dis/math/linbench.dis | appl/math/linbench.b |  | - | zx-twin |
-| dis/math/mersenne.dis | appl/math/mersenne.b |  | - |  |
-| dis/math/parts.dis | appl/math/parts.b |  | - |  |
 | dis/math/polyfill.dis | appl/math/polyfill.b | module/math/polyfill.m | - |  |
 | dis/math/polyhedra.dis | appl/math/polyhedra.b | module/math/polyhedra.m | - |  |
-| dis/math/powers.dis | appl/math/powers.b |  | - |  |
 
 ### 14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 72 rows
 

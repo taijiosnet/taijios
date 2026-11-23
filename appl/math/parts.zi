@@ -1,0 +1,113 @@
+// Partition function p(n) and Ramanujan congruence search (replaces appl/math/parts.b).
+Args :: #import "taijios_args";
+MathUtil :: #import "math_util";
+Big :: #import "bigint";
+#import "std/format"
+#import "std/vec"
+
+aflag: bool;
+cflag: bool;
+
+CheckCongruences :: (out: *Vec(u8), m: s64, p: []Big.BigInt) {
+    i: s64 = 2;
+    while i < m / 3 {
+        for j: 0..i - 1 {
+            k := j;
+            r := Big.ModSmall(*p[k], i);
+            while true {
+                k += i;
+                if k > m { break }
+                if Big.ModSmall(*p[k], i) != r {
+                    r = -1;
+                    break;
+                }
+            }
+            if r >= 0 {
+                if j == 0 {
+                    BuilderPrint(out, "p(%m) = % mod % ?\n", i, r, i);
+                } else {
+                    BuilderPrint(out, "p(%m+%) = % mod % ?\n", i, j, r, i);
+                }
+            }
+        }
+        i += 1;
+    }
+}
+
+Parts :: (out: *Vec(u8), m: s64) {
+    if aflag { unused BuilderAppend(out.*, "n\tp(n)\n") }
+    if m <= 0 {
+        pv: s64 = 0;
+        if m == 0 { pv = 1 }
+        if aflag {
+            BuilderPrint(out, "%\t%\n", m, pv);
+        } else {
+            BuilderPrint(out, "p[%] = %\n", m, pv);
+        }
+        return;
+    }
+    p: Vec(Big.BigInt);
+    VecResize(p, m + 1);
+    one := Big.FromInt(1);
+    Big.CopyInto(*p[0], *one);
+    for i: 1..m {
+        k := i;
+        s: s64 = 1;
+        n := Big.FromInt(0);
+        j: s64 = 1;
+        while true {
+            k -= 2 * j - 1;
+            if k < 0 { break }
+            if s == 1 {
+                nn := Big.Add(*n, *p[k]);
+                Big.CopyInto(*n, *nn);
+            } else {
+                nn := Big.Sub(*n, *p[k]);
+                Big.CopyInto(*n, *nn);
+            }
+            k -= j;
+            if k < 0 { break }
+            if s == 1 {
+                nn := Big.Add(*n, *p[k]);
+                Big.CopyInto(*n, *nn);
+            } else {
+                nn := Big.Sub(*n, *p[k]);
+                Big.CopyInto(*n, *nn);
+            }
+            s = -s;
+            j += 1;
+        }
+        if aflag {
+            BuilderPrint(out, "%\t", i);
+            Big.AppendDecimal(out, *n);
+            unused BuilderAppend(out.*, "\n");
+        }
+        Big.CopyInto(*p[i], *n);
+    }
+    if !aflag {
+        BuilderPrint(out, "p[%] = ", m);
+        Big.AppendDecimal(out, *p[m]);
+        unused BuilderAppend(out.*, "\n");
+    }
+    if cflag {
+        CheckCongruences(out, m, p[:]);
+    }
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    out: Vec(u8);
+    for idx: 0..argc - 1 {
+        s := Args.Operand(cast(s32)idx);
+        if s.count > 0 && s[0] == 45 {
+            for i: 1..s.count - 1 {
+                if s[i] == 97 { aflag = true }
+                else if s[i] == 99 { cflag = true }
+            }
+        } else {
+            Parts(*out, MathUtil.ParseInt(s));
+        }
+    }
+    if out.count > 0 { MathUtil.WriteOut(TextView(out[:])) }
+    return 0;
+}
