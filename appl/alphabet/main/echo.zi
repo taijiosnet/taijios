@@ -1,0 +1,12 @@
+// /echo [-n] string -> fd: the string, with a newline unless -n.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+
+Register :: () { Al.RegisterModule(-1, "echo", "fs-n", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    s := Va.ValueText(call.args[0]);
+    if Al.OptCount(call) == 0 { s = Al.Join(s, "\n") }
+    return St.TextStream(s);
+}

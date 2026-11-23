@@ -1,0 +1,7 @@
+// /wait status -> string: run a status and give its result.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+Register :: () { Al.RegisterModule(-1, "wait", "sr", Run) }
+
+Run :: (call: *Al.Call) -> s32 { return Va.MkString(Va.RunStatus(call.args[0])) }

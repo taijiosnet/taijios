@@ -1,0 +1,47 @@
+// The modules of the root typeset "/", which the Dis alphabet loaded from
+// /dis/alphabet/main.
+Auth :: #import "main/auth";
+Cat :: #import "main/cat";
+Create :: #import "main/create";
+Dial :: #import "main/dial";
+Echo :: #import "main/echo";
+Env :: #import "main/env";
+Export :: #import "main/export";
+Fd :: #import "main/fd";
+Filter :: #import "main/filter";
+Mount :: #import "main/mount";
+Par :: #import "main/par";
+Parse :: #import "main/parse";
+Pretty :: #import "main/pretty";
+Print :: #import "main/print";
+Read :: #import "main/read";
+Readall :: #import "main/readall";
+Rewrite :: #import "main/rewrite";
+Seq :: #import "main/seq";
+Unparse :: #import "main/unparse";
+W2fd :: #import "main/w2fd";
+Wait :: #import "main/wait";
+
+Register :: () {
+    Auth.Register();
+    Cat.Register();
+    Create.Register();
+    Dial.Register();
+    Echo.Register();
+    Env.Register();
+    Export.Register();
+    Fd.Register();
+    Filter.Register();
+    Mount.Register();
+    Par.Register();
+    Parse.Register();
+    Pretty.Register();
+    Print.Register();
+    Read.Register();
+    Readall.Register();
+    Rewrite.Register();
+    Seq.Register();
+    Unparse.Register();
+    W2fd.Register();
+    Wait.Register();
+}

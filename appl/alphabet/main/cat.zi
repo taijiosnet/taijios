@@ -1,0 +1,38 @@
+// /cat [fd...] -> fd: the fds one after another.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+Register :: () { Al.RegisterModule(-1, "cat", "ff*", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("cat");
+        p.read = Read;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "f", prod);
+    Va.SetErrc(v, Va.ReportStart(call.report, "print"));
+    Va.SetKids(v, call.args[:]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Read :: (v: s32, buffer: []u8) -> s64 {
+    while Va.N0(v) < Va.KidCount(v) {
+        kid := Va.Kid(v, Va.N0(v));
+        n := Va.Read(kid, buffer);
+        if n > 0 { return n }
+        Va.Free(kid, false);
+        Va.SetN0(v, Va.N0(v) + 1);
+    }
+    return 0;
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { for i: 0..Va.KidCount(v) - 1 { Va.Free(Va.Kid(v, i), false) } }
+    return 0;
+}

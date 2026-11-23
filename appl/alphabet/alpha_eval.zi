@@ -1,0 +1,1552 @@
+// Alphabet's modules and evaluator, ported from appl/alphabet/alphabet.b
+// and eval.b: declaring, importing, defining and loading modules, the
+// typed evaluation of an expression with its automatic conversions, and
+// the rewriter that writes an expression out with every module qualified
+// and every conversion explicit.
+//
+// The Dis evaluator was one generic adt instantiated twice, for values and
+// for the rewriter's values; here one evaluator runs in either mode. A
+// typeset is a registered Ziran module instead of a Dis module to load:
+// RegisterModule names each module it serves and the procedure that runs it.
+#import "std/vec";
+#import "std/sort";
+Sh :: #import "shcmd";
+using Ty :: #import "alpha_types";
+Va :: #import "alpha_values";
+
+ONDEMAND :: 1;
+CHECK :: 2;
+
+// What a module's run procedure is given: where it reports, and its
+// options and arguments, already of the types its signature names.
+Opt :: struct {
+    opt: s32;
+    at: s32;   // its arguments are vals[at:at+n]
+    n: s32;
+}
+
+Call :: struct {
+    session: s32;
+    report: s32;  // the evaluation's report, for sources the module starts
+    errc: s32;    // where its run reports
+    opts: Vec(Opt);   // in the order the Dis evaluator listed them: the last given first
+    vals: Vec(s32);
+    args: Vec(s32);
+}
+
+RunModule :: #type (call: *Call) -> s32;
+
+RegModule :: struct {
+    reg: s32;      // its registered typeset; -1 for the modules of "/"
+    name: string;
+    sig: string;   // in the codes of its typeset
+    run: RunModule;
+}
+
+reg_modules: Vec(RegModule);
+
+RegisterModule :: (reg: s32, name: string, sig: string, run: RunModule) {
+    m: RegModule;
+    m.reg = reg;
+    m.name = name;
+    m.sig = sig;
+    m.run = run;
+    VecPush(reg_modules, m);
+}
+
+OptCount :: (call: *Call) -> s64 { return call.opts.count }
+OptLetter :: (call: *Call, i: s64) -> s32 { return call.opts[i].opt }
+OptArgCount :: (call: *Call, i: s64) -> s64 { return call.opts[i].n }
+
+// Argument k of option i.
+OptArg :: (call: *Call, i: s64, k: s64) -> s32 { return call.vals[call.opts[i].at + k] }
+
+// A declared module of an alphabet.
+Module :: struct {
+    session: s32;
+    modname: string;
+    typeset: s32;  // -1 for a virtual or defined module
+    sig: Sig;
+    impl: s32;     // the registered module serving it, once loaded
+    def: s32;      // a defined module's expression
+    defmods: s32;  // the module table it was defined with
+    refcount: s32;
+}
+
+// Strhash of module names: the most recent entry for a name wins.
+ModEntry :: struct {
+    table: s32;
+    name: string;
+    module: s32;
+    alive: bool;
+}
+
+modules: Vec(Module);
+mod_entries: Vec(ModEntry);
+mod_tables: s32;
+
+NewTable :: () -> s32 {
+    mod_tables += 1;
+    return mod_tables;
+}
+
+TableFind :: (table: s32, name: string) -> s32 {
+    i := mod_entries.count - 1;
+    while i >= 0 {
+        e := mod_entries[i];
+        if e.alive && e.table == table && e.name == name { return e.module }
+        i -= 1;
+    }
+    return -1;
+}
+
+TableAdd :: (table: s32, name: string, m: s32) {
+    e: ModEntry;
+    e.table = table;
+    e.name = name;
+    e.module = m;
+    e.alive = true;
+    VecPush(mod_entries, e);
+}
+
+TableDel :: (table: s32, name: string) {
+    for * mod_entries { if it.table == table && it.name == name { it.alive = false } }
+}
+
+NewModule :: (sx: s32, name: string, ts: s32, sig: Sig) -> s32 {
+    m: Module;
+    m.session = sx;
+    m.modname = name;
+    m.typeset = ts;
+    m.sig = sig;
+    m.impl = -1;
+    m.def = -1;
+    m.defmods = -1;
+    VecPush(modules, m);
+    return cast(s32)(modules.count - 1);
+}
+
+// A new alphabet: the root types and no modules.
+NewAlphabet :: () -> s32 { return NewSession(NewTable()) }
+
+SetAutodeclare :: (sx: s32, on: bool) { sessions[sx].autodeclare = on }
+
+// quit: the alphabet's modules and typesets are let go.
+Quit :: (sx: s32) {
+    table := sessions[sx].modules;
+    for * mod_entries { if it.table == table { it.alive = false } }
+    for * typesets { if it.session == sx { it.alive = false } }
+}
+
+// ---- loading
+
+// The message a Dis load of path gave when the file was not there.
+NoFile :: (path: string) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "cannot load %: '%' does not exist", path, path);
+    return BuilderFinish(out);
+}
+
+FindRegModule :: (reg: s32, name: string) -> s32 {
+    for reg_modules { if it.reg == reg && it.name == name { return cast(s32)it_index } }
+    return -1;
+}
+
+ModulePath :: (reg: s32, name: string) -> string {
+    out: Vec(u8);
+    if reg < 0 {
+        BuilderPrint(*out, "/dis/alphabet/main/%.dis", name);
+    } else {
+        BuilderPrint(*out, "/dis/alphabet/%/%.dis", reg_typesets[reg].name, name);
+    }
+    return BuilderFinish(out);
+}
+
+// Module.ensureloaded
+EnsureLoaded :: (m: s32) -> string {
+    mm := modules[m];
+    if mm.impl >= 0 || mm.def >= 0 || mm.typeset < 0 { return "" }
+    reg := typesets[mm.typeset].reg;
+    impl := FindRegModule(reg, mm.modname);
+    sx := mm.session;
+    if impl < 0 {
+        if reg < 0 { return NoFile(ModulePath(reg, mm.modname)) }
+        out: Vec(u8);
+        BuilderPrint(*out, "cannot load: %", NoFile(ModulePath(reg, mm.modname)));
+        return BuilderFinish(out);
+    }
+    sig, ok := NativeSig(mm.typeset, reg_modules[impl].sig);
+    if !ok { sig = NoSig() }
+    if modules[m].sig.n < 0 {
+        modules[m].sig = sig;
+    } else {
+        a: Vec(s32);
+        b: Vec(s32);
+        SigCodes(modules[m].sig, *a);
+        SigCodes(sig, *b);
+        if !TypeCompat(a[:], b[:]) {
+            out: Vec(u8);
+            name: Vec(u8);
+            BuilderPrint(*name, "% %", mm.modname, CmdUsage(sx, b[:]));
+            BuilderPrint(*out, "% not compatible with % (% vs %, %)", Q(BuilderFinish(name)), Q(CmdUsage(sx, a[:])),
+                Q(SigText(modules[m].sig)), Q(SigText(sig)), ifx SigEqual(modules[m].sig, sig) then 1 else 0);
+            return BuilderFinish(out);
+        }
+    }
+    modules[m].impl = impl;
+    return "";
+}
+
+// gettypesig: a typeset module's signature in the alphabet's codes. An
+// option letter is kept as it is.
+NativeSig :: (ts: s32, local: string) -> (sig: Sig, ok: bool) {
+    if typesets[ts].reg < 0 { return SigOfText(local), true }
+    codes: Vec(s32);
+    i: s64 = 0;
+    while i < local.count {
+        tc := cast(s32)local[i];
+        if tc == #char "-" {
+            VecPush(codes, tc);
+            i += 1;
+            if i < local.count { VecPush(codes, cast(s32)local[i]) }
+            i += 1;
+            continue;
+        }
+        if tc != #char "*" {
+            t := TypesetGetType(ts, tc);
+            if t < 0 {
+                line: Vec(u8);
+                BuilderPrint(*line, "no type found for '%' in sig %\n", local[i:i + 1], Q(local));
+                print("%", BuilderFinish(line));
+                return NoSig(), false;
+            }
+            tc = types[t].tc;
+        }
+        VecPush(codes, tc);
+        i += 1;
+    }
+    return SigMake(codes[:]), true;
+}
+
+// ---- declarations
+
+// declare0: declare a module. With ONDEMAND it need not be loaded unless
+// CHECK is given or no signature is.
+Declare0 :: (sx: s32, qname_in: string, usig: string, flags: s32) -> (module: s32, error: string, raised: string) {
+    sig := NoSig();
+    if usig.count > 0 {
+        s, err, raised := Usage2Sig(sx, usig);
+        if raised.count > 0 { return -1, "", raised }
+        if s.n < 0 { return -1, Join("bad type sig: ", err), "" }
+        sig = s;
+    }
+    m: s32;
+    qname := qname_in;
+    table := sessions[sx].modules;
+    if qname.count > 0 && qname[0] != #char "/" {
+        if sig.n < 0 { return -1, "virtual module declaration must include signature", "" }
+        m = NewModule(sx, qname, -1, sig);
+    } else {
+        qname = Canon(qname);
+        typeset, mod := SplitQname(qname);
+        ts := GetTypeset(sx, typeset);
+        if ts < 0 { return -1, "unknown typeset", "" }
+        old := TableFind(table, qname);
+        if old >= 0 {
+            if modules[old].typeset == ts { return old, "", "" }
+            return -1, "already imported", "";
+        }
+        m = NewModule(sx, mod, ts, sig);
+        if sig.n < 0 || (flags & CHECK) != 0 || (flags & ONDEMAND) == 0 {
+            e := EnsureLoaded(m);
+            if e.count > 0 { return -1, e, "" }
+            if (flags & ONDEMAND) != 0 { modules[m].impl = -1 }
+        }
+    }
+    TableAdd(table, qname, m);
+    modules[m].refcount += 1;
+    return m, "", "";
+}
+
+Declare :: (sx: s32, qname: string, usig: string, flags: s32) -> (error: string, raised: string) {
+    m, err, raised := Declare0(sx, qname, usig, flags);
+    return err, raised;
+}
+
+Undeclare :: (sx: s32, name: string) -> string {
+    table := sessions[sx].modules;
+    m := TableFind(table, name);
+    if m < 0 { return "module not declared" }
+    TableDel(table, name);
+    modules[m].refcount -= 1;
+    return "";
+}
+
+// define: name becomes a module that runs expr, rewritten with every
+// module it uses resolved now.
+Define :: (sx: s32, name: string, expr: s32, errc: s32) -> string {
+    if name.count == 0 || name[0] == #char "/" { return "bad module name" }
+    table := sessions[sx].modules;
+    if TableFind(table, name) >= 0 { return "module already declared" }
+    used := NewTable();
+    e, sig, ok := Rewrite0(sx, expr, -1, errc, used);
+    if !ok { return "cannot rewrite" }
+    m := NewModule(sx, name, sessions[sx].root, sig);
+    modules[m].def = e;
+    modules[m].defmods = used;
+    modules[m].refcount = 1;
+    TableAdd(table, name, m);
+    return "";
+}
+
+// getmodule: (qualified name, usage, definition); no name when it is not
+// declared.
+GetModule :: (sx: s32, name: string) -> (qname: string, usage: string, def: s32) {
+    qname, sig, def, found := GetModule0(sx, name);
+    if !found || sig.n < 0 { return qname, "", def }
+    codes: Vec(s32);
+    SigCodes(sig, *codes);
+    return qname, CmdUsage(sx, codes[:]), def;
+}
+
+GetModule0 :: (sx: s32, name_in: string) -> (qname: string, sig: Sig, def: s32, found: bool) {
+    table := sessions[sx].modules;
+    m: s32 = -1;
+    name := name_in;
+    if name.count > 0 && name[0] != #char "/" {
+        m = TableFind(table, name);
+        if m < 0 { return "", NoSig(), -1, false }
+    } else {
+        name = Canon(name);
+        typeset, mod := SplitQname(name);
+        m = TableFind(table, name);
+        if m < 0 {
+            if !sessions[sx].autodeclare { return "", NoSig(), -1, false }
+            ts := GetTypeset(sx, typeset);
+            if ts < 0 { return "", NoSig(), -1, false }
+            m = NewModule(sx, mod, ts, NoSig());
+            if EnsureLoaded(m).count > 0 { return "", NoSig(), -1, false }
+        }
+    }
+    qname := modules[m].modname;
+    if modules[m].def < 0 && modules[m].typeset >= 0 { qname = MkQname(typesets[modules[m].typeset].name, qname) }
+    return qname, modules[m].sig, modules[m].def, true;
+}
+
+// getmodules: every entry of the alphabet's table, in the order the Dis
+// table of three slots listed them.
+GetModules :: (sx: s32, out: *Vec(string)) {
+    table := sessions[sx].modules;
+    i := 2;
+    while i >= 0 {
+        for mod_entries { if it.alive && it.table == table && HashSlot(it.name, 3) == i { VecPush(<<out, it.name) } }
+        i -= 1;
+    }
+}
+
+// Strhash's hash: slot of a name in a table of n slots.
+HashSlot :: (s: string, n: s64) -> s64 {
+    h: u32 = 0;
+    i: s64 = 0;
+    while i < s.count {
+        r, width := DecodeRune(s[i:]);
+        h = 65599 * h + cast(u32)r;
+        i += width;
+    }
+    return cast(s64)(h & 0x7FFFFFFF) % n;
+}
+
+// gettypesetmodules: the modules a typeset serves, as listing its Dis
+// directory named them.
+TypesetModules :: (sx: s32, tsname: string, out: *Vec(string)) -> bool {
+    ts := GetTypeset(sx, tsname);
+    if ts < 0 { return false }
+    reg := typesets[ts].reg;
+    names: Vec(string);
+    for reg_modules { if it.reg == reg { VecPush(names, it.name) } }
+    SortText(names[:]);
+    for names { VecPush(<<out, it) }
+    return true;
+}
+
+// gettypes: a typeset's type names, or with no typeset every type.
+GetTypes :: (sx: s32, ts: string, out: *Vec(string)) {
+    i := sessions[sx].ntypes - 1;
+    while i >= 0 {
+        t := TypeById(sx, i);
+        if ts.count == 0 {
+            VecPush(<<out, Type2s(sx, types[t].tc));
+        } else if typesets[types[t].typeset].name == ts {
+            VecPush(<<out, types[t].name);
+        }
+        i -= 1;
+    }
+}
+
+// gettypesets: oldest first.
+GetTypesets :: (sx: s32, out: *Vec(string)) {
+    for typesets { if it.session == sx && it.alive { VecPush(<<out, it.name) } }
+}
+
+Autoconversion :: struct {
+    src: string;
+    dst: string;
+    expr: s32;
+}
+
+// getautoconversions, in the order the Dis list held them.
+GetAutoconversions :: (sx: s32, out: *Vec(Autoconversion)) {
+    i := sessions[sx].ntypes - 1;
+    while i >= 0 {
+        t := TypeById(sx, i);
+        for transforms {
+            if it.session == sx && it.src == t {
+                a: Autoconversion;
+                a.src = Type2s(sx, types[t].tc);
+                a.dst = Type2s(sx, types[it.dst].tc);
+                a.expr = it.expr;
+                VecPush(<<out, a);
+            }
+        }
+        i -= 1;
+    }
+}
+
+ImportModule :: (sx: s32, qname_in: string) -> string {
+    qname := Canon(qname_in);
+    typeset, mod := SplitQname(qname);
+    if typeset.count == 0 { return "unknown typeset" }
+    table := sessions[sx].modules;
+    m := TableFind(table, mod);
+    if m >= 0 {
+        if modules[m].typeset < 0 { return "already defined" }
+        if typesets[modules[m].typeset].name == typeset { return "" }
+        return Join("already imported from ", typesets[modules[m].typeset].name);
+    }
+    m = TableFind(table, qname);
+    if m < 0 {
+        if !sessions[sx].autodeclare { return "module not declared" }
+        found, err := FindModule(sx, table, qname);
+        if found < 0 { return Join("cannot import: ", err) }
+        m = found;
+        TableAdd(table, qname, m);
+        modules[m].refcount += 1;
+    }
+    TableAdd(table, mod, m);
+    return "";
+}
+
+ImportType :: (sx: s32, qname_in: string) -> string {
+    qname := Canon(qname_in);
+    typeset, tname := SplitQname(qname);
+    ts := GetTypeset(sx, typeset);
+    if ts < 0 { return "unknown typeset" }
+    t := TypeByName(sx, tname);
+    if t >= 0 {
+        if types[t].typeset == ts { return "" }
+        return Join("type already imported from ", typesets[types[t].typeset].name);
+    }
+    t = TypeByName(sx, qname);
+    if t < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "% does not hold type %", typeset, tname);
+        return BuilderFinish(out);
+    }
+    AddTypeName(sx, tname, t);
+    return "";
+}
+
+// loadtypeset: load a registered typeset below one already loaded.
+LoadTypeset :: (sx: s32, qname: string, errc: s32) -> string {
+    tsname := Canon(qname);
+    if GetTypeset(sx, tsname) >= 0 { return "" }
+    parent, name := SplitQname(tsname);
+    pts := GetTypeset(sx, parent);
+    if pts < 0 { return "parent typeset not found" }
+    regname := ifx typesets[pts].reg < 0 then name else Join3(reg_typesets[typesets[pts].reg].name, "/", name);
+    reg := FindRegTypeset(regname);
+    if reg < 0 {
+        out: Vec(u8);
+        if typesets[pts].reg < 0 {
+            path: Vec(u8);
+            BuilderPrint(*path, "/dis/alphabet/%types.dis", name);
+            BuilderPrint(*out, "cannot load %types.dis: '%' does not exist", name, BuilderFinish(path));
+        } else {
+            path: Vec(u8);
+            BuilderPrint(*path, "/dis/alphabet/%/%types.dis", reg_typesets[typesets[pts].reg].name, name);
+            BuilderAppend(out, NoFile(BuilderFinish(path)));
+        }
+        return BuilderFinish(out);
+    }
+    unused LoadTypes(sx, tsname, pts, reg, errc);
+    return "";
+}
+
+// ---- conversions
+
+Autoconvert :: (sx: s32, src: string, dst: string, expr_in: s32, errc: s32) -> string {
+    tdst := TypeByName(sx, dst);
+    if tdst < 0 { return Join("unknown type ", dst) }
+    tsrc := TypeByName(sx, src);
+    if tsrc < 0 { return Join("unknown type ", src) }
+    root := sessions[sx].root;
+    if types[tdst].typeset != types[tsrc].typeset && types[tdst].typeset != root && types[tsrc].typeset != root {
+        return "conversion between incompatible typesets";
+    }
+    expr := expr_in;
+    if expr >= 0 && Sh.Kind(expr) == Sh.Word {
+        // mod -> {(srctype); mod $1}
+        expr = Sh.Mk(Sh.Block, Sh.Mk(Sh.Seq, Sh.Mk(Sh.List, Sh.MkWord(src), -1),
+            Sh.Mk(Sh.Adj, Sh.MkWord(Sh.WordOf(expr)), Sh.Mk(Sh.Var, Sh.MkWord("1"), -1))), -1);
+    }
+    e, sig, ok := Rewrite0(sx, expr, types[tdst].tc, errc, -1);
+    if !ok { return Join("cannot rewrite transformation ", Sh.CmdString(expr)) }
+    want: Vec(s32);
+    VecPush(want, types[tdst].tc);
+    VecPush(want, types[tsrc].tc);
+    got: Vec(s32);
+    SigCodes(sig, *got);
+    if !TypeCompat(want[:], got[:]) { return "incompatible module type" }
+    err := AddConversion(sx, tsrc, tdst, e);
+    if err.count > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "bad auto-conversion %->% via %: %", types[tsrc].qname, types[tdst].qname, Sh.CmdString(expr), err);
+        return BuilderFinish(out);
+    }
+    return "";
+}
+
+AddConversion :: (sx: s32, src: s32, dst: s32, expr: s32) -> string {
+    // the same transform may be added again
+    for transforms {
+        if it.session == sx && it.src == src && SetHolds(it.all_at, it.all_n, types[dst].id) {
+            if it.dst == dst && Sh.CmdString(it.expr) == Sh.CmdString(expr) { return "" }
+        }
+    }
+    n := sessions[sx].ntypes;
+    reached: Vec(bool);
+    for 1..n { VecPush(reached, false) }
+    at := Ambiguous(sx, dst, *reached);
+    if at.count > 0 { return Join("ambiguity: ", at) }
+    t: Transform;
+    t.session = sx;
+    t.src = src;
+    t.dst = dst;
+    t.expr = expr;
+    ids: Vec(s32);
+    for reached { if it { VecPush(ids, cast(s32)it_index) } }
+    t.all_at = cast(s32)set_items.count;
+    t.all_n = cast(s32)ids.count;
+    for ids { VecPush(set_items, it) }
+    VecPush(transforms, t);
+    added := transforms.count - 1;
+    // no ambiguity may now reach src from a type that leads to it
+    for i: 0..n - 1 {
+        ti := TypeById(sx, cast(s32)i);
+        for transforms {
+            if it.session == sx && it.src == ti && SetHolds(it.all_at, it.all_n, types[src].id) {
+                again: Vec(bool);
+                for 1..n { VecPush(again, false) }
+                a := Ambiguous(sx, ti, *again);
+                if a.count > 0 {
+                    transforms[added].session = -1;
+                    return Join("ambiguity: ", a);
+                }
+            }
+        }
+    }
+    // everything dst leads to, dst too, joins the sets that reached src
+    all: Vec(s32);
+    VecPush(all, types[dst].id);
+    for transforms {
+        if it.session == sx && it.src == dst {
+            for k: 0..it.all_n - 1 { AddId(*all, set_items[it.all_at + k]) }
+        }
+    }
+    for * transforms {
+        if it.session == sx && SetHolds(it.all_at, it.all_n, types[src].id) {
+            merged: Vec(s32);
+            for k: 0..it.all_n - 1 { VecPush(merged, set_items[it.all_at + k]) }
+            for all { AddId(*merged, it) }
+            it.all_at = cast(s32)set_items.count;
+            it.all_n = cast(s32)merged.count;
+            for merged { VecPush(set_items, it) }
+        }
+    }
+    return "";
+}
+
+AddId :: (set: *Vec(s32), id: s32) {
+    i: s64 = 0;
+    while i < set.count {
+        if set.*[i] == id { return }
+        i += 1;
+    }
+    VecPush(<<set, id);
+}
+
+// The conversions out of type t, newest first.
+TransformsOf :: (sx: s32, t: s32, out: *Vec(s64)) {
+    i := transforms.count - 1;
+    while i >= 0 {
+        if transforms[i].session == sx && transforms[i].src == t { VecPush(<<out, i) }
+        i -= 1;
+    }
+}
+
+Ambiguous :: (sx: s32, t: s32, reached: *Vec(bool)) -> string {
+    dt := Ambiguous1(sx, t, reached);
+    if dt < 0 { return "" }
+    fresh: Vec(bool);
+    for 1..reached.count { VecPush(fresh, false) }
+    start: Vec(u8);
+    BuilderPrint(*start, "self %", types[t].qname);
+    at: Vec(string);
+    unused FindAmbiguous(sx, t, dt, *fresh, BuilderFinish(start), *at);
+    out: Vec(u8);
+    for at {
+        if it_index > 0 { BuilderAppend(out, ", ") }
+        BuilderAppend(out, it);
+    }
+    return BuilderFinish(out);
+}
+
+// A conversion is ambiguous when one type can be reached two ways: the
+// type it is found at.
+Ambiguous1 :: (sx: s32, t: s32, reached: *Vec(bool)) -> s32 {
+    id := types[t].id;
+    if reached.*[id] { return t }
+    reached.*[id] = true;
+    list: Vec(s64);
+    TransformsOf(sx, t, *list);
+    for list {
+        at := Ambiguous1(sx, transforms[it].dst, reached);
+        if at >= 0 { return at }
+    }
+    return -1;
+}
+
+// The ways from t that reach dt, into a as the Dis list held them.
+FindAmbiguous :: (sx: s32, t: s32, dt: s32, reached: *Vec(bool), s: string, a: *Vec(string)) -> bool {
+    if t == dt { VecPush(<<a, s) }
+    id := types[t].id;
+    if reached.*[id] { return true }
+    reached.*[id] = true;
+    list: Vec(s64);
+    TransformsOf(sx, t, *list);
+    for list {
+        next: Vec(u8);
+        BuilderPrint(*next, "%|%", s, Sh.CmdString(transforms[it].expr));
+        at: Vec(string);
+        found := FindAmbiguous(sx, transforms[it].dst, dt, reached, BuilderFinish(next), *at);
+        // Limbo prepended each one in turn
+        merged: Vec(string);
+        k := at.count - 1;
+        while k >= 0 {
+            VecPush(merged, at[k]);
+            k -= 1;
+        }
+        i: s64 = 0;
+        while i < a.count {
+            VecPush(merged, a.*[i]);
+            i += 1;
+        }
+        VecSwap(<<a, merged);
+        if found { return true }
+    }
+    return false;
+}
+
+// ---- evaluation
+
+EvalCtx :: struct {
+    session: s32;
+    table: s32;      // the modules it may use
+    report: s32;
+    errc: s32;
+    rewriting: bool; // values are the rewriter's
+    used: s32;       // rewriting: the table that collects the modules used, or -1
+}
+
+// The rewriter's values: the expression that makes each one.
+Rvalue :: struct {
+    i: s32;
+    tc: s32;
+    refcount: s32;
+    args_at: s32;  // in rlist
+    args_n: s32;
+    opts_at: s32;  // in rlist as opt, n, values...
+    opts_n: s32;
+}
+
+rvalues: Vec(Rvalue);
+rlist: Vec(s32);
+
+NewRvalue :: (i: s32, tc: s32, refcount: s32) -> s32 {
+    r: Rvalue;
+    r.i = i;
+    r.tc = tc;
+    r.refcount = refcount;
+    r.args_at = cast(s32)rlist.count;
+    r.opts_at = cast(s32)rlist.count;
+    VecPush(rvalues, r);
+    return cast(s32)(rvalues.count - 1);
+}
+
+VTypec :: (e: *EvalCtx, v: s32) -> s32 {
+    if e.rewriting { return rvalues[v].tc }
+    return Va.Typec(v);
+}
+
+VIsString :: (e: *EvalCtx, v: s32) -> bool {
+    if e.rewriting { return rvalues[v].tc == #char "s" }
+    return Va.IsString(v);
+}
+
+VGets :: (e: *EvalCtx, v: s32) -> string {
+    if e.rewriting { return Sh.WordOf(rvalues[v].i) }
+    return Va.ValueText(v);
+}
+
+VDup :: (e: *EvalCtx, v: s32) -> s32 {
+    if v < 0 { return -1 }
+    if e.rewriting { return v }
+    return Va.Dup(v);
+}
+
+VFree :: (e: *EvalCtx, v: s32, used: bool) {
+    if v < 0 || e.rewriting { return }
+    Va.Free(v, used);
+}
+
+MMks :: (e: *EvalCtx, s: string) -> s32 {
+    if e.rewriting { return NewRvalue(Sh.MkWord(s), #char "s", 0) }
+    return Va.MkString(s);
+}
+
+MMkc :: (e: *EvalCtx, c: s32) -> s32 {
+    if e.rewriting { return NewRvalue(Sh.Mk(Sh.Bq2, c, -1), #char "c", 0) }
+    return Va.MkCmdValue(c);
+}
+
+// Module.find and Rmodule.find
+MFind :: (e: *EvalCtx, name: string) -> (module: s32, error: string) {
+    sx := e.session;
+    m := TableFind(e.table, name);
+    if e.rewriting {
+        if m < 0 {
+            if !sessions[sx].autodeclare || name.count == 0 || name[0] != #char "/" { return -1, "module not declared" }
+            if e.table != sessions[sx].modules { return -1, "shouldn't happen: module not found in defined block" }
+            found, err, raised := Declare0(sx, name, "", ONDEMAND);
+            if found < 0 { return -1, err }
+            m = found;
+        }
+        return m, "";
+    }
+    return FindModule(sx, e.table, name);
+}
+
+FindModule :: (sx: s32, table: s32, name: string) -> (module: s32, error: string) {
+    m := TableFind(table, name);
+    if m < 0 {
+        if !sessions[sx].autodeclare || name.count == 0 || name[0] != #char "/" { return -1, "module not declared" }
+        found, err, raised := Declare0(sx, name, "", 0);
+        if found < 0 { return -1, err }
+        return found, "";
+    }
+    err := EnsureLoaded(m);
+    if err.count > 0 { return -1, err }
+    return m, "";
+}
+
+// ContextEval: Eval->Context.eval, which reports an error and gives no
+// value.
+ContextEval :: (e: *EvalCtx, expr: s32, args: []s32) -> s32 {
+    if expr < 0 {
+        for args { VFree(e, it, false) }
+        return -1;
+    }
+    v, ok := RunCmd(e, expr, -1, args);
+    if !ok { return -1 }
+    return v;
+}
+
+// raise "error: ...": reported where Context.eval would catch it.
+Raise :: (e: *EvalCtx, message: string) -> (value: s32, ok: bool) {
+    Va.Report(e.errc, message);
+    return -1, false;
+}
+
+Env :: struct {
+    items: Vec(s32);
+    base: s64;
+}
+
+EnvGet :: (e: *EvalCtx, env: *Env, id: s64) -> s32 {
+    i := id - 1;
+    if i < 0 || env.base + i >= env.items.count { return -1 }
+    x := env.items[env.base + i];
+    y := VDup(e, x);
+    if y < 0 {
+        env.items[env.base + i] = -1;
+        y = x;
+    }
+    return y;
+}
+
+EnvDiscard :: (e: *EvalCtx, env: *Env) {
+    if env.base < env.items.count { for env.items[env.base:] { VFree(e, it, false) } }
+}
+
+RunCmd :: (e: *EvalCtx, cmd_in: s32, arg0: s32, args_in: []s32) -> (value: s32, ok: bool) {
+    cmd := cmd_in;
+    m: s32 = -1;
+    sigcodes: Vec(s32);
+    if Sh.Kind(cmd) == Sh.Word {
+        found, err := MFind(e, Sh.WordOf(cmd));
+        if found < 0 {
+            VFree(e, arg0, false);
+            for args_in { VFree(e, it, false) }
+            out: Vec(u8);
+            BuilderPrint(*out, "error: cannot load %: %", Q(Sh.WordOf(cmd)), err);
+            return Raise(e, BuilderFinish(out));
+        }
+        m = found;
+        SigCodes(modules[m].sig, *sigcodes);
+    } else {
+        body, err, ok := BlockSig0(e, cmd, *sigcodes);
+        if !ok {
+            VFree(e, arg0, false);
+            for args_in { VFree(e, it, false) }
+            return Raise(e, Join("error: invalid command: ", err));
+        }
+        cmd = body;
+    }
+    call: Call;
+    call.session = e.session;
+    call.report = e.report;
+    call.errc = e.errc;
+    if !CvtArgs(e, sigcodes[:], cmd, arg0, args_in, *call) {
+        for call.vals { VFree(e, it, false) }
+        for call.args { VFree(e, it, false) }
+        out: Vec(u8);
+        BuilderPrint(*out, "error: usage: % %", Sh.CmdString(cmd), CmdUsage(e.session, sigcodes[:]));
+        return Raise(e, BuilderFinish(out));
+    }
+    if m >= 0 {
+        r := MRun(e, m, *call);
+        if r < 0 { return Raise(e, "error: command failed") }
+        return r, true;
+    }
+    env: Env;
+    for call.args { VecPush(env.items, it) }
+    v, ok := Expr(e, cmd, *env);
+    EnvDiscard(e, *env);
+    return v, ok;
+}
+
+Expr :: (e: *EvalCtx, c: s32, env: *Env) -> (value: s32, ok: bool) {
+    arg0: s32 = -1;
+    op: s32;
+    args: Vec(s32);
+    k := Sh.Kind(c);
+    if k == Sh.Pipe {
+        if Sh.Left(c) < 0 {
+            // the first argument is the input; the others move down
+            if env.base >= env.items.count { return Raise(e, "error: array bounds error") }
+            arg0 = env.items[env.base];
+            env.items[env.base] = -1;
+            env.base += 1;
+        } else {
+            a, ok := Expr(e, Sh.Left(c), env);
+            if !ok { return -1, false }
+            arg0 = a;
+        }
+        o, ok := GetArgs(e, Sh.Right(c), env, *args);
+        if !ok {
+            VFree(e, arg0, false);
+            return -1, false;
+        }
+        op = o;
+    } else if k == Sh.Adj || k == Sh.Word || k == Sh.Block || k == Sh.Bq2 {
+        o, ok := GetArgs(e, c, env, *args);
+        if !ok { return -1, false }
+        op = o;
+    } else {
+        return Raise(e, Join("error: expected pipe, adj or word, got ", Sh.CmdString(c)));
+    }
+    return RunCmd(e, op, arg0, args[:]);
+}
+
+// a b c is adj(adj(a, b), c): the arguments are evaluated last first.
+GetArgs :: (e: *EvalCtx, c_in: s32, env: *Env, args: *Vec(s32)) -> (op: s32, ok: bool) {
+    d := c_in;
+    while Sh.Kind(d) == Sh.Adj { d = Sh.Left(d) }
+    if Sh.Kind(d) != Sh.Word && Sh.Kind(d) != Sh.Block {
+        v, ok := Raise(e, Join("error: expected word or block, got ", Sh.CmdString(d)));
+        return -1, false;
+    }
+    reversed: Vec(s32);
+    c := c_in;
+    while Sh.Kind(c) == Sh.Adj {
+        right := Sh.Right(c);
+        kr := Sh.Kind(right);
+        r: s32;
+        if kr == Sh.Var {
+            v, ok := GetVar(e, Sh.Left(right), env);
+            if !ok { return -1, false }
+            r = v;
+        } else if kr == Sh.Block {
+            v, ok := Expr(e, Sh.Left(right), env);
+            if !ok { return -1, false }
+            r = v;
+        } else if kr == Sh.Word {
+            r = MMks(e, Sh.Deglob(Sh.WordOf(right)));
+        } else if kr == Sh.Bq2 {
+            r = MMkc(e, Sh.Left(right));
+        } else {
+            for reversed { VFree(e, it, false) }
+            v, ok := Raise(e, Join("error: syntax error: expected var, block or word. got ", Sh.CmdString(c)));
+            return -1, false;
+        }
+        VecPush(reversed, r);
+        c = Sh.Left(c);
+    }
+    i := reversed.count - 1;
+    while i >= 0 {
+        VecPush(<<args, reversed[i]);
+        i -= 1;
+    }
+    return c, true;
+}
+
+GetVar :: (e: *EvalCtx, c: s32, env: *Env) -> (value: s32, ok: bool) {
+    if c < 0 || Sh.Kind(c) != Sh.Word { return Raise(e, "error: bad variable name") }
+    name := Sh.Deglob(Sh.WordOf(c));
+    v := EnvGet(e, env, LimboInt(name));
+    if v < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "error: $% not defined or cannot be reused", Q(name));
+        return Raise(e, BuilderFinish(out));
+    }
+    return v, true;
+}
+
+// Limbo's int of a string: its leading decimal number, or 0.
+LimboInt :: (s: string) -> s64 {
+    i: s64 = 0;
+    while i < s.count && (s[i] == #char " " || s[i] == #char "\t") { i += 1 }
+    negative := false;
+    if i < s.count && (s[i] == #char "-" || s[i] == #char "+") {
+        negative = s[i] == #char "-";
+        i += 1;
+    }
+    n: s64 = 0;
+    while i < s.count && s[i] >= #char "0" && s[i] <= #char "9" {
+        n = n * 10 + cast(s64)(s[i] - #char "0");
+        i += 1;
+    }
+    return ifx negative then -n else n;
+}
+
+// blocksig0 of {(fd string); walk $2 | merge {unbundle $1}}: the block's
+// signature into sig and the expression it runs.
+BlockSig0 :: (e: *EvalCtx, block: s32, sig: *Vec(s32)) -> (body: s32, error: string, ok: bool) {
+    if block < 0 || Sh.Kind(block) != Sh.Block { return -1, Join("expected block, got ", Sh.CmdString(block)), false }
+    b := Sh.Left(block);
+    if b < 0 || Sh.Kind(b) != Sh.Seq || Sh.Left(b) < 0 || Sh.Kind(Sh.Left(b)) != Sh.List {
+        ptc, err := PipeSig(e, b);
+        if err.count > 0 { return -1, err, false }
+        VecPush(<<sig, #char "a");
+        if ptc != -1 { VecPush(<<sig, ptc) }
+        return b, "", true;
+    }
+    r := Sh.Right(b);
+    d := Sh.Left(Sh.Left(b));
+    if d < 0 {
+        VecPush(<<sig, #char "a");
+        return r, "", true;
+    }
+    argt: Vec(string);
+    while Sh.Kind(d) == Sh.Adj {
+        if Sh.Kind(Sh.Right(d)) != Sh.Word { return -1, Join("bad declaration: expected word, got ", Sh.CmdString(Sh.Right(d))), false }
+        VecPush(argt, Sh.Deglob(Sh.WordOf(Sh.Right(d))));
+        d = Sh.Left(d);
+    }
+    if Sh.Kind(d) != Sh.Word { return -1, Join("bad declaration: expected word, got ", Sh.CmdString(d)), false }
+    VecPush(argt, Sh.WordOf(d));
+    VecPush(<<sig, #char "a");
+    ptc, err := PipeSig(e, r);
+    if err.count > 0 { return -1, err, false }
+    if ptc != -1 { VecPush(<<sig, ptc) }
+    i := argt.count - 1;
+    while i >= 0 {
+        tc := Typename2c(e.session, argt[i]);
+        if tc == -1 {
+            out: Vec(u8);
+            BuilderPrint(*out, "unknown type %", Q(argt[i]));
+            return -1, BuilderFinish(out), false;
+        }
+        VecPush(<<sig, tc);
+        i -= 1;
+    }
+    return r, "", true;
+}
+
+// The type of the first argument of an expression whose first pipe
+// element is empty, or -1.
+PipeSig :: (e: *EvalCtx, c: s32) -> (tc: s32, error: string) {
+    if c < 0 { return -1, "" }
+    x := c;
+    while Sh.Kind(x) == Sh.Pipe {
+        if Sh.Left(x) < 0 {
+            y := Sh.Right(x);
+            while Sh.Kind(y) == Sh.Adj { y = Sh.Left(y) }
+            sig: Vec(s32);
+            if Sh.Kind(y) == Sh.Word {
+                m, err := MFind(e, Sh.WordOf(y));
+                if m < 0 { return -1, err }
+                SigCodes(modules[m].sig, *sig);
+            } else if Sh.Kind(y) == Sh.Block {
+                body, err, ok := BlockSig0(e, y, *sig);
+                if !ok { return -1, err }
+            } else {
+                return -1, Join("expected word or block, got ", Sh.CmdString(y));
+            }
+            if sig.count < 2 { return -1, Join("cannot pipe into ", Sh.CmdString(y)) }
+            return sig[1], "";
+        }
+        x = Sh.Left(x);
+    }
+    return -1, "";
+}
+
+BlockSig :: (e: *EvalCtx, c: s32, sig: *Vec(s32)) -> (error: string, ok: bool) {
+    body, err, ok := BlockSig0(e, c, sig);
+    return err, ok;
+}
+
+// cvtargs: options, then arguments, converted to the signature's types.
+// call collects what is converted; false for a usage error.
+CvtArgs :: (e: *EvalCtx, otype: []s32, cmd: s32, arg0: s32, args_in: []s32, call: *Call) -> bool {
+    _, at_view, t := SplitType(otype);
+    rest: Vec(s32);
+    ok := CvtOpts(e, t, cmd, args_in, call, *rest);
+    args: Vec(s32);
+    if arg0 >= 0 { VecPush(args, arg0) }
+    for rest { VecPush(args, it) }
+    if !ok {
+        for args { VecPush(call.args, it) }
+        return false;
+    }
+    at: Vec(s32);
+    for at_view { VecPush(at, it) }
+    if at.count > 0 && at[0] == #char "*" {
+        out: Vec(u8);
+        BuilderPrint(*out, "error: invalid type descriptor % for %", QQ(SigCodesText(at[:])), Sh.CmdString(cmd));
+        Va.Report(e.errc, BuilderFinish(out));
+        for args { VecPush(call.args, it) }
+        return false;
+    }
+    n := args.count;
+    if at.count > 0 && at[at.count - 1] == #char "*" {
+        tc := at[at.count - 2];
+        VecResize(at, at.count - 2);
+        while at.count < n { VecPush(at, tc) }
+    }
+    if n != at.count {
+        out: Vec(u8);
+        BuilderPrint(*out, "error: wrong number of arguments (%/%) to %", n, at.count, Sh.CmdString(cmd));
+        Va.Report(e.errc, BuilderFinish(out));
+        for args { VecPush(call.args, it) }
+        return false;
+    }
+    converted: Vec(s32);
+    left: Vec(s32);
+    good := CvtValues(e, at[:], cmd, args[:], *converted, *left);
+    for converted { VecPush(call.args, it) }
+    if !good { for left { VecPush(call.args, it) } }
+    return good;
+}
+
+SigCodesText :: (codes: []s32) -> string {
+    out: Vec(u8);
+    for codes { AppendRune(*out, it) }
+    return BuilderFinish(out);
+}
+
+// cvtvalues: the first t.count values converted into out; the rest of the
+// values, unconverted, into rest.
+CvtValues :: (e: *EvalCtx, t: []s32, cmd: s32, args: []s32, out: *Vec(s32), rest: *Vec(s32)) -> bool {
+    i: s64 = 0;
+    while i < t.count {
+        tc := t[i];
+        if i >= args.count {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "error: missing argument of type % for %", Type2s(e.session, tc), Sh.CmdString(cmd));
+            Va.Report(e.errc, BuilderFinish(msg));
+            return false;
+        }
+        v := MCvt(e, args[i], tc);
+        if v < 0 {
+            Va.Report(e.errc, Join("error: conversion failed for ", Sh.CmdString(cmd)));
+            if i + 1 < args.count { for args[i + 1:] { VecPush(<<rest, it) } }
+            return false;
+        }
+        VecPush(<<out, v);
+        i += 1;
+    }
+    if i < args.count { for args[i:] { VecPush(<<rest, it) } }
+    return true;
+}
+
+// cvtopts: the options at the front of args into call; the values after
+// them into rest.
+CvtOpts :: (e: *EvalCtx, opttype: []s32, cmd: s32, args_in: []s32, call: *Call, rest: *Vec(s32)) -> bool {
+    args: Vec(s32);
+    for args_in { VecPush(args, it) }
+    pos: s64 = 0;
+    ok := true;
+    stop := opttype.count == 0;
+    while !stop && pos < args.count {
+        s := "";
+        a := args[pos];
+        if VIsString(e, a) {
+            s = VGets(e, a);
+            if s.count <= 1 || s[0] != #char "-" {
+                s = "";
+            } else if s == "--" {
+                pos += 1;
+                s = "";
+            }
+        }
+        if s.count == 0 { break }
+        s = s[1:];
+        consumed := false;
+        while s.count > 0 {
+            opt, width := DecodeRune(s);
+            found, t := OptTypes(opt, opttype);
+            if !found {
+                out: Vec(u8);
+                BuilderAppend(out, "error: unknown option -");
+                AppendRune(*out, opt);
+                BuilderPrint(*out, " for %", Sh.CmdString(cmd));
+                Va.Report(e.errc, BuilderFinish(out));
+                ok = false;
+                stop = true;
+                break;
+            }
+            o: Opt;
+            o.opt = opt;
+            o.at = cast(s32)call.vals.count;
+            if t.count == 0 {
+                s = s[width:];
+                VecInsertFirst(*call.opts, o);
+                continue;
+            }
+            // the option's arguments follow it, in this word or the next
+            if s.count > width {
+                args[pos] = MMks(e, s[width:]);
+            } else {
+                pos += 1;
+            }
+            got: Vec(s32);
+            left: Vec(s32);
+            good := CvtValues(e, t, cmd, args[pos:], *got, *left);
+            if !good {
+                // the Dis evaluator joined the converted values back in
+                pos = args.count;
+                for got { VecPush(<<rest, it) }
+                for left { VecPush(<<rest, it) }
+                ok = false;
+                stop = true;
+                break;
+            }
+            o.n = cast(s32)got.count;
+            for got { VecPush(call.vals, it) }
+            VecInsertFirst(*call.opts, o);
+            pos += t.count;
+            consumed = true;
+            break;
+        }
+        if !stop && !consumed { pos += 1 }
+    }
+    if pos < args.count { for args[pos:] { VecPush(<<rest, it) } }
+    return ok;
+}
+
+// Options go first in call.opts: the Dis list was built by prepending.
+VecInsertFirst :: (opts: *Vec(Opt), o: Opt) {
+    VecPush(<<opts, o);
+    i := opts.count - 1;
+    while i > 0 {
+        opts.*[i] = opts.*[i - 1];
+        i -= 1;
+    }
+    opts.*[0] = o;
+}
+
+DecodeRune :: (s: string) -> (rune: s32, width: s64) {
+    c := cast(s32)s[0];
+    if c < 0x80 || s.count < 2 { return c, 1 }
+    if c < 0xE0 { return ((c & 0x1F) << 6) | (cast(s32)s[1] & 0x3F), 2 }
+    if c < 0xF0 && s.count >= 3 { return ((c & 0x0F) << 12) | ((cast(s32)s[1] & 0x3F) << 6) | (cast(s32)s[2] & 0x3F), 3 }
+    if s.count >= 4 {
+        return ((c & 0x07) << 18) | ((cast(s32)s[1] & 0x3F) << 12) | ((cast(s32)s[2] & 0x3F) << 6) | (cast(s32)s[3] & 0x3F), 4;
+    }
+    return c, 1;
+}
+
+// Module.cvt and Rmodule.cvt: convert v to type tc through the
+// alphabet's automatic conversions.
+MCvt :: (e: *EvalCtx, v_in: s32, tc: s32) -> s32 {
+    if v_in < 0 { return -1 }
+    sx := e.session;
+    v := v_in;
+    dst := TypeByCode(sx, tc);
+    dstid := types[dst].id;
+    while VTypec(e, v) != tc {
+        list: Vec(s64);
+        TransformsOf(sx, TypeByCode(sx, VTypec(e, v)), *list);
+        chosen: s64 = -1;
+        for list {
+            if SetHolds(transforms[it].all_at, transforms[it].all_n, dstid) {
+                chosen = it;
+                break;
+            }
+        }
+        if chosen < 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "error: no way to get from % to %", types[TypeByCode(sx, VTypec(e, v))].qname, types[dst].qname);
+            Va.CoreReport(e.errc, BuilderFinish(out));
+            VFree(e, v, false);
+            return -1;
+        }
+        expr := transforms[chosen].expr;
+        one := s32.[v];
+        nv := ContextEval(e, expr, one[:]);
+        if nv < 0 {
+            if !e.rewriting {
+                out: Vec(u8);
+                BuilderPrint(*out, "error: autoconvert % failed", Q(Sh.CmdString(expr)));
+                Va.CoreReport(e.errc, BuilderFinish(out));
+            }
+            return -1;
+        }
+        v = nv;
+    }
+    return v;
+}
+
+// Module.run and Rmodule.run
+MRun :: (e: *EvalCtx, m: s32, call: *Call) -> s32 {
+    mm := modules[m];
+    if e.rewriting { return RRun(e, m, call) }
+    if mm.def >= 0 {
+        inner := <<e;
+        inner.table = mm.defmods;
+        return ContextEval(*inner, mm.def, call.args[:]);
+    }
+    if mm.typeset >= 0 {
+        impl := reg_modules[mm.impl];
+        v := impl.run(call);
+        if v >= 0 && typesets[mm.typeset].reg >= 0 { Va.SetTypec(v, Native(mm.typeset, Va.Typec(v))) }
+        used := v >= 0;
+        for call.args { VFree(e, it, used) }
+        for call.vals { VFree(e, it, used) }
+        return v;
+    }
+    Va.CoreReport(e.errc, "error: cannot run a virtually declared module");
+    return -1;
+}
+
+// The alphabet's code for a typeset's own code.
+Native :: (ts: s32, local: s32) -> s32 {
+    t := TypesetGetType(ts, local);
+    if t < 0 { return local }
+    return types[t].tc;
+}
+
+// The typeset's own code for one of the alphabet's codes.
+LocalCode :: (sx: s32, reg: s32, tc: s32) -> s32 {
+    for typeset_types {
+        if types[it.ty].session == sx && types[it.ty].tc == tc && typesets[it.typeset].reg == reg { return it.local }
+    }
+    return tc;
+}
+
+RRun :: (e: *EvalCtx, m: s32, call: *Call) -> s32 {
+    mm := modules[m];
+    if mm.def >= 0 {
+        inner := <<e;
+        inner.table = mm.defmods;
+        return ContextEval(*inner, mm.def, call.args[:]);
+    }
+    name := mm.modname;
+    if mm.typeset >= 0 { name = MkQname(typesets[mm.typeset].name, mm.modname) }
+    if e.used >= 0 {
+        TableAdd(e.used, name, m);
+        modules[m].refcount += 1;
+    }
+    v := NewRvalue(Sh.MkWord(name), SigAt(mm.sig, 0), 0);
+    rvalues[v].args_at = cast(s32)rlist.count;
+    rvalues[v].args_n = cast(s32)call.args.count;
+    for call.args { VecPush(rlist, it) }
+    rvalues[v].opts_at = cast(s32)rlist.count;
+    rvalues[v].opts_n = cast(s32)call.opts.count;
+    for call.opts {
+        VecPush(rlist, it.opt);
+        VecPush(rlist, it.n);
+        for k: 0..it.n - 1 { VecPush(rlist, call.vals[it.at + k]) }
+    }
+    if call.args.count == 0 && call.opts.count == 0 { rvalues[v].i = Sh.Mk(Sh.Block, rvalues[v].i, -1) }
+    for call.args { rvalues[it].refcount += 1 }
+    for call.vals { rvalues[it].refcount += 1 }
+    return v;
+}
+
+// ---- the evaluation entries
+
+// eval0: evaluate expr to a value of type dsttype.
+Eval0 :: (sx: s32, expr: s32, dsttype: string, report: s32, errc: s32, args: []s32) -> s32 {
+    e: EvalCtx;
+    e.session = sx;
+    e.table = sessions[sx].modules;
+    e.report = report;
+    e.errc = errc;
+    e.used = -1;
+    tc: s32 = -1;
+    if dsttype.count > 0 {
+        tc = Typename2c(sx, dsttype);
+        if tc == -1 {
+            Va.CoreReport(errc, Join("error: unknown type ", dsttype));
+            return -1;
+        }
+    }
+    v := ContextEval(*e, expr, args);
+    if tc != -1 { v = MCvt(*e, v, tc) }
+    return v;
+}
+
+// eval: evaluate expr as a status and give its result. Reports go to
+// standard error as "alphabet: N. source: message".
+Eval :: (sx: s32, expr: s32, args: []s32) -> string {
+    report := Va.NewReport(Va.NewSink("alphabet: ", -1));
+    errc := Va.ReportStart(report, "eval");
+    v := Eval0(sx, expr, "/status", report, errc, args);
+    if v < 0 { return "no value" }
+    return Va.RunStatus(v);
+}
+
+TypeCompatUsage :: (sx: s32, t0: string, t1: string) -> (compatible: bool, error: string) {
+    s0, err0, raised0 := Usage2Sig(sx, t0);
+    if s0.n < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "bad usage %: %", Q(t0), err0);
+        return false, BuilderFinish(out);
+    }
+    s1, err1, raised1 := Usage2Sig(sx, t1);
+    if s1.n < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "bad usage %: %", Q(t1), err1);
+        return false, BuilderFinish(out);
+    }
+    a: Vec(s32);
+    b: Vec(s32);
+    SigCodes(s0, *a);
+    SigCodes(s1, *b);
+    return TypeCompat(a[:], b[:]), "";
+}
+
+// rewrite: expr with its modules qualified and its conversions written out,
+// and its usage; ok false when it cannot be.
+Rewrite :: (sx: s32, expr: s32, dsttype: string, errc: s32) -> (expr: s32, usage: string, ok: bool) {
+    tc: s32 = -1;
+    if dsttype.count > 0 {
+        tc = Typename2c(sx, dsttype);
+        if tc == -1 {
+            Va.CoreReport(errc, Join("error: unknown type ", dsttype));
+            return -1, "", false;
+        }
+    }
+    e, sig, ok := Rewrite0(sx, expr, tc, errc, -1);
+    if !ok { return -1, "", false }
+    codes: Vec(s32);
+    SigCodes(sig, *codes);
+    return e, CmdUsage(sx, codes[:]), true;
+}
+
+// rewrite0: (expression, signature). Every module the expression uses goes
+// in table used, when there is one.
+Rewrite0 :: (sx: s32, expr: s32, tc: s32, errc: s32, used: s32) -> (expr: s32, sig: Sig, ok: bool) {
+    e: EvalCtx;
+    e.session = sx;
+    e.table = sessions[sx].modules;
+    e.report = -1;
+    e.errc = errc;
+    e.rewriting = true;
+    e.used = used;
+    rewrite_session = sx;
+    sig: Vec(s32);
+    err, good := BlockSig(*e, expr, *sig);
+    if !good {
+        Va.CoreReport(errc, Join("error: cannot get expr type: ", err));
+        return -1, NoSig(), false;
+    }
+    args: Vec(s32);
+    for i: 1..sig.count - 1 { VecPush(args, NewRvalue(Sh.Mk(-1, -1, -1), sig[i], 1)) }
+    v := ContextEval(*e, expr, args[:]);
+    if v >= 0 && tc != -1 { v = MCvt(*e, v, tc) }
+    if v < 0 { return -1, NoSig(), false }
+    sig[0] = rvalues[v].tc;
+    rvalues[v].refcount += 1;
+    top: Renv;
+    out := Gen(v, *top);
+    if sig.count > 1 {
+        t := Sh.MkWord(Type2s(sx, sig[1]));
+        for i: 2..sig.count - 1 { t = Sh.Mk(Sh.Adj, t, Sh.MkWord(Type2s(sx, sig[i]))) }
+        out = Sh.Mk(Sh.Block, Sh.Mk(Sh.Seq, Sh.Mk(Sh.List, t, -1), Sh.Left(out)), -1);
+    }
+    return out, SigMake(sig[:]), true;
+}
+
+Renv :: struct {
+    items: Vec(s32); // newest first
+    n: s32;
+}
+
+// gen: the expression that made v. Values used more than once outside
+// become $n of parentenv.
+Gen :: (v: s32, parentenv: *Renv) -> s32 {
+    rvalues[v].refcount -= 1;
+    if rvalues[v].refcount > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "%", AddEnv(parentenv, v));
+        return Sh.Mk(Sh.Var, Sh.MkWord(BuilderFinish(out)), -1);
+    }
+    rv := rvalues[v];
+    c := rv.i;
+    if rv.opts_n == 0 && rv.args_n == 0 { return c }
+    local: Renv;
+    genblock := NeedBlock(v);
+    env := ifx genblock then *local else parentenv;
+    p := rv.opts_at;
+    for 1..rv.opts_n {
+        opt := rlist[p];
+        n := rlist[p + 1];
+        out: Vec(u8);
+        VecPush(out, #char "-");
+        AppendRune(*out, opt);
+        c = Sh.Mk(Sh.Adj, c, Sh.MkWord(BuilderFinish(out)));
+        for k: 0..n - 1 { c = Sh.Mk(Sh.Adj, c, Gen(rlist[p + 2 + k], env)) }
+        p += 2 + n;
+    }
+    if rv.args_n > 0 {
+        w := rvalues[rlist[rv.args_at]].i;
+        if w >= 0 && Sh.Kind(w) == Sh.Word {
+            word := Sh.WordOf(w);
+            if word.count > 1 && word[0] == #char "-" { c = Sh.Mk(Sh.Adj, c, Sh.MkWord("--")) }
+        }
+    }
+    // pipe notation when it can be used
+    arg0: s32 = -1;
+    if rv.args_n > 0 {
+        arg0 = Gen(rlist[rv.args_at], env);
+        if Sh.Kind(arg0) != Sh.Block {
+            c = Sh.Mk(Sh.Adj, c, arg0);
+            arg0 = -1;
+        }
+        for k: 1..rv.args_n - 1 { c = Sh.Mk(Sh.Adj, c, Gen(rlist[rv.args_at + k], env)) }
+    }
+    if arg0 >= 0 { c = Sh.Mk(Sh.Pipe, Sh.Left(arg0), c) }
+    if genblock {
+        // the values this block refers to, oldest first, become its arguments
+        args: Vec(s32);
+        i := local.items.count - 1;
+        while i >= 0 {
+            VecPush(args, local.items[i]);
+            i -= 1;
+        }
+        m := Sh.MkWord(RType2s(rvalues[args[0]].tc));
+        for k: 1..args.count - 1 { m = Sh.Mk(Sh.Adj, m, Sh.MkWord(RType2s(rvalues[args[k]].tc))) }
+        c = Sh.Mk(Sh.Block, Sh.Mk(Sh.Seq, Sh.Mk(Sh.List, m, -1), c), -1);
+        nv := NewRvalue(c, rv.tc, 1);
+        rvalues[nv].args_at = cast(s32)rlist.count;
+        rvalues[nv].args_n = cast(s32)args.count;
+        for args { VecPush(rlist, it) }
+        rvalues[nv].opts_at = cast(s32)rlist.count;
+        return Gen(nv, parentenv);
+    }
+    return Sh.Mk(Sh.Block, c, -1);
+}
+
+// The alphabet the rewriter is writing for names the types of $n.
+rewrite_session: s32;
+
+RType2s :: (tc: s32) -> string { return Type2s(rewrite_session, tc) }
+
+AddEnv :: (env: *Renv, v: s32) -> s64 {
+    for env.items {
+        if it == v { return env.items.count - it_index }
+    }
+    VecInsertFirstS32(*env.items, v);
+    rvalues[v].refcount += 1;
+    env.n += 1;
+    return env.n;
+}
+
+VecInsertFirstS32 :: (items: *Vec(s32), v: s32) {
+    VecPush(<<items, v);
+    i := items.count - 1;
+    while i > 0 {
+        items.*[i] = items.*[i - 1];
+        i -= 1;
+    }
+    items.*[0] = v;
+}
+
+// A new block is needed when a value used more than once can be resolved
+// here: we are the only thing that points to it.
+NeedBlock :: (v: s32) -> bool {
+    dups: Vec(s32);
+    GetDups(v, *dups);
+    for dups { rvalues[it].refcount -= 1 }
+    r := false;
+    for dups {
+        if rvalues[it].refcount == 0 { r = true }
+        rvalues[it].refcount += 1;
+    }
+    return r;
+}
+
+// The values below v that need $ references, not looking deeper.
+GetDups :: (v: s32, onto: *Vec(s32)) {
+    if rvalues[v].refcount > 1 {
+        VecInsertFirstS32(onto, v);
+        return;
+    }
+    rv := rvalues[v];
+    p := rv.opts_at;
+    for 1..rv.opts_n {
+        n := rlist[p + 1];
+        for k: 0..n - 1 { GetDups(rlist[p + 2 + k], onto) }
+        p += 2 + n;
+    }
+    for k: 0..rv.args_n - 1 { GetDups(rlist[rv.args_at + k], onto) }
+}
+
+Join :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+Join3 :: (a: string, b: string, c: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    BuilderAppend(out, b);
+    BuilderAppend(out, c);
+    return BuilderFinish(out);
+}
+

@@ -1,0 +1,39 @@
+// /export string -> wfd: a directory served as a 9P file tree on whatever
+// connection its consumer gives it.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ns :: #import "taijios_namespace";
+
+Register :: () { Al.RegisterModule(-1, "export", "ws", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("export");
+        p.handle = Serve;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "w", prod);
+    Va.SetText(v, Va.ValueText(call.args[0]));
+    Va.SetErrc(v, Va.ReportStart(call.report, "export"));
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+// The end of a pipe whose other end the directory is exported on.
+Serve :: (v: s32) -> s32 {
+    if Va.RawHandle(v) >= 0 { return Va.RawHandle(v) }
+    ends: [2]s32;
+    if Ns.Pipe(ends[:]) < 0 {
+        Va.Report(Va.ErrcOf(v), Va.WithError("cannot export"));
+        return -1;
+    }
+    if Ns.Export(ends[0], Va.ValueText(v), false) < 0 {
+        Va.Report(Va.ErrcOf(v), Va.WithError("cannot export"));
+        return -1;
+    }
+    Va.SetRawHandle(v, ends[1]);
+    return ends[1];
+}

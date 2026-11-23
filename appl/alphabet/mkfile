@@ -47,3 +47,46 @@ $ROOT/dis/sh/alphabet.dis: alphabet.shmod.dis
 
 <$ROOT/mkfiles/mksubdirs
 
+
+# The Ziran Alphabet: /dis/alphabet.zx runs the builtins of "load alphabet".
+ZXSOURCES=\
+	command.zi\
+	shcmd.zi\
+	alpha_types.zi\
+	alpha_values.zi\
+	alpha_eval.zi\
+	alpha_builtins.zi\
+	alpha_streams.zi\
+	alpha_typesets.zi\
+	main/typeset.zi\
+	main/auth.zi\
+	main/cat.zi\
+	main/create.zi\
+	main/dial.zi\
+	main/echo.zi\
+	main/env.zi\
+	main/export.zi\
+	main/fd.zi\
+	main/filter.zi\
+	main/mount.zi\
+	main/par.zi\
+	main/parse.zi\
+	main/pretty.zi\
+	main/print.zi\
+	main/read.zi\
+	main/readall.zi\
+	main/rewrite.zi\
+	main/seq.zi\
+	main/unparse.zi\
+	main/w2fd.zi\
+	main/wait.zi\
+
+alphabet.zx: $ZXSOURCES mkfile
+	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../lib --module-path main=main --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
+
+$ROOT/dis/alphabet.zx: alphabet.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 alphabet.zx "$staged" && mv "$staged" "$target"
+
+install-zx:V: $ROOT/dis/alphabet.zx

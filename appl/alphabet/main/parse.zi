@@ -1,0 +1,19 @@
+// /parse string -> cmd: the shell's parse of a string.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Sh :: #import "shcmd";
+
+Register :: () { Al.RegisterModule(-1, "parse", "cs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    text := Va.ValueText(call.args[0]);
+    c, err := Sh.Parse(text);
+    if c < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "parse: parse % failed: %", Ty.Q(text), err);
+        Va.Report(call.errc, BuilderFinish(out));
+        return -1;
+    }
+    return Va.MkCmdValue(c);
+}

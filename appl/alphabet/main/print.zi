@@ -1,0 +1,54 @@
+// /print fd string -> status: write the fd to a file descriptor of this
+// process, given by number.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+Ty :: #import "alpha_types";
+
+Register :: () { Al.RegisterModule(-1, "print", "rfs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    number := Va.ValueText(call.args[1]);
+    h := St.Fildes(Al.LimboInt(number), 1);
+    if h < 0 {
+        Va.Report(call.errc, Al.Join("error: no such fd ", Ty.Q(number)));
+        return -1;
+    }
+    return Copier(call.args[0], h);
+}
+
+// A status that copies fd value from into handle h, then lets h go. The
+// status is success whatever the copy meets, as the Dis one was.
+Copier :: (from: s32, h: s32) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("print");
+        p.run = RunCopy;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "r", prod);
+    Va.SetRawHandle(v, h);
+    kids := s32.[from];
+    Va.SetKids(v, kids[:]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+RunCopy :: (v: s32) -> string {
+    from := Va.Kid(v, 0);
+    unused Va.WriteTo(from, Va.RawHandle(v));
+    Va.Free(from, false);
+    St.ReleaseHandle(Va.RawHandle(v));
+    return "";
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if used { return 0 }
+    Va.Free(Va.Kid(v, 0), false);
+    St.ReleaseHandle(Va.RawHandle(v));
+    return 0;
+}

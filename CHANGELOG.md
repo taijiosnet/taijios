@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add /dis/alphabet.zx, Alphabet in Ziran: the typed evaluator, its rewriter and the builtins of "load alphabet", with the modules of the root typeset. The Dis alphabet stays until the ZX shell runs it as its builtin.
+
 - Ship Snake only as ZX and remove its Dis version.
 
 - Open Inferno images and GIF pictures in the ZX image viewer, and remove the Dis viewer.

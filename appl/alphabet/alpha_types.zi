@@ -1,0 +1,670 @@
+// Alphabet's type system, as appl/alphabet/alphabet.b and eval.b kept it:
+// each alphabet's types, the typesets they came from, the names they are
+// known by, the automatic conversions between them, and the type
+// signatures of modules with their usage text.
+//
+// A type code is the character a signature uses for a type: c s r f w d
+// for the root types, and characters from U+25A0 on for types a typeset
+// brings, numbered as they are loaded. A signature is its return type,
+// its argument types (the last may be followed by * for "any number"),
+// then -o for each option o, each followed by the types of its arguments.
+//
+// Rows of every table are kept for the life of the program and refer to
+// each other by index; each row names the alphabet it belongs to.
+#import "std/vec";
+Va :: #import "alpha_values";
+
+// Signatures live in one arena; n is -1 for no signature at all.
+Sig :: struct {
+    at: s32;
+    n: s32;
+}
+
+NoSig :: () -> Sig {
+    s: Sig;
+    s.n = -1;
+    return s;
+}
+
+SigMake :: (codes: []s32) -> Sig {
+    s: Sig;
+    s.at = cast(s32)sig_codes.count;
+    s.n = cast(s32)codes.count;
+    for codes { VecPush(sig_codes, it) }
+    return s;
+}
+
+SigAt :: (s: Sig, i: s64) -> s32 { return sig_codes[s.at + i] }
+
+// The codes of s appended to out.
+SigCodes :: (s: Sig, out: *Vec(s32)) {
+    if s.n <= 0 { return }
+    for i: 0..s.n - 1 { VecPush(<<out, sig_codes[s.at + i]) }
+}
+
+SigEqual :: (a: Sig, b: Sig) -> bool {
+    if a.n != b.n { return false }
+    if a.n <= 0 { return true }
+    for i: 0..a.n - 1 { if sig_codes[a.at + i] != sig_codes[b.at + i] { return false } }
+    return true;
+}
+
+// The signature as Limbo held it: its codes as characters.
+SigText :: (s: Sig) -> string {
+    out: Vec(u8);
+    if s.n > 0 { for i: 0..s.n - 1 { AppendRune(*out, sig_codes[s.at + i]) } }
+    return BuilderFinish(out);
+}
+
+// Codes written as ASCII text (the signatures modules declare) as a Sig.
+SigOfText :: (text: string) -> Sig {
+    codes: Vec(s32);
+    for text { VecPush(codes, cast(s32)it) }
+    return SigMake(codes[:]);
+}
+
+AppendRune :: (out: *Vec(u8), r: s32) {
+    if r < 0x80 {
+        VecPush(<<out, cast(u8)r);
+    } else if r < 0x800 {
+        VecPush(<<out, cast(u8)(0xC0 | (r >> 6)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    } else if r < 0x10000 {
+        VecPush(<<out, cast(u8)(0xE0 | (r >> 12)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 6) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    } else {
+        VecPush(<<out, cast(u8)(0xF0 | (r >> 18)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 12) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | ((r >> 6) & 0x3F)));
+        VecPush(<<out, cast(u8)(0x80 | (r & 0x3F)));
+    }
+}
+
+Session :: struct {
+    autodeclare: bool;
+    currtypec: s32;  // the code the next loaded type gets
+    root: s32;       // the typeset "/"
+    ntypes: s32;     // types are numbered 0..ntypes-1
+    modules: s32;    // its table of module names
+}
+
+AType :: struct {
+    session: s32;
+    id: s32;
+    tc: s32;
+    typeset: s32;
+    qname: string;
+    name: string;
+}
+
+Typeset :: struct {
+    session: s32;
+    name: string;
+    parent: s32;   // -1 for "/"
+    reg: s32;      // the registered typeset that serves it; -1 for "/"
+    alive: bool;
+}
+
+// A typeset's own code for one of the types it holds.
+TypesetType :: struct {
+    typeset: s32;
+    local: s32;
+    ty: s32;
+}
+
+TypeName :: struct {
+    session: s32;
+    name: string;
+    ty: s32;
+}
+
+// A conversion from type src to type dst by expr; all is the set of type
+// ids it can lead to. A type's conversions are searched newest first.
+Transform :: struct {
+    session: s32;
+    src: s32;
+    dst: s32;
+    expr: s32;
+    all_at: s32;
+    all_n: s32;
+}
+
+sessions: Vec(Session);
+types: Vec(AType);
+typesets: Vec(Typeset);
+typeset_types: Vec(TypesetType);
+type_names: Vec(TypeName);
+transforms: Vec(Transform);
+set_items: Vec(s32);
+
+// A registered typeset: a Ziran module that serves types and modules, as a
+// typeset's Dis proxy did. name is its path below "/", alphabet the codes
+// it uses, root codes included.
+RegTypeset :: struct {
+    name: string;
+    alphabet: string;
+}
+
+RegType :: struct {
+    reg: s32;
+    local: s32;
+    name: string;
+}
+
+reg_typesets: Vec(RegTypeset);
+reg_types: Vec(RegType);
+
+RegisterTypeset :: (name: string, alphabet: string) -> s32 {
+    r: RegTypeset;
+    r.name = name;
+    r.alphabet = alphabet;
+    VecPush(reg_typesets, r);
+    return cast(s32)(reg_typesets.count - 1);
+}
+
+RegisterType :: (reg: s32, local: s32, name: string) {
+    t: RegType;
+    t.reg = reg;
+    t.local = local;
+    t.name = name;
+    VecPush(reg_types, t);
+}
+
+FindRegTypeset :: (name: string) -> s32 {
+    for reg_typesets { if it.name == name { return cast(s32)it_index } }
+    return -1;
+}
+
+// The name a registered typeset gives one of its codes.
+RegType2s :: (reg: s32, local: s32) -> string {
+    for reg_types { if it.reg == reg && it.local == local { return it.name } }
+    out: Vec(u8);
+    BuilderAppend(out, "unknowntype('");
+    AppendRune(*out, local);
+    BuilderAppend(out, "')");
+    return BuilderFinish(out);
+}
+
+// A new alphabet holding only the root types: /cmd /string /status /fd
+// /wfd /data, under their qualified names.
+NewSession :: (modules: s32) -> s32 {
+    s: Session;
+    s.currtypec = 0x25A0;
+    s.modules = modules;
+    sx := cast(s32)sessions.count;
+    VecPush(sessions, s);
+    root: Typeset;
+    root.session = sx;
+    root.name = "/";
+    root.parent = -1;
+    root.reg = -1;
+    root.alive = true;
+    VecPush(typesets, root);
+    sessions[sx].root = cast(s32)(typesets.count - 1);
+    codes := s32.[#char "c", #char "s", #char "r", #char "f", #char "w", #char "d"];
+    names := string.["cmd", "string", "status", "fd", "wfd", "data"];
+    qnames := string.["/cmd", "/string", "/status", "/fd", "/wfd", "/data"];
+    for codes {
+        t := AddType(sx, it, sessions[sx].root, qnames[it_index], names[it_index]);
+        Number(t);
+        AddTypeName(sx, qnames[it_index], t);
+        AddTypesetType(sessions[sx].root, it, t);
+    }
+    return sx;
+}
+
+// A type without its id; Number gives it the next one.
+AddType :: (sx: s32, tc: s32, ts: s32, qname: string, name: string) -> s32 {
+    t: AType;
+    t.session = sx;
+    t.id = -1;
+    t.tc = tc;
+    t.typeset = ts;
+    t.qname = qname;
+    t.name = name;
+    VecPush(types, t);
+    return cast(s32)(types.count - 1);
+}
+
+Number :: (t: s32) {
+    sx := types[t].session;
+    types[t].id = sessions[sx].ntypes;
+    sessions[sx].ntypes += 1;
+}
+
+AddTypeName :: (sx: s32, name: string, t: s32) {
+    n: TypeName;
+    n.session = sx;
+    n.name = name;
+    n.ty = t;
+    VecPush(type_names, n);
+}
+
+AddTypesetType :: (ts: s32, local: s32, t: s32) {
+    x: TypesetType;
+    x.typeset = ts;
+    x.local = local;
+    x.ty = t;
+    VecPush(typeset_types, x);
+}
+
+// typebyname.find: the most recently given meaning of a name.
+TypeByName :: (sx: s32, name: string) -> s32 {
+    i := type_names.count - 1;
+    while i >= 0 {
+        if type_names[i].session == sx && type_names[i].name == name { return type_names[i].ty }
+        i -= 1;
+    }
+    return -1;
+}
+
+// typebyc.find: the type with internal code tc.
+TypeByCode :: (sx: s32, tc: s32) -> s32 {
+    for types { if it.session == sx && it.tc == tc { return cast(s32)it_index } }
+    return -1;
+}
+
+TypeById :: (sx: s32, id: s32) -> s32 {
+    for types { if it.session == sx && it.id == id { return cast(s32)it_index } }
+    return -1;
+}
+
+// Typeset.gettype: the type a typeset means by its own code.
+TypesetGetType :: (ts: s32, local: s32) -> s32 {
+    for typeset_types { if it.typeset == ts && it.local == local { return it.ty } }
+    return -1;
+}
+
+GetTypeset :: (sx: s32, name: string) -> s32 {
+    c := Canon(name);
+    i := typesets.count - 1;
+    while i >= 0 {
+        if typesets[i].session == sx && typesets[i].alive && typesets[i].name == c { return cast(s32)i }
+        i -= 1;
+    }
+    return -1;
+}
+
+// Value.type2s: a type's short name when that name means it, else its
+// qualified name.
+Type2s :: (sx: s32, tc: s32) -> string {
+    t := TypeByCode(sx, tc);
+    if t < 0 { return "unknown" }
+    if TypeByName(sx, types[t].name) == t { return types[t].name }
+    return types[t].qname;
+}
+
+Typename2c :: (sx: s32, name: string) -> s32 {
+    t := TypeByName(sx, name);
+    if t < 0 { return -1 }
+    return types[t].tc;
+}
+
+// loadtypeset: give alphabet sx the types of a registered typeset. A type
+// the parent already has keeps its code; each new one gets the next code,
+// the last new type of the alphabet first.
+LoadTypes :: (sx: s32, tsname: string, parent: s32, reg: s32, errc: s32) -> s32 {
+    ts: Typeset;
+    ts.session = sx;
+    ts.name = tsname;
+    ts.parent = parent;
+    ts.reg = reg;
+    ts.alive = true;
+    VecPush(typesets, ts);
+    tsx := cast(s32)(typesets.count - 1);
+    a := reg_typesets[reg].alphabet;
+    newtypes: Vec(s32);
+    for a {
+        tc := cast(s32)it;
+        t := TypesetGetType(parent, tc);
+        if t < 0 {
+            name := RegType2s(reg, tc);
+            qname := MkQname(tsname, name);
+            t = AddType(sx, -1, tsx, qname, name);
+            if TypeByName(sx, qname) >= 0 {
+                message: Vec(u8);
+                BuilderAppend(message, "warning: oops: typename clash on ");
+                AppendQ(*message, qname);
+                Va.CoreReport(errc, BuilderFinish(message));
+            } else {
+                AddTypeName(sx, qname, t);
+            }
+            VecPush(newtypes, t);
+        }
+        AddTypesetType(tsx, tc, t);
+    }
+    i := newtypes.count - 1;
+    while i >= 0 {
+        Number(newtypes[i]);
+        types[newtypes[i]].tc = sessions[sx].currtypec;
+        sessions[sx].currtypec += 1;
+        i -= 1;
+    }
+    return tsx;
+}
+
+MkQname :: (parent: string, child: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, parent);
+    if parent != "/" { VecPush(out, #char "/") }
+    BuilderAppend(out, child);
+    return BuilderFinish(out);
+}
+
+// A canonical qualified name split into typeset and name.
+SplitQname :: (name: string) -> (typeset: string, name: string) {
+    if name.count == 0 { return "", "" }
+    i := name.count - 1;
+    while i >= 0 && name[i] != #char "/" { i -= 1 }
+    if i == 0 { return "/", name[1:] }
+    if i < 0 { return name[0:0], name[1:] }
+    return name[0:i], name[i + 1:];
+}
+
+// Repeated slashes made single and trailing ones removed; "" unless the
+// name begins with a slash.
+Canon :: (name: string) -> string {
+    if name.count == 0 || name[0] != #char "/" { return "" }
+    out: Vec(u8);
+    slash := false;
+    nonslash := 0;
+    for name {
+        if it == #char "/" {
+            slash = true;
+        } else {
+            if slash {
+                VecPush(out, #char "/");
+                nonslash += 1;
+                slash = false;
+            }
+            VecPush(out, it);
+        }
+    }
+    if slash && nonslash == 0 { VecPush(out, #char "/") }
+    return BuilderFinish(out);
+}
+
+SetHolds :: (at: s32, n: s32, id: s32) -> bool {
+    if n <= 0 { return false }
+    for i: 0..n - 1 { if set_items[at + i] == id { return true } }
+    return false;
+}
+
+// ---- signatures
+
+// splittype: (return type, argument types, options).
+SplitType :: (t: []s32) -> (ret: s32, args: []s32, opts: []s32) {
+    if t.count == 0 { return -1, t[0:0], t[0:0] }
+    i: s64 = 1;
+    while i < t.count && t[i] != #char "-" { i += 1 }
+    return t[0], t[1:i], t[i:];
+}
+
+// opttypes: the argument types of option opt, or ok false.
+OptTypes :: (opt: s32, opts: []s32) -> (ok: bool, types: []s32) {
+    for i: 1..opts.count - 1 {
+        if opts[i] == opt && opts[i - 1] == #char "-" {
+            j := i + 1;
+            while j < opts.count && opts[j] != #char "-" { j += 1 }
+            return true, opts[i + 1:j];
+        }
+    }
+    return false, opts[0:0];
+}
+
+CodesEqual :: (a: []s32, b: []s32) -> bool {
+    if a.count != b.count { return false }
+    for a { if it != b[it_index] { return false } }
+    return true;
+}
+
+// Whether a module of signature t1 serves a caller that expects t0.
+TypeCompat :: (t0: []s32, t1: []s32) -> bool {
+    rt0, at0, ot0 := SplitType(t0);
+    rt1, at1, ot1 := SplitType(t1);
+    if (rt0 != rt1 && rt0 != #char "a") || !CodesEqual(at0, at1) { return false }
+    i: s64 = 1;
+    while i < ot0.count {
+        j := i;
+        while j < ot0.count && ot0[j] != #char "-" { j += 1 }
+        ok, t := OptTypes(ot0[i], ot1);
+        if !ok || !CodesEqual(ot0[i + 1:j], t) { return false }
+        i = j + 1;
+    }
+    return true;
+}
+
+// The usage text of a signature, as cmdusage wrote it.
+CmdUsage :: (sx: s32, t: []s32) -> string {
+    if t.count == 0 { return "-> bad" }
+    oi: s64 = 0;
+    while oi < t.count && t[oi] != #char "-" { oi += 1 }
+    s: Vec(u8);
+    if oi < t.count {
+        single: Vec(u8);
+        multi: Vec(u8);
+        i := oi;
+        while i < t.count - 1 {
+            j := i + 1;
+            while j < t.count && t[j] != #char "-" { j += 1 }
+            if j == i + 2 {
+                AppendRune(*single, t[i + 1]);
+            } else {
+                BuilderAppend(multi, " [-");
+                AppendRune(*multi, t[i + 1]);
+                for k: i + 2..j - 1 {
+                    VecPush(multi, #char " ");
+                    BuilderAppend(multi, Type2s(sx, t[k]));
+                }
+                VecPush(multi, #char "]");
+            }
+            i = j;
+        }
+        if single.count > 0 {
+            BuilderAppend(s, " [-");
+            for single { VecPush(s, it) }
+            VecPush(s, #char "]");
+        }
+        for multi { VecPush(s, it) }
+    }
+    many := false;
+    if oi > 2 && t[oi - 1] == #char "*" {
+        many = true;
+        oi -= 2;
+    }
+    k: s64 = 1;
+    while k < oi {
+        VecPush(s, #char " ");
+        BuilderAppend(s, Type2s(sx, t[k]));
+        k += 1;
+    }
+    if many {
+        BuilderAppend(s, " [");
+        BuilderAppend(s, Type2s(sx, t[k]));
+        BuilderAppend(s, "...]");
+    }
+    BuilderAppend(s, " -> ");
+    BuilderAppend(s, Type2s(sx, t[0]));
+    text := BuilderFinish(s);
+    if text.count > 0 && text[0] == #char " " { return text[1:] }
+    return text;
+}
+
+// usage2sig: the signature that usage text describes, or an error. A
+// misplaced "." stops it with the Limbo exception text in raised.
+Usage2Sig :: (sx: s32, u: string) -> (sig: Sig, error: string, raised: string) {
+    l: UsageLexer;
+    l.u = u;
+    t, tok := OptsTok(*l);
+    opts: Vec(s32);
+    while true {
+        if t != #char "[" { break }
+        o := l.i;
+        t, tok = OptsTok(*l);
+        if t != #char "-" {
+            l.i = o;
+            t = #char "[";
+            break;
+        }
+        for tok {
+            VecPush(opts, #char "-");
+            VecPush(opts, cast(s32)it);
+        }
+        while true {
+            t, tok = OptsTok(*l);
+            if t == #char "]" { break }
+            if t != #char "t" {
+                if l.raised.count > 0 { return NoSig(), "", l.raised }
+                message: Vec(u8);
+                BuilderAppend(message, "bad option syntax, got '");
+                AppendRune(*message, t);
+                VecPush(message, #char "'");
+                return NoSig(), BuilderFinish(message), "";
+            }
+            tc := Typename2c(sx, tok);
+            if tc == -1 { return NoSig(), UnknownType(tok), "" }
+            VecPush(opts, tc);
+        }
+    }
+    args: Vec(s32);
+    while true {
+        if l.raised.count > 0 { return NoSig(), "", l.raised }
+        if t == #char ">" { break }
+        if t == #char "[" {
+            t, tok = OptsTok(*l);
+            if t != #char "t" { return Raised(*l, "bad argument syntax") }
+            tc := Typename2c(sx, tok);
+            if tc == -1 { return NoSig(), UnknownType(tok), "" }
+            t, tok = OptsTok(*l);
+            if t != #char "*" { return Raised(*l, "bad argument syntax") }
+            t, tok = OptsTok(*l);
+            if t != #char "]" { return Raised(*l, "bad argument syntax") }
+            t, tok = OptsTok(*l);
+            if t != #char ">" { return Raised(*l, "bad argument syntax") }
+            VecPush(args, tc);
+            VecPush(args, #char "*");
+            break;
+        }
+        if t != #char "t" { return NoSig(), "no return type", "" }
+        tc := Typename2c(sx, tok);
+        if tc == -1 { return NoSig(), UnknownType(tok), "" }
+        VecPush(args, tc);
+        t, tok = OptsTok(*l);
+    }
+    t, tok = OptsTok(*l);
+    if l.raised.count > 0 { return NoSig(), "", l.raised }
+    if t != #char "t" { return NoSig(), "expected return type", "" }
+    tc := Typename2c(sx, tok);
+    if tc == -1 { return NoSig(), UnknownType(tok), "" }
+    codes: Vec(s32);
+    VecPush(codes, tc);
+    for args { VecPush(codes, it) }
+    for opts { VecPush(codes, it) }
+    return SigMake(codes[:]), "", "";
+}
+
+// %q as Inferno's print formats it: quoted when empty or holding a space,
+// a control character or a quote.
+AppendQ :: (out: *Vec(u8), word: string) {
+    needs := word.count == 0;
+    for word { if it <= #char " " || it == #char "'" { needs = true } }
+    if !needs { BuilderAppend(<<out, word); return }
+    VecPush(<<out, #char "'");
+    for word {
+        if it == #char "'" { VecPush(<<out, #char "'") }
+        VecPush(<<out, it);
+    }
+    VecPush(<<out, #char "'");
+}
+
+// %#q: always quoted.
+QQ :: (word: string) -> string {
+    out: Vec(u8);
+    VecPush(out, #char "'");
+    for word {
+        if it == #char "'" { VecPush(out, #char "'") }
+        VecPush(out, it);
+    }
+    VecPush(out, #char "'");
+    return BuilderFinish(out);
+}
+
+Q :: (word: string) -> string {
+    out: Vec(u8);
+    AppendQ(*out, word);
+    return BuilderFinish(out);
+}
+
+#scope_file
+
+sig_codes: Vec(s32);
+
+UnknownType :: (name: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, "unknown type: ");
+    BuilderAppend(out, name);
+    return BuilderFinish(out);
+}
+
+Raised :: (l: *UsageLexer, message: string) -> (sig: Sig, error: string, raised: string) {
+    if l.raised.count > 0 { return NoSig(), "", l.raised }
+    return NoSig(), message, "";
+}
+
+UsageLexer :: struct {
+    u: string;
+    i: s64;
+    raised: string; // the exception optstok raised
+}
+
+UsageChar :: (l: *UsageLexer, i: s64) -> s32 {
+    if i >= l.u.count { return 0 }
+    return cast(s32)l.u[i];
+}
+
+// optstok: one token of usage text: - with the option letters, [ ], * for
+// "...", > for "->", t with a type name, or -1 at the end.
+OptsTok :: (l: *UsageLexer) -> (t: s32, tok: string) {
+    if l.raised.count > 0 { return -1, "" }
+    while UsageChar(l, l.i) == #char " " { l.i += 1 }
+    c := UsageChar(l, l.i);
+    if c == 0 { return -1, "" }
+    if c == #char "-" {
+        l.i += 1;
+        if UsageChar(l, l.i) == #char ">" {
+            l.i += 1;
+            return #char ">", "";
+        }
+        start := l.i;
+        while true {
+            d := UsageChar(l, l.i);
+            if d == 0 || d == #char "]" || d == #char " " { break }
+            l.i += 1;
+        }
+        return #char "-", l.u[start:l.i];
+    }
+    if c == #char "[" || c == #char "]" {
+        l.i += 1;
+        return c, "";
+    }
+    if c == #char "." {
+        start := l.i;
+        while UsageChar(l, l.i) == #char "." { l.i += 1 }
+        if l.i - start < 3 {
+            l.raised = "parse:error at '.'";
+            return -1, "";
+        }
+        return #char "*", "";
+    }
+    start := l.i;
+    while true {
+        d := UsageChar(l, l.i);
+        if d == 0 { break }
+        if d == #char " " || d == #char "]" || d == #char "-" || (d == #char "." && UsageChar(l, l.i + 1) == #char ".") {
+            return #char "t", l.u[start:l.i];
+        }
+        l.i += 1;
+    }
+    return #char "t", l.u[start:l.i];
+}

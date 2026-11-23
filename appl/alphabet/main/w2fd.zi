@@ -1,0 +1,42 @@
+// /w2fd wfd -> fd: read what a wfd gives.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+Register :: () { Al.RegisterModule(-1, "w2fd", "fw", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("w2fd");
+        p.read = Read;
+        p.handle = HandleOf;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "f", prod);
+    Va.SetErrc(v, Va.ReportStart(call.report, "2fd"));
+    Va.SetKids(v, call.args[:]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+HandleOf :: (v: s32) -> s32 { return Va.Handle(Va.Kid(v, 0)) }
+
+Read :: (v: s32, buffer: []u8) -> s64 {
+    h := Va.Handle(Va.Kid(v, 0));
+    if h < 0 { return 0 }
+    n := Io.ReadBytes(h, buffer);
+    if n < 0 {
+        Va.Report(Va.ErrcOf(v), Va.WithError("read error"));
+        return 0;
+    }
+    return n;
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { Va.Free(Va.Kid(v, 0), false) }
+    return 0;
+}

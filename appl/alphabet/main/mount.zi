@@ -1,0 +1,61 @@
+// /mount [-abc] [-x string] wfd string -> status: mount the file tree served
+// on a wfd. -a and -b mount after or before what is there, -c allows
+// creation, -x names the tree to attach.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Ns :: #import "taijios_namespace";
+
+Register :: () { Al.RegisterModule(-1, "mount", "rws-a-b-c-xs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("mount");
+        p.run = RunMount;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    flag: s64 = Ns.Replace;
+    aname := "";
+    for opt_index: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, opt_index) == #char "a" {
+            flag = Ns.After | (flag & Ns.AllowCreate);
+        } else if Al.OptLetter(call, opt_index) == #char "b" {
+            flag = Ns.Before | (flag & Ns.AllowCreate);
+        } else if Al.OptLetter(call, opt_index) == #char "c" {
+            flag |= Ns.AllowCreate;
+        } else if Al.OptLetter(call, opt_index) == #char "x" {
+            aname = Va.ValueText(Al.OptArg(call, opt_index, 0));
+        }
+    }
+    v := Va.NewValue(#char "r", prod);
+    Va.SetText(v, Va.ValueText(call.args[1]));
+    Va.SetN0(v, flag);
+    Va.SetN1(v, Va.MkString(aname)); // the tree to attach, as a string value
+    Va.SetErrc(v, Va.ReportStart(call.report, "mount"));
+    Va.SetKids(v, call.args[0:1]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+RunMount :: (v: s32) -> string {
+    dir := Va.ValueText(v);
+    h := Va.Handle(Va.Kid(v, 0));
+    aname := Va.ValueText(cast(s32)Va.N1(v));
+    if h < 0 || Ns.Mount(h, -1, dir, cast(s32)Va.N0(v), aname) < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "mount error on %: %", Ty.QQ(dir), Ns.Error());
+        e := BuilderFinish(out);
+        Va.Report(Va.ErrcOf(v), e);
+        return e;
+    }
+    return "";
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { Va.Free(Va.Kid(v, 0), false) }
+    return 0;
+}

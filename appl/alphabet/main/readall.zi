@@ -1,0 +1,7 @@
+// /readall fd -> string: all of an fd.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+Register :: () { Al.RegisterModule(-1, "readall", "sf", Run) }
+
+Run :: (call: *Al.Call) -> s32 { return Va.MkString(Va.ReadAll(call.args[0])) }

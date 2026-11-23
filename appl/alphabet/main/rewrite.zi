@@ -1,0 +1,38 @@
+// /rewrite [-d string] cmd cmd -> cmd: an expression rewritten under the
+// declarations of the second command, run in an alphabet of their own;
+// -d names the type the result should have.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Bu :: #import "alpha_builtins";
+
+Register :: () { Al.RegisterModule(-1, "rewrite", "ccc-ds", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    expr := Va.CmdOf(call.args[0]);
+    decls := Va.CmdOf(call.args[1]);
+    state: Bu.State;
+    none: []Bu.Arg;
+    Bu.Init(*state, none);
+    status := Bu.RunTree(*state, decls);
+    if status.count == 0 {
+        argv: Vec(Bu.Arg);
+        VecPush(argv, Bu.Arg.{word = "rewrite", cmd = -1});
+        VecPush(argv, Bu.Arg.{cmd = expr});
+        if Al.OptCount(call) > 0 { VecPush(argv, Bu.Arg.{word = Va.ValueText(Al.OptArg(call, 0, 0)), cmd = -1}) }
+        words: Vec(Bu.Arg);
+        status = Bu.RunS(*state, argv[:], *words);
+        if status.count == 0 {
+            Al.Quit(state.alphabet);
+            if words.count != 2 || words[0].cmd < 0 {
+                out: Vec(u8);
+                BuilderPrint(*out, "rewrite not available, strange... (len %)", words.count);
+                Va.Report(call.errc, BuilderFinish(out));
+                return -1;
+            }
+            return Va.MkCmdValue(words[0].cmd);
+        }
+    }
+    Al.Quit(state.alphabet);
+    Va.Report(call.errc, Al.Join("rewrite failed: ", status));
+    return -1;
+}

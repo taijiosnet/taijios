@@ -1,0 +1,21 @@
+// /dial string -> wfd: a network connection.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+Ty :: #import "alpha_types";
+Dial :: #import "taijios_dial";
+
+Register :: () { Al.RegisterModule(-1, "dial", "ws", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    addr := Va.ValueText(call.args[0]);
+    handles: [2]s32;
+    directory: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(addr, "", handles[:], directory[:]) < 0 {
+        Va.Report(call.errc, Va.WithError(Al.Join("dial: cannot dial ", Ty.Q(addr))));
+        return -1;
+    }
+    v := St.WfdHandle(handles[0], Va.ReportStart(call.report, "dial"));
+    Va.SetN0(v, handles[1]); // the connection lasts while its control file is open
+    return v;
+}

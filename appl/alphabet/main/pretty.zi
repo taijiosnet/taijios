@@ -1,0 +1,66 @@
+// /pretty cmd -> string: an alphabet expression laid out one module to a
+// line, a pipeline split after each |, nested blocks indented by tabs. A
+// command that is not an expression gives no value.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Sh :: #import "shcmd";
+
+Register :: () { Al.RegisterModule(-1, "pretty", "sc", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    out: Vec(u8);
+    if !Pretty(*out, Va.CmdOf(call.args[0]), 0) { return -1 }
+    return Va.MkString(BuilderFinish(out));
+}
+
+#scope_file
+
+Tabs :: (out: *Vec(u8), n: s64) { for 1..n { VecPush(<<out, #char "\t") } }
+
+Pretty :: (out: *Vec(u8), n: s32, depth: s64) -> bool {
+    if n < 0 { return true }
+    k := Sh.Kind(n);
+    if k == Sh.Block {
+        BuilderAppend(<<out, "{\n");
+        Tabs(out, depth + 1);
+        if !Pretty(out, Sh.Left(n), depth + 1) { return false }
+        VecPush(<<out, #char "\n");
+        Tabs(out, depth);
+        VecPush(<<out, #char "}");
+    } else if k == Sh.Var {
+        VecPush(<<out, #char "$");
+        return Pretty(out, Sh.Left(n), depth);
+    } else if k == Sh.List {
+        VecPush(<<out, #char "(");
+        if !Pretty(out, Sh.Left(n), depth) { return false }
+        VecPush(<<out, #char ")");
+    } else if k == Sh.Seq {
+        if !Pretty(out, Sh.Left(n), depth) { return false }
+        VecPush(<<out, #char "\n");
+        Tabs(out, depth);
+        return Pretty(out, Sh.Right(n), depth);
+    } else if k == Sh.Pipe {
+        if !Pretty(out, Sh.Left(n), depth) { return false }
+        BuilderAppend(<<out, " |\n");
+        Tabs(out, depth);
+        return Pretty(out, Sh.Right(n), depth);
+    } else if k == Sh.Adj {
+        if !Pretty(out, Sh.Left(n), depth) { return false }
+        VecPush(<<out, #char " ");
+        return Pretty(out, Sh.Right(n), depth);
+    } else if k == Sh.Word {
+        BuilderAppend(<<out, Sh.Quote(Sh.WordOf(n), true));
+    } else if k == Sh.Bq2 {
+        // if it cannot be laid out, it is written as the shell writes it
+        inner: Vec(u8);
+        if Pretty(*inner, Sh.Left(n), depth) {
+            VecPush(<<out, #char "\"");
+            for inner { VecPush(<<out, it) }
+        } else {
+            BuilderAppend(<<out, Sh.CmdString(n));
+        }
+    } else {
+        return false;
+    }
+    return true;
+}

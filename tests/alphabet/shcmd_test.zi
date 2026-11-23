@@ -1,0 +1,61 @@
+// The shell-syntax parser and printer that Alphabet expressions use. Each
+// expected text is what the Dis shell printed for "echo {INPUT}", which
+// parses the block and prints it with cmd2string.
+//
+// From the TaijiOS root:
+//     ziran run --target=c --root tests/alphabet --module-path appl/alphabet tests/alphabet/shcmd_test.zi
+Sh :: #import "shcmd";
+
+Case :: struct {
+    input: string;
+    want: string;
+}
+
+cases: [21]Case = Case.[
+    .{input = "a b c", want = "{a b c}"},
+    .{input = "a|b|c", want = "{a|b|c}"},
+    .{input = "a | b; c & d", want = "{a|b;c&;d}"},
+    .{input = "a && b || c", want = "{or {and {a} {b}} {c}}"},
+    .{input = "x=y; x:=y z; a = b = c", want = "{x=y;x:=y z;a=b=c}"},
+    .{input = "*.b 'q*' x[a] ?", want = "{*.b 'q*' x[a] ?}"},
+    .{input = "$a $#a $\"a $a.b $a^$b a$b", want = "{$a $#a $\"a $a^.b $a^$b a^$b}"},
+    .{input = "\"{x} `{y} \"x", want = "{\"{x} `{y} \"x}"},
+    .{input = "a >x <y >>z <>w >[2]e >[1=2] <[0=]", want = "{a >x <y >>z <>w >[2]e >[1=2] <[0=]}"},
+    .{input = "a |[2] b |[1=2] c |[=3] d", want = "{a|[2]b|[1=2]c|[=3]d}"},
+    .{input = "(a b\nc) {x\ny\n}", want = "{(a b c) {x;y}}"},
+    .{input = "'it''s' '' 'a b'", want = "{'it''s' '' 'a b'}"},
+    .{input = "a^b ^c x:y", want = "{a^b^c x:y}"},
+    .{input = "| /print 1", want = "{|/print 1}"},
+    .{input = "(fd string); walk $2 | merge {unbundle $1}", want = "{(fd string);walk $2|merge {unbundle $1}}"},
+    .{input = "a # comment\nb", want = "{a;b}"},
+    .{input = ";a;;b;", want = "{a;b}"},
+    .{input = "a&", want = "{a&}"},
+    .{input = "{} ()", want = "{{} ()}"},
+    .{input = "a 'b", want = "internal: parse error: unterminated string literal"},
+    .{input = "a >[x] b", want = "internal: parse error: syntax error in redirection"},
+];
+
+failures: s32;
+
+main :: () -> s32 {
+    for cases {
+        text: Vec(u8);
+        BuilderPrint(*text, "{%}", it.input);
+        node, err := Sh.Parse(BuilderFinish(text));
+        got := ifx err.count > 0 then err else Sh.CmdString(node);
+        if got != it.want {
+            failures += 1;
+            print("FAIL case %: [%]\n  got  [%]\n  want [%]\n", it_index, it.input, got, it.want);
+        }
+    }
+    // A top-level parse ends at the first newline; an empty text is no tree.
+    first, first_err := Sh.Parse("a b\nc d");
+    if first_err.count != 0 || Sh.CmdString(first) != "a b" { failures += 1; print("FAIL: first line only\n") }
+    empty, empty_err := Sh.Parse("");
+    if empty != -1 || empty_err.count != 0 { failures += 1; print("FAIL: empty parse\n") }
+    bad, bad_err := Sh.Parse("a }");
+    if bad != -1 || bad_err != "internal: parse error: syntax error" { failures += 1; print("FAIL: syntax error\n") }
+    if failures != 0 { print("shcmd: % failures\n", failures); return 1 }
+    print("shcmd: all % cases match the Dis shell\n", cases.count + 3);
+    return 0;
+}

@@ -1,0 +1,135 @@
+// /filter fd cmd [string...] -> fd: what a shell command writes when it
+// reads the fd; the strings are its arguments. Each line it writes to its
+// standard error is reported. The command runs in the ZX shell.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Sh :: #import "shcmd";
+Ns :: #import "taijios_namespace";
+Process :: #import "taijios_process";
+
+SHELL :: "/dis/sh.zx";
+
+Register :: () { Al.RegisterModule(-1, "filter", "ffcs*", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("filter");
+        p.read = Read;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "f", prod);
+    Va.SetErrc(v, Va.ReportStart(call.report, "filter"));
+    Va.SetKids(v, call.args[:]);
+    Va.SetRawHandle(v, -1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+// Starts the command on first read: its input is the fd's own handle when
+// it has one, else a pipe this value feeds.
+Start :: (v: s32) -> bool {
+    input := Va.Kid(v, 0);
+    operands: Vec(string);
+    VecPush(operands, "-c");
+    VecPush(operands, Sh.CmdString(Va.CmdOf(Va.Kid(v, 1))));
+    for i: 2..Va.KidCount(v) - 1 { VecPush(operands, Va.ValueText(Va.Kid(v, i))) }
+    out: [2]s32;
+    errors: [2]s32;
+    if Ns.Pipe(out[:]) < 0 || Ns.Pipe(errors[:]) < 0 {
+        Va.Report(Va.ErrcOf(v), Va.WithError("cannot make pipe"));
+        return false;
+    }
+    in_handle := Va.Handle(input);
+    feed: [2]s32 = .[-1, -1];
+    if in_handle < 0 {
+        if Ns.Pipe(feed[:]) < 0 {
+            Va.Report(Va.ErrcOf(v), Va.WithError("cannot make pipe"));
+            return false;
+        }
+        in_handle = feed[0];
+    }
+    launch := Process.StartWith(SHELL, operands[:], in_handle, out[1], errors[1]);
+    unused Io.CloseFile(out[1]);
+    unused Io.CloseFile(errors[1]);
+    if feed[0] >= 0 { unused Io.CloseFile(feed[0]) }
+    if launch.id == 0 {
+        Va.Report(Va.ErrcOf(v), Al.Join("cannot run the shell: ", launch.error));
+        return false;
+    }
+    Va.SetRawHandle(v, out[0]);
+    Va.SetN0(v, feed[1]);
+    Va.SetN1(v, errors[0]);
+    Va.SetN2(v, launch.id);
+    return true;
+}
+
+// The command's output. While the fd still has bytes for the command they
+// are written to it, and the output read as it comes so neither side waits
+// on the other.
+Read :: (v: s32, buffer: []u8) -> s64 {
+    if Va.RawHandle(v) < 0 && Va.N2(v) == 0 {
+        if !Start(v) { return 0 }
+    }
+    if Va.RawHandle(v) < 0 { return 0 }
+    ReportErrors(v, false);
+    chunk: [4096]u8;
+    while Va.N0(v) >= 0 {
+        n := Io.PollRead(Va.RawHandle(v), buffer);
+        if n > 0 { return n }
+        got := Va.Read(Va.Kid(v, 0), chunk[:]);
+        if got <= 0 {
+            unused Io.CloseFile(cast(s32)Va.N0(v));
+            Va.SetN0(v, -1);
+        } else if Io.WriteBytes(cast(s32)Va.N0(v), TextView(chunk[:got])) < 0 {
+            unused Io.CloseFile(cast(s32)Va.N0(v));
+            Va.SetN0(v, -1);
+        }
+    }
+    n := Io.ReadBytes(Va.RawHandle(v), buffer);
+    if n <= 0 {
+        ReportErrors(v, true);
+        unused Io.CloseFile(Va.RawHandle(v));
+        Va.SetRawHandle(v, -1);
+        unused Process.Wait(cast(s32)Va.N2(v));
+        return 0;
+    }
+    return n;
+}
+
+// Each whole line of the command's standard error, as a report.
+ReportErrors :: (v: s32, to_end: bool) {
+    h := cast(s32)Va.N1(v);
+    if h < 0 { return }
+    buffer: [1024]u8;
+    while true {
+        n := ifx to_end then Io.ReadBytes(h, buffer[:]) else Io.PollRead(h, buffer[:]);
+        if n <= 0 { break }
+        BuilderAppend(pending, TextView(buffer[:n]));
+    }
+    start: s64 = 0;
+    for pending {
+        if it == #char "\n" {
+            if it_index > start { Va.Report(Va.ErrcOf(v), TextDetach(TextCopy(TextView(pending[start:it_index])))) }
+            start = it_index + 1;
+        }
+    }
+    rest: Vec(u8);
+    for pending[start:] { VecPush(rest, it) }
+    VecSwap(pending, rest);
+    if to_end {
+        unused Io.CloseFile(h);
+        Va.SetN1(v, -1);
+    }
+}
+
+pending: Vec(u8);
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { Va.Free(Va.Kid(v, 0), false) }
+    return 0;
+}

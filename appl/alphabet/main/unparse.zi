@@ -1,0 +1,8 @@
+// /unparse cmd -> string: a command as the shell writes it.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Sh :: #import "shcmd";
+
+Register :: () { Al.RegisterModule(-1, "unparse", "sc", Run) }
+
+Run :: (call: *Al.Call) -> s32 { return Va.MkString(Sh.CmdString(Va.CmdOf(call.args[0]))) }

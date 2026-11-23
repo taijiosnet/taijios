@@ -1,0 +1,56 @@
+// /auth [-v] [-k string] [-C string] wfd -> wfd: authenticate over a
+// connection with a keyring key, -k naming the key file (default
+// /usr/USER/keyring/default) and -C the algorithm to use after.
+//
+// The key file is read here. The authentication protocol itself needs the
+// Inferno Auth client, which no ZX library gives yet: until it does the
+// module reports that and gives no connection.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+Authinfo :: #import "auth/authinfo";
+
+Register :: () { Al.RegisterModule(-1, "auth", "ww-ks-Cs-v", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    keyfile := "";
+    for opt_index: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, opt_index) == #char "k" {
+            keyfile = Va.ValueText(Al.OptArg(call, opt_index, 0));
+            if keyfile.count > 0 && !(keyfile[0] == #char "/" || (keyfile.count > 2 && keyfile[0:2] == "./")) {
+                out: Vec(u8);
+                BuilderPrint(*out, "/usr/%/keyring/%", User(), keyfile);
+                keyfile = BuilderFinish(out);
+            }
+        }
+    }
+    if keyfile.count == 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "/usr/%/keyring/default", User());
+        keyfile = BuilderFinish(out);
+    }
+    info: Authinfo.Authinfo;
+    error: Vec(u8);
+    if !Authinfo.Read(keyfile, *info, *error) {
+        out: Vec(u8);
+        BuilderPrint(*out, "auth: cannot read %: %", Ty.Q(keyfile), BuilderFinish(error));
+        Va.Report(call.errc, BuilderFinish(out));
+        return -1;
+    }
+    errc := Va.ReportStart(call.report, "auth");
+    Va.Report(errc, "authentication failed: the Inferno authentication protocol is not available to ZX programs");
+    return -1;
+}
+
+#scope_file
+
+User :: () -> string {
+    h := Io.OpenFile("/dev/user", 0);
+    if h < 0 { return "nobody" }
+    buffer: [128]u8;
+    n := Io.ReadBytes(h, buffer[:]);
+    unused Io.CloseFile(h);
+    if n < 0 { return "nobody" }
+    return TextDetach(TextCopy(TextView(buffer[:n])));
+}

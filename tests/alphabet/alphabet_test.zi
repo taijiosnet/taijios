@@ -1,0 +1,237 @@
+// Guest regression for Alphabet in Ziran: the core (parser, type checker,
+// evaluator, the builtins of "load alphabet") and the modules of the root
+// typeset "/". Each case is a script of alphabet builtin commands; it runs
+// as /dis/alphabet.zx SCRIPT, and its status, output and diagnostics must
+// be what the Dis "load alphabet" builtin gave for the same script, run
+// with sh. A case with a note says where the Dis original could not be
+// matched: it hung, or printed debugging, and the case holds the result
+// the original meant.
+//
+// /filter runs shell commands and waits for /dis/sh.zx; /auth's protocol
+// waits for a ZX Inferno Auth client; only its key file is checked here.
+//
+// From the TaijiOS root, after "(cd appl/alphabet && mk install-zx)":
+//     ziran run --target=c --root tests/alphabet tests/alphabet/alphabet_test.zi -- [EMU]
+#import "std/byte_text_linux";
+#import "std/file";
+#import "std/file_linux";
+#import "std/file_tree_linux";
+#import "std/process_run_linux";
+
+Case :: struct {
+    name: string;
+    script: string;
+    input: string; // a file of the work directory read as standard input; empty reads /dev/null
+    status: string;
+    out: string;
+    err: string;
+}
+
+WORK :: "build/tests/alphabet/main";
+
+block0: [16]Case = Case.[
+    .{name = "echo-nostatus", script = "- {/echo hello}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /fd to /status\n"},
+    .{name = "print-echo", script = "- {/print {/echo hello} 1}\n", input = "", status = "", out = "hello\n", err = ""},
+    .{name = "echo-n", script = "- {/print {/echo -n hello} 1}\n", input = "", status = "", out = "hello", err = ""},
+    .{name = "cat-two", script = "- {/print {/cat {/echo a} {/echo b}} 1}\n", input = "", status = "", out = "a\nb\n", err = ""},
+    .{name = "cat-none", script = "- {/print {/cat} 1}\n", input = "", status = "", out = "", err = ""},
+    .{name = "autoconvert-print", script = "autoconvert /fd /status {(/fd); /print $1 1}\n- {/echo hi}\n", input = "", status = "", out = "hi\n", err = ""},
+    .{name = "create", script = "- {/create {/echo data} /build/tests/alphabet/main/work/created}\n- {/print {/read /build/tests/alphabet/main/work/created} 1}\n", input = "", status = "", out = "data\n", err = ""},
+    .{name = "create-bad", script = "- {/create {/echo data} /nodir/x}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: cannot create /nodir/x: '/nodir' file does not exist\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "read", script = "- {/print {/read /build/tests/alphabet/main/work/a.txt} 1}\n", input = "", status = "", out = "alpha\nbeta\n", err = ""},
+    .{name = "read-missing", script = "- {/print {/read /build/tests/alphabet/main/work/missing} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: cannot open /build/tests/alphabet/main/work/missing: '/build/tests/alphabet/main/work/missing' does not exist\nalphabet: 0. eval: error: command failed\n"},
+    // the Dis readall never answered a /read producer and hung
+    .{name = "readall", script = "- {/print {/echo {/readall {/read /build/tests/alphabet/main/work/a.txt}}} 1}\n", input = "", status = "", out = "alpha\nbeta\n\n", err = ""},
+    .{name = "env", script = "- {/print {/echo {/env abcvar}} 1}\n", input = "", status = "", out = "hello\n", err = ""},
+    .{name = "env-list", script = "- {/print {/echo {/env ablist}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: env: environment variable ablist has more than one element\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "env-unset", script = "- {/print {/echo {/env nosuchvar}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: env: environment variable nosuchvar not set\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "env-badname", script = "- {/print {/echo {/env a/b}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: env: invalid environment variable name a/b\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "parse-unparse", script = "- {/print {/echo {/unparse {/parse 'a  b|c'}}} 1}\n", input = "", status = "", out = "a b|c\n", err = ""},
+];
+
+block1: [16]Case = Case.[
+    // the Dis module hung after the failed parse
+    .{name = "parse-bad", script = "- {/print {/echo {/unparse {/parse 'a }'}}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: parse: parse 'a }' failed: internal: parse error: syntax error\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "pretty", script = "- {/print {/echo {/pretty \"{/print {/echo a} 1; /print {/echo b|/cat} 1}}} 1}\n", input = "", status = "", out = "{\n\t/print {\n\t\t/echo a\n\t} 1\n\t/print {\n\t\t/echo b |\n\t\t/cat\n\t} 1\n}\n", err = ""},
+    .{name = "pretty-bad", script = "- {/print {/echo {/pretty \"{a=b}}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: command failed\n"},
+    .{name = "wait", script = "- {/print {/echo {/wait {/print {/echo x} 1}}} 1}\n", input = "", status = "", out = "x\n\n", err = ""},
+    // Dis seq also printed three debugging lines with its process id
+    .{name = "seq", script = "- {/seq {/print {/echo a} 1} {/print {/echo b} 1}}\n", input = "", status = "", out = "a\nb\n", err = ""},
+    // Dis seq -o and -a hung when they stopped early
+    .{name = "seq-o", script = "- {/seq -o {/print {/echo a} 1} {/print {/echo b} 1}}\n", input = "", status = "", out = "a\n", err = ""},
+    .{name = "par", script = "- {/par {/print {/echo a} 1} {/print {/echo b} 1}}\n", input = "", status = "", out = "a\nb\n", err = ""},
+    .{name = "fd-stdin", script = "- {/print {/w2fd {/fd 0}} 1}\n", input = "a.txt", status = "", out = "alpha\nbeta\n", err = ""},
+    .{name = "fd-bad", script = "- {/print {/w2fd {/fd 9}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no such file descriptor 9\nalphabet: 0. eval: error: command failed\n"},
+    // the emulator's refusal text for a ZX dial has no space before the parenthesis
+    .{name = "dial-bad", script = "- {/print {/w2fd {/dial tcp!127.0.0.1!1}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: dial: cannot dial tcp!127.0.0.1!1: Connection refused (connect 127.0.0.1!1)\nalphabet: 0. eval: error: command failed\n"},
+    // Dis mount of an /export hung
+    .{name = "export-mount", script = "- {/mount {/export /build/tests/alphabet/main/work} /n/remote}\n- {/print {/read /n/remote/a.txt} 1}\n", input = "", status = "", out = "alpha\nbeta\n", err = ""},
+    // Dis mount hung after reporting a failed mount
+    .{name = "mount-bad", script = "- {/mount {/export /build/tests/alphabet/main/work} /nosuchdir}\n", input = "", status = "mount error on '/nosuchdir': '/nosuchdir' file does not exist", out = "", err = "alphabet: 2. mount: mount error on '/nosuchdir': '/nosuchdir' file does not exist\n"},
+    .{name = "auth-nokey", script = "- {/print {/w2fd {/auth -k /nosuchkey {/export /}}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: auth: cannot read /nosuchkey: '/nosuchkey' file does not exist\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "rewrite-mod", script = "- {/print {/echo {/unparse {/rewrite -d /status \"{/echo a} \"{autoconvert /fd /status {(/fd); /print $1 1}}}}} 1}\n", input = "", status = "", out = "{/echo a|/print 1}\n", err = ""},
+    .{name = "args", script = "- {(/string); /print {/echo $1} 1} hello\n", input = "", status = "", out = "hello\n", err = ""},
+    .{name = "args-two", script = "- {(/string /string); /print {/echo $1} $2} hello 1\n", input = "", status = "", out = "hello\n", err = ""},
+];
+
+block2: [16]Case = Case.[
+    .{name = "args-badtype", script = "- {(/fd /string); /print $1 $2} hello 1\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /fd\nalphabet: 0. eval: error: conversion failed for /print $1 $2\nalphabet: 0. eval: error: usage: /print $1 $2 /fd /string -> unknown\n"},
+    .{name = "args-count", script = "- {(/string); /print {/echo $1} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: wrong number of arguments (0/1) to /print {/echo $1} 1\nalphabet: 0. eval: error: usage: /print {/echo $1} 1 /string -> unknown\n"},
+    .{name = "err-nargs", script = "- {/print {/echo a}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: wrong number of arguments (1/2) to /print\nalphabet: 0. eval: error: usage: /print /fd /string -> /status\n"},
+    .{name = "err-nargs-many", script = "- {/print {/echo a} 1 2}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: wrong number of arguments (3/2) to /print\nalphabet: 0. eval: error: usage: /print /fd /string -> /status\n"},
+    .{name = "err-missing", script = "- {/print}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: wrong number of arguments (0/2) to /print\nalphabet: 0. eval: error: usage: /print /fd /string -> /status\n"},
+    .{name = "err-nomod", script = "- {/nosuch}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: cannot load /nosuch: cannot load /dis/alphabet/main/nosuch.dis: '/dis/alphabet/main/nosuch.dis' does not exist\n"},
+    .{name = "err-echo-noarg", script = "- {/echo}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: wrong number of arguments (0/1) to /echo\nalphabet: 0. eval: error: usage: /echo [-n] /string -> /fd\n"},
+    .{name = "err-badopt", script = "- {/echo -x a}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: unknown option -x for /echo\nalphabet: 0. eval: error: usage: /echo [-n] /string -> /fd\n"},
+    .{name = "err-cvt-string-fd", script = "- {/cat /a}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /fd\nalphabet: 0. eval: error: conversion failed for /cat\nalphabet: 0. eval: error: usage: /cat [/fd...] -> /fd\n"},
+    .{name = "err-cvt-fd-string", script = "- {/print {/echo a} {/echo b}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /fd to /string\nalphabet: 0. eval: error: conversion failed for /print\nalphabet: 0. eval: error: usage: /print /fd /string -> /status\n"},
+    .{name = "err-var", script = "- {/print $1 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: $1 not defined or cannot be reused\n"},
+    .{name = "err-type", script = "- {(/nosuchtype); /echo a}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: invalid command: unknown type /nosuchtype\n"},
+    .{name = "err-seqexpr", script = "- {/echo a; /echo b}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: expected pipe, adj or word, got /echo a;/echo b\n"},
+    .{name = "err-usage", script = "- foo\n", input = "", status = "usage", out = "", err = "usage: - {expr} [arg...]\n"},
+    .{name = "err-nofd", script = "- {/print {/echo a} 7}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no such fd 7\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "rewrite-sb", script = "echo ${rewrite {/print {/echo a} 1}}\n", input = "", status = "", out = "{/echo a|/print 1} -> /status\n", err = ""},
+];
+
+block3: [16]Case = Case.[
+    .{name = "rewrite-sb-type", script = "echo ${rewrite {/echo a} /status}\n", input = "", status = "bad expression", out = "", err = "e: error: no way to get from /fd to /status\n"},
+    .{name = "rewrite-sb-auto", script = "autoconvert /fd /status {(/fd); /print $1 1}\necho ${rewrite {/echo a} /status}\n", input = "", status = "", out = "{/echo a|/print 1} -> /status\n", err = ""},
+    .{name = "rewrite-sb-block", script = "echo ${rewrite {(/string); /print {/echo $1} 1}}\n", input = "", status = "", out = "{(/string);/echo $1|/print 1} /string -> /status\n", err = ""},
+    .{name = "rewrite-sb-dup", script = "echo ${rewrite {(/string); /seq {/print {/echo $1} 1} {/print {/echo $1} 1}}}\n", input = "", status = "", out = "{(/string);/echo $1|/print 1|/seq {/echo $1|/print 1}} /string -> /status\n", err = ""},
+    .{name = "define", script = "define hello {(/string); /print {/echo $1} 1}\n- {hello world}\necho ${usage hello}\nwhatis hello\n", input = "", status = "", out = "world\n/string -> /status\nload alphabet; declare hello '/string -> /status'; define hello {(/string ); {(/string);/echo $1|/print 1}}\n", err = ""},
+    .{name = "define-bad", script = "define /x {/echo a}\n", input = "", status = "bad define: bad module name", out = "", err = ""},
+    .{name = "define-twice", script = "define x {/echo a}\ndefine x {/echo b}\n", input = "", status = "bad define: module already declared", out = "", err = ""},
+    .{name = "declare-virtual", script = "declare foo '/string -> /fd'\n- {/print {foo a} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: cannot run a virtually declared module\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "declare-compat", script = "declare /echo '/string -> /fd'\necho ${usage /echo}\n", input = "", status = "", out = "/string -> /fd\n", err = ""},
+    .{name = "declare-incompat", script = "declare /echo '/fd -> /fd'\n", input = "", status = "error", out = "", err = "cannot declare /echo: 'echo [-n] /string -> /fd' not compatible with '/fd -> /fd' (ff vs fs-n, 0)\n"},
+    .{name = "declare-nosuch", script = "declare /nosuch\n", input = "", status = "error", out = "", err = "cannot declare /nosuch: cannot load /dis/alphabet/main/nosuch.dis: '/dis/alphabet/main/nosuch.dis' does not exist\n"},
+    .{name = "declare-badsig", script = "declare /echo '/string ->'\n", input = "", status = "error", out = "", err = "cannot declare /echo: bad type sig: expected return type\n"},
+    .{name = "import", script = "declare /echo\nimport /echo\n- {/print {echo hi} 1}\necho ${modules}\n", input = "", status = "", out = "hi\n/echo /print echo\n", err = ""},
+    .{name = "import-bad", script = "import /nosuch\n", input = "", status = "import error", out = "", err = "alphabet: cannot import /nosuch: cannot import: cannot load /dis/alphabet/main/nosuch.dis: '/dis/alphabet/main/nosuch.dis' does not exist\n"},
+    .{name = "type", script = "type /fd /string\necho ${usage /print}\necho ${types}\necho ${types /}\n", input = "", status = "", out = "fd string -> /status\n/data /wfd fd /status string /cmd\ndata wfd fd status string cmd\n", err = ""},
+    .{name = "type-bad", script = "type /nosuch\n", input = "", status = "type declare error", out = "", err = "alphabet: cannot import type /nosuch: / does not hold type nosuch\n"},
+];
+
+block4: [15]Case = Case.[
+    .{name = "types-badts", script = "echo ${types /nosuch}\n", input = "", status = "error", out = "", err = "unknown typeset /nosuch\n"},
+    .{name = "usage", script = "echo ${usage /echo}\necho ${usage /seq}\necho ${usage /mount}\n", input = "", status = "", out = "[-n] /string -> /fd\n[-ao] [/status...] -> /status\n[-abc] [-x /string] /wfd /string -> /status\n", err = ""},
+    .{name = "usage-nosuch", script = "echo ${usage /nosuch}\n", input = "", status = "error", out = "", err = "module not declared\n"},
+    .{name = "undeclare", script = "declare /echo\nundeclare /echo\nundeclare /echo\n", input = "", status = "", out = "", err = "alphabet: cannot undeclare /echo: module not declared\n"},
+    .{name = "autodeclare-off", script = "autodeclare 0\n- {/print {/echo a} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: cannot load /echo: module not declared\n"},
+    .{name = "info", script = "info\n", input = "", status = "", out = "typeset /\n/auth [-v] [-k /string] [-C /string] /wfd -> /wfd\n/cat [/fd...] -> /fd\n/create /fd /string -> /status\n/dial /string -> /wfd\n/echo [-n] /string -> /fd\n/env /string -> /string\n/export /string -> /wfd\n/fd /string -> /wfd\n/filter /fd /cmd [/string...] -> /fd\n/mount [-abc] [-x /string] /wfd /string -> /status\n/par [/status...] -> /status\n/parse /string -> /cmd\n/pretty /cmd -> /string\n/print /fd /string -> /status\n/read /string -> /fd\n/readall /fd -> /string\n/rewrite [-d /string] /cmd /cmd -> /cmd\n/seq [-ao] [/status...] -> /status\n/unparse /cmd -> /string\n/w2fd /wfd -> /fd\n/wait /status -> /string\n", err = ""},
+    .{name = "info-auto", script = "autoconvert /fd /status {(/fd); /print $1 1}\nautoconvert /string /fd /read\ninfo\n", input = "", status = "", out = "typeset /\n/auth [-v] [-k /string] [-C /string] /wfd -> /wfd\n/cat [/fd...] -> /fd\n/create /fd /string -> /status\n/dial /string -> /wfd\n/echo [-n] /string -> /fd\n/env /string -> /string\n/export /string -> /wfd\n/fd /string -> /wfd\n/filter /fd /cmd [/string...] -> /fd\n/mount [-abc] [-x /string] /wfd /string -> /status\n/par [/status...] -> /status\n/parse /string -> /cmd\n/pretty /cmd -> /string\n/print /fd /string -> /status\n/read /string -> /fd\n/readall /fd -> /string\n/rewrite [-d /string] /cmd /cmd -> /cmd\n/seq [-ao] [/status...] -> /status\n/unparse /cmd -> /string\n/w2fd /wfd -> /fd\n/wait /status -> /string\n\nautoconvert /fd /status {(/fd);/print $1 1}\nautoconvert /string /fd {(/string);/read $1}\n", err = ""},
+    .{name = "typeset-bad", script = "typeset /nosuch\n", input = "", status = "error", out = "", err = "cannot load typeset /nosuch: cannot load nosuchtypes.dis: '/dis/alphabet/nosuchtypes.dis' does not exist\n"},
+    .{name = "clear", script = "define x {/echo a}\nclear\necho ${usage x}\n", input = "", status = "error", out = "", err = "module not declared\n"},
+    .{name = "whatis", script = "whatis /echo\n", input = "", status = "", out = "load alphabet; declare /echo '[-n] /string -> /fd'\n", err = ""},
+    .{name = "autoconvert-word", script = "autoconvert /string /fd /read\n- {/print /build/tests/alphabet/main/work/a.txt 1}\n", input = "", status = "", out = "alpha\nbeta\n", err = ""},
+    .{name = "autoconvert-ambig", script = "autoconvert /string /fd /read\nautoconvert /string /fd /echo\n", input = "", status = "", out = "", err = ""},
+    .{name = "autoconvert-loop", script = "autoconvert /string /fd /read\nautoconvert /fd /string /readall\n", input = "", status = "error", out = "", err = "cannot autoconvert /fd to /string via /readall: bad auto-conversion /fd->/string via {(/fd);/readall $1}: ambiguity: self /string|{(/string);/read $1}|{(/fd);/readall $1}, self /string\n"},
+    .{name = "autoconvert-badtype", script = "autoconvert /nosuch /fd /read\n", input = "", status = "error", out = "", err = "cannot autoconvert /nosuch to /fd via /read: unknown type /nosuch\n"},
+    .{name = "autoconvert-incompat", script = "autoconvert /string /fd /readall\n", input = "", status = "error", out = "", err = "e: error: no way to get from /string to /fd\ne: error: conversion failed for /readall\ne: error: usage: /readall /fd -> /string\ncannot autoconvert /string to /fd via /readall: cannot rewrite transformation {(/string);/readall $1}\n"},
+];
+
+CASES :: 79;
+
+CaseAt :: (i: s64) -> Case {
+
+    if i < 16 { return block0[i - 0] }
+
+    if i < 32 { return block1[i - 16] }
+
+    if i < 48 { return block2[i - 32] }
+
+    if i < 64 { return block3[i - 48] }
+
+    if i < 79 { return block4[i - 64] }
+
+    return block0[0];
+}
+
+
+failures: s32;
+
+Expect :: (ok: bool, c: Case, what: string, got: string, want: string) {
+    if ok { return }
+    failures += 1;
+    print("FAIL % %:\n  got  [%]\n  want [%]\n", c.name, what, got, want);
+}
+
+Path :: (dir: string, kind: string, index: s64) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/%/%.%", WORK, dir, kind, index);
+    return BuilderFinish(path);
+}
+
+Prepare :: () -> bool {
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/tests");
+    unused CreateDirectory("build/tests/alphabet");
+    if !CreateDirectory(WORK) { return false }
+    dirs := string.["work", "work/sub", "cases", "result"];
+    for dirs {
+        path: Vec(u8);
+        BuilderPrint(*path, "%/%", WORK, it);
+        if !CreateDirectory(BuilderFinish(path)) { return false }
+    }
+    a: Vec(u8);
+    BuilderPrint(*a, "%/work/a.txt", WORK);
+    if !WriteEntireFile(BuilderFinish(a), "alpha\nbeta\n") { return false }
+    for i: 0..CASES - 1 {
+        if !WriteEntireFile(Path("cases", "script", i), CaseAt(i).script) { return false }
+    }
+    return true;
+}
+
+// One guest shell script runs every case and keeps each result in files.
+Script :: () -> string {
+    script: Vec(u8);
+    BuilderPrint(*script, "abcvar=hello\nablist=(a b)\ncd /%/work\n", WORK);
+    for i: 0..CASES - 1 {
+        c := CaseAt(i);
+        input := "/dev/null";
+        if c.input.count > 0 { input = c.input }
+        BuilderPrint(*script, "/dis/alphabet.zx /%/cases/script.% < % > ../result/out.% >[2] ../result/err.%\n",
+            WORK, i, input, i, i);
+        BuilderPrint(*script, "echo $status > ../result/status.%\n", i);
+    }
+    return BuilderFinish(script);
+}
+
+Result :: (kind: string, index: s64) -> string {
+    text, ok := ReadEntireFile(Path("result", kind, index));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    if !Prepare() { print("cannot prepare %\n", WORK); return 1 }
+    guest: Vec(u8);
+    BuilderPrint(*guest, "%/script", WORK);
+    guest_path := BuilderFinish(guest);
+    if !WriteEntireFile(guest_path, Script()) { return 1 }
+    root: Text = WorkingDirectory();
+    shell: Vec(u8);
+    BuilderPrint(*shell, "/%", guest_path);
+    command: [7]string = .["timeout", "120", emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(shell)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("cannot start %\n", emu);
+        return 1;
+    }
+    for i: 0..CASES - 1 {
+        c := CaseAt(i);
+        status: Vec(u8);
+        BuilderPrint(*status, "%\n", c.status);
+        want_status := BuilderFinish(status);
+        got := Result("status", i);
+        Expect(got == want_status, c, "status", got, want_status);
+        out := Result("out", i);
+        Expect(out == c.out, c, "stdout", out, c.out);
+        err := Result("err", i);
+        Expect(err == c.err, c, "stderr", err, c.err);
+    }
+    if failures != 0 { print("alphabet: % failures in % cases\n", failures, CASES); return 1 }
+    print("alphabet: all % cases match the Dis originals\n", CASES);
+    return 0;
+}

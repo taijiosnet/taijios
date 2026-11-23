@@ -1,0 +1,5 @@
+// Every typeset this alphabet serves, registered once at start: "/" and,
+// as their ports land, abc, fs and grid.
+Main :: #import "main/typeset";
+
+Register :: () { Main.Register() }

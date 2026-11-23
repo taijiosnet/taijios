@@ -1,0 +1,297 @@
+// Alphabet values and their reports. In the Dis version every value that
+// was not a string or a command was a channel served by a process; here a
+// value is a row that names its producer, and the producer's operations
+// do that process's work when a consumer asks: read the next bytes of an
+// fd, run a status, hand over a file handle, duplicate or free.
+//
+// Reports number their sources as the Dis reporter did: each evaluation
+// numbers from 0, "eval" first, then every module that starts a report, in
+// the order the modules run.
+using Io :: #import "taijios_io";
+
+ReadOp :: #type (v: s32, buffer: []u8) -> s64;
+RunOp :: #type (v: s32) -> string;
+FreeOp :: #type (v: s32, used: bool) -> s32;
+DupOp :: #type (v: s32) -> s32;
+HandleOp :: #type (v: s32) -> s32;
+
+// What a producer does with the values it made. Read gives the next bytes
+// of an fd value, 0 at its end; Run starts a status and gives its result,
+// "" for success; Handle gives a real handle for an fd or wfd value, or
+// -1; Dup gives a value usable again, or -1 when it can be used only once.
+Producer :: struct {
+    name: string;
+    read: ReadOp;
+    run: RunOp;
+    free: FreeOp;
+    dup: DupOp;
+    handle: HandleOp;
+}
+
+Value :: struct {
+    tc: s32;       // the alphabet's code for its type
+    prod: s32;
+    text: string;  // a string value, or text a producer keeps
+    cmd: s32;      // a command value
+    handle: s32;   // a taijios_io handle the value holds, or -1
+    errc: s32;     // where its producer reports
+    session: s32;
+    n0: s64;
+    n1: s64;
+    n2: s64;
+    kids_at: s32;  // values it was made from, in value_kids
+    kids_n: s32;
+    done: bool;
+}
+
+values: Vec(Value);
+value_kids: Vec(s32);
+producers: Vec(Producer);
+
+AddProducer :: (p: Producer) -> s32 {
+    VecPush(producers, p);
+    return cast(s32)(producers.count - 1);
+}
+
+// A producer whose operations do nothing; set the ones it needs.
+BlankProducer :: (name: string) -> Producer {
+    p: Producer;
+    p.name = name;
+    p.read = NoRead;
+    p.run = NoRun;
+    p.free = NoFree;
+    p.dup = NoDup;
+    p.handle = NoHandle;
+    return p;
+}
+
+NoRead :: (v: s32, buffer: []u8) -> s64 { return 0 }
+NoRun :: (v: s32) -> string { return "" }
+NoFree :: (v: s32, used: bool) -> s32 { return 0 }
+NoDup :: (v: s32) -> s32 { return -1 }
+SelfDup :: (v: s32) -> s32 { return v }
+NoHandle :: (v: s32) -> s32 { return -1 }
+
+// The producer of plain strings and commands, which can be used again.
+PlainProducer :: () -> s32 {
+    if plain < 0 {
+        p := BlankProducer("plain");
+        p.dup = SelfDup;
+        plain = AddProducer(p);
+    }
+    return plain;
+}
+
+NewValue :: (tc: s32, prod: s32) -> s32 {
+    v: Value;
+    v.tc = tc;
+    v.prod = prod;
+    v.cmd = -1;
+    v.handle = -1;
+    v.errc = -1;
+    v.session = -1;
+    v.kids_at = cast(s32)value_kids.count;
+    VecPush(values, v);
+    return cast(s32)(values.count - 1);
+}
+
+MkString :: (s: string) -> s32 {
+    v := NewValue(#char "s", PlainProducer());
+    values[v].text = s;
+    return v;
+}
+
+MkCmdValue :: (c: s32) -> s32 {
+    v := NewValue(#char "c", PlainProducer());
+    values[v].cmd = c;
+    return v;
+}
+
+// Gives v the values it was made from.
+SetKids :: (v: s32, kids: []s32) {
+    values[v].kids_at = cast(s32)value_kids.count;
+    values[v].kids_n = cast(s32)kids.count;
+    for kids { VecPush(value_kids, it) }
+}
+
+Kid :: (v: s32, i: s64) -> s32 { return value_kids[values[v].kids_at + i] }
+
+// Field access for typeset modules.
+ValueText :: (v: s32) -> string { return values[v].text }
+SetText :: (v: s32, s: string) { values[v].text = s }
+SetTypec :: (v: s32, tc: s32) { values[v].tc = tc }
+CmdOf :: (v: s32) -> s32 { return values[v].cmd }
+SetCmd :: (v: s32, c: s32) { values[v].cmd = c }
+RawHandle :: (v: s32) -> s32 { return values[v].handle }
+SetRawHandle :: (v: s32, h: s32) { values[v].handle = h }
+ErrcOf :: (v: s32) -> s32 { return values[v].errc }
+SetErrc :: (v: s32, e: s32) { values[v].errc = e }
+SessionOf :: (v: s32) -> s32 { return values[v].session }
+SetSession :: (v: s32, sx: s32) { values[v].session = sx }
+N0 :: (v: s32) -> s64 { return values[v].n0 }
+SetN0 :: (v: s32, x: s64) { values[v].n0 = x }
+N1 :: (v: s32) -> s64 { return values[v].n1 }
+SetN1 :: (v: s32, x: s64) { values[v].n1 = x }
+N2 :: (v: s32) -> s64 { return values[v].n2 }
+SetN2 :: (v: s32, x: s64) { values[v].n2 = x }
+KidCount :: (v: s32) -> s64 { return values[v].kids_n }
+
+IsString :: (v: s32) -> bool { return values[v].tc == #char "s" }
+
+Typec :: (v: s32) -> s32 { return values[v].tc }
+
+Dup :: (v: s32) -> s32 {
+    if v < 0 { return -1 }
+    return producers[values[v].prod].dup(v);
+}
+
+Free :: (v: s32, used: bool) {
+    if v < 0 || values[v].done { return }
+    values[v].done = true;
+    unused producers[values[v].prod].free(v, used);
+}
+
+// The next bytes of an fd value: the count, 0 at its end, -1 on error.
+Read :: (v: s32, buffer: []u8) -> s64 { return producers[values[v].prod].read(v, buffer) }
+
+// Starts a status value and waits for its result.
+RunStatus :: (v: s32) -> string { return producers[values[v].prod].run(v) }
+
+Handle :: (v: s32) -> s32 { return producers[values[v].prod].handle(v) }
+
+// Copies the rest of fd value v to handle out, as a Dis producer wrote
+// into the descriptor its consumer gave it.
+WriteTo :: (v: s32, out: s32) -> bool {
+    buffer: [8192]u8;
+    while true {
+        n := Read(v, buffer[:]);
+        if n <= 0 { return n == 0 }
+        if Io.WriteBytes(out, TextView(buffer[:n])) < 0 { return false }
+    }
+    return true;
+}
+
+// The whole of fd value v.
+ReadAll :: (v: s32) -> string {
+    out: Vec(u8);
+    buffer: [8192]u8;
+    while true {
+        n := Read(v, buffer[:]);
+        if n <= 0 { break }
+        for buffer[:n] { VecPush(out, it) }
+    }
+    return BuilderFinish(out);
+}
+
+// ---- reports
+
+// Where report text goes: with prefix to standard error, or with prefix
+// on to a parent sink.
+Sink :: struct {
+    prefix: string;
+    parent: s32;
+}
+
+// An error channel: a numbered source of a report, or a plain channel
+// (id -1) whose messages go to the sink as they are.
+Errc :: struct {
+    sink: s32;
+    id: s32;
+    name: string;
+}
+
+// One evaluation's report: its sink and the number its next source gets.
+ReportRow :: struct {
+    sink: s32;
+    next: s32;
+}
+
+sinks: Vec(Sink);
+errcs: Vec(Errc);
+reports: Vec(ReportRow);
+
+NewSink :: (prefix: string, parent: s32) -> s32 {
+    s: Sink;
+    s.prefix = prefix;
+    s.parent = parent;
+    VecPush(sinks, s);
+    return cast(s32)(sinks.count - 1);
+}
+
+// A plain error channel into sink.
+PlainErrc :: (sink: s32) -> s32 {
+    e: Errc;
+    e.sink = sink;
+    e.id = -1;
+    VecPush(errcs, e);
+    return cast(s32)(errcs.count - 1);
+}
+
+NewReport :: (sink: s32) -> s32 {
+    r: ReportRow;
+    r.sink = sink;
+    VecPush(reports, r);
+    return cast(s32)(reports.count - 1);
+}
+
+// Report.start: the next numbered source of report r, or no channel for no
+// report.
+ReportStart :: (r: s32, name: string) -> s32 {
+    if r < 0 { return -1 }
+    e: Errc;
+    e.sink = reports[r].sink;
+    e.id = reports[r].next;
+    e.name = name;
+    reports[r].next += 1;
+    VecPush(errcs, e);
+    return cast(s32)(errcs.count - 1);
+}
+
+// Reports->report: a message on a channel; with no channel it is lost.
+Report :: (errc: s32, message: string) {
+    if errc < 0 { return }
+    e := errcs[errc];
+    if e.id < 0 {
+        Emit(e.sink, message);
+        return;
+    }
+    text: Vec(u8);
+    BuilderPrint(*text, "%. %: %", e.id, e.name, message);
+    Emit(e.sink, BuilderFinish(text));
+}
+
+// Alphabet's own report: with no channel the message goes to standard
+// error.
+CoreReport :: (errc: s32, message: string) {
+    if errc < 0 {
+        line: Vec(u8);
+        BuilderPrint(*line, "%\n", message);
+        unused Io.WriteBytes(2, BuilderFinish(line));
+        return;
+    }
+    Report(errc, message);
+}
+
+Emit :: (sink: s32, text: string) {
+    s := sinks[sink];
+    line: Vec(u8);
+    BuilderAppend(line, s.prefix);
+    BuilderAppend(line, text);
+    if s.parent >= 0 {
+        Emit(s.parent, BuilderFinish(line));
+        return;
+    }
+    VecPush(line, #char "\n");
+    unused Io.WriteBytes(2, BuilderFinish(line));
+}
+
+// A message with the system's error text: "prefix: error".
+WithError :: (prefix: string) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "%: %", prefix, Io.LastError());
+    return BuilderFinish(out);
+}
+
+#scope_file
+
+plain: s32 = -1;

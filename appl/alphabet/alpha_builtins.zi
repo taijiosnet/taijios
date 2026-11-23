@@ -1,0 +1,430 @@
+// The shell builtins that "load alphabet" gave, from alphabet.shmod.b:
+// declare, declares, undeclare, define, import, autodeclare, type,
+// typeset, autoconvert, - (evaluate), info and clear, the value builtins
+// rewrite, modules, types and usage, and the whatis text of a module. Each
+// prints what the shell module printed and gives the status the shell set.
+//
+// An argument is a word or a braced block, as the shell passed them.
+using Io :: #import "taijios_io";
+Sh :: #import "shcmd";
+using Ty :: #import "alpha_types";
+Va :: #import "alpha_values";
+using Al :: #import "alpha_eval";
+
+Arg :: struct {
+    word: string;
+    cmd: s32; // a block, or -1
+}
+
+// The alphabet the builtins act on; clear replaces it.
+State :: struct {
+    alphabet: s32;
+}
+
+DeclaresOp :: #type (sx: s32, decls: s32, errc: s32) -> string;
+
+// abc's declares module serves the declares builtin once abc is registered.
+declares_op: DeclaresOp;
+have_declares: bool;
+
+SetDeclares :: (op: DeclaresOp) {
+    declares_op = op;
+    have_declares = true;
+}
+
+// initbuiltin: a new alphabet that declares modules on demand; the shell
+// variable autodeclares, when the caller has it, holds declarations to
+// run first.
+Init :: (state: *State, autodeclares: []Arg) {
+    state.alphabet = NewAlphabet();
+    SetAutodeclare(state.alphabet, true);
+    for autodeclares {
+        c := it.cmd;
+        if c < 0 {
+            parsed, err := Sh.Parse(it.word);
+            if err.count > 0 {
+                Line2(Join("alphabet: warning: bad autodeclaration: ", err));
+                continue;
+            }
+            c = parsed;
+        }
+        args := Arg.[.{word = "declares", cmd = -1}, .{cmd = c}];
+        unused Declares(state, args[:]);
+    }
+}
+
+Word :: (a: Arg) -> string {
+    if a.word.count > 0 || a.cmd < 0 { return a.word }
+    return Sh.CmdString(a.cmd);
+}
+
+// A builtin, by its name in argv[0]: the status it gives.
+Run :: (state: *State, argv: []Arg) -> string {
+    name := argv[0].word;
+    if name == "declare" { return DeclareB(state, argv) }
+    if name == "declares" { return Declares(state, argv) }
+    if name == "undeclare" { return UndeclareB(state, argv) }
+    if name == "define" { return DefineB(state, argv) }
+    if name == "import" { return ImportB(state, argv) }
+    if name == "type" { return TypeB(state, argv) }
+    if name == "typeset" { return TypesetB(state, argv) }
+    if name == "autoconvert" { return AutoconvertB(state, argv) }
+    if name == "autodeclare" {
+        if argv.count != 2 { return Usage("autodeclare 0/1") }
+        SetAutodeclare(state.alphabet, LimboInt(Word(argv[1])) != 0);
+        return "";
+    }
+    if name == "info" { return InfoB(state, argv) }
+    if name == "clear" {
+        Quit(state.alphabet);
+        state.alphabet = NewAlphabet();
+        SetAutodeclare(state.alphabet, true);
+        return "";
+    }
+    if name == "-" { return EvalB(state, argv) }
+    return "";
+}
+
+IsBuiltin :: (name: string) -> bool {
+    names := string.["declare", "declares", "undeclare", "define", "import", "autodeclare", "type", "typeset",
+        "autoconvert", "-", "info", "clear"];
+    for names { if it == name { return true } }
+    return false;
+}
+
+IsSBuiltin :: (name: string) -> bool {
+    return name == "rewrite" || name == "modules" || name == "types" || name == "usage";
+}
+
+// A value builtin, ${name args}: its words, and a status that is not empty
+// when it failed.
+RunS :: (state: *State, argv: []Arg, out: *Vec(Arg)) -> string {
+    name := argv[0].word;
+    sx := state.alphabet;
+    if name == "rewrite" { return RewriteB(state, argv, out) }
+    if name == "modules" {
+        names: Vec(string);
+        GetModules(sx, *names);
+        for names { VecPush(<<out, Arg.{word = it, cmd = -1}) }
+        return "";
+    }
+    if name == "types" {
+        ts := "";
+        if argv.count > 1 { ts = Word(argv[1]) }
+        names: Vec(string);
+        GetTypes(sx, ts, *names);
+        if names.count == 0 { return Fail("error", Join("unknown typeset ", Q(ts))) }
+        for names { VecPush(<<out, Arg.{word = it, cmd = -1}) }
+        return "";
+    }
+    if name == "usage" {
+        if argv.count != 2 { return Usage("usage qname") }
+        qname, u, def := GetModule(sx, Word(argv[1]));
+        if qname.count == 0 { return Fail("error", "module not declared") }
+        VecPush(<<out, Arg.{word = u, cmd = -1});
+        return "";
+    }
+    return "";
+}
+
+// whatis: the declarations that would make module mod again, or "".
+Whatis :: (state: *State, mod: string) -> string {
+    qname, sig, def := GetModule(state.alphabet, mod);
+    if qname.count == 0 { return "" }
+    out: Vec(u8);
+    BuilderPrint(*out, "declare % %", Q(qname), Q(sig));
+    if def >= 0 {
+        s := sig;
+        i := s.count - 1;
+        while i >= 0 {
+            if s[i] == #char ">" {
+                s = s[0:i - 1];
+                break;
+            }
+            i -= 1;
+        }
+        BuilderPrint(*out, "; define % {(%); %}", Q(qname), s, Sh.CmdString(def));
+    }
+    return BuilderFinish(out);
+}
+
+#scope_file
+
+// ctxt.fail: the message on standard error, and the status.
+Fail :: (status: string, message: string) -> string {
+    Line2(message);
+    return status;
+}
+
+Usage :: (s: string) -> string { return Fail("usage", Join("usage: ", s)) }
+
+Line2 :: (message: string) {
+    line: Vec(u8);
+    BuilderPrint(*line, "%\n", message);
+    unused Io.WriteBytes(2, BuilderFinish(line));
+}
+
+// printerrors: messages as "e: message".
+PrintErrors :: () -> s32 { return Va.PlainErrc(Va.NewSink("e: ", -1)) }
+
+Declares :: (state: *State, argv: []Arg) -> string {
+    if argv.count < 2 || argv[1].cmd < 0 { return Fail("usage", "usage: declares decls") }
+    if !have_declares {
+        return Fail("bad module", "alphabet: cannot load /dis/alphabet/abc/declares.dis: '/dis/alphabet/abc/declares.dis' does not exist");
+    }
+    e := declares_op(state.alphabet, argv[1].cmd, PrintErrors());
+    if e.count > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "alphabet: declaration failed: %", e);
+        return Fail("bad declaration", BuilderFinish(out));
+    }
+    return "";
+}
+
+RewriteB :: (state: *State, argv: []Arg, out: *Vec(Arg)) -> string {
+    n := argv.count - 1;
+    if (n != 1 && n != 2) || argv[1].cmd < 0 { return Usage("rewrite {expr} [desttype]") }
+    desttype := "";
+    if n == 2 { desttype = Word(argv[2]) }
+    c, usage, ok := Rewrite(state.alphabet, argv[1].cmd, desttype, PrintErrors());
+    if !ok { return "bad expression" }
+    VecPush(<<out, Arg.{cmd = c});
+    VecPush(<<out, Arg.{word = usage, cmd = -1});
+    return "";
+}
+
+DeclareB :: (state: *State, argv: []Arg) -> string {
+    n := argv.count - 1;
+    if n < 1 || n > 2 { return Usage("declare qname [type]") }
+    decltype := "";
+    if n == 2 { decltype = Word(argv[2]) }
+    e, raised := Declare(state.alphabet, Word(argv[1]), decltype, 0);
+    if raised.count > 0 { return Raised(raised) }
+    if e.count > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "cannot declare %: %", Word(argv[1]), e);
+        return Fail("error", BuilderFinish(out));
+    }
+    return "";
+}
+
+// A Limbo exception that is not a shell failure: the shell reported it
+// as an exception and ended the command.
+Raised :: (e: string) -> string {
+    out: Vec(u8);
+    BuilderPrint(*out, "sh: exception %", e);
+    return Fail(e, BuilderFinish(out));
+}
+
+UndeclareB :: (state: *State, argv: []Arg) -> string {
+    if argv.count < 2 { return Usage("undeclare name...") }
+    for argv[1:] {
+        e := Undeclare(state.alphabet, Word(it));
+        if e.count > 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "alphabet: cannot undeclare %: %", Q(Word(it)), e);
+            Line2(BuilderFinish(out));
+        }
+    }
+    return "";
+}
+
+DefineB :: (state: *State, argv: []Arg) -> string {
+    if argv.count != 3 || argv[2].cmd < 0 { return Usage("define name {expr}") }
+    err := Define(state.alphabet, argv[1].word, argv[2].cmd, PrintErrors());
+    if err.count > 0 { return Join("bad define: ", err) }
+    return "";
+}
+
+ImportB :: (state: *State, argv: []Arg) -> string {
+    if argv.count < 2 { return Usage("import qname...") }
+    errs := 0;
+    for argv[1:] {
+        e := ImportModule(state.alphabet, Word(it));
+        if e.count > 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "alphabet: cannot import %: %", Word(it), e);
+            Line2(BuilderFinish(out));
+            errs += 1;
+        }
+    }
+    if errs > 0 { return "import error" }
+    return "";
+}
+
+TypeB :: (state: *State, argv: []Arg) -> string {
+    if argv.count < 2 { return Usage("type qname...") }
+    errs := 0;
+    for argv[1:] {
+        e := ImportType(state.alphabet, Word(it));
+        if e.count > 0 {
+            out: Vec(u8);
+            BuilderPrint(*out, "alphabet: cannot import type %: %", Word(it), e);
+            Line2(BuilderFinish(out));
+            errs += 1;
+        }
+    }
+    if errs > 0 { return "type declare error" }
+    return "";
+}
+
+TypesetB :: (state: *State, argv: []Arg) -> string {
+    if argv.count != 2 { return Usage("typeset qname") }
+    e := LoadTypeset(state.alphabet, Word(argv[1]), PrintErrors());
+    if e.count > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "cannot load typeset %: %", Q(Word(argv[1])), e);
+        return Fail("error", BuilderFinish(out));
+    }
+    return "";
+}
+
+AutoconvertB :: (state: *State, argv: []Arg) -> string {
+    if argv.count != 4 { return Usage("autoconvert src dst fn") }
+    src := Word(argv[1]);
+    dst := Word(argv[2]);
+    expr := argv[3].cmd;
+    if expr < 0 { expr = Sh.MkWord(argv[3].word) }
+    e := Autoconvert(state.alphabet, src, dst, expr, PrintErrors());
+    if e.count > 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "cannot autoconvert % to % via %: %", src, dst, Word(argv[3]), e);
+        return Fail("error", BuilderFinish(out));
+    }
+    return "";
+}
+
+InfoB :: (state: *State, argv: []Arg) -> string {
+    if argv.count > 1 { return Usage("info") }
+    sx := state.alphabet;
+    out: Vec(u8);
+    first := true;
+    tsl: Vec(string);
+    GetTypesets(sx, *tsl);
+    for ts: tsl {
+        mods: Vec(string);
+        if !TypesetModules(sx, ts, *mods) { continue }
+        if !first { VecPush(out, #char "\n") }
+        BuilderPrint(*out, "typeset %\n", ts);
+        for mods {
+            path: Vec(u8);
+            BuilderPrint(*path, "%/%", ts, it);
+            qname, u, def := GetModule(sx, BuilderFinish(path));
+            if qname.count > 0 { BuilderPrint(*out, "% %\n", qname, u) }
+        }
+        first = false;
+    }
+    acl: Vec(Autoconversion);
+    GetAutoconversions(sx, *acl);
+    if acl.count > 0 { VecPush(out, #char "\n") }
+    for acl { BuilderPrint(*out, "autoconvert % % %\n", Q(it.src), Q(it.dst), Sh.CmdString(it.expr)) }
+    unused Io.WriteBytes(1, BuilderFinish(out));
+    return "";
+}
+
+EvalB :: (state: *State, argv: []Arg) -> string {
+    if argv.count < 2 || argv[1].cmd < 0 { return Usage("- {expr} [arg...]") }
+    args: Vec(s32);
+    for argv[2:] {
+        if it.cmd >= 0 {
+            VecPush(args, Va.MkCmdValue(it.cmd));
+        } else {
+            VecPush(args, Va.MkString(it.word));
+        }
+    }
+    return Eval(state.alphabet, argv[1].cmd, args[:]);
+}
+
+#scope_export
+
+// ---- running commands
+
+// Runs a parsed command line the way the shell ran builtins: a sequence
+// or block in turn, a simple command by its name. Words lose their GLOB
+// marks; ${name args} of a value builtin gives its words. Besides the
+// builtins there are whatis, echo, and load (of alphabet, which is
+// already there). The status is that of the last command.
+RunTree :: (state: *State, n: s32) -> string {
+    if n < 0 { return "" }
+    k := Sh.Kind(n);
+    if k == Sh.Seq {
+        unused RunTree(state, Sh.Left(n));
+        return RunTree(state, Sh.Right(n));
+    }
+    if k == Sh.Nowait || k == Sh.Block { return RunTree(state, Sh.Left(n)) }
+    argv: Vec(Arg);
+    status := Glom(state, n, *argv);
+    if status.count > 0 { return status }
+    if argv.count == 0 { return "" }
+    name := argv[0].word;
+    if IsBuiltin(name) {
+        status := Run(state, argv[:]);
+        return TextDetach(TextCopy(status));
+    }
+    if IsSBuiltin(name) {
+        words: Vec(Arg);
+        failed := RunS(state, argv[:], *words);
+        if failed.count > 0 { return TextDetach(TextCopy(failed)) }
+        Echo(words[:]);
+        return "";
+    }
+    if name == "echo" {
+        Echo(argv[1:]);
+        return "";
+    }
+    if name == "load" { return "" }
+    if name == "whatis" {
+        if argv.count < 2 { return Usage("whatis name ...") }
+        for argv[1:] {
+            w := Whatis(state, Word(it));
+            if w.count > 0 {
+                line: Vec(u8);
+                BuilderPrint(*line, "load alphabet; %\n", w);
+                unused Io.WriteBytes(1, BuilderFinish(line));
+            }
+        }
+        return "";
+    }
+    return Fail("not found", Join(name, ": not found"));
+}
+
+Echo :: (words: []Arg) {
+    line: Vec(u8);
+    for words {
+        if it_index > 0 { VecPush(line, #char " ") }
+        BuilderAppend(line, Word(it));
+    }
+    VecPush(line, #char "\n");
+    unused Io.WriteBytes(1, BuilderFinish(line));
+}
+
+#scope_file
+
+Glom :: (state: *State, n: s32, argv: *Vec(Arg)) -> string {
+    if Sh.Kind(n) == Sh.Adj {
+        status := Glom(state, Sh.Left(n), argv);
+        if status.count > 0 { return status }
+        return Glom(state, Sh.Right(n), argv);
+    }
+    k := Sh.Kind(n);
+    if k == Sh.Word {
+        VecPush(<<argv, Arg.{word = Sh.Deglob(Sh.WordOf(n)), cmd = -1});
+        return "";
+    }
+    if k == Sh.Block {
+        VecPush(<<argv, Arg.{cmd = n});
+        return "";
+    }
+    if k == Sh.Var && Sh.Left(n) >= 0 && Sh.Kind(Sh.Left(n)) == Sh.Block {
+        inner: Vec(Arg);
+        status := Glom(state, Sh.Left(Sh.Left(n)), *inner);
+        if status.count > 0 { return status }
+        if inner.count == 0 || !IsSBuiltin(inner[0].word) { return Fail("builtin not found", "sh: builtin not found") }
+        words: Vec(Arg);
+        failed := RunS(state, inner[:], *words);
+        if failed.count > 0 { return failed }
+        for words { VecPush(<<argv, it) }
+        return "";
+    }
+    return Fail("bad command", Join("alphabet: cannot run ", Sh.CmdString(n)));
+}

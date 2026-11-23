@@ -1,0 +1,52 @@
+// /seq [-ao] [status...] -> status: run statuses one after another; with
+// -a stop at the first failure, with -o at the first success. The result is
+// the status that ran last.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+
+Register :: () { Al.RegisterModule(-1, "seq", "rr*-a-o", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 {
+        p := Va.BlankProducer("seq");
+        p.run = RunSeq;
+        p.free = Free;
+        prod = Va.AddProducer(p);
+    }
+    stop: s64 = -1;
+    for opt_index: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, opt_index) == #char "a" { stop = 0 }
+        if Al.OptLetter(call, opt_index) == #char "o" { stop = 1 }
+    }
+    v := Va.NewValue(#char "r", prod);
+    Va.SetN0(v, stop);
+    Va.SetKids(v, call.args[:]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+RunSeq :: (v: s32) -> string {
+    stop := Va.N0(v);
+    status := "";
+    n := Va.KidCount(v);
+    i: s64 = 0;
+    while i < n {
+        status = Va.RunStatus(Va.Kid(v, i));
+        i += 1;
+        succeeded: s64 = ifx status.count == 0 then 1 else 0;
+        if succeeded == stop { break }
+    }
+    while i < n {
+        Va.Free(Va.Kid(v, i), false);
+        i += 1;
+    }
+    return status;
+}
+
+Free :: (v: s32, used: bool) -> s32 {
+    if !used { for i: 0..Va.KidCount(v) - 1 { Va.Free(Va.Kid(v, i), false) } }
+    return 0;
+}

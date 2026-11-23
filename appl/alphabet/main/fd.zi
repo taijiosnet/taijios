@@ -1,0 +1,20 @@
+// /fd string -> wfd: a file descriptor of this process, by number.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+Ty :: #import "alpha_types";
+
+Register :: () { Al.RegisterModule(-1, "fd", "ws", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    number := Va.ValueText(call.args[0]);
+    n := Al.LimboInt(number);
+    h := St.Fildes(n, 2);
+    if h < 0 { h = St.Fildes(n, 0) }
+    if h < 0 { h = St.Fildes(n, 1) }
+    if h < 0 {
+        Va.Report(call.errc, Al.Join("error: no such file descriptor ", Ty.Q(number)));
+        return -1;
+    }
+    return St.WfdHandle(h, Va.ReportStart(call.report, "stdin"));
+}

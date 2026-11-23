@@ -1,0 +1,90 @@
+// The fd and wfd values many modules make: text served from memory, the
+// contents of a handle, and a handle a wfd value holds. An fd value that
+// reaches its end lets its handle go.
+using Io :: #import "taijios_io";
+Va :: #import "alpha_values";
+
+// An fd value whose bytes are text.
+TextStream :: (text: string) -> s32 {
+    if text_prod < 0 {
+        p := Va.BlankProducer("text");
+        p.read = TextRead;
+        text_prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "f", text_prod);
+    Va.SetText(v, text);
+    return v;
+}
+
+// An fd value read from handle; it offers the handle to a consumer that
+// wants one, as a Dis producer offered its descriptor.
+HandleStream :: (handle: s32, errc: s32) -> s32 {
+    if handle_prod < 0 {
+        p := Va.BlankProducer("handle");
+        p.read = HandleRead;
+        p.free = HandleFree;
+        p.handle = HandleOf;
+        handle_prod = Va.AddProducer(p);
+    }
+    v := Va.NewValue(#char "f", handle_prod);
+    Va.SetRawHandle(v, handle);
+    Va.SetErrc(v, errc);
+    return v;
+}
+
+// A wfd value that is handle.
+WfdHandle :: (handle: s32, errc: s32) -> s32 {
+    v := HandleStream(handle, errc);
+    Va.SetTypec(v, #char "w");
+    return v;
+}
+
+// A handle for descriptor number n of the process, as sys->fildes gave
+// one, or -1 when it is not open.
+Fildes :: (n: s64, mode: s32) -> s32 {
+    if n < 0 { return -1 }
+    if n < 3 { return cast(s32)n }
+    path: Vec(u8);
+    BuilderPrint(*path, "/fd/%", n);
+    return Io.OpenFile(BuilderFinish(path), mode);
+}
+
+ReleaseHandle :: (h: s32) {
+    if h >= 3 { unused Io.CloseFile(h) }
+}
+
+#scope_file
+
+text_prod: s32 = -1;
+handle_prod: s32 = -1;
+
+TextRead :: (v: s32, buffer: []u8) -> s64 {
+    text := Va.ValueText(v);
+    at := Va.N0(v);
+    n := text.count - at;
+    if n > buffer.count { n = buffer.count }
+    if n <= 0 { return 0 }
+    for i: 0..n - 1 { buffer[i] = text[at + i] }
+    Va.SetN0(v, at + n);
+    return n;
+}
+
+HandleRead :: (v: s32, buffer: []u8) -> s64 {
+    h := Va.RawHandle(v);
+    if h < 0 { return 0 }
+    n := Io.ReadBytes(h, buffer);
+    if n <= 0 {
+        ReleaseHandle(h);
+        Va.SetRawHandle(v, -1);
+    }
+    return n;
+}
+
+HandleFree :: (v: s32, used: bool) -> s32 {
+    if used { return 0 }
+    ReleaseHandle(Va.RawHandle(v));
+    Va.SetRawHandle(v, -1);
+    return 0;
+}
+
+HandleOf :: (v: s32) -> s32 { return Va.RawHandle(v) }

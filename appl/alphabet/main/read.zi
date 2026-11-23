@@ -1,0 +1,18 @@
+// /read string -> fd: the contents of a file.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+Ty :: #import "alpha_types";
+
+Register :: () { Al.RegisterModule(-1, "read", "fs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    file := Va.ValueText(call.args[0]);
+    h := Io.OpenFile(file, 0);
+    if h < 0 {
+        Va.Report(call.errc, Va.WithError(Al.Join("cannot open ", Ty.Q(file))));
+        return -1;
+    }
+    return St.HandleStream(h, Va.ReportStart(call.report, "read"));
+}
