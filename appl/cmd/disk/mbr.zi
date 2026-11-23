@@ -1,0 +1,149 @@
+// disk/mbr [-9] [-m mbrfile] disk: install a PC master boot record on disk.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Disks :: #import "disks";
+
+USAGE :: "usage: disk/mbr [-m mbrfile] disk\n";
+
+Fatal :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "disk/mbr: %\n", msg);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+FillDefMbr :: (dst: []u8) {
+    for i: 0..Disks.TOFFSET - 1 { dst[i] = 0 }
+    dst[0] = 0xEB;
+    dst[1] = 0x3C;
+    code: [57]u8 = .[
+        0xFA, 0xFC, 0x8C, 0xC8, 0x8E, 0xD8, 0x8E, 0xD0,
+        0xBC, 0x00, 0x7C, 0xBE, 0x77, 0x7C, 0xE8, 0x19,
+        0x00, 0x33, 0xC0, 0xCD, 0x16, 0xBB, 0x40, 0x00,
+        0x8E, 0xC3, 0xBB, 0x72, 0x00, 0xB8, 0x34, 0x12,
+        0x26, 0x89, 0x07, 0xEA, 0x00, 0x00, 0xFF, 0xFF,
+        0xEB, 0xD6, 0xAC, 0x0A, 0xC0, 0x74, 0x09, 0xB4,
+        0x0E, 0xBB, 0x07, 0x00, 0xCD, 0x10, 0xEB, 0xF2,
+        0xC3,
+    ];
+    for i: 0..code.count - 1 { dst[0x3E + i] = code[i] }
+    msg := "Not a bootable disc or disc error\r\nPress almost any key to reboot...";
+    for i: 0..msg.count - 1 { dst[0x3E + 57 + i] = msg[i] }
+}
+
+main :: () -> s32 {
+    flag9 := false;
+    mbrfile := "";
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "9" {
+            flag9 = true;
+        } else if letter == #char "m" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            mbrfile = val;
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+    if Args.OperandCount() - scan.next != 1 { return Cli.Usage(USAGE) }
+    diskpath := Args.Operand(scan.next);
+
+    disk: Disks.Disk;
+    if !Disks.Open(*disk, diskpath, 2, false) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "opendisk %: %", diskpath, Io.LastError());
+        return Fatal(BuilderFinish(msg));
+    }
+    if disk.dtype == "floppy" {
+        Disks.Close(*disk);
+        return Fatal("will not install mbr on floppy");
+    }
+    if disk.secsize != 512 {
+        Disks.Close(*disk);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "secsize % invalid: must be 512", disk.secsize);
+        return Fatal(BuilderFinish(msg));
+    }
+
+    secsize := disk.secsize;
+    max_mbr := secsize * disk.s;
+    mbr: Vec(u8);
+    for i: 0..max_mbr - 1 { VecPush(mbr, 0) }
+
+    if Io.SeekFile(disk.fd, 0, 0) < 0 {
+        Disks.Close(*disk);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "seek to boot sector: %\n", Io.LastError());
+        return Fatal(BuilderFinish(msg));
+    }
+    if Io.ReadBytes(disk.fd, mbr[:secsize]) != cast(s32)secsize {
+        Disks.Close(*disk);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "reading boot sector: %", Io.LastError());
+        return Fatal(BuilderFinish(msg));
+    }
+
+    nmbr: s64 = Disks.TOFFSET;
+    if mbrfile == "" {
+        FillDefMbr(mbr[:]);
+    } else {
+        sysfd := Io.OpenFile(mbrfile, 0);
+        if sysfd < 0 {
+            Disks.Close(*disk);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "open %: %", mbrfile, Io.LastError());
+            return Fatal(BuilderFinish(msg));
+        }
+        buf: Vec(u8);
+        for i: 0..secsize * (disk.s + 1) - 1 { VecPush(buf, 0) }
+        got := Io.ReadBytes(sysfd, buf[:]);
+        unused Io.CloseFile(sysfd);
+        if got < 0 {
+            Disks.Close(*disk);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "read %: %", mbrfile, Io.LastError());
+            return Fatal(BuilderFinish(msg));
+        }
+        nmbr = cast(s64)got;
+        if nmbr > max_mbr {
+            Disks.Close(*disk);
+            msg: Vec(u8);
+            BuilderPrint(*msg, "master boot record too large % > %", nmbr, max_mbr);
+            return Fatal(BuilderFinish(msg));
+        }
+        if nmbr < secsize { nmbr = secsize }
+        for i: Disks.TOFFSET..secsize - 1 { buf[i] = mbr[i] }
+        for i: 0..nmbr - 1 { mbr[i] = buf[i] }
+    }
+
+    if flag9 {
+        for i: Disks.TOFFSET..secsize - 1 { mbr[i] = 0 }
+        part := Disks.PCpart.{active = 0, ptype = Disks.TYPE9, base = 0, offset = disk.s, size = disk.secs - disk.s};
+        Disks.EncodePCpart(part, *disk, mbr[Disks.TOFFSET:Disks.TOFFSET + Disks.TENTRY_SIZE]);
+    }
+    mbr[secsize - 2] = Disks.MAGIC0;
+    mbr[secsize - 1] = Disks.MAGIC1;
+    nmbr = (nmbr + secsize - 1) & ~(secsize - 1);
+
+    if Io.SeekFile(disk.wfd, 0, 0) < 0 {
+        Disks.Close(*disk);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "seek to MBR sector: %\n", Io.LastError());
+        return Fatal(BuilderFinish(msg));
+    }
+    if Io.WriteBytes(disk.wfd, TextView(mbr[:nmbr])) != cast(s32)nmbr {
+        Disks.Close(*disk);
+        msg: Vec(u8);
+        BuilderPrint(*msg, "writing MBR: %", Io.LastError());
+        return Fatal(BuilderFinish(msg));
+    }
+    Disks.Close(*disk);
+    return 0;
+}

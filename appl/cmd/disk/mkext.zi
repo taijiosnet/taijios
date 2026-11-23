@@ -1,0 +1,337 @@
+// disk/mkext [-h] [-d destdir] [-T] [-u] [-v] [file ...]: extract a mkfs archive from stdin.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Stat :: #import "taijios_stat";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Quote :: #import "taijios_quote";
+
+USAGE :: "usage: mkext [-h] [-d destdir] [-T] [-u] [-v] [file ...]\n";
+
+Reader :: struct {
+    fd: s32;
+    buf: [8192]u8;
+    pos: s64;
+    len: s64;
+}
+
+ReadByte :: (r: *Reader) -> s32 {
+    if r.pos >= r.len {
+        n := Io.ReadBytes(r.fd, r.buf[:]);
+        if n <= 0 { return -1 }
+        r.pos = 0;
+        r.len = cast(s64)n;
+    }
+    b := cast(s32)r.buf[r.pos];
+    r.pos += 1;
+    return b;
+}
+
+ReadLine :: (r: *Reader, out: *Vec(u8)) -> bool {
+    VecClear(<<out);
+    while true {
+        b := ReadByte(r);
+        if b < 0 { return out.count > 0 }
+        VecPush(<<out, cast(u8)b);
+        if b == #char "\n" { return true }
+    }
+    return false;
+}
+
+ReadChunk :: (r: *Reader, dst: []u8) -> s64 {
+    if r.pos < r.len {
+        avail := r.len - r.pos;
+        n := ifx dst.count < avail then dst.count else avail;
+        for i: 0..n - 1 { dst[i] = r.buf[r.pos + i] }
+        r.pos += n;
+        return n;
+    }
+    n := Io.ReadBytes(r.fd, dst);
+    if n <= 0 { return 0 }
+    return cast(s64)n;
+}
+
+Warn :: (msg: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "mkext: %\n", msg);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+}
+
+ParseUnquoted :: (line: string, fields: *Vec(Text)) {
+    VecClear(<<fields);
+    i: s64 = 0;
+    while i < line.count {
+        while i < line.count && (line[i] == #char " " || line[i] == #char "\t" || line[i] == #char "\n" || line[i] == #char "\r") {
+            i += 1;
+        }
+        if i >= line.count { break }
+        tok: Text;
+        quoted := false;
+        while i < line.count {
+            c := line[i];
+            if !quoted && (c == #char " " || c == #char "\t" || c == #char "\n" || c == #char "\r") { break }
+            if c == #char "'" {
+                if quoted && i + 1 < line.count && line[i + 1] == #char "'" {
+                    VecPush(tok.bytes, #char "'");
+                    i += 2;
+                    continue;
+                }
+                quoted = !quoted;
+                i += 1;
+                continue;
+            }
+            VecPush(tok.bytes, c);
+            i += 1;
+        }
+        VecPush(<<fields, tok);
+    }
+}
+
+ParseOctal :: (s: string) -> u32 {
+    v: u32 = 0;
+    for i: 0..s.count - 1 {
+        c := s[i];
+        if c < #char "0" || c > #char "7" { break }
+        v = (v << 3) | cast(u32)(c - #char "0");
+    }
+    return v;
+}
+
+ParseDec :: (s: string) -> s64 {
+    v: s64 = 0;
+    for i: 0..s.count - 1 {
+        c := s[i];
+        if c < #char "0" || c > #char "9" { break }
+        v = v * 10 + cast(s64)(c - #char "0");
+    }
+    return v;
+}
+
+AppendOctal :: (out: *Vec(u8), v_in: u32) {
+    buf: [16]u8;
+    n := 0;
+    v := v_in;
+    while true {
+        buf[n] = #char "0" + cast(u8)(v & 7);
+        n += 1;
+        v >>= 3;
+        if v == 0 { break }
+    }
+    for i: 0..n - 1 { VecPush(<<out, buf[n - 1 - i]) }
+}
+
+FilePrefix :: (prefix: string, s: string) -> bool {
+    n := prefix.count;
+    m := s.count;
+    if n > m || s[:n] != prefix { return false }
+    if m > n && s[n] != #char "/" { return false }
+    return true;
+}
+
+Selected :: (s: string, first: s32, count: s32) -> bool {
+    for i: first..count - 1 {
+        if FilePrefix(Args.Operand(i), s) { return true }
+    }
+    return false;
+}
+
+MkDirs :: (destdir: string, name: string) {
+    base: Vec(u8);
+    BuilderAppend(base, destdir);
+    i: s64 = 0;
+    while i < name.count {
+        while i < name.count && name[i] == #char "/" { i += 1 }
+        if i >= name.count { break }
+        start := i;
+        while i < name.count && name[i] != #char "/" { i += 1 }
+        // Check if there are more components after this one
+        rest := i;
+        while rest < name.count && name[rest] == #char "/" { rest += 1 }
+        bstr := TextView(base[:]);
+        if bstr.count > 0 {
+            fd := Io.CreateFile(bstr, 0, cast(s32)(0x80000000 | 0x1FD));
+            if fd >= 0 { unused Io.CloseFile(fd) }
+        }
+        if rest >= name.count { break }
+        VecPush(base, #char "/");
+        BuilderAppend(base, name[start:i]);
+    }
+}
+
+SeekPast :: (r: *Reader, bytes: s64) -> bool {
+    buf: [8192]u8;
+    tot: s64 = 0;
+    while tot < bytes {
+        need := bytes - tot;
+        if need > buf.count { need = buf.count }
+        n := ReadChunk(r, buf[:need]);
+        if n <= 0 {
+            Warn("premature eof");
+            return false;
+        }
+        tot += n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    destdir := "";
+    fflag := false;
+    hflag := false;
+    uflag := false;
+    tflag := false;
+    vflag := false;
+
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "d" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            destdir = val;
+        } else if letter == #char "f" {
+            fflag = true;
+        } else if letter == #char "h" {
+            hflag = true;
+        } else if letter == #char "u" {
+            uflag = true;
+            tflag = true;
+        } else if letter == #char "t" || letter == #char "T" {
+            tflag = true;
+        } else if letter == #char "v" {
+            vflag = true;
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+
+    arg_count := Args.OperandCount();
+    has_filter := scan.next < arg_count;
+
+    reader: Reader;
+    reader.fd = 0;
+    line: Vec(u8);
+    fields: Vec(Text);
+    buf: [8192]u8;
+
+    while ReadLine(*reader, *line) {
+        lstr := TextView(line[:]);
+        if lstr == "end of archive\n" {
+            unused Cli.WriteAll(2, "done\n");
+            return 0;
+        }
+        ParseUnquoted(lstr, *fields);
+        if fields.count != 6 {
+            Warn("too few fields in file header");
+            continue;
+        }
+        raw_name := TextView(fields[0]);
+        mode := ParseOctal(TextView(fields[1]));
+        uid := TextView(fields[2]);
+        gid := TextView(fields[3]);
+        mtime := cast(s32)ParseDec(TextView(fields[4]));
+        bytes := ParseDec(TextView(fields[5]));
+
+        if has_filter {
+            if !Selected(raw_name, scan.next, arg_count) {
+                if bytes != 0 && !SeekPast(*reader, bytes) {
+                    unused Args.SetFailure("error");
+                    return 1;
+                }
+                continue;
+            }
+            MkDirs(destdir, raw_name);
+        }
+
+        full: Vec(u8);
+        BuilderAppend(full, destdir);
+        BuilderAppend(full, raw_name);
+        name := BuilderFinish(full);
+
+        if hflag {
+            out: Vec(u8);
+            Quote.Quote(*out, name);
+            VecPush(out, #char " ");
+            AppendOctal(*out, mode);
+            BuilderPrint(*out, " % % % %\n", uid, gid, cast(u32)mtime, bytes);
+            unused Cli.WriteAll(1, BuilderFinish(out));
+            if bytes != 0 && !SeekPast(*reader, bytes) {
+                unused Args.SetFailure("error");
+                return 1;
+            }
+            continue;
+        }
+
+        if (mode & 0x80000000) != 0 {
+            fd := Io.CreateFile(name, 0, cast(s32)mode);
+            if fd >= 0 {
+                unused Io.CloseFile(fd);
+            } else {
+                sbuf: [Stat.BufferSize]u8;
+                info := Stat.PathInfo(name, sbuf[:]);
+                if info.size == 0 || (info.mode & Stat.Directory) == 0 {
+                    msg: Vec(u8);
+                    BuilderPrint(*msg, "can't make directory %: %", name, Io.LastError());
+                    Warn(BuilderFinish(msg));
+                }
+            }
+            continue;
+        }
+
+        if vflag {
+            vmsg: Vec(u8);
+            BuilderPrint(*vmsg, "x % % bytes\n", name, bytes);
+            unused Cli.WriteAll(1, BuilderFinish(vmsg));
+        }
+        sfd := Io.CreateFile(name, 1, cast(s32)mode);
+        if sfd < 0 && fflag {
+            if Io.Remove(name) >= 0 {
+                sfd = Io.CreateFile(name, 1, cast(s32)mode);
+            }
+        }
+        if sfd < 0 {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "can't make file %: %", name, Io.LastError());
+            Warn(BuilderFinish(msg));
+            if bytes != 0 && !SeekPast(*reader, bytes) {
+                unused Args.SetFailure("error");
+                return 1;
+            }
+            continue;
+        }
+        tot: s64 = 0;
+        while tot < bytes {
+            need := bytes - tot;
+            if need > buf.count { need = buf.count }
+            n := ReadChunk(*reader, buf[:need]);
+            if n <= 0 {
+                unused Io.CloseFile(sfd);
+                msg: Vec(u8);
+                BuilderPrint(*msg, "premature eof reading %", name);
+                Warn(BuilderFinish(msg));
+                unused Args.SetFailure("error");
+                return 1;
+            }
+            if Io.WriteBytes(sfd, TextView(buf[:n])) != cast(s32)n {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "error writing %: %", name, Io.LastError());
+                Warn(BuilderFinish(msg));
+            }
+            tot += n;
+        }
+        if tflag || uflag {
+            src: Stat.Info;
+            src.mode = mode;
+            src.modified = mtime;
+            src.owner = uid;
+            src.group = gid;
+            unused Stat.Change(sfd, src, true, tflag, uflag, uflag);
+        }
+        unused Io.CloseFile(sfd);
+    }
+    unused Cli.WriteAll(2, "premature end of archive\n");
+    unused Args.SetFailure(" eof");
+    return 1;
+}

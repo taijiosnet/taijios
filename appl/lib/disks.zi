@@ -1,0 +1,256 @@
+// Disk geometry discovery and PC partition table encoding, matching Inferno's Disks module.
+#import "std/vec";
+using Io :: #import "taijios_io";
+using Stat :: #import "taijios_stat";
+using Lines :: #import "zx_lines";
+
+TOFFSET :: 446;
+TENTRY_SIZE :: 16;
+NTENTRY :: 4;
+OMAGIC :: 64;
+MAGIC0 :: 0x55;
+MAGIC1 :: 0xAA;
+
+TYPE9 :: 0x39;
+ACTIVE :: 0x80;
+
+Disk :: struct {
+    fd: s32;
+    wfd: s32;
+    ctlfd: s32;
+    rdonly: bool;
+    dtype: string;
+    prefix: Text;
+    part: Text;
+    chssrc: string;
+    secsize: s64;
+    size: s64;
+    secs: s64;
+    offset: s64;
+    c: s64;
+    h: s64;
+    s: s64;
+    width: s64;
+}
+
+PCpart :: struct {
+    active: u8;
+    ptype: u8;
+    base: s64;
+    offset: s64;
+    size: s64;
+}
+
+GetLe32 :: (p: []u8, off: s64) -> s64 {
+    return (cast(s64)p[off + 3] << 24) | (cast(s64)p[off + 2] << 16) |
+        (cast(s64)p[off + 1] << 8) | cast(s64)p[off];
+}
+
+PutLe32 :: (p: []u8, off: s64, v: s64) {
+    p[off] = cast(u8)(v & 0xFF);
+    p[off + 1] = cast(u8)((v >> 8) & 0xFF);
+    p[off + 2] = cast(u8)((v >> 16) & 0xFF);
+    p[off + 3] = cast(u8)((v >> 24) & 0xFF);
+}
+
+ReadN :: (fd: s32, buf: []u8) -> s64 {
+    tot: s64 = 0;
+    while tot < buf.count {
+        n := Io.ReadBytes(fd, buf[tot:]);
+        if n <= 0 { break }
+        tot += cast(s64)n;
+    }
+    return tot;
+}
+
+PutChs :: (d: *Disk, p: []u8, off: s64, lba: s64) {
+    s := lba % d.s;
+    h := (lba / d.s) % d.h;
+    c := lba / (d.s * d.h);
+    if c >= 1024 {
+        c = 1023;
+        h = d.h - 1;
+        s = d.s - 1;
+    }
+    p[off] = cast(u8)(h & 0xFF);
+    p[off + 1] = cast(u8)(((s + 1) & 0x3F) | ((c >> 2) & 0xC0));
+    p[off + 2] = cast(u8)(c & 0xFF);
+}
+
+EncodePCpart :: (p: PCpart, d: *Disk, out: []u8) {
+    out[0] = p.active;
+    out[4] = p.ptype;
+    PutChs(d, out, 1, p.base + p.offset);
+    PutChs(d, out, 5, p.base + p.offset + p.size - 1);
+    PutLe32(out, 8, p.offset);
+    PutLe32(out, 12, p.size);
+}
+
+ExtractPCpart :: (a: []u8) -> PCpart {
+    p: PCpart;
+    p.active = a[0];
+    p.ptype = a[4];
+    p.base = 0;
+    p.offset = GetLe32(a, 8);
+    p.size = GetLe32(a, 12);
+    return p;
+}
+
+PartitionGeometry :: (d: *Disk) -> bool {
+    buf: [512]u8;
+    have := false;
+    dpath: Vec(u8);
+    BuilderPrint(*dpath, "%data", TextView(d.prefix));
+    rawfd := Io.OpenFile(BuilderFinish(dpath), 0);
+    if rawfd >= 0 {
+        if Io.SeekFile(rawfd, 0, 0) == 0 && ReadN(rawfd, buf[:]) == 512 &&
+            buf[TOFFSET + OMAGIC] == MAGIC0 && buf[TOFFSET + OMAGIC + 1] == MAGIC1 {
+            have = true;
+        }
+        unused Io.CloseFile(rawfd);
+    }
+    if !have {
+        if Io.SeekFile(d.fd, 0, 0) < 0 || ReadN(d.fd, buf[:]) != 512 ||
+            buf[TOFFSET + OMAGIC] != MAGIC0 || buf[TOFFSET + OMAGIC + 1] != MAGIC1 {
+            return false;
+        }
+    }
+    h: s64 = -1;
+    s: s64 = -1;
+    for idx: 0..NTENTRY - 1 {
+        off := TOFFSET + idx * TENTRY_SIZE;
+        if buf[off + 4] == 0 { continue }
+        eh := cast(s64)buf[off + 5];
+        es := cast(s64)(buf[off + 6] & 63);
+        if h == -1 {
+            h = eh;
+            s = es;
+        } else if h != eh || s != es {
+            return false;
+        }
+    }
+    if h == -1 { return false }
+    d.h = h + 1;
+    d.s = s;
+    if d.h * d.s > 0 { d.c = d.secs / (d.h * d.s) }
+    d.chssrc = "part";
+    return true;
+}
+
+DriverGeometry :: (d: *Disk) -> bool {
+    if d.c == 0 || d.h == 0 || d.s == 0 { return false }
+    d.chssrc = "disk";
+    if d.c < 1024 { return true }
+    if d.h == 15 {
+        d.h = 255;
+        d.c /= 17;
+        return true;
+    }
+    m: s64 = 2;
+    while m * d.h < 256 {
+        if d.c / m < 1024 {
+            d.c /= m;
+            d.h *= m;
+            return true;
+        }
+        m *= 2;
+    }
+    d.h = 255;
+    d.s = 63;
+    d.c = d.secs / (d.h * d.s);
+    return true;
+}
+
+GuessGeometry :: (d: *Disk) {
+    d.chssrc = "guess";
+    hs: [4]s64 = .[64, 64, 128, 255];
+    ss: [4]s64 = .[32, 63, 63, 63];
+    for i: 0..3 {
+        if 1024 * hs[i] * ss[i] >= d.secs {
+            d.h = hs[i];
+            d.s = ss[i];
+            d.c = d.secs / (d.h * d.s);
+            return;
+        }
+    }
+    d.h = 255;
+    d.s = 63;
+    d.c = d.secs / (d.h * d.s);
+}
+
+FindGeometry :: (d: *Disk) {
+    d.h = 0;
+    d.s = 0;
+    d.c = 0;
+    if !PartitionGeometry(d) && !DriverGeometry(d) {
+        GuessGeometry(d);
+    }
+}
+
+MkWidth :: (d: *Disk) {
+    tmp: Vec(u8);
+    BuilderPrint(*tmp, "%", d.size);
+    d.width = tmp.count;
+}
+
+OpenFileDisk :: (d: *Disk) -> bool {
+    sbuf: [Stat.BufferSize]u8;
+    info := Stat.DescriptorInfo(d.fd, sbuf[:]);
+    if info.size == 0 { return false }
+    d.secsize = 512;
+    d.size = info.length;
+    d.secs = d.size / d.secsize;
+    d.offset = 0;
+    FindGeometry(d);
+    MkWidth(d);
+    return true;
+}
+
+Open :: (d: *Disk, name: string, mode: s32, noctl: bool) -> bool {
+    d.fd = -1;
+    d.wfd = -1;
+    d.ctlfd = -1;
+    d.rdonly = mode == 0;
+    d.fd = Io.OpenFile(name, 0);
+    if d.fd < 0 { return false }
+    if mode != 0 {
+        d.wfd = Io.OpenFile(name, 1);
+        if d.wfd < 0 { d.rdonly = true }
+    }
+    if noctl {
+        d.dtype = "file";
+        return OpenFileDisk(d);
+    }
+    if name.count >= 7 {
+        q := name[name.count - 7:];
+        if q[0] == #char "f" && q[1] == #char "d" && q[2] >= #char "0" && q[2] <= #char "9" && q[3:] == "disk" {
+            cpath: Vec(u8);
+            BuilderPrint(*cpath, "%ctl", name[:name.count - 4]);
+            d.ctlfd = Io.OpenFile(BuilderFinish(cpath), 2);
+            if d.ctlfd >= 0 {
+                VecClear(d.prefix.bytes);
+                BuilderAppend(d.prefix.bytes, name[:name.count - 4]);
+                d.dtype = "floppy";
+                return OpenFileDisk(d);
+            }
+        }
+    }
+    slash: s64 = -1;
+    for i: 0..name.count - 1 {
+        if name[i] == #char "/" { slash = i }
+    }
+    VecClear(d.prefix.bytes);
+    if slash >= 0 {
+        BuilderAppend(d.prefix.bytes, name[:slash + 1]);
+    } else {
+        BuilderAppend(d.prefix.bytes, name);
+    }
+    d.dtype = "file";
+    return OpenFileDisk(d);
+}
+
+Close :: (d: *Disk) {
+    if d.fd >= 0 { unused Io.CloseFile(d.fd); d.fd = -1 }
+    if d.wfd >= 0 { unused Io.CloseFile(d.wfd); d.wfd = -1 }
+    if d.ctlfd >= 0 { unused Io.CloseFile(d.ctlfd); d.ctlfd = -1 }
+}

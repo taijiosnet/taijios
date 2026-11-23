@@ -1,0 +1,122 @@
+// Guest parity test for disk/kfscmd, disk/mbr, disk/mkfs, and disk/mkext.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/disk tests/disk/disk_tools_test.zi -- [EMU] [PREFIX] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/disk";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
+    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "disk/";
+    suffix := ifx argc > 3 then TextFromCString(argv[3]) else "";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/disk/work") ||
+        !CreateDirectory("build/dis-legacy-math/disk/work/src") ||
+        !CreateDirectory("build/dis-legacy-math/disk/work/src/sub") ||
+        !CreateDirectory("build/dis-legacy-math/disk/work/out") ||
+        !CreateDirectory("build/dis-legacy-math/disk/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Create a 64 KiB disk image (128 sectors) for disk/mbr testing
+    disk_img: Vec(u8);
+    for i: 0..65535 { VecPush(disk_img, 0) }
+    unused WriteEntireFile("build/dis-legacy-math/disk/work/disk.img", BuilderFinish(disk_img));
+
+    // Create source files and proto for mkfs / mkext
+    unused WriteEntireFile("build/dis-legacy-math/disk/work/src/hello.txt", "hello disk world\n");
+    unused WriteEntireFile("build/dis-legacy-math/disk/work/src/sub/nested.txt", "nested 123\n");
+    unused WriteEntireFile("build/dis-legacy-math/disk/work/sample.proto", "hello.txt\nsub\n\tnested.txt\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. kfscmd usage & missing chan
+    BuilderPrint(*script, "%kfscmd% -Z > ../result/kfs_u.out >[2] ../result/kfs_u.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/kfs_u.st\n");
+    BuilderPrint(*script, "%kfscmd% -n nonexistent sync > ../result/kfs_m.out >[2] ../result/kfs_m.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/kfs_m.st\n");
+
+    // 2. mbr -9 on disk.img
+    BuilderPrint(*script, "%mbr% -9 disk.img > ../result/mbr.out >[2] ../result/mbr.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/mbr.st\n");
+
+    // 3. mkfs -a -s src sample.proto > arch.out
+    BuilderPrint(*script, "%mkfs% -a -s src sample.proto > ../result/arch.bin >[2] ../result/mkfs.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/mkfs.st\n");
+
+    // 4. mkext -h < arch.bin
+    BuilderPrint(*script, "%mkext% -h < ../result/arch.bin > ../result/mkext_h.out >[2] ../result/mkext_h.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/mkext_h.st\n");
+
+    // 5. mkext -d out < arch.bin
+    BuilderPrint(*script, "%mkext% -d out < ../result/arch.bin > ../result/mkext_x.out >[2] ../result/mkext_x.err\n", prefix, suffix);
+    BuilderPrint(*script, "echo $status > ../result/mkext_x.st\n");
+
+    unused WriteEntireFile("build/dis-legacy-math/disk/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("kfs_u.st") == "usage\n", "kfscmd usage status");
+    Expect(Result("kfs_u.err") == "usage: disk/kfscmd [-n fsname] cmd ...\n", "kfscmd usage stderr");
+    Expect(Result("kfs_m.st") == "error\n", "kfscmd missing status");
+    Expect(Result("kfs_m.err") == "kfscmd: can't open /chan/kfs.nonexistent.cmd: '/chan/kfs.nonexistent.cmd' file does not exist\n", "kfscmd missing stderr");
+
+    Expect(Result("mbr.st") == "\n", "mbr status");
+    Expect(Result("mbr.err") == "", "mbr stderr");
+    img, img_ok := ReadEntireFile("build/dis-legacy-math/disk/work/disk.img");
+    Expect(img_ok && img.count == 65536 && img[0] == 0xEB && img[1] == 0x3C &&
+        img[446 + 4] == 0x39 && img[510] == 0x55 && img[511] == 0xAA, "mbr boot sector + Plan 9 partition + 55 AA");
+
+    Expect(Result("mkfs.st") == "\n", "mkfs status");
+    Expect(Result("mkfs.err") == "processing sample.proto\nfile system made\n", "mkfs stderr");
+    Expect(Result("mkext_h.st") == "\n", "mkext -h status");
+    Expect(Result("mkext_h.err") == "done\n", "mkext -h stderr");
+    Expect(Result("mkext_x.st") == "\n", "mkext -d status");
+    Expect(Result("mkext_x.err") == "done\n", "mkext -d stderr");
+
+    h_txt, h_ok := ReadEntireFile("build/dis-legacy-math/disk/work/out/hello.txt");
+    Expect(h_ok && h_txt == "hello disk world\n", "extracted hello.txt");
+    n_txt, n_ok := ReadEntireFile("build/dis-legacy-math/disk/work/out/sub/nested.txt");
+    Expect(n_ok && n_txt == "nested 123\n", "extracted sub/nested.txt");
+
+    if failures != 0 {
+        print("disk_tools_test: % failures\n", failures);
+        return 1;
+    }
+    print("disk_tools_test: all checks passed\n");
+    return 0;
+}

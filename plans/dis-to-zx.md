@@ -816,10 +816,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/disk/format.dis | appl/cmd/disk/format.b | module/format.m | - |  |
 | dis/disk/ftl.dis | appl/cmd/disk/ftl.b |  | - |  |
 | dis/disk/kfs.dis | appl/cmd/disk/kfs.b |  | - |  |
-| dis/disk/kfscmd.dis | appl/cmd/disk/kfscmd.b |  | - |  |
-| dis/disk/mbr.dis | appl/cmd/disk/mbr.b |  | - |  |
-| dis/disk/mkext.dis | appl/cmd/disk/mkext.b |  | - |  |
-| dis/disk/mkfs.dis | appl/cmd/disk/mkfs.b |  | - |  |
 | dis/disk/pedit.dis | appl/cmd/disk/prep/pedit.b |  | - |  |
 | dis/disk/prep.dis | appl/cmd/disk/prep/prep.b |  | - |  |
 | dis/fs/and.dis | appl/cmd/fs/and.b |  | - |  |

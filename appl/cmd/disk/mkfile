@@ -5,10 +5,6 @@ DIRS=\
 
 TARG=\
 	kfs.dis\
-	mbr.dis\
-	mkext.dis\
-	mkfs.dis\
-	kfscmd.dis\
 	format.dis\
 	ftl.dis\
 
@@ -23,3 +19,16 @@ DISBIN=$ROOT/dis/disk
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
+
+ZXCOMMANDS=kfscmd mbr mkext mkfs
+ZXUTIL=../../lib/disks.zi ../../lib/taijios_quote.zi ../zx_cli.zi ../zx_arg.zi ../zx_lines.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

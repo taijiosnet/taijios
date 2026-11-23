@@ -1,0 +1,64 @@
+// disk/kfscmd [-n fsname] cmd ...: send commands to a kfs control channel.
+#import "std/vec";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Quote :: #import "taijios_quote";
+
+USAGE :: "usage: disk/kfscmd [-n fsname] cmd ...\n";
+
+Err :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "kfscmd: %\n", msg);
+    unused Cli.WriteAll(2, BuilderFinish(out));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+main :: () -> s32 {
+    cfs := "main";
+    scan: Arg.Scan;
+    letter := Arg.Option(*scan);
+    while letter != 0 {
+        if letter == #char "n" {
+            val, ok := Arg.Value(*scan);
+            if !ok { return Cli.Usage(USAGE) }
+            cfs = val;
+        } else {
+            return Cli.Usage(USAGE);
+        }
+        letter = Arg.Option(*scan);
+    }
+
+    ctlf: Vec(u8);
+    BuilderPrint(*ctlf, "/chan/kfs.%.cmd", cfs);
+    ctlpath := BuilderFinish(ctlf);
+    ctl := Io.OpenFile(ctlpath, 2);
+    if ctl < 0 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", ctlpath, Io.LastError());
+        return Err(BuilderFinish(msg));
+    }
+
+    count := Args.OperandCount();
+    buf: [1024]u8;
+    for i: scan.next..count - 1 {
+        cmd := Args.Operand(i);
+        if Io.WriteBytes(ctl, cmd) > 0 {
+            while true {
+                n := Io.ReadBytes(ctl, buf[:]);
+                if n <= 0 { break }
+                unused Cli.WriteAll(1, TextView(buf[:n]));
+            }
+        } else {
+            msg: Vec(u8);
+            Quote.Quote(*msg, cmd);
+            BuilderPrint(*msg, ": %", Io.LastError());
+            unused Io.CloseFile(ctl);
+            return Err(BuilderFinish(msg));
+        }
+    }
+    unused Io.CloseFile(ctl);
+    return 0;
+}
