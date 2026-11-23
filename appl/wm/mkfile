@@ -144,8 +144,9 @@ colors.zx: colors.zi color_map.zi ../cmd/taijios_draw.zi ziran.toml ziran.lock m
 
 install-colors-zx:V: $DISBIN/colors.dis $DISBIN/colors.zx
 
-date.zx: date.zi ../cmd/taijios_time.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
-	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry date:main -o $target date.zi
+# The module is date_window: appl/cmd has the date command.
+date.zx: date_window.zi ../cmd/taijios_time.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry date_window:main -o $target date_window.zi
 
 install-date-zx:V: $DISBIN/date.zx
 

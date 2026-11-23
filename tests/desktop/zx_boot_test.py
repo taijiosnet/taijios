@@ -603,12 +603,12 @@ def check_catalog_apps(emulator, root, env):
         if bundle.stem not in ('rill', 'desktop_panel', 'wm'):
             shutil.copy2(bundle, bundles / bundle.name)
     # Colours and Date are built here until the installer ships them.
-    for name, hosts in (('colors', ('taijios_draw',)), ('date', ('taijios_files',))):
+    for name, module, hosts in (('colors', 'colors', ('taijios_draw',)), ('date', 'date_window', ('taijios_files',))):
         if not (bundles / f'{name}.zx').exists():
             subprocess.run([
                 'ziran', 'bundle', '--project', '--module-path', '../cmd', '--bind-host', 'kryon/pixmap',
                 *(word for host in hosts for word in ('--bind-host', host)),
-                '--entry', f'{name}:main', '-o', bundles / f'{name}.zx', f'{name}.zi',
+                '--entry', f'{module}:main', '-o', bundles / f'{name}.zx', f'{module}.zi',
             ], cwd=wm, env=env, check=True, timeout=120)
     # The generator names the ZX bundle once it is installed; do the same for the staged ones.
     (root / 'lib/apps').mkdir(parents=True)
