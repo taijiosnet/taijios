@@ -1,0 +1,448 @@
+// Pure object tree, layout solver, card formatting, hit-testing, and protocol
+// parser for spree/clients/cards, ported from appl/spree/clients/cards.b.
+#import "std/vec"
+#import "std/number_text"
+
+MAX_OBJECTS :: 256;
+MAX_CARDS :: 64;
+MAX_STACKS :: 48;
+
+CARD_W :: 48;
+CARD_H :: 66;
+FAN_DX :: 18;
+FAN_DY :: 18;
+
+ObjKind :: enum s32 {
+    Empty :: 0;
+    Card :: 1;
+    Stack :: 2;
+    Member :: 3;
+    Widget :: 4;
+    LayoutFrame :: 5;
+    LayoutObj :: 6;
+    Scoretable :: 7;
+    Score :: 8;
+    Other :: 9;
+}
+
+STYLE_DISPLAY :: 0;
+STYLE_PILE :: 1;
+
+ORIENT_RIGHT :: 0;
+ORIENT_UP :: 1;
+ORIENT_LEFT :: 2;
+ORIENT_DOWN :: 3;
+
+CardObj :: struct {
+    kind: ObjKind;
+    id: s32;
+    parent_id: s32;
+    // Card
+    face: s32;
+    number: s32; // num*4 + suit
+    rear: s32;
+    // Stack
+    style: s32;
+    orient: s32;
+    maxcards: s32;
+    n_concealed: s32;
+    showsize: bool;
+    clickable: bool;
+    layid: s32;
+    sel_start: s32;
+    sel_end: s32;
+    title: Text;
+    cards: Vec(s32);
+    // Computed layout rect on canvas
+    x: s32;
+    y: s32;
+    w: s32;
+    h: s32;
+    // Member / Widget / Score
+    name: Text;
+    text: Text;
+    cmd: Text;
+    wtype: Text;
+    opts: Text;
+    cid: s32;
+}
+
+CardsState :: struct {
+    objs: [MAX_OBJECTS]CardObj;
+    my_cid: s32;
+    status: Text;
+    win_title: Text;
+    title_changed: bool;
+    show_scores: bool;
+    dirty: bool;
+}
+
+InitState :: (st: *CardsState) {
+    for i: 0..MAX_OBJECTS-1 {
+        st.objs[i].kind = .Empty;
+        st.objs[i].id = cast(s32)i;
+        st.objs[i].parent_id = -1;
+        st.objs[i].layid = -1;
+        st.objs[i].sel_start = 0;
+        st.objs[i].sel_end = 0;
+        st.objs[i].showsize = true;
+        unused VecResize(st.objs[i].cards, 0);
+    }
+    st.my_cid = -1;
+    unused VecResize(st.status.bytes, 0);
+    unused VecResize(st.win_title.bytes, 0);
+    unused BuilderAppend(st.win_title.bytes, "Cards");
+    st.title_changed = false;
+    st.show_scores = false;
+    st.dirty = true;
+}
+
+SetText :: (dst: *Text, src: string) {
+    unused VecResize(dst.bytes, 0);
+    unused BuilderAppend(dst.bytes, src);
+}
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    neg := false;
+    i: s64 = 0;
+    if s.count > 0 && s[0] == 45 { neg = true; i = 1 }
+    while i < s.count {
+        c := s[i];
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        else { break }
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+SplitFirst :: (s: string) -> (head: string, rest: string) {
+    i: s64 = 0;
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 13) { i += 1 }
+    start := i;
+    while i < s.count && s[i] != 32 && s[i] != 9 && s[i] != 13 { i += 1 }
+    head := s[start:i];
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 13) { i += 1 }
+    return head, s[i:];
+}
+
+EscapeTk :: (s: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    for c: s {
+        if c == 123 || c == 125 || c == 92 { unused VecPush(out.bytes, 92) }
+        unused VecPush(out.bytes, c);
+    }
+}
+
+CardLabel :: (number: s32, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    ranks: [13]string = .["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+    suits: [4]string = .["C", "D", "H", "S"];
+    suit := number % 4;
+    rank := (number / 4) % 13;
+    if suit < 0 { suit = 0 }
+    if rank < 0 { rank = 0 }
+    unused BuilderAppend(out.bytes, ranks[rank]);
+    unused BuilderAppend(out.bytes, suits[suit]);
+    return suit == 1 || suit == 2;
+}
+
+FormatClickCmd :: (stack_id: s32, idx: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    b1: [16]u8; b2: [16]u8;
+    unused BuilderAppend(out.bytes, "click ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)stack_id, b1[:]));
+    unused BuilderAppend(out.bytes, " ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)idx, b2[:]));
+    unused BuilderAppend(out.bytes, "\n");
+}
+
+ParseOrient :: (opts: string) -> s32 {
+    first, _ := SplitFirst(opts);
+    if first == "down" { return ORIENT_DOWN }
+    if first == "up" { return ORIENT_UP }
+    if first == "left" { return ORIENT_LEFT }
+    return ORIENT_RIGHT;
+}
+
+ApplyUpdate :: (st: *CardsState, line: string) -> bool {
+    verb, rest := SplitFirst(line);
+    if verb.count == 0 { return false }
+
+    if verb == "say" || verb == "remark" {
+        SetText(*st.status, rest);
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "create" {
+        // create id parentid vis type...
+        id_s, r1 := SplitFirst(rest);
+        pid_s, r2 := SplitFirst(r1);
+        _, r3 := SplitFirst(r2);
+        otype, r4 := SplitFirst(r3);
+        id := ParseInt(id_s);
+        pid := ParseInt(pid_s);
+        if id < 0 || id >= MAX_OBJECTS { return false }
+        o := *st.objs[id];
+        o.id = id;
+        o.parent_id = pid;
+        o.face = 0;
+        o.number = 0;
+        o.rear = 0;
+        o.style = STYLE_PILE;
+        o.orient = ORIENT_RIGHT;
+        o.maxcards = 13;
+        o.n_concealed = 0;
+        o.showsize = true;
+        o.clickable = false;
+        o.layid = -1;
+        o.sel_start = 0;
+        o.sel_end = 0;
+        unused VecResize(o.cards, 0);
+        SetText(*o.name, "");
+        SetText(*o.title, "");
+        SetText(*o.text, "");
+        SetText(*o.cmd, "");
+        SetText(*o.wtype, "");
+        SetText(*o.opts, "");
+
+        if otype == "card" {
+            o.kind = .Card;
+            if pid >= 0 && pid < MAX_OBJECTS && st.objs[pid].kind == .Stack {
+                unused VecPush(st.objs[pid].cards, id);
+            }
+        } else if otype == "stack" {
+            o.kind = .Stack;
+        } else if otype == "member" {
+            o.kind = .Member;
+        } else if otype == "widget" {
+            o.kind = .Widget;
+            wt, _ := SplitFirst(r4);
+            SetText(*o.wtype, wt);
+        } else if otype == "layframe" {
+            o.kind = .LayoutFrame;
+        } else if otype == "layobj" {
+            o.kind = .LayoutObj;
+        } else if otype == "scoretable" {
+            o.kind = .Scoretable;
+        } else if otype == "score" {
+            o.kind = .Score;
+        } else {
+            o.kind = .Other;
+        }
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "tx" {
+        // tx srcid start end dstid dstidx
+        s_s, r1 := SplitFirst(rest);
+        st_s, r2 := SplitFirst(r1);
+        en_s, r3 := SplitFirst(r2);
+        d_s, r4 := SplitFirst(r3);
+        di_s, _ := SplitFirst(r4);
+        src_id := ParseInt(s_s);
+        start := ParseInt(st_s);
+        end := ParseInt(en_s);
+        dst_id := ParseInt(d_s);
+        dst_idx := ParseInt(di_s);
+        if src_id < 0 || src_id >= MAX_OBJECTS || dst_id < 0 || dst_id >= MAX_OBJECTS { return false }
+        src := *st.objs[src_id];
+        dst := *st.objs[dst_id];
+        if start < 0 || end < start || cast(s64)end > src.cards.count { return false }
+        cnt := cast(s64)(end - start);
+        if cnt == 0 { return true }
+        moved: Vec(s32);
+        unused VecResize(moved, cnt);
+        for i: 0..cnt-1 { moved[i] = src.cards[cast(s64)start + i] }
+        for i: cast(s64)end..src.cards.count-1 { src.cards[i - cnt] = src.cards[i] }
+        unused VecResize(src.cards, src.cards.count - cnt);
+        ins := cast(s64)dst_idx;
+        if ins < 0 || ins > dst.cards.count { ins = dst.cards.count }
+        old_len := dst.cards.count;
+        unused VecResize(dst.cards, old_len + cnt);
+        k := old_len - 1;
+        while k >= ins {
+            dst.cards[k + cnt] = dst.cards[k];
+            k -= 1;
+        }
+        for i: 0..cnt-1 {
+            cid := moved[i];
+            dst.cards[ins + i] = cid;
+            if cid >= 0 && cid < MAX_OBJECTS { st.objs[cid].parent_id = dst_id }
+        }
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "del" {
+        // del parent start end objs...
+        _, r1 := SplitFirst(rest);
+        _, r2 := SplitFirst(r1);
+        _, cur := SplitFirst(r2);
+        while cur.count > 0 {
+            id_s, next := SplitFirst(cur);
+            cur = next;
+            if id_s.count == 0 { break }
+            id := ParseInt(id_s);
+            if id < 0 || id >= MAX_OBJECTS { continue }
+            pid := st.objs[id].parent_id;
+            if st.objs[id].kind == .Card && pid >= 0 && pid < MAX_OBJECTS && st.objs[pid].kind == .Stack {
+                p := *st.objs[pid];
+                for i: 0..p.cards.count-1 {
+                    if p.cards[i] == id {
+                        for j: i..p.cards.count-2 { p.cards[j] = p.cards[j + 1] }
+                        unused VecResize(p.cards, p.cards.count - 1);
+                        break;
+                    }
+                }
+            }
+            st.objs[id].kind = .Empty;
+        }
+        st.dirty = true;
+        return true;
+    }
+
+    if verb == "set" {
+        id_s, r1 := SplitFirst(rest);
+        attr, val := SplitFirst(r1);
+        id := ParseInt(id_s);
+        if id < 0 || id >= MAX_OBJECTS { return false }
+        o := *st.objs[id];
+        if o.kind == .Card {
+            if attr == "face" { o.face = ParseInt(val) }
+            else if attr == "number" { o.number = ParseInt(val) }
+            else if attr == "rear" { o.rear = ParseInt(val) }
+        } else if o.kind == .Stack {
+            if attr == "style" { o.style = ifx val == "display" then STYLE_DISPLAY else STYLE_PILE }
+            else if attr == "maxcards" { o.maxcards = ParseInt(val) }
+            else if attr == "title" { SetText(*o.title, val) }
+            else if attr == "n" { o.n_concealed = ParseInt(val) }
+            else if attr == "showsize" { o.showsize = ParseInt(val) != 0 }
+            else if attr == "layid" { o.layid = ParseInt(val) }
+            else if attr == "actions" { o.clickable = val == "click" }
+            else if attr == "sel" {
+                if val.count == 0 { o.sel_start = 0; o.sel_end = 0 }
+                else {
+                    a_s, r2 := SplitFirst(val);
+                    mid_s, b_s := SplitFirst(r2);
+                    if mid_s == "-" {
+                        o.sel_start = ParseInt(a_s);
+                        o.sel_end = ParseInt(b_s);
+                    } else {
+                        o.sel_start = ParseInt(a_s);
+                        o.sel_end = o.sel_start + 1;
+                    }
+                }
+            }
+        } else if o.kind == .Member {
+            if attr == "name" { SetText(*o.name, val) }
+            else if attr == "id" { o.cid = ParseInt(val) }
+            else if attr == "you" { st.my_cid = ParseInt(val) }
+            else if attr == "status" { SetText(*o.text, val); if o.cid == st.my_cid { SetText(*st.status, val) } }
+            else if attr == "cliquetitle" && val.count > 0 { SetText(*st.win_title, val); st.title_changed = true }
+        } else if o.kind == .Widget {
+            if attr == "text" { SetText(*o.text, val) }
+            else if attr == "command" { SetText(*o.cmd, val) }
+            else if attr == "layid" { o.layid = ParseInt(val) }
+        } else if o.kind == .LayoutObj {
+            if attr == "layid" { o.layid = ParseInt(val) }
+            else if attr == "opts" {
+                SetText(*o.opts, val);
+                orient := ParseOrient(val);
+                if o.layid >= 0 {
+                    for k: 0..MAX_OBJECTS-1 {
+                        if st.objs[k].kind == .Stack && st.objs[k].layid == o.layid {
+                            st.objs[k].orient = orient;
+                        }
+                    }
+                }
+            }
+        } else if o.kind == .Score {
+            if attr == "score" { SetText(*o.text, val) }
+        }
+        st.dirty = true;
+        return true;
+    }
+    return false;
+}
+
+// Compute canvas positions for all active Stack objects in a clean grid layout.
+LayoutStacks :: (st: *CardsState, canvas_w: s32) {
+    x: s32 = 12;
+    y: s32 = 16;
+    row_h: s32 = CARD_H + 24;
+    for i: 0..MAX_OBJECTS-1 {
+        o := *st.objs[i];
+        if o.kind != .Stack { continue }
+        nc := cast(s32)o.cards.count;
+        sw: s32 = CARD_W;
+        sh: s32 = CARD_H;
+        if o.style == STYLE_DISPLAY && nc > 1 {
+            if o.orient == ORIENT_DOWN || o.orient == ORIENT_UP {
+                sh = CARD_H + (nc - 1) * FAN_DY;
+            } else {
+                sw = CARD_W + (nc - 1) * FAN_DX;
+            }
+        }
+        if x + sw + 12 > canvas_w && x > 12 {
+            x = 12;
+            y += row_h + 12;
+            row_h = CARD_H + 24;
+        }
+        o.x = x;
+        o.y = y;
+        o.w = sw;
+        o.h = sh;
+        if sh + 20 > row_h { row_h = sh + 20 }
+        x += sw + 14;
+    }
+}
+
+// Hit-test (px, py) on canvas -> (stack_id, card_idx).
+HitTest :: (st: *CardsState, px: s32, py: s32) -> (stack_id: s32, card_idx: s32) {
+    for i: 0..MAX_OBJECTS-1 {
+        o := *st.objs[i];
+        if o.kind != .Stack { continue }
+        if px < o.x || px > o.x + o.w || py < o.y || py > o.y + o.h { continue }
+        nc := cast(s32)o.cards.count;
+        if nc == 0 { return o.id, -1 }
+        if o.style == STYLE_PILE { return o.id, nc - 1 }
+        if o.orient == ORIENT_DOWN || o.orient == ORIENT_UP {
+            idx := (py - o.y) / FAN_DY;
+            if idx >= nc { idx = nc - 1 }
+            if idx < 0 { idx = 0 }
+            return o.id, idx;
+        }
+        idx := (px - o.x) / FAN_DX;
+        if idx >= nc { idx = nc - 1 }
+        if idx < 0 { idx = 0 }
+        return o.id, idx;
+    }
+    return -1, -1;
+}
+
+CARDS_UI :: #string END_UI
+frame .buts
+button .buts.fit -text {Fit} -command {cards_act fit}
+button .buts.scores -text {Scores} -command {cards_act scores}
+label .buts.status -text {}
+pack .buts.fit .buts.scores .buts.status -side left -padx 4
+frame .cf
+scrollbar .cf.sb -command {.cf.c yview}
+canvas .cf.c -width 600 -height 420 -bg #008800 -yscrollcommand {.cf.sb set}
+pack .cf.sb -side right -fill y
+pack .cf.c -side left -fill both -expand 1
+frame .in
+entry .in.e
+button .in.say -text {Say} -command {cards_act say}
+pack .in.e -side left -fill x -expand 1 -padx 2
+pack .in.say -side left -padx 2
+pack .buts -side top -fill x -pady 2
+pack .cf -side top -fill both -expand 1
+pack .in -side top -fill x -pady 2
+bind .cf.c <ButtonPress-1> {cards_click %x %y}
+bind .in.e <Key-\n> {cards_act say}
+cards_draw
+END_UI;

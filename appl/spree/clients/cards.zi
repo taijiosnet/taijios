@@ -1,0 +1,276 @@
+// Spree Cards Tk client, ported from appl/spree/clients/cards.b.
+#import "std/vec"
+#import "std/number_text"
+using IO :: #import "taijios_io"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Model :: #import "cards_model"
+
+state: Model.CardsState;
+line_buf: Text;
+notify_msg: Text;
+notify_ticks: s32 = 0;
+pending_act: s32 = 0; // 1=fit, 2=scores, 3=say, 4=widget_cmd
+pending_cmd: Text;
+pending_click: bool = false;
+click_x: s32 = 0;
+click_y: s32 = 0;
+added_buttons: [Model.MAX_OBJECTS]bool;
+
+SendCmd :: (s: string) {
+    if IO.Write(0, s) < 0 {
+        Model.SetText(*notify_msg, "command rejected");
+        notify_ticks = 15;
+    }
+}
+
+DrawCard :: (c: *Canvas.State, x: s32, y: s32, card: *Model.CardObj, selected: bool) {
+    outline: s32 = ifx selected then 0xffdd00 else 0x000000;
+    if card.face != 0 {
+        unused Canvas.Add(c, .Rectangle, .{x, y, x + Model.CARD_W, y + Model.CARD_H}, 0xffffff, outline, .Center);
+        lbl: Text;
+        is_red := Model.CardLabel(card.number, *lbl);
+        col: s32 = ifx is_red then 0xcc0000 else 0x000000;
+        unused Canvas.AddText(c, x + 4, y + 10, .West, TextView(lbl), col);
+    } else {
+        unused Canvas.Add(c, .Rectangle, .{x, y, x + Model.CARD_W, y + Model.CARD_H}, 0x224488, outline, .Center);
+        unused Canvas.Add(c, .Rectangle, .{x + 4, y + 4, x + Model.CARD_W - 4, y + Model.CARD_H - 4}, Canvas.NONE, 0x88aadd, .Center);
+    }
+}
+
+RenderTable :: () {
+    cid := Tk.Find(".cf.c");
+    if cid < 0 { return }
+    c := *Tk.widgets[cid].canvas;
+    w := ifx c.viewport.width > 0 then c.viewport.width else 600;
+    Model.LayoutStacks(*state, w);
+    Canvas.DeleteAll(c);
+
+    max_y: s32 = 420;
+    for i: 0..Model.MAX_OBJECTS-1 {
+        o := *state.objs[i];
+        if o.kind != .Stack { continue }
+        // Stack slot outline + title
+        unused Canvas.Add(c, .Rectangle, .{o.x, o.y, o.x + Model.CARD_W, o.y + Model.CARD_H}, 0x006600, 0xcccccc, .Center);
+        if o.title.bytes.count > 0 {
+            unused Canvas.AddText(c, o.x + 2, o.y - 8, .West, TextView(o.title), 0xffffff);
+        }
+        nc := cast(s32)o.cards.count;
+        if nc > 0 {
+            if o.style == Model.STYLE_PILE {
+                top_id := o.cards[nc - 1];
+                if top_id >= 0 && top_id < Model.MAX_OBJECTS {
+                    sel := (nc - 1) >= o.sel_start && (nc - 1) < o.sel_end;
+                    DrawCard(c, o.x, o.y, *state.objs[top_id], sel);
+                }
+            } else {
+                for ci: 0..cast(s64)nc-1 {
+                    card_id := o.cards[ci];
+                    if card_id < 0 || card_id >= Model.MAX_OBJECTS { continue }
+                    cx := o.x;
+                    cy := o.y;
+                    if o.orient == Model.ORIENT_DOWN || o.orient == Model.ORIENT_UP {
+                        cy += cast(s32)ci * Model.FAN_DY;
+                    } else {
+                        cx += cast(s32)ci * Model.FAN_DX;
+                    }
+                    sel := cast(s32)ci >= o.sel_start && cast(s32)ci < o.sel_end;
+                    DrawCard(c, cx, cy, *state.objs[card_id], sel);
+                }
+            }
+        }
+        if o.y + o.h + 24 > max_y { max_y = o.y + o.h + 24 }
+    }
+
+    if state.show_scores {
+        sy: s32 = 24;
+        unused Canvas.Add(c, .Rectangle, .{20, 12, w - 20, 180}, 0xffffdd, 0x000000, .Center);
+        unused Canvas.AddText(c, 30, sy, .West, "Scores", 0x000000);
+        sy += 18;
+        for i: 0..Model.MAX_OBJECTS-1 {
+            if state.objs[i].kind == .Score && state.objs[i].text.bytes.count > 0 {
+                unused Canvas.AddText(c, 30, sy, .West, TextView(state.objs[i].text), 0x000000);
+                sy += 16;
+            }
+        }
+    }
+
+    if notify_ticks > 0 && notify_msg.bytes.count > 0 {
+        unused Canvas.Add(c, .Rectangle, .{4, 4, 280, 26}, 0xffffaa, 0x000000, .Center);
+        unused Canvas.AddText(c, 10, 15, .West, TextView(notify_msg), 0xcc0000);
+    }
+
+    c.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)max_y * Canvas.FRACTION};
+    Canvas.ClampViewport(*c.viewport);
+    c.viewport.resized = true;
+}
+
+SyncWidgets :: (tcl: *Tcl.Interpreter) {
+    // Sync status label
+    esc: Text;
+    Model.EscapeTk(TextView(state.status), *esc);
+    scmd: Text;
+    unused BuilderAppend(scmd.bytes, ".buts.status configure -text {");
+    unused BuilderAppend(scmd.bytes, TextView(esc));
+    unused BuilderAppend(scmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(scmd));
+
+    // Dynamically add/update engine button widgets in .buts
+    for i: 0..Model.MAX_OBJECTS-1 {
+        o := *state.objs[i];
+        if o.kind == .Widget && TextView(o.wtype) == "button" && o.cmd.bytes.count > 0 {
+            nb: [24]u8;
+            is := FormatInteger(i, nb[:]);
+            et: Text;
+            Model.EscapeTk(ifx o.text.bytes.count > 0 then TextView(o.text) else TextView(o.cmd), *et);
+            if !added_buttons[i] {
+                added_buttons[i] = true;
+                bc: Text;
+                unused BuilderAppend(bc.bytes, "button .buts.wb");
+                unused BuilderAppend(bc.bytes, is);
+                unused BuilderAppend(bc.bytes, " -text {");
+                unused BuilderAppend(bc.bytes, TextView(et));
+                unused BuilderAppend(bc.bytes, "} -command {cards_act wcmd ");
+                unused BuilderAppend(bc.bytes, TextView(o.cmd));
+                unused BuilderAppend(bc.bytes, "}; pack .buts.wb");
+                unused BuilderAppend(bc.bytes, is);
+                unused BuilderAppend(bc.bytes, " -side left -padx 2");
+                unused Window.Execute(tcl, TextView(bc));
+            } else {
+                bc: Text;
+                unused BuilderAppend(bc.bytes, ".buts.wb");
+                unused BuilderAppend(bc.bytes, is);
+                unused BuilderAppend(bc.bytes, " configure -text {");
+                unused BuilderAppend(bc.bytes, TextView(et));
+                unused BuilderAppend(bc.bytes, "}");
+                unused Window.Execute(tcl, TextView(bc));
+            }
+        }
+    }
+}
+
+CardsDraw :: (_: s64, args: []Text, result: *T.Result) { RenderTable() }
+
+CardsClick :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count < 2 { return }
+    click_x = Model.ParseInt(TextView(args[0]));
+    click_y = Model.ParseInt(TextView(args[1]));
+    pending_click = true;
+}
+
+CardsCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 { result.code = .Error; return }
+    v := TextView(args[0]);
+    if v == "fit" { pending_act = 1 }
+    else if v == "scores" { pending_act = 2 }
+    else if v == "say" { pending_act = 3 }
+    else if v == "wcmd" && args.count >= 2 {
+        pending_act = 4;
+        Model.SetText(*pending_cmd, TextView(args[1]));
+    }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    changed := false;
+    if pending_act != 0 {
+        act := pending_act;
+        pending_act = 0;
+        if act == 1 {
+            changed = true;
+        } else if act == 2 {
+            state.show_scores = !state.show_scores;
+            changed = true;
+        } else if act == 3 {
+            res := Tcl.Eval(tcl, ".in.e get");
+            if res.code == .OK && res.value.bytes.count > 0 {
+                msg: Text;
+                unused BuilderAppend(msg.bytes, "say ");
+                unused BuilderAppend(msg.bytes, TextView(res.value));
+                unused BuilderAppend(msg.bytes, "\n");
+                SendCmd(TextView(msg));
+                unused Window.Execute(tcl, ".in.e delete 0 end");
+                changed = true;
+            }
+        } else if act == 4 {
+            msg: Text;
+            unused BuilderAppend(msg.bytes, TextView(pending_cmd));
+            unused BuilderAppend(msg.bytes, "\n");
+            SendCmd(TextView(msg));
+            changed = true;
+        }
+    }
+
+    if pending_click {
+        pending_click = false;
+        sid, cidx := Model.HitTest(*state, click_x, click_y);
+        if sid >= 0 {
+            cmd: Text;
+            Model.FormatClickCmd(sid, cidx, *cmd);
+            SendCmd(TextView(cmd));
+            changed = true;
+        }
+    }
+
+    if notify_ticks > 0 {
+        notify_ticks -= 1;
+        if notify_ticks == 0 { changed = true }
+    }
+
+    buf: [4096]u8;
+    n := IO.PollRead(0, buf[:]);
+    if n > 0 {
+        unused BuilderAppend(line_buf.bytes, TextView(buf[:n]));
+        rem: Text;
+        consumed := false;
+        {
+            s := TextView(line_buf);
+            pos: s64 = 0;
+            while pos < s.count {
+                nl := pos;
+                while nl < s.count && s[nl] != 10 { nl += 1 }
+                if nl >= s.count { break }
+                line := s[pos:nl];
+                pos = nl + 1;
+                if line.count > 0 && Model.ApplyUpdate(*state, line) { changed = true }
+            }
+            if pos > 0 {
+                consumed = true;
+                if pos < s.count { unused BuilderAppend(rem.bytes, s[pos:]) }
+            }
+        }
+        if consumed {
+            unused VecResize(line_buf.bytes, 0);
+            unused BuilderAppend(line_buf.bytes, TextView(rem));
+        }
+    }
+
+    if state.title_changed {
+        state.title_changed = false;
+        unused Surface.SetWindowTitle(TextView(state.win_title));
+    }
+
+    if changed || state.dirty {
+        state.dirty = false;
+        RenderTable();
+        SyncWidgets(tcl);
+        return .Changed;
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    Model.InitState(*state);
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "cards_act", CardsCmd) ||
+       !Tcl.RegisterCommand(*tcl, "cards_click", CardsClick) ||
+       !Tcl.RegisterCommand(*tcl, "cards_draw", CardsDraw) { return 1 }
+    rc := Window.RunPolled(*tcl, Model.CARDS_UI, "Cards", 640, 500, Start, Tick, 50);
+    unused IO.Write(0, "");
+    return rc;
+}

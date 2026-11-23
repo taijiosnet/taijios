@@ -1,0 +1,59 @@
+// Table-driven unit + Tk UI tests for appl/spree/clients/cards_model.zi.
+#import "std/vec"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Model :: #import "cards_model"
+
+failures: s32;
+st: Model.CardsState;
+
+NoopCmd :: (_: s64, args: []Text, result: *T.Result) {}
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    Model.InitState(*st);
+
+    Expect(Model.ApplyUpdate(*st, "create 1 0 1 stack"), "create stack 1");
+    Expect(Model.ApplyUpdate(*st, "set 1 style display"), "set stack display");
+    Expect(Model.ApplyUpdate(*st, "set 1 title Hand"), "set stack title");
+    Expect(Model.ApplyUpdate(*st, "create 2 1 1 card"), "create card 2");
+    Expect(Model.ApplyUpdate(*st, "set 2 face 1"), "card 2 face up");
+    Expect(Model.ApplyUpdate(*st, "set 2 number 50"), "card 2 KH (12*4+2)");
+    Expect(Model.ApplyUpdate(*st, "create 3 0 1 stack"), "create stack 3");
+    Expect(Model.ApplyUpdate(*st, "tx 1 0 1 3 0"), "tx card 2 to stack 3");
+    Expect(st.objs[1].cards.count == 0 && st.objs[3].cards.count == 1, "card moved");
+
+    lbl: Text;
+    is_red := Model.CardLabel(50, *lbl);
+    Expect(is_red && TextView(lbl) == "KH", "CardLabel 50 -> KH red");
+    is_red2 := Model.CardLabel(3, *lbl);
+    Expect(!is_red2 && TextView(lbl) == "AS", "CardLabel 3 -> AS black");
+
+    Model.LayoutStacks(*st, 600);
+    sid, cidx := Model.HitTest(*st, st.objs[3].x + 10, st.objs[3].y + 10);
+    Expect(sid == 3 && cidx == 0, "HitTest stack 3 card 0");
+
+    cmd: Text;
+    Model.FormatClickCmd(3, 0, *cmd);
+    Expect(TextView(cmd) == "click 3 0\n", "FormatClickCmd");
+
+    tcl: Tcl.Interpreter;
+    Expect(Tk.Attach(*tcl), "Tk.Attach");
+    Expect(Tcl.RegisterCommand(*tcl, "cards_act", NoopCmd), "reg act");
+    Expect(Tcl.RegisterCommand(*tcl, "cards_click", NoopCmd), "reg click");
+    Expect(Tcl.RegisterCommand(*tcl, "cards_draw", NoopCmd), "reg draw");
+    res := Tcl.Eval(*tcl, Model.CARDS_UI);
+    Expect(res.code == .OK, TextView(res.value));
+    Tk.Layout(640, 500);
+    Expect(Tk.Find(".cf.c") >= 0 && Tk.Find(".buts.fit") >= 0, "widgets exist");
+
+    if failures == 0 { print("cards_client_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}
