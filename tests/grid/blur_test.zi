@@ -1,0 +1,105 @@
+// Table-driven unit tests for appl/grid/demo/block_model.zi.
+#import "std/vec"
+using Model :: #import "block_model"
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+DirCase :: struct {
+    input: string;
+    expected: string;
+}
+
+TimeCase :: struct {
+    secs: s64;
+    expected: string;
+}
+
+NameCase :: struct {
+    name: string;
+    ok: bool;
+    idx: s32;
+}
+
+main :: () -> s32 {
+    dir_cases: [3]DirCase = DirCase.[
+        .{input = "/tmp", expected = "/tmp/blur/"},
+        .{input = "/tmp/blur", expected = "/tmp/blur/"},
+        .{input = "/tmp/blur/", expected = "/tmp/blur/"},
+    ];
+    out: Text;
+    for dir_cases {
+        Model.NormalizeDir(it.input, *out);
+        Expect(TextView(out) == it.expected, it.input);
+    }
+
+    g := Model.ComputeGrid(210, 140);
+    Expect(g.cols == 3 && g.rows == 2 && g.bw == 70 && g.bh == 70, "ComputeGrid 210x140");
+    bx, by := Model.BlockXY(4, 3);
+    Expect(bx == 1 && by == 1, "BlockXY(4, 3)");
+
+    Model.FormatProgress(3, 6, *out);
+    Expect(TextView(out) == "50%", "FormatProgress 50%");
+
+    time_cases: [3]TimeCase = TimeCase.[
+        .{secs = 5, expected = "00:05"},
+        .{secs = 125, expected = "02:05"},
+        .{secs = 3661, expected = "01:01:01"},
+    ];
+    for time_cases {
+        Model.FormatElapsed(it.secs, *out);
+        Expect(TextView(out) == it.expected, it.expected);
+    }
+
+    name_cases: [3]NameCase = NameCase.[
+        .{name = "block.0.a", ok = true, idx = 0},
+        .{name = "block.42.c", ok = true, idx = 42},
+        .{name = "badname", ok = false, idx = 0},
+    ];
+    for name_cases {
+        idx, ok := Model.ParseBlockName(it.name);
+        Expect(ok == it.ok && (!ok || idx == it.idx), it.name);
+    }
+
+    // SlaveConfig round-trip
+    cfg_in: Model.SlaveConfig = .{size = 12, blocks_x = 3, blocks_y = 2, bsize_x = 70, bsize_y = 70};
+    Model.FormatSlaveData(cfg_in, *out);
+    cfg_out: Model.SlaveConfig;
+    Expect(Model.ParseSlaveData(TextView(out), *cfg_out), "ParseSlaveData");
+    Expect(cfg_out.size == 12 && cfg_out.blocks_x == 3 && cfg_out.blocks_y == 2 &&
+           cfg_out.bsize_x == 70 && cfg_out.bsize_y == 70, "SlaveConfig fields");
+
+    // BitImage encode/decode round-trip + ProcessBlock (blur + grad sketch)
+    src_rgb: Vec(u8);
+    for y: 0..7 {
+        for x: 0..7 {
+            v: u8 = ifx x < 4 then 20 else 220;
+            unused VecPush(src_rgb, v);
+            unused VecPush(src_rgb, v);
+            unused VecPush(src_rgb, v);
+        }
+    }
+    encoded: Vec(u8);
+    r_img: Model.Rect = .{minx = 0, miny = 0, maxx = 8, maxy = 8};
+    Expect(Model.FormatBitImage(r_img, VecSlice(src_rgb, 0, src_rgb.count), *encoded), "FormatBitImage 8x8");
+    img: Model.BitImage;
+    Expect(Model.ParseBitImage(VecSlice(encoded, 0, encoded.count), *img), "ParseBitImage 8x8");
+    Expect(img.width == 8 && img.height == 8 && img.rgb.count == 192, "parsed 8x8 dimensions");
+
+    proc_out: Vec(u8);
+    Expect(Model.ProcessBlock(*img, 0, 0, 2, 8, 8, *proc_out), "ProcessBlock 8x8");
+    Expect(proc_out.count == 192, "ProcessBlock output size");
+
+    rgba: [8 * 8 * 4]u8;
+    Model.BlitRGBToRGBA(VecSlice(proc_out, 0, proc_out.count), 8, 8, 0, 0, rgba[:], 8, 8);
+    Expect(rgba[3] == 255, "BlitRGBToRGBA alpha");
+
+    if failures == 0 { print("blur_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

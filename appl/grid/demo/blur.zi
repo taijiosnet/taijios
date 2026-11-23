@@ -1,0 +1,377 @@
+// Grid demo distributed image blur application (master + slave),
+// ported from appl/grid/demo/blur.b and appl/grid/demo/block.b.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args"
+using Clock :: #import "taijios_clock"
+using IO :: #import "taijios_io"
+using Surface :: #import "zx_surface"
+using Model :: #import "block_model"
+using BlockFS :: #import "block_fs"
+
+DMDIR_BIT :: 0x80000000;
+BAR_H :: 20;
+
+IsDirMeta :: (meta: []u8) -> bool {
+    if meta.count < 12 { return false }
+    mode := cast(u32)meta[8] | (cast(u32)meta[9] << 8) |
+            (cast(u32)meta[10] << 16) | (cast(u32)meta[11] << 24);
+    return (mode & cast(u32)DMDIR_BIT) != 0;
+}
+
+DrawProgressBar :: (rgba: []u8, w: s32, img_h: s32, done: s32, total: s32) {
+    filled := ifx total > 0 then (w * done) / total else w;
+    for dy: 0..BAR_H-1 {
+        py := img_h + dy;
+        for px: 0..w-1 {
+            off := (cast(s64)py * cast(s64)w + cast(s64)px) * 4;
+            if off + 3 >= rgba.count { continue }
+            if dy == 0 {
+                rgba[off] = 120; rgba[off + 1] = 120; rgba[off + 2] = 120; rgba[off + 3] = 255;
+            } else if px < filled {
+                rgba[off] = 46; rgba[off + 1] = 139; rgba[off + 2] = 87; rgba[off + 3] = 255;
+            } else {
+                rgba[off] = 235; rgba[off + 1] = 235; rgba[off + 2] = 235; rgba[off + 3] = 255;
+            }
+        }
+    }
+}
+
+Usage :: (err: string) -> s32 {
+    print("usage: blur [dir] [image]\n");
+    if err.count > 0 {
+        print("Error: %\n", err);
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    return 0;
+}
+
+DoBlock :: (work_dir: string, cfg: Model.SlaveConfig, block_idx: s32, bname: string) -> bool {
+    bx, by := Model.BlockXY(block_idx, cfg.blocks_x);
+    buf: [24]u8;
+    rel: Text;
+    unused BuilderAppend(rel.bytes, "imgdata.");
+    unused BuilderAppend(rel.bytes, FormatInteger(cast(s64)block_idx, buf[:]));
+    unused BuilderAppend(rel.bytes, ".bit");
+    img_path: Text;
+    BlockFS.JoinPath(work_dir, TextView(rel), *img_path);
+
+    raw: Vec(u8);
+    if !BlockFS.ReadWhole(TextView(img_path), *raw) {
+        print("Error nil image! '%'\n", TextView(img_path));
+        return false;
+    }
+    procimg: Model.BitImage;
+    if !Model.ParseBitImage(VecSlice(raw, 0, raw.count), *procimg) {
+        print("Error parsing image! '%'\n", TextView(img_path));
+        return false;
+    }
+    out_rgb: Vec(u8);
+    if !Model.ProcessBlock(*procimg, bx, by, cfg.size, cfg.bsize_x, cfg.bsize_y, *out_rgb) {
+        return false;
+    }
+    bit_bytes: Vec(u8);
+    out_r: Model.Rect = .{minx = 0, miny = 0, maxx = cfg.bsize_x, maxy = cfg.bsize_y};
+    if !Model.FormatBitImage(out_r, VecSlice(out_rgb, 0, out_rgb.count), *bit_bytes) {
+        return false;
+    }
+
+    bdir: Text;
+    BlockFS.JoinPath(work_dir, bname, *bdir);
+    out_img_path: Text;
+    BlockFS.JoinPath(TextView(bdir), "img.bit", *out_img_path);
+    if !BlockFS.WriteWhole(TextView(out_img_path), TextView(VecSlice(bit_bytes, 0, bit_bytes.count))) {
+        return false;
+    }
+    done_path: Text;
+    BlockFS.JoinPath(TextView(bdir), "done", *done_path);
+    dfd := IO.Create(TextView(done_path), BlockFS.OWRITE, BlockFS.FILE_PERM);
+    if dfd >= 0 { unused IO.Close(dfd) }
+    return true;
+}
+
+RunSlave :: (work_dir: string) -> s32 {
+    print("starting slave\n");
+    working_path: Text;
+    BlockFS.JoinPath(work_dir, "working", *working_path);
+    data_path: Text;
+    BlockFS.JoinPath(work_dir, "data.dat", *data_path);
+    todo_path: Text;
+    BlockFS.JoinPath(work_dir, "todo", *todo_path);
+
+    cfg: Model.SlaveConfig;
+    while true {
+        if !BlockFS.PathExists(TextView(working_path)) {
+            BlockFS.SleepMillis(1000);
+            continue;
+        }
+        raw: Vec(u8);
+        if BlockFS.ReadWhole(TextView(data_path), *raw) {
+            if Model.ParseSlaveData(TextView(VecSlice(raw, 0, raw.count)), *cfg) {
+                break;
+            }
+            print("Error: 'Cannot read data file'\n");
+            return 1;
+        }
+        BlockFS.SleepMillis(500);
+    }
+
+    doneblocks: s32 = 0;
+    while true {
+        entries: Vec(BlockFS.DirEntry);
+        unused BlockFS.ReadDir(TextView(todo_path), *entries);
+        if entries.count == 0 {
+            if !BlockFS.PathExists(TextView(working_path)) { break }
+            BlockFS.SleepMillis(2000);
+            continue;
+        }
+        stopped := false;
+        es := VecSlice(entries, 0, entries.count);
+        for i: 0..es.count-1 {
+            bname := TextView(es[i].name);
+            claim_path: Text;
+            BlockFS.JoinPath(work_dir, bname, *claim_path);
+            fd := IO.CreateNew(TextView(claim_path), BlockFS.OREAD, cast(s32)BlockFS.DMDIR_PERM);
+            if fd >= 0 {
+                unused IO.Close(fd);
+                bidx, ok := Model.ParseBlockName(bname);
+                if ok {
+                    unused DoBlock(work_dir, cfg, bidx, bname);
+                    doneblocks += 1;
+                }
+            }
+            if !BlockFS.PathExists(TextView(working_path)) {
+                stopped = true;
+                break;
+            }
+        }
+        if stopped { break }
+    }
+    print("Finished: % blocks\n", doneblocks);
+    return 0;
+}
+
+RunMaster :: (work_dir: string, filename: string) -> s32 {
+    BlockFS.CleanFiles(work_dir);
+    raw: Vec(u8);
+    if !BlockFS.ReadWhole(filename, *raw) {
+        print("Error: 'cannot read image: %'\n", filename);
+        return 1;
+    }
+    img: Model.BitImage;
+    if !Model.ParseBitImage(VecSlice(raw, 0, raw.count), *img) {
+        print("Error: 'wrong image depth! (must be 24bit)'\n");
+        return 1;
+    }
+
+    wfd := IO.Create(work_dir, BlockFS.OREAD, cast(s32)BlockFS.DMDIR_PERM);
+    if wfd >= 0 { unused IO.Close(wfd) }
+
+    grid := Model.ComputeGrid(img.width, img.height);
+    cfg: Model.SlaveConfig = .{
+        size = Model.DEFAULT_BLUR_SIZE,
+        blocks_x = grid.cols,
+        blocks_y = grid.rows,
+        bsize_x = grid.bw,
+        bsize_y = grid.bh,
+    };
+    noblocks := grid.cols * grid.rows;
+
+    // Write padded per-block imgdata.<n>.bit files.
+    n: s32 = 0;
+    buf: [24]u8;
+    for y: 0..grid.rows-1 {
+        for x: 0..grid.cols-1 {
+            r2 := Model.BlockPaddedRect(x, y, grid.bw, grid.bh, cfg.size, img.width, img.height);
+            r2_src: Model.Rect = .{
+                minx = img.minx + r2.minx,
+                miny = img.miny + r2.miny,
+                maxx = img.minx + r2.maxx,
+                maxy = img.miny + r2.maxy,
+            };
+            sub_rgb: Vec(u8);
+            if Model.ReadPixelsRect(*img, r2_src, *sub_rgb) {
+                bit_out: Vec(u8);
+                if Model.FormatBitImage(r2, VecSlice(sub_rgb, 0, sub_rgb.count), *bit_out) {
+                    rel: Text;
+                    unused BuilderAppend(rel.bytes, "imgdata.");
+                    unused BuilderAppend(rel.bytes, FormatInteger(cast(s64)n, buf[:]));
+                    unused BuilderAppend(rel.bytes, ".bit");
+                    fpath: Text;
+                    BlockFS.JoinPath(work_dir, TextView(rel), *fpath);
+                    if !BlockFS.WriteWhole(TextView(fpath), TextView(VecSlice(bit_out, 0, bit_out.count))) {
+                        print("couldn't write image: '%'\n", TextView(fpath));
+                    }
+                }
+            }
+            n += 1;
+        }
+    }
+
+    data_text: Text;
+    Model.FormatSlaveData(cfg, *data_text);
+    if !BlockFS.WriteData(work_dir, TextView(data_text)) {
+        print("Error: 'could not create data.dat'\n");
+        return 1;
+    }
+
+    letters: Vec(u8);
+    times: Vec(s64);
+    BlockFS.MasterInit(work_dir, noblocks, *letters, *times);
+
+    win_w := grid.cols * grid.bw;
+    img_h := grid.rows * grid.bh;
+    win_h := img_h + BAR_H;
+
+    frame: Vec(u8);
+    if !VecResizeBounded(frame, cast(s64)win_w * cast(s64)win_h * 4, 16777216) { return 1 }
+    frame_slice := VecSlice(frame, 0, frame.count);
+    src_rgb := VecSlice(img.rgb, 0, img.rgb.count);
+    Model.BlitRGBToRGBA(src_rgb, img.width, img.height, 0, 0, frame_slice, win_w, img_h);
+    DrawProgressBar(frame_slice, win_w, img_h, 0, noblocks);
+
+    if !Surface.Open("Blur - 0%", win_w, win_h) {
+        BlockFS.CleanFiles(work_dir);
+        return 1;
+    }
+    defer Surface.Close();
+    if !Surface.Present(win_w, win_h, TextView(frame_slice)) {
+        BlockFS.CleanFiles(work_dir);
+        return 1;
+    }
+
+    start_ms := Clock.Millis();
+    last_poll_ms := start_ms - 1000;
+    done_count: s32 = 0;
+    finished := false;
+
+    while true {
+        event := Surface.Event(100);
+        if event.kind == Surface.Closed {
+            break;
+        }
+        dirty := event.kind == Surface.Redraw || event.kind == Surface.Resize;
+
+        now_ms := Clock.Millis();
+        if !finished && now_ms - last_poll_ms >= 500 {
+            last_poll_ms = now_ms;
+            now_s := now_ms / 1000;
+            nodone: s32 = 0;
+            ls := VecSlice(letters, 0, letters.count);
+            ts := VecSlice(times, 0, times.count);
+            for i: 0..noblocks-1 {
+                if ts[i] == Model.BLOCK_DONE {
+                    nodone += 1;
+                    continue;
+                }
+                bname: Text;
+                Model.FormatBlockName(i, ls[i], *bname);
+                bdir: Text;
+                BlockFS.JoinPath(work_dir, TextView(bname), *bdir);
+                done_file: Text;
+                BlockFS.JoinPath(TextView(bdir), "done", *done_file);
+                if BlockFS.PathExists(TextView(done_file)) {
+                    todo_rel: Text;
+                    unused BuilderAppend(todo_rel.bytes, "todo/");
+                    unused BuilderAppend(todo_rel.bytes, TextView(bname));
+                    todo_file: Text;
+                    BlockFS.JoinPath(work_dir, TextView(todo_rel), *todo_file);
+                    unused IO.Remove(TextView(todo_file));
+
+                    out_img_path: Text;
+                    BlockFS.JoinPath(TextView(bdir), "img.bit", *out_img_path);
+                    braw: Vec(u8);
+                    bimg: Model.BitImage;
+                    if BlockFS.ReadWhole(TextView(out_img_path), *braw) &&
+                       Model.ParseBitImage(VecSlice(braw, 0, braw.count), *bimg) {
+                        bx, by := Model.BlockXY(i, grid.cols);
+                        Model.BlitRGBToRGBA(VecSlice(bimg.rgb, 0, bimg.rgb.count),
+                                            bimg.width, bimg.height,
+                                            bx * grid.bw, by * grid.bh,
+                                            frame_slice, win_w, img_h);
+                        ts[i] = Model.BLOCK_DONE;
+                        nodone += 1;
+                        dirty = true;
+                    } else {
+                        ls[i] = BlockFS.MakeFile(work_dir, i, ls[i]);
+                        ts[i] = Model.BLOCK_WAITING;
+                    }
+                } else if BlockFS.PathExists(TextView(bdir)) {
+                    if ts[i] == Model.BLOCK_WAITING {
+                        ts[i] = now_s;
+                    } else if now_s - ts[i] > Model.DEFAULT_TIMEOUT_SECS {
+                        ls[i] = BlockFS.MakeFile(work_dir, i, ls[i]);
+                        ts[i] = Model.BLOCK_WAITING;
+                    }
+                }
+            }
+            if nodone != done_count {
+                done_count = nodone;
+                DrawProgressBar(frame_slice, win_w, img_h, done_count, noblocks);
+                pct: Text;
+                Model.FormatProgress(done_count, noblocks, *pct);
+                title: Text;
+                unused BuilderAppend(title.bytes, "Blur - ");
+                unused BuilderAppend(title.bytes, TextView(pct));
+                unused Surface.SetTitle(TextView(title));
+                dirty = true;
+            }
+            if done_count == noblocks {
+                finished = true;
+                elapsed_s := (Clock.Millis() - start_ms) / 1000;
+                ts: Text;
+                Model.FormatElapsed(elapsed_s, *ts);
+                title: Text;
+                unused BuilderAppend(title.bytes, "Blur - Time taken: ");
+                unused BuilderAppend(title.bytes, TextView(ts));
+                unused Surface.SetTitle(TextView(title));
+                BlockFS.CleanFiles(work_dir);
+                dirty = true;
+            }
+        }
+
+        if dirty {
+            if !Surface.Present(win_w, win_h, TextView(frame_slice)) { break }
+        }
+    }
+    BlockFS.CleanFiles(work_dir);
+    return 0;
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    if argc > 2 { return Usage("too many arguments") }
+
+    dir_str := "/tmp/blur/";
+    filename := "";
+    is_master := false;
+
+    for i: 0..cast(s64)argc-1 {
+        arg := Args.Operand(cast(s32)i);
+        meta: [12]u8;
+        if IO.Stat(arg, meta[:]) != 0 {
+            err: Text;
+            unused BuilderAppend(err.bytes, "file/directory '");
+            unused BuilderAppend(err.bytes, arg);
+            unused BuilderAppend(err.bytes, "' does not exist");
+            return Usage(TextView(err));
+        }
+        if IsDirMeta(meta[:]) {
+            dir_str = arg;
+        } else {
+            filename = arg;
+            is_master = true;
+        }
+    }
+
+    work_dir: Text;
+    Model.NormalizeDir(dir_str, *work_dir);
+    wfd := IO.Create(TextView(work_dir), BlockFS.OREAD, cast(s32)BlockFS.DMDIR_PERM);
+    if wfd >= 0 { unused IO.Close(wfd) }
+
+    if is_master {
+        return RunMaster(TextView(work_dir), filename);
+    }
+    return RunSlave(TextView(work_dir));
+}

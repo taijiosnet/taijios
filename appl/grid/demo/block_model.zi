@@ -1,0 +1,637 @@
+// Pure image block geometry, Inferno r8g8b8 .bit codec, blur + gradient-sketch
+// filters, and distributed block-coordination model for grid/demo/{block,blur},
+// ported from appl/grid/demo/block.b and appl/grid/demo/blur.b.
+#import "std/vec"
+#import "std/number_text"
+
+BLOCK_WAITING :: -1;
+BLOCK_DONE :: -2;
+DEFAULT_TIMEOUT_SECS :: 50;
+DEFAULT_BLUR_SIZE :: 12;
+DEFAULT_BLUR_OPT :: 2;
+
+Rect :: struct {
+    minx: s32;
+    miny: s32;
+    maxx: s32;
+    maxy: s32;
+}
+
+BitImage :: struct {
+    minx: s32;
+    miny: s32;
+    maxx: s32;
+    maxy: s32;
+    width: s32;
+    height: s32;
+    rgb: Vec(u8);
+}
+
+BlockGrid :: struct {
+    cols: s32;
+    rows: s32;
+    bw: s32;
+    bh: s32;
+}
+
+SlaveConfig :: struct {
+    size: s32;
+    blocks_x: s32;
+    blocks_y: s32;
+    bsize_x: s32;
+    bsize_y: s32;
+}
+
+RectDx :: (r: Rect) -> s32 { return r.maxx - r.minx }
+RectDy :: (r: Rect) -> s32 { return r.maxy - r.miny }
+
+ParseIntField :: (s: string) -> (val: s32, ok: bool) {
+    i: s64 = 0;
+    while i < s.count && (s[i] == 32 || s[i] == 9 || s[i] == 13 || s[i] == 10) { i += 1 }
+    if i >= s.count { return 0, false }
+    neg := false;
+    if s[i] == 45 { neg = true; i += 1 }
+    if i >= s.count || s[i] < 48 || s[i] > 57 { return 0, false }
+    v: s64 = 0;
+    while i < s.count && s[i] >= 48 && s[i] <= 57 {
+        v = v * 10 + cast(s64)(s[i] - 48);
+        i += 1;
+    }
+    return cast(s32)(ifx neg then -v else v), true;
+}
+
+AppendRightAligned11 :: (out: *Vec(u8), text: string) {
+    pad := 11 - text.count;
+    while pad > 0 {
+        unused VecPush(<<out, 32);
+        pad -= 1;
+    }
+    unused BuilderAppend(<<out, text);
+    unused VecPush(<<out, 32);
+}
+
+// Parse an Inferno uncompressed 24-bit r8g8b8 .bit image (60-byte header + RGB bytes).
+ParseBitImage :: (data: []u8, out: *BitImage) -> bool {
+    unused VecResize(out.rgb, 0);
+    out.minx = 0;
+    out.miny = 0;
+    out.maxx = 0;
+    out.maxy = 0;
+    out.width = 0;
+    out.height = 0;
+    if data.count < 60 { return false }
+    minx, ok0 := ParseIntField(TextView(data[12:24]));
+    miny, ok1 := ParseIntField(TextView(data[24:36]));
+    maxx, ok2 := ParseIntField(TextView(data[36:48]));
+    maxy, ok3 := ParseIntField(TextView(data[48:60]));
+    if !ok0 || !ok1 || !ok2 || !ok3 { return false }
+    w := maxx - minx;
+    h := maxy - miny;
+    if w <= 0 || h <= 0 || w > 4096 || h > 4096 { return false }
+    need := cast(s64)w * cast(s64)h * 3;
+    if data.count < 60 + need { return false }
+    out.minx = minx;
+    out.miny = miny;
+    out.maxx = maxx;
+    out.maxy = maxy;
+    out.width = w;
+    out.height = h;
+    unused BuilderAppend(out.rgb, TextView(data[60:60 + need]));
+    return true;
+}
+
+// Encode an Inferno uncompressed 24-bit r8g8b8 .bit image (60-byte header + RGB bytes).
+FormatBitImage :: (r: Rect, rgb: []u8, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    w := RectDx(r);
+    h := RectDy(r);
+    if w <= 0 || h <= 0 { return false }
+    need := cast(s64)w * cast(s64)h * 3;
+    if rgb.count < need { return false }
+    AppendRightAligned11(out, "r8g8b8");
+    buf: [24]u8;
+    AppendRightAligned11(out, FormatInteger(cast(s64)r.minx, buf[:]));
+    AppendRightAligned11(out, FormatInteger(cast(s64)r.miny, buf[:]));
+    AppendRightAligned11(out, FormatInteger(cast(s64)r.maxx, buf[:]));
+    AppendRightAligned11(out, FormatInteger(cast(s64)r.maxy, buf[:]));
+    unused BuilderAppend(<<out, TextView(rgb[:need]));
+    return true;
+}
+
+// Extract a sub-rectangle from a BitImage (coordinates in the BitImage's coordinate space).
+ReadPixelsRect :: (img: *BitImage, sub: Rect, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    w := RectDx(sub);
+    h := RectDy(sub);
+    if w <= 0 || h <= 0 { return false }
+    if sub.minx < img.minx || sub.miny < img.miny || sub.maxx > img.maxx || sub.maxy > img.maxy {
+        return false;
+    }
+    src := VecSlice(img.rgb, 0, img.rgb.count);
+    for py: sub.miny..sub.maxy-1 {
+        sy := py - img.miny;
+        row_start := (cast(s64)sy * cast(s64)img.width + cast(s64)(sub.minx - img.minx)) * 3;
+        row_len := cast(s64)w * 3;
+        unused BuilderAppend(<<out, TextView(src[row_start:row_start + row_len]));
+    }
+    return true;
+}
+
+ComputeGrid :: (w: s32, h: s32) -> BlockGrid {
+    cols := w / 70;
+    if cols < 1 { cols = 1 }
+    rows := h / 70;
+    if rows < 1 { rows = 1 }
+    return .{cols = cols, rows = rows, bw = w / cols, bh = h / rows};
+}
+
+BlockXY :: (index: s32, cols: s32) -> (x: s32, y: s32) {
+    if cols <= 0 { return 0, 0 }
+    y := index / cols;
+    x := index - y * cols;
+    return x, y;
+}
+
+// Compute the padded source rectangle for block (bx, by) clamped to image bounds.
+BlockPaddedRect :: (bx: s32, by: s32, bw: s32, bh: s32, pad_size: s32, img_w: s32, img_h: s32) -> Rect {
+    r: Rect = .{
+        minx = bx * bw - pad_size,
+        miny = by * bh - pad_size,
+        maxx = (bx + 1) * bw + pad_size,
+        maxy = (by + 1) * bh + pad_size,
+    };
+    if r.minx < 0 { r.minx = 0 }
+    if r.miny < 0 { r.miny = 0 }
+    if r.maxx > img_w { r.maxx = img_w }
+    if r.maxy > img_h { r.maxy = img_h }
+    return r;
+}
+
+NormalizeDir :: (dir: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, dir);
+    if out.bytes.count == 0 || out.bytes[out.bytes.count - 1] != 47 {
+        unused VecPush(out.bytes, 47);
+    }
+    need_blur := false;
+    {
+        cur := TextView(<<out);
+        if cur.count < 5 || cur[cur.count - 5:] != "blur/" {
+            need_blur = true;
+        }
+    }
+    if need_blur {
+        unused BuilderAppend(out.bytes, "blur/");
+    }
+}
+
+FormatSlaveData :: (cfg: SlaveConfig, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    buf: [24]u8;
+    vals: [5]s32 = .[cfg.size, cfg.blocks_x, cfg.blocks_y, cfg.bsize_x, cfg.bsize_y];
+    for vals {
+        unused BuilderAppend(out.bytes, FormatInteger(cast(s64)it, buf[:]));
+        unused VecPush(out.bytes, 10);
+    }
+}
+
+ParseSlaveData :: (text: string, out: *SlaveConfig) -> bool {
+    vals: [5]s32;
+    count: s32 = 0;
+    i: s64 = 0;
+    while i < text.count && count < 5 {
+        while i < text.count && (text[i] == 10 || text[i] == 13 || text[i] == 32 || text[i] == 9) { i += 1 }
+        if i >= text.count { break }
+        start := i;
+        while i < text.count && text[i] != 10 && text[i] != 13 { i += 1 }
+        v, ok := ParseIntField(text[start:i]);
+        if !ok { return false }
+        vals[count] = v;
+        count += 1;
+    }
+    if count < 5 { return false }
+    out.size = vals[0];
+    out.blocks_x = vals[1];
+    out.blocks_y = vals[2];
+    out.bsize_x = vals[3];
+    out.bsize_y = vals[4];
+    return out.blocks_x > 0 && out.blocks_y > 0 && out.bsize_x > 0 && out.bsize_y > 0;
+}
+
+// Parse "block.<index>.<letter>" -> (index, ok).
+ParseBlockName :: (name: string) -> (index: s32, ok: bool) {
+    first_dot: s64 = -1;
+    second_dot: s64 = -1;
+    for i: 0..name.count-1 {
+        if name[i] == 46 {
+            if first_dot < 0 { first_dot = i }
+            else { second_dot = i; break }
+        }
+    }
+    if first_dot < 0 || second_dot <= first_dot + 1 { return 0, false }
+    return ParseIntField(name[first_dot + 1:second_dot]);
+}
+
+NextLetter :: (cur: u8) -> u8 {
+    if cur == 0 { return 97 } // 'a'
+    return cur + 1;
+}
+
+FormatBlockName :: (block: s32, letter: u8, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    buf: [24]u8;
+    unused BuilderAppend(out.bytes, "block.");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)block, buf[:]));
+    unused VecPush(out.bytes, 46);
+    unused VecPush(out.bytes, letter);
+}
+
+FormatProgress :: (done: s32, total: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    pct: s64 = ifx total > 0 then (cast(s64)done * 100) / cast(s64)total else 100;
+    buf: [24]u8;
+    unused BuilderAppend(out.bytes, FormatInteger(pct, buf[:]));
+    unused BuilderAppend(out.bytes, "%");
+}
+
+AppendTwoDigit :: (out: *Text, v: s64) {
+    if v < 10 { unused VecPush(out.bytes, 48) }
+    buf: [24]u8;
+    unused BuilderAppend(out.bytes, FormatInteger(v, buf[:]));
+}
+
+FormatElapsed :: (waittime_secs: s64, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    wt := ifx waittime_secs < 0 then 0 else waittime_secs;
+    hrs := wt / 3600;
+    mins := (wt - 3600 * hrs) / 60;
+    secs := wt - 3600 * hrs - 60 * mins;
+    if hrs > 0 {
+        AppendTwoDigit(out, hrs);
+        unused VecPush(out.bytes, 58);
+    }
+    AppendTwoDigit(out, mins);
+    unused VecPush(out.bytes, 58);
+    AppendTwoDigit(out, secs);
+}
+
+// --- Image processing filters from appl/grid/demo/blur.b ---
+
+// Box-blur a block (matching blur.b blurblock with opt 0/1/2).
+BlurBlock :: (size: s32, r: Rect, pad: Rect, buffer: []u8, opt: s32, out: *Vec(u8)) {
+    rw := RectDx(r);
+    rh := RectDy(r);
+    unused VecResize(<<out, 0);
+    if rw <= 0 || rh <= 0 { return }
+    width := rw + pad.minx + pad.maxx;
+    for y: 0..rh-1 {
+        for x: 0..rw-1 {
+            r2_minx := x - size;
+            r2_miny := y - size;
+            r2_maxx := x + size + 1;
+            r2_maxy := y + size + 1;
+            if r2_minx < -pad.minx { r2_minx = -pad.minx }
+            if r2_miny < -pad.miny { r2_miny = -pad.miny }
+            if r2_maxx > rw + pad.maxx { r2_maxx = rw + pad.maxx }
+            if r2_maxy > rh + pad.maxy { r2_maxy = rh + pad.maxy }
+            nosamples := cast(s64)(r2_maxx - r2_minx) * cast(s64)(r2_maxy - r2_miny);
+            if nosamples <= 0 { nosamples = 1 }
+            s_minx := r2_minx + pad.minx;
+            s_miny := r2_miny + pad.miny;
+            s_maxx := r2_maxx + pad.minx;
+            s_maxy := r2_maxy + pad.miny;
+            p0: s64 = 0;
+            p1: s64 = 0;
+            p2: s64 = 0;
+            for sy: s_miny..s_maxy-1 {
+                row_off := cast(s64)sy * cast(s64)width * 3;
+                for sx: s_minx..s_maxx-1 {
+                    off := row_off + cast(s64)sx * 3;
+                    p0 += cast(s64)buffer[off];
+                    p1 += cast(s64)buffer[off + 1];
+                    p2 += cast(s64)buffer[off + 2];
+                }
+            }
+            pix: [3]s64 = .[p0, p1, p2];
+            for c: 0..2 {
+                v: s64 = 0;
+                if opt == 0 { v = pix[c] / nosamples }
+                else if opt == 1 { v = 255 - (pix[c] / nosamples) }
+                else { v = 63 + (pix[c] / (2 * nosamples)) }
+                if v < 0 { v = 0 }
+                if v > 255 { v = 255 }
+                unused VecPush(<<out, cast(u8)v);
+            }
+        }
+    }
+}
+
+Norm :: (a: []s32, lower: s32, upper: s32) {
+    if a.count == 0 { return }
+    min_v := a[0];
+    max_v := a[0];
+    for i: 1..a.count-1 {
+        if a[i] < min_v { min_v = a[i] }
+        if a[i] > max_v { max_v = a[i] }
+    }
+    span := max_v - min_v;
+    if span == 0 {
+        for i: 0..a.count-1 { a[i] = lower }
+        return;
+    }
+    multi := cast(float64)(upper - lower) / cast(float64)span;
+    add := cast(float64)(lower - min_v);
+    for i: 0..a.count-1 {
+        v := cast(s32)((add + cast(float64)a[i]) * multi);
+        if v < lower { v = lower }
+        if v > upper { v = upper }
+        a[i] = v;
+    }
+}
+
+GetGrad :: (buf: []s32, dir: s32, w: s32, h: s32, px: s32, py: s32, out: *Vec(s32)) {
+    npx := px - 1;
+    npy := py - 1;
+    if npx < 0 { npx = 0 }
+    if npy < 0 { npy = 0 }
+    gw := w + npx;
+    gh := h + npy;
+    tmp: Vec(s32);
+    unused VecResize(tmp, cast(s64)gw * cast(s64)gh);
+    gradbuf := VecSlice(tmp, 0, tmp.count);
+    n: s64 = 0;
+    stride := w + px;
+    for y: 0..gh-1 {
+        for x: 0..gw-1 {
+            val1 := buf[cast(s64)y * cast(s64)stride + cast(s64)x];
+            val2 := val1;
+            if !((dir == 0 && x - w >= npx) || (dir == 1 && y - h >= npy)) {
+                idx2 := cast(s64)(y + dir) * cast(s64)stride + cast(s64)(x + 1 - dir);
+                if idx2 >= 0 && idx2 < buf.count {
+                    val2 = buf[idx2];
+                }
+            }
+            gradbuf[n] = val2 - val1;
+            n += 1;
+        }
+    }
+    Norm(gradbuf, 0, 255);
+    unused VecResize(<<out, 0);
+    for i: 0..gradbuf.count-1 { unused VecPush(<<out, gradbuf[i]) }
+}
+
+Hyster :: (a: []s32, gox: bool, width: s32, lim: s32) {
+    if a.count == 0 || width <= 0 || lim == 0 { return }
+    min_v := a[0];
+    max_v := a[0];
+    av: s64 = 0;
+    for i: 0..a.count-1 {
+        if a[i] < min_v { min_v = a[i] }
+        if a[i] > max_v { max_v = a[i] }
+        av += cast(s64)a[i];
+    }
+    av_i := cast(s32)(av / a.count);
+    upper := av_i + (max_v - av_i) / lim;
+    lower := av_i - (av_i - min_v) / lim;
+    low: s32 = 0;
+    x: s32 = 0;
+    y: s32 = 0;
+    height := cast(s32)(a.count / cast(s64)width);
+    newline := true;
+    for k: 0..a.count-1 {
+        idx := cast(s64)y * cast(s64)width + cast(s64)x;
+        if newline {
+            low = ifx a[idx] > av_i then 1 else 0;
+            newline = false;
+        }
+        oldlow := low;
+        if low == 0 {
+            if a[idx] > upper { low = 1 }
+        } else {
+            if a[idx] < lower { low = 0 }
+        }
+        if oldlow == low {
+            a[idx] = 127;
+        } else {
+            a[idx] = low * 255;
+        }
+        if gox {
+            x += 1;
+            if x == width {
+                x = 0;
+                y += 1;
+                newline = true;
+            }
+        } else {
+            y += 1;
+            if y == height {
+                y = 0;
+                x += 1;
+                newline = true;
+            }
+        }
+    }
+}
+
+Clean :: (a: []s32, width: s32, r: s32, d: s32) {
+    if a.count == 0 || width <= 0 { return }
+    height := cast(s32)(a.count / cast(s64)width);
+    for y: 0..height-1 {
+        for x: 0..width-1 {
+            idx := cast(s64)width * cast(s64)y + cast(s64)x;
+            val := a[idx];
+            if val != 127 {
+                sx := x - r;
+                if sx < 0 { sx = 0 }
+                ex := x + r;
+                if ex > width { ex = width }
+                sy := y - r;
+                if sy < 0 { sy = 0 }
+                ey := y + r;
+                if ey > height { ey = height }
+                n: s32 = 0;
+                for iy: sy..ey-1 {
+                    row := cast(s64)width * cast(s64)iy;
+                    for ix: sx..ex-1 {
+                        if a[row + cast(s64)ix] == val { n += 1 }
+                    }
+                }
+                if n < d { a[idx] = 127 }
+            }
+        }
+    }
+}
+
+Sat :: (a: []s32) -> s32 {
+    if a.count == 0 { return 0 }
+    n: s64 = 0;
+    for i: 0..a.count-1 {
+        if a[i] != 127 { n += 1 }
+    }
+    return cast(s32)((100 * n) / a.count);
+}
+
+MakePic :: (buf: []s32, w: s32, nw: s32, nh: s32, out: *Vec(u8)) {
+    unused VecResize(<<out, 0);
+    for y: 0..nh-1 {
+        for x: 0..nw-1 {
+            v := buf[cast(s64)y * cast(s64)w + cast(s64)x];
+            if v < 0 { v = -v }
+            if v > 255 { v = 255 }
+            b := cast(u8)v;
+            unused VecPush(<<out, b);
+            unused VecPush(<<out, b);
+            unused VecPush(<<out, b);
+        }
+    }
+}
+
+FilterGradChan :: (gslice: []s32, rw: s32, rh: s32, pad: Rect, threshold: s32,
+                   gx: *Vec(s32), gy: *Vec(s32)) {
+    tmp_x: Vec(s32);
+    GetGrad(gslice, 0, rw, rh, pad.maxx, pad.maxy, *tmp_x);
+    gx_s := VecSlice(tmp_x, 0, tmp_x.count);
+    Hyster(gx_s, true, rw, threshold);
+    Clean(gx_s, rw, 5, 4);
+    for k: 0..2 { Clean(gx_s, rw, 2, 2) }
+    unused VecResize(<<gx, 0);
+    for i: 0..gx_s.count-1 { unused VecPush(<<gx, gx_s[i]) }
+
+    tmp_y: Vec(s32);
+    GetGrad(gslice, 1, rw, rh, pad.maxx, pad.maxy, *tmp_y);
+    gy_s := VecSlice(tmp_y, 0, tmp_y.count);
+    Hyster(gy_s, false, rw, threshold);
+    Clean(gy_s, rw, 5, 4);
+    for k: 0..2 { Clean(gy_s, rw, 2, 2) }
+    unused VecResize(<<gy, 0);
+    for i: 0..gy_s.count-1 { unused VecPush(<<gy, gy_s[i]) }
+}
+
+// Gradient edge-sketch filter matching blur.b gradblock.
+GradBlock :: (start_threshold: s32, r: Rect, pad: Rect, buffer: []u8, out: *Vec(u8)) {
+    rw := RectDx(r);
+    rh := RectDy(r);
+    threshold := start_threshold;
+    pw := rw + pad.maxx;
+    ph := rh + pad.maxy;
+    grey: Vec(s32);
+    unused VecResize(grey, cast(s64)pw * cast(s64)ph);
+    gx0: Vec(s32); gx1: Vec(s32); gx2: Vec(s32);
+    gy0: Vec(s32); gy1: Vec(s32); gy2: Vec(s32);
+    combined: Vec(s32);
+
+    while true {
+        for rgb: 0..2 {
+            gslice := VecSlice(grey, 0, grey.count);
+            n: s64 = 0;
+            for y: 0..ph-1 {
+                for x: 0..pw-1 {
+                    gslice[n] = cast(s32)buffer[(cast(s64)y * cast(s64)pw + cast(s64)x) * 3 + cast(s64)rgb];
+                    n += 1;
+                }
+            }
+            gx := ifx rgb == 0 then *gx0 else ifx rgb == 1 then *gx1 else *gx2;
+            gy := ifx rgb == 0 then *gy0 else ifx rgb == 1 then *gy1 else *gy2;
+            FilterGradChan(gslice, rw, rh, pad, threshold, gx, gy);
+        }
+
+        total := gx0.count;
+        unused VecResize(combined, total);
+        cs := VecSlice(combined, 0, total);
+        s_gx0 := VecSlice(gx0, 0, gx0.count);
+        s_gx1 := VecSlice(gx1, 0, gx1.count);
+        s_gx2 := VecSlice(gx2, 0, gx2.count);
+        s_gy0 := VecSlice(gy0, 0, gy0.count);
+        s_gy1 := VecSlice(gy1, 0, gy1.count);
+        s_gy2 := VecSlice(gy2, 0, gy2.count);
+
+        for i: 0..total-1 {
+            val: s32 = 127;
+            cnt: s32 = 0;
+            if s_gx0[i] != 127 { cnt += 1; val = s_gx0[i] }
+            else if s_gy0[i] != 127 { cnt += 1; val = s_gy0[i] }
+            if s_gx1[i] != 127 { cnt += 1; val = s_gx1[i] }
+            else if s_gy1[i] != 127 { cnt += 1; val = s_gy1[i] }
+            if s_gx2[i] != 127 { cnt += 1; val = s_gx2[i] }
+            else if s_gy2[i] != 127 { cnt += 1; val = s_gy2[i] }
+            cs[i] = ifx cnt > 1 then val else 127;
+        }
+
+        if Sat(cs) > 25 && threshold > 4 {
+            threshold -= 2;
+            continue;
+        }
+        MakePic(cs, rw, rw, rh, out);
+        return;
+    }
+}
+
+// Process a single block image (matching blur.b doblock: blur + sketch composite).
+ProcessBlock :: (procimg: *BitImage, bx: s32, by: s32, size: s32, bw: s32, bh: s32, out_rgb: *Vec(u8)) -> bool {
+    r: Rect = .{minx = bx * bw, miny = by * bh, maxx = (bx + 1) * bw, maxy = (by + 1) * bh};
+
+    // Blur pass uses full procimg bounds
+    r2_blur: Rect = .{minx = procimg.minx, miny = procimg.miny, maxx = procimg.maxx, maxy = procimg.maxy};
+    if r2_blur.minx < 0 { r2_blur.minx = 0 }
+    if r2_blur.miny < 0 { r2_blur.miny = 0 }
+    if r2_blur.maxx > procimg.maxx { r2_blur.maxx = procimg.maxx }
+    if r2_blur.maxy > procimg.maxy { r2_blur.maxy = procimg.maxy }
+    buf_blur: Vec(u8);
+    if !ReadPixelsRect(procimg, r2_blur, *buf_blur) { return false }
+    pad_blur: Rect = .{
+        minx = r.minx - r2_blur.minx,
+        miny = r.miny - r2_blur.miny,
+        maxx = r2_blur.maxx - r.maxx,
+        maxy = r2_blur.maxy - r.maxy,
+    };
+    blurred: Vec(u8);
+    BlurBlock(size, r, pad_blur, VecSlice(buf_blur, 0, buf_blur.count), DEFAULT_BLUR_OPT, *blurred);
+
+    // Sketch pass uses r extended by +1 on maxx/maxy clamped to procimg
+    r2_grad: Rect = .{minx = r.minx, miny = r.miny, maxx = r.maxx + 1, maxy = r.maxy + 1};
+    if r2_grad.minx < procimg.minx { r2_grad.minx = procimg.minx }
+    if r2_grad.miny < procimg.miny { r2_grad.miny = procimg.miny }
+    if r2_grad.maxx > procimg.maxx { r2_grad.maxx = procimg.maxx }
+    if r2_grad.maxy > procimg.maxy { r2_grad.maxy = procimg.maxy }
+    buf_grad: Vec(u8);
+    if !ReadPixelsRect(procimg, r2_grad, *buf_grad) { return false }
+    pad_grad: Rect = .{
+        minx = r.minx - r2_grad.minx,
+        miny = r.miny - r2_grad.miny,
+        maxx = r2_grad.maxx - r.maxx,
+        maxy = r2_grad.maxy - r.maxy,
+    };
+    sketched: Vec(u8);
+    GradBlock(10, r, pad_grad, VecSlice(buf_grad, 0, buf_grad.count), *sketched);
+
+    bl := VecSlice(blurred, 0, blurred.count);
+    sk := VecSlice(sketched, 0, sketched.count);
+    n := ifx bl.count < sk.count then bl.count else sk.count;
+    for i: 0..n-1 {
+        if sk[i] != 127 { bl[i] = sk[i] }
+    }
+    unused VecResize(<<out_rgb, 0);
+    unused BuilderAppend(<<out_rgb, TextView(bl));
+    return true;
+}
+
+// Blit an RGB24 block image into an RGBA framebuffer at (dst_x, dst_y).
+BlitRGBToRGBA :: (src_rgb: []u8, sw: s32, sh: s32, dst_x: s32, dst_y: s32,
+                  dst_rgba: []u8, dst_w: s32, dst_h: s32) {
+    for sy: 0..sh-1 {
+        py := dst_y + sy;
+        if py < 0 || py >= dst_h { continue }
+        for sx: 0..sw-1 {
+            px := dst_x + sx;
+            if px < 0 || px >= dst_w { continue }
+            soff := (cast(s64)sy * cast(s64)sw + cast(s64)sx) * 3;
+            doff := (cast(s64)py * cast(s64)dst_w + cast(s64)px) * 4;
+            if soff + 2 < src_rgb.count && doff + 3 < dst_rgba.count {
+                dst_rgba[doff] = src_rgb[soff];
+                dst_rgba[doff + 1] = src_rgb[soff + 1];
+                dst_rgba[doff + 2] = src_rgb[soff + 2];
+                dst_rgba[doff + 3] = 255;
+            }
+        }
+    }
+}

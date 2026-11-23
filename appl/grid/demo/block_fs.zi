@@ -1,0 +1,171 @@
+// Distributed filesystem block coordination for grid/demo/{block,blur},
+// ported from appl/grid/demo/block.b.
+#import "std/vec"
+#import "std/number_text"
+using Clock :: #import "taijios_clock"
+using IO :: #import "taijios_io"
+using Stat :: #import "taijios_stat"
+using Model :: #import "block_model"
+
+OREAD :: 0;
+OWRITE :: 1;
+DMDIR_PERM :: 0x800001ff; // DMDIR | 0o777
+FILE_PERM :: 0x1b6;       // 0o666
+
+DirEntry :: struct {
+    name: Text;
+    is_dir: bool;
+}
+
+SleepMillis :: (ms: s64) {
+    deadline := Clock.Millis() + ms;
+    buf: [32]u8;
+    while Clock.Millis() < deadline {
+        fd := IO.Open("/dev/msec", 0);
+        if fd >= 0 {
+            unused IO.Read(fd, buf[:]);
+            unused IO.Close(fd);
+        }
+    }
+}
+
+PathExists :: (path: string) -> bool {
+    meta: [12]u8;
+    return IO.Stat(path, meta[:]) == 0;
+}
+
+ReadWhole :: (path: string, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    fd := IO.Open(path, OREAD);
+    if fd < 0 { return false }
+    buf: [8192]u8;
+    ok := true;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n < 0 { ok = false; break }
+        if n == 0 { break }
+        if out.count + cast(s64)n > 33554432 { ok = false; break }
+        unused BuilderAppend(<<out, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    return ok;
+}
+
+WriteWhole :: (path: string, data: string) -> bool {
+    fd := IO.Create(path, OWRITE, FILE_PERM);
+    if fd < 0 { return false }
+    off: s64 = 0;
+    ok := true;
+    while off < data.count {
+        n := IO.Write(fd, data[off:]);
+        if n <= 0 { ok = false; break }
+        off += cast(s64)n;
+    }
+    unused IO.Close(fd);
+    return ok;
+}
+
+JoinPath :: (dir: string, tail: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, dir);
+    if out.bytes.count > 0 && out.bytes[out.bytes.count - 1] != 47 {
+        unused VecPush(out.bytes, 47);
+    }
+    unused BuilderAppend(out.bytes, tail);
+}
+
+// Read all directory entries from `dir` using packed Inferno stat records.
+ReadDir :: (dir: string, entries: *Vec(DirEntry)) -> bool {
+    unused VecResize(<<entries, 0);
+    fd := IO.Open(dir, OREAD);
+    if fd < 0 { return false }
+    raw: Vec(u8);
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    data := VecSlice(raw, 0, raw.count);
+    off: s64 = 0;
+    while off < data.count {
+        info := Stat.Decode(data[off:]);
+        if info.size <= 0 { break }
+        entry: DirEntry;
+        unused BuilderAppend(entry.name.bytes, info.name);
+        entry.is_dir = (info.mode & cast(u32)Stat.Directory) != 0;
+        unused VecPush(<<entries, entry);
+        off += info.size;
+    }
+    return true;
+}
+
+// Recursively remove all files and subdirectories inside `delpath`.
+CleanFiles :: (delpath: string) {
+    if delpath.count == 0 { return }
+    entries: Vec(DirEntry);
+    if !ReadDir(delpath, *entries) { return }
+    es := VecSlice(entries, 0, entries.count);
+    for i: 0..es.count-1 {
+        child: Text;
+        JoinPath(delpath, TextView(es[i].name), *child);
+        if es[i].is_dir {
+            CleanFiles(TextView(child));
+        }
+        unused IO.Remove(TextView(child));
+    }
+}
+
+WriteData :: (work_dir: string, data: string) -> bool {
+    p: Text;
+    JoinPath(work_dir, "data.dat", *p);
+    return WriteWhole(TextView(p), data);
+}
+
+MakeFile :: (work_dir: string, block: s32, cur_letter: u8) -> u8 {
+    next_let := Model.NextLetter(cur_letter);
+    if cur_letter != 0 {
+        old_name: Text;
+        Model.FormatBlockName(block, cur_letter, *old_name);
+        old_rel: Text;
+        unused BuilderAppend(old_rel.bytes, "todo/");
+        unused BuilderAppend(old_rel.bytes, TextView(old_name));
+        old_path: Text;
+        JoinPath(work_dir, TextView(old_rel), *old_path);
+        unused IO.Remove(TextView(old_path));
+    }
+    new_name: Text;
+    Model.FormatBlockName(block, next_let, *new_name);
+    rel: Text;
+    unused BuilderAppend(rel.bytes, "todo/");
+    unused BuilderAppend(rel.bytes, TextView(new_name));
+    full: Text;
+    JoinPath(work_dir, TextView(rel), *full);
+    fd := IO.Create(TextView(full), OREAD, FILE_PERM);
+    if fd >= 0 {
+        unused IO.Close(fd);
+    } else {
+        print("Error creating: '%'\n", TextView(full));
+    }
+    return next_let;
+}
+
+MasterInit :: (work_dir: string, noblocks: s32, letters: *Vec(u8), times: *Vec(s64)) {
+    todo_dir: Text;
+    JoinPath(work_dir, "todo", *todo_dir);
+    fd := IO.Create(TextView(todo_dir), OREAD, cast(s32)DMDIR_PERM);
+    if fd >= 0 { unused IO.Close(fd) }
+
+    working: Text;
+    JoinPath(work_dir, "working", *working);
+    wfd := IO.Create(TextView(working), OWRITE, FILE_PERM);
+    if wfd >= 0 { unused IO.Close(wfd) }
+
+    unused VecResize(<<letters, 0);
+    unused VecResize(<<times, 0);
+    for i: 0..noblocks-1 {
+        unused VecPush(<<letters, MakeFile(work_dir, i, 0));
+        unused VecPush(<<times, cast(s64)Model.BLOCK_WAITING);
+    }
+}
