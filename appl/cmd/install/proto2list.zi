@@ -1,0 +1,148 @@
+// Make a version list from proto files (replaces appl/cmd/install/proto2list.b).
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Util :: #import "install_util";
+Proto :: #import "proto_lib";
+#import "std/format"
+#import "std/vec"
+
+Elem :: struct {
+    old_p: Text;
+    new_p: Text;
+}
+
+crctab: [256]u32;
+
+InitCrcTab :: () {
+    poly: u32 = 0xEDB88320;
+    for i: 0..255 {
+        c := cast(u32)i;
+        for _: 0..7 {
+            if (c & 1) != 0 {
+                c = (c >> 1) ^ poly;
+            } else {
+                c = c >> 1;
+            }
+        }
+        crctab[i] = c;
+    }
+}
+
+FileCrc :: (path: string, mode: u32) -> s32 {
+    if (mode & Stat.Directory) != 0 { return 0 }
+    fd := IO.Open(path, 0);
+    if fd < 0 {
+        err: Vec(u8);
+        BuilderPrint(*err, "cannot open %\n", path);
+        Util.WriteErr(TextView(err[:]));
+        return 0;
+    }
+    crc: u32 = 0xFFFFFFFF;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n < 0 {
+            err: Vec(u8);
+            BuilderPrint(*err, "bad read on % : %\n", path, IO.Error());
+            Util.WriteErr(TextView(err[:]));
+            unused IO.Close(fd);
+            return 0;
+        }
+        if n == 0 { break }
+        for i: 0..cast(s64)n - 1 {
+            idx := (crc ^ cast(u32)buf[i]) & 0xFF;
+            crc = crctab[idx] ^ (crc >> 8);
+        }
+    }
+    unused IO.Close(fd);
+    crc = crc ^ 0xFFFFFFFF;
+    return cast(s32)crc;
+}
+
+CopyElem :: (dst: *Elem, src: *Elem) {
+    Util.CopyTextInto(*dst.old_p, *src.old_p);
+    Util.CopyTextInto(*dst.new_p, *src.new_p);
+}
+
+main :: () -> s32 {
+    InitCrcTab();
+    flist: Vec(Elem);
+    argc := Args.OperandCount();
+    for idx: 0..argc - 1 {
+        protof := Args.Operand(cast(s32)idx);
+        res: Proto.ProtoResult;
+        unused Proto.RdProto(protof, "/", *res);
+        dc := Proto.DiagCount(*res);
+        for di: 0..dc - 1 {
+            lvl := Proto.DiagLevel(*res, di);
+            lno := Proto.DiagLine(*res, di);
+            dmsg_t := Proto.DiagMsg(*res, di);
+            dmsg := TextView(dmsg_t);
+            err: Vec(u8);
+            if lvl == Proto.FATAL {
+                BuilderPrint(*err, "fatal: line % : %\n", cast(s64)lno, dmsg);
+                Util.WriteErr(TextView(err[:]));
+                return 0;
+            }
+            BuilderPrint(*err, "%: line % : %\n", protof, cast(s64)lno, dmsg);
+            Util.WriteErr(TextView(err[:]));
+            if lvl == Proto.ERROR { return 0 }
+        }
+        ic := Proto.ItemCount(*res);
+        for ii: 0..ic - 1 {
+            oldp_t := Proto.ItemOldPath(*res, ii);
+            newp_t := Proto.ItemNewPath(*res, ii);
+            oldp := TextView(oldp_t);
+            newp := TextView(newp_t);
+            e: Elem;
+            e.old_p = Util.CopyText(oldp);
+            if newp == oldp { e.new_p = Util.CopyText("-") }
+            else { e.new_p = Util.CopyText(newp) }
+            VecPush(flist, e);
+        }
+    }
+
+    // Sort by old_p
+    for i: 1..flist.count - 1 {
+        j := i;
+        while j > 0 && Util.StrLess(TextView(flist[j].old_p), TextView(flist[j - 1].old_p)) {
+            tmp: Elem;
+            CopyElem(*tmp, *flist[j]);
+            CopyElem(*flist[j], *flist[j - 1]);
+            CopyElem(*flist[j - 1], *tmp);
+            j -= 1;
+        }
+    }
+
+    // Uniq by old_p
+    out: Vec(u8);
+    i: s64 = 0;
+    while i < flist.count {
+        oldp := TextView(flist[i].old_p);
+        newp := TextView(flist[i].new_p);
+        // Skip duplicates
+        while i + 1 < flist.count && TextView(flist[i + 1].old_p) == oldp {
+            i += 1;
+        }
+        d: Util.DirEntry;
+        if !Util.StatEntry(oldp, *d) {
+            err: Vec(u8);
+            BuilderPrint(*err, "cannot open %\n", oldp);
+            Util.WriteErr(TextView(err[:]));
+            i += 1;
+            continue;
+        }
+        flen := d.length;
+        if (d.mode & Stat.Directory) != 0 { flen = 0 }
+        cval := FileCrc(oldp, d.mode);
+        BuilderPrint(*out, "%\t%\t%\t%\t%\t%\t0\n", oldp, newp, flen, cast(s32)d.mode, cast(s64)d.mtime, cast(s64)cval);
+        if out.count >= 16384 {
+            Util.WriteOut(TextView(out[:]));
+            VecClear(out);
+        }
+        i += 1;
+    }
+    if out.count > 0 { Util.WriteOut(TextView(out[:])) }
+    return 0;
+}

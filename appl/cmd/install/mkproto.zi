@@ -1,0 +1,79 @@
+// Generate a proto description of a directory or file (replaces appl/cmd/install/mkproto.b).
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Quote :: #import "taijios_quote";
+Util :: #import "install_util";
+#import "std/format"
+#import "std/vec"
+
+not_list: Vec(Text);
+out: Vec(u8);
+
+IsExcluded :: (reln: string) -> bool {
+    for i: 0..not_list.count - 1 {
+        if TextView(not_list[i]) == reln { return true }
+    }
+    return false;
+}
+
+VisitFile :: (reln: string, depth: s32) {
+    for _: 0..depth - 1 { VecPush(out, 9) }
+    Quote.Quote(*out, reln);
+    VecPush(out, 10);
+    if out.count >= 16384 {
+        Util.WriteOut(TextView(out[:]));
+        VecClear(out);
+    }
+}
+
+Visit :: (fulln: string, reln: string, depth: s32) {
+    if depth == 0 && IsExcluded(reln) { return }
+    d: Util.DirEntry;
+    if !Util.StatEntry(fulln, *d) {
+        err: Vec(u8);
+        BuilderPrint(*err, "mkproto: cannot stat %: %\n", fulln, IO.Error());
+        Util.WriteErr(TextView(err[:]));
+        return;
+    }
+    if depth >= 0 { VisitFile(reln, depth) }
+    if (d.mode & Stat.Directory) != 0 {
+        dl: Util.DirList;
+        if Util.ReadDirSorted(fulln, *dl) {
+            for i: 0..dl.entries.count - 1 {
+                ename_t := Util.EntryName(*dl, i);
+                ename := TextView(ename_t);
+                sub: Vec(u8);
+                BuilderPrint(*sub, "%/%", fulln, ename);
+                Visit(TextView(sub[:]), ename, depth + 1);
+            }
+        }
+    }
+}
+
+main :: () -> s32 {
+    argc := Args.OperandCount();
+    idx: s32 = 0;
+    while idx < argc {
+        a := Args.Operand(idx);
+        if a.count > 0 && a[0] == 45 {
+            VecPush(not_list, Util.CopyText(a[1:]));
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    rem := argc - idx;
+    if rem == 0 {
+        Visit(".", "", -1);
+    } else if rem == 1 {
+        Visit(Args.Operand(idx), "", -1);
+    } else {
+        for i: idx..argc - 1 {
+            a := Args.Operand(i);
+            Visit(a, a, 0);
+        }
+    }
+    if out.count > 0 { Util.WriteOut(TextView(out[:])) }
+    return 0;
+}

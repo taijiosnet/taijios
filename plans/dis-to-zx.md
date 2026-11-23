@@ -807,7 +807,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/install/applylog.dis | appl/cmd/install/applylog.b |  | - |  |
 | dis/install/arch.dis | appl/cmd/install/arch.b |  | - |  |
 | dis/install/archfs.dis | appl/cmd/install/archfs.b |  | - |  |
-| dis/install/ckproto.dis | appl/cmd/install/ckproto.b |  | - |  |
 | dis/install/create.dis | appl/cmd/install/create.b |  | - |  |
 | dis/install/eproto.dis | appl/cmd/install/eproto.b |  | - |  |
 | dis/install/info.dis | appl/cmd/install/info.b |  | - |  |
@@ -815,10 +814,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/install/install.dis | appl/cmd/install/install.b |  | - |  |
 | dis/install/log.dis | appl/cmd/install/log.b |  | - |  |
 | dis/install/logs.dis | appl/cmd/install/logs.b |  | - |  |
-| dis/install/mergelog.dis | appl/cmd/install/mergelog.b |  | - |  |
-| dis/install/mkproto.dis | appl/cmd/install/mkproto.b |  | - |  |
 | dis/install/proto.dis | appl/cmd/install/proto.b |  | - |  |
-| dis/install/proto2list.dis | appl/cmd/install/proto2list.b |  | - |  |
 | dis/install/updatelog.dis | appl/cmd/install/updatelog.b |  | - |  |
 | dis/install/wdiff.dis | appl/cmd/install/wdiff.b |  | - |  |
 | dis/install/wfind.dis | appl/cmd/install/wfind.b |  | - |  |

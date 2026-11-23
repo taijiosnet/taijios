@@ -1,0 +1,128 @@
+// Merge old and new replica logs (replaces appl/cmd/install/mergelog.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+IO :: #import "taijios_io";
+Quote :: #import "taijios_quote";
+Util :: #import "install_util";
+Logs :: #import "logs_lib";
+#import "std/format"
+#import "std/vec"
+
+verbose: bool;
+debug: bool;
+nerror: s32;
+
+Usage :: () -> s32 {
+    Util.WriteErr("usage: mergelog [-vd] oldlog [path ... ] <newlog\n");
+    unused Args.SetFailure("usage");
+    return 1;
+}
+
+Fail :: (msg: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "applylog: %\n", msg);
+    Util.WriteErr(TextView(out[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Note :: (path: string, msg: string) {
+    out: Vec(u8);
+    unused BuilderAppend(out, "applylog: note: ");
+    Quote.Quote(*out, path);
+    BuilderPrint(*out, " %\n", msg);
+    Util.WriteErr(TextView(out[:]));
+}
+
+ReplayLine :: (db: *Logs.LogDb, log: *Logs.LogEntry) {
+    path := TextView(log.path);
+    idx := Logs.DbLook(db, path);
+    indb := idx >= 0 && Logs.DbEntryAction(db, idx) != 100;
+    if log.action == 97 {
+        if indb {
+            Note(path, "duplicate create");
+            return;
+        }
+    } else if log.action == 99 {
+        if !indb {
+            Note(path, "contents but no entry");
+            return;
+        }
+    } else if log.action == 100 {
+        if !indb {
+            Note(path, "deleted but no entry");
+            return;
+        }
+        if Logs.DbEntryMtime(db, idx) > log.mtime {
+            Note(path, "deleted but it's newer");
+            return;
+        }
+    } else if log.action == 109 {
+        if !indb {
+            Note(path, "metadata but no entry");
+            return;
+        }
+    }
+    if idx < 0 {
+        idx = Logs.DbAdd(db, log);
+    }
+    Logs.DbUpdateAt(db, idx, log);
+}
+
+ReplayBuffer :: (db: *Logs.LogDb, data: string) -> (ok: bool, err: string) {
+    pos: s64 = 0;
+    while pos < data.count {
+        end := pos;
+        while end < data.count && data[end] != 10 { end += 1 }
+        line := data[pos:end];
+        if end < data.count { end += 1 }
+        pos = end;
+        if line.count == 0 { continue }
+        e: Logs.LogEntry;
+        ok, err := Logs.ParseLogLine(line, *e);
+        if !ok { return false, err }
+        ReplayLine(db, *e);
+    }
+    return true, "";
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    while true {
+        o := Arg.Option(*scan);
+        if o == 0 { break }
+        if o == 100 { debug = true }
+        else if o == 118 { verbose = true }
+        else { return Usage() }
+    }
+    rem := Args.OperandCount() - scan.next;
+    if rem < 3 { return Usage() }
+
+    clientlog := Args.Operand(scan.next);
+    if rem > 1 { return Fail("restriction by path not yet done") }
+
+    db: Logs.LogDb;
+    buf: Vec(u8);
+    if !Util.ReadAllFile(clientlog, *buf) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", clientlog, IO.Error());
+        return Fail(TextView(msg[:]));
+    }
+    ok1, err1 := ReplayBuffer(*db, TextView(buf[:]));
+    if !ok1 { return Fail(err1) }
+
+    stdin_buf: Vec(u8);
+    Util.ReadAllFd(0, *stdin_buf);
+    ok2, err2 := ReplayBuffer(*db, TextView(stdin_buf[:]));
+    if !ok2 { return Fail(err2) }
+
+    Logs.DbSort(*db, Logs.Byseq);
+    out: Vec(u8);
+    cnt := Logs.DbEntryCount(*db);
+    for i: 0..cnt - 1 {
+        Logs.DbAppendEntryTextAt(*db, i, *out);
+        VecPush(out, 10);
+    }
+    Util.WriteOut(TextView(out[:]));
+    return 0;
+}

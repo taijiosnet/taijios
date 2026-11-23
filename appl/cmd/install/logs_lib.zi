@@ -1,0 +1,219 @@
+// Replica log database parser and formatter (replaces appl/cmd/install/logs.b).
+Quote :: #import "taijios_quote";
+Util :: #import "install_util";
+#import "std/format"
+#import "std/vec"
+
+Byseq :: 0
+Byname :: 1
+
+LogEntry :: struct {
+    seq: s64;
+    action: u8;
+    path: Text;
+    serverpath: Text;
+    x: s32;
+    mode: u32;
+    qtype: u8;
+    uid: Text;
+    gid: Text;
+    mtime: s32;
+    length: s64;
+    contents: Vec(Text);
+}
+
+LogDb :: struct {
+    name: Text;
+    entries: Vec(LogEntry);
+}
+
+CopyLogEntry :: (dst: *LogEntry, src: *LogEntry) {
+    dst.seq = src.seq;
+    dst.action = src.action;
+    Util.CopyTextInto(*dst.path, *src.path);
+    Util.CopyTextInto(*dst.serverpath, *src.serverpath);
+    dst.x = src.x;
+    dst.mode = src.mode;
+    dst.qtype = src.qtype;
+    Util.CopyTextInto(*dst.uid, *src.uid);
+    Util.CopyTextInto(*dst.gid, *src.gid);
+    dst.mtime = src.mtime;
+    dst.length = src.length;
+    VecClear(dst.contents);
+    for i: 0..src.contents.count - 1 {
+        VecPush(dst.contents, Util.CopyText(TextView(src.contents[i])));
+    }
+}
+
+ParseLogLine :: (line: string, out: *LogEntry) -> (ok: bool, err: string) {
+    words: Vec(Text);
+    Quote.Unquoted(line, *words);
+    if words.count < 10 { return false, "bad log entry" }
+    act_s := TextView(words[2]);
+    if act_s.count != 1 { return false, "bad log entry" }
+    act := cast(u8)act_s[0];
+    if act != 97 && act != 99 && act != 100 && act != 109 { return false, "bad log entry" }
+
+    tval, tok := Util.ParseIntBase(TextView(words[0]), 10);
+    gval, gok := Util.ParseIntBase(TextView(words[1]), 10);
+    mval, mok := Util.ParseIntBase(TextView(words[5]), 8);
+    mtval, mtok := Util.ParseIntBase(TextView(words[8]), 10);
+    lval, lok := Util.ParseIntBase(TextView(words[9]), 10);
+    if !tok || !gok || !mok || !mtok || !lok { return false, "invalid integer field" }
+
+    out.seq = (tval << 32) | (gval & 0xFFFFFFFF);
+    out.action = act;
+    out.x = -1;
+    VecClear(out.path.bytes);
+    unused BuilderAppend(out.path.bytes, TextView(words[3]));
+    VecClear(out.serverpath.bytes);
+    sp := TextView(words[4]);
+    if sp == "-" {
+        unused BuilderAppend(out.serverpath.bytes, TextView(words[3]));
+    } else {
+        unused BuilderAppend(out.serverpath.bytes, sp);
+    }
+    out.mode = cast(u32)mval;
+    out.qtype = cast(u8)((out.mode >> 24) & 0xFF);
+    VecClear(out.uid.bytes);
+    if TextView(words[6]) != "-" {
+        unused BuilderAppend(out.uid.bytes, TextView(words[6]));
+    }
+    VecClear(out.gid.bytes);
+    if TextView(words[7]) != "-" {
+        unused BuilderAppend(out.gid.bytes, TextView(words[7]));
+    }
+    out.mtime = cast(s32)mtval;
+    out.length = lval;
+    VecClear(out.contents);
+    if words.count > 10 {
+        for i: 10..words.count - 1 {
+            c := TextView(words[i]);
+            if c.count > 0 { VecPush(out.contents, Util.CopyText(c)) }
+        }
+    }
+    return true, "";
+}
+
+UpdateEntry :: (e: *LogEntry, n: *LogEntry) {
+    if n.action == 100 {
+        VecClear(e.contents);
+    } else {
+        e.mode = n.mode;
+        e.qtype = n.qtype;
+        Util.CopyTextInto(*e.uid, *n.uid);
+        Util.CopyTextInto(*e.gid, *n.gid);
+        e.mtime = n.mtime;
+        e.length = n.length;
+    }
+    if n.action != 109 || e.action == 100 {
+        e.action = n.action;
+    }
+    Util.CopyTextInto(*e.serverpath, *n.serverpath);
+    // Prepend n.contents in reverse order (matching logs.b)
+    if n.contents.count > 0 {
+        merged: Vec(Text);
+        for i: 0..n.contents.count - 1 {
+            VecPush(merged, Util.CopyText(TextView(n.contents[i])));
+        }
+        for i: 0..e.contents.count - 1 {
+            VecPush(merged, Util.CopyText(TextView(e.contents[i])));
+        }
+        VecClear(e.contents);
+        for i: 0..merged.count - 1 {
+            VecPush(e.contents, Util.CopyText(TextView(merged[i])));
+        }
+    }
+    if n.seq > e.seq { e.seq = n.seq }
+}
+
+DbLook :: (db: *LogDb, path: string) -> s64 {
+    for i: 0..db.entries.count - 1 {
+        if TextView(db.entries[i].path) == path { return i }
+    }
+    return -1;
+}
+
+DbAdd :: (db: *LogDb, n: *LogEntry) -> s64 {
+    idx := db.entries.count;
+    e: LogEntry;
+    CopyLogEntry(*e, n);
+    e.action = 97;
+    e.x = cast(s32)idx;
+    VecPush(db.entries, e);
+    return idx;
+}
+
+DbSort :: (db: *LogDb, key: s32) {
+    cnt := db.entries.count;
+    for i: 1..cnt - 1 {
+        j := i;
+        while j > 0 {
+            swap := false;
+            if key == Byname {
+                swap = Util.StrLess(TextView(db.entries[j].path), TextView(db.entries[j - 1].path));
+            } else {
+                swap = db.entries[j].seq < db.entries[j - 1].seq;
+            }
+            if !swap { break }
+            tmp: LogEntry;
+            CopyLogEntry(*tmp, *db.entries[j]);
+            CopyLogEntry(*db.entries[j], *db.entries[j - 1]);
+            CopyLogEntry(*db.entries[j - 1], *tmp);
+            j -= 1;
+        }
+    }
+}
+
+DbEntryCount :: (db: *LogDb) -> s64 { return db.entries.count }
+DbEntryAction :: (db: *LogDb, i: s64) -> u8 { return db.entries[i].action }
+DbEntryMtime :: (db: *LogDb, i: s64) -> s32 { return db.entries[i].mtime }
+DbUpdateAt :: (db: *LogDb, i: s64, n: *LogEntry) { UpdateEntry(*db.entries[i], n) }
+DbAppendEntryTextAt :: (db: *LogDb, i: s64, out: *Vec(u8)) { AppendEntryText(out, *db.entries[i]) }
+
+AppendContents :: (out: *Vec(u8), e: *LogEntry) {
+    for i: 0..e.contents.count - 1 {
+        unused BuilderAppend(out.*, " ");
+        unused BuilderAppend(out.*, TextView(e.contents[i]));
+    }
+}
+
+AppendEntryText :: (out: *Vec(u8), e: *LogEntry) {
+    a := e.action;
+    if a == 0 { a = 63 }
+    BuilderPrint(out, "% % ", e.seq >> 32, e.seq & 0xFFFFFFFF);
+    Quote.Quote(out, TextView(e.path));
+    BuilderPrint(out, " [%] ", cast(s64)e.x);
+    VecPush(out.*, a);
+    unused BuilderAppend(out.*, " m=");
+    Util.AppendOctal(out, cast(u64)e.mode);
+    BuilderPrint(out, " l=% t=% c=", e.length, cast(u64)cast(u32)e.mtime);
+    cstr: Vec(u8);
+    AppendContents(*cstr, e);
+    Quote.Quote(out, TextView(cstr[:]));
+}
+
+AppendLogText :: (out: *Vec(u8), e: *LogEntry) {
+    a := e.action;
+    if a == 0 { a = 63 }
+    BuilderPrint(out, "% % ", e.seq >> 32, e.seq & 0xFFFFFFFF);
+    VecPush(out.*, a);
+    unused BuilderAppend(out.*, " ");
+    p := TextView(e.path);
+    sp := TextView(e.serverpath);
+    Quote.Quote(out, p);
+    unused BuilderAppend(out.*, " ");
+    if sp.count == 0 || sp == p {
+        unused BuilderAppend(out.*, "-");
+    } else {
+        Quote.Quote(out, sp);
+    }
+    unused BuilderAppend(out.*, " ");
+    Util.AppendOctal(out, cast(u64)e.mode);
+    unused BuilderAppend(out.*, " ");
+    Quote.Quote(out, TextView(e.uid));
+    unused BuilderAppend(out.*, " ");
+    Quote.Quote(out, TextView(e.gid));
+    BuilderPrint(out, " % %", cast(u64)cast(u32)e.mtime, e.length);
+    AppendContents(out, e);
+}

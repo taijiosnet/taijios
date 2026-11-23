@@ -1,0 +1,233 @@
+// Check proto files against a filesystem tree (replaces appl/cmd/install/ckproto.b).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Stat :: #import "taijios_stat";
+Util :: #import "install_util";
+Proto :: #import "proto_lib";
+#import "std/format"
+#import "std/vec"
+
+DNode :: struct {
+    name: Text;
+    proto: Text;
+    parent: s32;
+    child: s32;
+    sibling: s32;
+}
+
+nodes: Vec(DNode);
+root: string = "/";
+protof: string = "";
+omitgen: bool;
+verbose: bool;
+ckmode: bool;
+out: Vec(u8);
+
+FlushOut :: () {
+    if out.count > 0 {
+        Util.WriteOut(TextView(out[:]));
+        VecClear(out);
+    }
+}
+
+Fatal :: (msg: string) -> s32 {
+    FlushOut();
+    err: Vec(u8);
+    BuilderPrint(*err, "fatal: %\n", msg);
+    Util.WriteErr(TextView(err[:]));
+    return 0;
+}
+
+Lookup :: (p: s32, f: string) -> s32 {
+    if f == "." { return p }
+    if f == ".." { return nodes[p].parent }
+    d := nodes[p].child;
+    while d >= 0 {
+        dn := TextView(nodes[d].name);
+        if dn == f { return d }
+        if Util.StrGreater(dn, f) { return -1 }
+        d = nodes[d].sibling;
+    }
+    return -1;
+}
+
+AddFile :: (path_in: string) {
+    curd: s32 = 0;
+    path := path_in;
+    while path.count > 0 {
+        while path.count > 0 && path[0] == 47 { path = path[1:] }
+        if path.count == 0 { break }
+        i: s64 = 0;
+        while i < path.count && path[i] != 47 { i += 1 }
+        elem := path[:i];
+        rest := path[i:];
+
+        d := Lookup(curd, elem);
+        if d < 0 {
+            nid := cast(s32)nodes.count;
+            nd: DNode;
+            nd.name = Util.CopyText(elem);
+            nd.proto = Util.CopyText(protof);
+            nd.parent = curd;
+            nd.child = -1;
+            nd.sibling = -1;
+            VecPush(nodes, nd);
+            if nodes[curd].child < 0 {
+                nodes[curd].child = nid;
+            } else {
+                prev: s32 = -1;
+                cur := nodes[curd].child;
+                while cur >= 0 {
+                    if Util.StrLess(elem, TextView(nodes[cur].name)) {
+                        nodes[nid].sibling = cur;
+                        if prev < 0 { nodes[curd].child = nid }
+                        else { nodes[prev].sibling = nid }
+                        break;
+                    }
+                    prev = cur;
+                    cur = nodes[cur].sibling;
+                }
+                if cur < 0 { nodes[prev].sibling = nid }
+            }
+            d = nid;
+        } else if rest.count == 0 && TextView(nodes[d].proto) == protof {
+            BuilderPrint(*out, "% repeated in proto %\n", path_in, protof);
+        }
+        curd = d;
+        path = rest;
+    }
+}
+
+PrTree :: (n: s32, indent: s32) {
+    if indent >= 0 {
+        for _: 0..indent - 1 { VecPush(out, 9) }
+        BuilderPrint(*out, "%\n", TextView(nodes[n].name));
+    }
+    s := nodes[n].child;
+    while s >= 0 {
+        PrTree(s, indent + 1);
+        s = nodes[s].sibling;
+    }
+}
+
+IsGenerated :: (f: string) -> bool {
+    dot: s64 = -1;
+    i := f.count - 1;
+    while i >= 0 {
+        if f[i] == 46 { dot = i; break }
+        i -= 1;
+    }
+    if dot < 0 { return false }
+    suff := f[dot + 1:];
+    return suff == "dis" || suff == "sbl" || suff == "out" || suff == "0" ||
+           suff == "1" || suff == "2" || suff == "5" || suff == "8" ||
+           suff == "k" || suff == "q" || suff == "v" || suff == "t";
+}
+
+CkDir :: (d: string, dird: s32) {
+    dl: Util.DirList;
+    if !Util.ReadDirSorted(d, *dl) { return }
+    for i: 0..dl.entries.count - 1 {
+        ename_t := Util.EntryName(*dl, i);
+        ename := TextView(ename_t);
+        if omitgen && IsGenerated(ename) { continue }
+        dire := Lookup(dird, ename);
+        sub: Vec(u8);
+        Util.MkPath(d, ename, *sub);
+        sub_s := TextView(sub[:]);
+        if dire < 0 {
+            BuilderPrint(*out, "% missing\n", sub_s);
+            continue;
+        }
+        mode := Util.EntryMode(*dl, i);
+        if ckmode {
+            if (mode & Stat.Directory) != 0 {
+                if (mode & 0x1FD) != 0x1FD {
+                    BuilderPrint(*out, "directory % not 775 at least\n", sub_s);
+                }
+            } else {
+                if (mode & 0x1B4) != 0x1B4 {
+                    BuilderPrint(*out, "file % not 664 at least\n", sub_s);
+                }
+            }
+        }
+        if (mode & Stat.Directory) != 0 {
+            CkDir(sub_s, dire);
+        }
+    }
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    while true {
+        c := Arg.Option(*scan);
+        if c == 0 { break }
+        if c == 114 {
+            v, ok := Arg.Value(*scan);
+            if !ok { return Fatal("missing argument to -r") }
+            root = v;
+        } else if c == 111 {
+            omitgen = true;
+        } else if c == 118 {
+            verbose = true;
+        } else if c == 109 {
+            ckmode = true;
+        } else {
+            return Fatal("usage: install/ckproto [-o] [-v] [-m] [-r root] protofile ....");
+        }
+    }
+
+    rn: DNode;
+    rn.name = Util.CopyText("/");
+    rn.parent = 0;
+    rn.child = -1;
+    rn.sibling = -1;
+    VecPush(nodes, rn);
+
+    argc := Args.OperandCount();
+    for idx: scan.next..argc - 1 {
+        protof = Args.Operand(idx);
+        res: Proto.ProtoResult;
+        unused Proto.RdProto(protof, root, *res);
+        dc := Proto.DiagCount(*res);
+        for di: 0..dc - 1 {
+            lvl := Proto.DiagLevel(*res, di);
+            lno := Proto.DiagLine(*res, di);
+            dmsg_t := Proto.DiagMsg(*res, di);
+            dmsg := TextView(dmsg_t);
+            if lvl == Proto.WARN {
+                BuilderPrint(*out, "%: line % : %\n", protof, cast(s64)lno, dmsg);
+            } else if lvl == Proto.ERROR {
+                FlushOut();
+                err: Vec(u8);
+                BuilderPrint(*err, "%: line % : %\n", protof, cast(s64)lno, dmsg);
+                Util.WriteErr(TextView(err[:]));
+                return 0;
+            } else {
+                msg: Vec(u8);
+                BuilderPrint(*msg, "line % : %", cast(s64)lno, dmsg);
+                return Fatal(TextView(msg[:]));
+            }
+        }
+        ic := Proto.ItemCount(*res);
+        for ii: 0..ic - 1 {
+            newp_t := Proto.ItemNewPath(*res, ii);
+            oldp_t := Proto.ItemOldPath(*res, ii);
+            newp := TextView(newp_t);
+            oldp := TextView(oldp_t);
+            if verbose {
+                if oldp == newp {
+                    BuilderPrint(*out, "%\n", newp);
+                } else {
+                    BuilderPrint(*out, "% %\n", newp, oldp);
+                }
+            }
+            AddFile(oldp);
+            if newp != oldp { AddFile(newp) }
+        }
+    }
+    if verbose { PrTree(0, -1) }
+    CkDir(root, 0);
+    FlushOut();
+    return 0;
+}

@@ -1,0 +1,227 @@
+// Shared helpers for dis/install ZX commands (readdir, stat, paths, octal, CRC-32).
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+#import "std/format"
+#import "std/vec"
+
+DirEntry :: struct {
+    name: Text;
+    owner: Text;
+    group: Text;
+    mode: u32;
+    mtime: s32;
+    length: s64;
+    qtype: u8;
+}
+
+DirList :: struct {
+    entries: Vec(DirEntry);
+}
+
+WriteOut :: (s: string) {
+    if s.count > 0 { unused IO.Write(1, s) }
+}
+
+WriteErr :: (s: string) {
+    if s.count > 0 { unused IO.Write(2, s) }
+}
+
+CopyText :: (s: string) -> Text {
+    t: Text;
+    unused BuilderAppend(t.bytes, s);
+    return t;
+}
+
+StrLess :: (a: string, b: string) -> bool {
+    n := a.count;
+    if b.count < n { n = b.count }
+    for i: 0..n - 1 {
+        if a[i] != b[i] { return a[i] < b[i] }
+    }
+    return a.count < b.count;
+}
+
+StrGreater :: (a: string, b: string) -> bool {
+    return StrLess(b, a);
+}
+
+CopyTextInto :: (dst: *Text, src: *Text) {
+    VecClear(dst.bytes);
+    for i: 0..src.bytes.count - 1 { VecPush(dst.bytes, src.bytes[i]) }
+}
+
+CopyDirEntry :: (dst: *DirEntry, src: *DirEntry) {
+    CopyTextInto(*dst.name, *src.name);
+    CopyTextInto(*dst.owner, *src.owner);
+    CopyTextInto(*dst.group, *src.group);
+    dst.mode = src.mode;
+    dst.mtime = src.mtime;
+    dst.length = src.length;
+    dst.qtype = src.qtype;
+}
+
+StatEntry :: (path: string, out: *DirEntry) -> bool {
+    buf: [Stat.BufferSize]u8;
+    info := Stat.PathInfo(path, buf[:]);
+    if info.size <= 0 { return false }
+    VecClear(out.name.bytes);
+    unused BuilderAppend(out.name.bytes, info.name);
+    VecClear(out.owner.bytes);
+    unused BuilderAppend(out.owner.bytes, info.owner);
+    VecClear(out.group.bytes);
+    unused BuilderAppend(out.group.bytes, info.group);
+    out.mode = info.mode;
+    out.mtime = info.modified;
+    out.length = info.length;
+    out.qtype = info.identity.qtype;
+    return true;
+}
+
+EntryLess :: (a: *DirEntry, b: *DirEntry) -> bool {
+    return StrLess(TextView(a.name), TextView(b.name));
+}
+
+EntryName :: (dl: *DirList, i: s64) -> Text {
+    return CopyText(TextView(dl.entries[i].name));
+}
+
+EntryMode :: (dl: *DirList, i: s64) -> u32 {
+    return dl.entries[i].mode;
+}
+
+GetEntry :: (dl: *DirList, i: s64, out: *DirEntry) {
+    CopyDirEntry(out, *dl.entries[i]);
+}
+
+ReadDirSorted :: (path: string, out: *DirList) -> bool {
+    VecClear(out.entries);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [Stat.BufferSize]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        off: s64 = 0;
+        while off < cast(s64)n {
+            info := Stat.Decode(buf[off:cast(s64)n]);
+            if info.size <= 0 { break }
+            e: DirEntry;
+            e.name = CopyText(info.name);
+            e.owner = CopyText(info.owner);
+            e.group = CopyText(info.group);
+            e.mode = info.mode;
+            e.mtime = info.modified;
+            e.length = info.length;
+            e.qtype = info.identity.qtype;
+            VecPush(out.entries, e);
+            off += info.size;
+        }
+    }
+    unused IO.Close(fd);
+
+    // Insertion sort by name (exact lexicographic order matching Readdir->NAME)
+    cnt := out.entries.count;
+    for i: 1..cnt - 1 {
+        j := i;
+        while j > 0 && EntryLess(*out.entries[j], *out.entries[j - 1]) {
+            tmp: DirEntry;
+            CopyDirEntry(*tmp, *out.entries[j]);
+            CopyDirEntry(*out.entries[j], *out.entries[j - 1]);
+            CopyDirEntry(*out.entries[j - 1], *tmp);
+            j -= 1;
+        }
+    }
+
+    // Compact duplicate names (matching Readdir->COMPACT)
+    if cnt > 1 {
+        w: s64 = 1;
+        for i: 1..cnt - 1 {
+            if TextView(out.entries[i].name) != TextView(out.entries[w - 1].name) {
+                if w != i { CopyDirEntry(*out.entries[w], *out.entries[i]) }
+                w += 1;
+            }
+        }
+        VecResize(out.entries, w);
+    }
+    return true;
+}
+
+MkPath :: (prefix: string, elem: string, out: *Vec(u8)) {
+    VecClear(out.*);
+    slash1 := prefix.count > 0 && prefix[prefix.count - 1] == 47;
+    slash2 := elem.count > 0 && elem[0] == 47;
+    if slash1 && slash2 {
+        unused BuilderAppend(out.*, prefix);
+        unused BuilderAppend(out.*, elem[1:]);
+    } else if !slash1 && !slash2 {
+        unused BuilderAppend(out.*, prefix);
+        unused BuilderAppend(out.*, "/");
+        unused BuilderAppend(out.*, elem);
+    } else {
+        unused BuilderAppend(out.*, prefix);
+        unused BuilderAppend(out.*, elem);
+    }
+}
+
+AppendOctal :: (out: *Vec(u8), v_in: u64) {
+    if v_in == 0 {
+        VecPush(out.*, 48);
+        return;
+    }
+    digits: [24]u8;
+    n: s64 = 0;
+    v := v_in;
+    while v > 0 {
+        digits[n] = cast(u8)(48 + (v & 7));
+        n += 1;
+        v = v >> 3;
+    }
+    i := n - 1;
+    while i >= 0 {
+        VecPush(out.*, digits[i]);
+        i -= 1;
+    }
+}
+
+ParseIntBase :: (s: string, base: s64) -> (val: s64, ok: bool) {
+    if s.count == 0 { return 0, false }
+    i: s64 = 0;
+    neg := false;
+    if s[i] == 45 {
+        neg = true;
+        i += 1;
+    } else if s[i] == 43 {
+        i += 1;
+    }
+    if i >= s.count { return 0, false }
+    v: s64 = 0;
+    while i < s.count {
+        c := cast(u8)s[i];
+        d: s64 = -1;
+        if c >= 48 && c <= 57 { d = cast(s64)(c - 48) }
+        else if c >= 97 && c <= 102 { d = cast(s64)(c - 87) }
+        else if c >= 65 && c <= 70 { d = cast(s64)(c - 55) }
+        if d < 0 || d >= base { return 0, false }
+        v = v * base + d;
+        i += 1;
+    }
+    if neg { v = -v }
+    return v, true;
+}
+
+ReadAllFd :: (fd: s32, out: *Vec(u8)) {
+    buf: [4096]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(out.*, TextView(buf[:n]));
+    }
+}
+
+ReadAllFile :: (path: string, out: *Vec(u8)) -> bool {
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    ReadAllFd(fd, out);
+    unused IO.Close(fd);
+    return true;
+}

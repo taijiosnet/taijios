@@ -10,15 +10,11 @@ TARG=\
 	install.dis\
 	arch.dis\
 	proto.dis\
-	ckproto.dis\
-	proto2list.dis\
 	wrap2list.dis\
 	wfind.dis\
-	mkproto.dis\
 	applylog.dis\
 	logs.dis\
 	log.dis\
-	mergelog.dis\
 	updatelog.dis\
 	eproto.dis\
 
@@ -41,3 +37,16 @@ SYSMODULES=\
 DISBIN=$ROOT/dis/install
 
 <$ROOT/mkfiles/mkdis
+
+ZXCOMMANDS=mkproto ckproto proto2list mergelog
+ZXUTIL=install_util.zi proto_lib.zi logs_lib.zi ../zx_arg.zi ../taijios_args.zi ../taijios_io.zi ../taijios_stat.zi ../../lib/taijios_quote.zi
+
+install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
+
+&.zx: &.zi $ZXUTIL
+	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --entry $stem:main -o $target $stem.zi
+
+$DISBIN/%.zx: %.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"

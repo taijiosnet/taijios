@@ -1,0 +1,99 @@
+// Guest parity test for install batch 1: mkproto, ckproto, proto2list, mergelog.
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/install tests/install/install_batch1_test.zi -- [EMU] [SUFFIX]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/inst1";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+    suffix := ifx argc > 2 then TextFromCString(argv[2]) else ".dis";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/inst1/tree") ||
+        !CreateDirectory("build/dis-legacy-math/inst1/tree/sub") ||
+        !CreateDirectory("build/dis-legacy-math/inst1/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    unused WriteEntireFile("build/dis-legacy-math/inst1/tree/alpha.txt", "hello proto\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst1/tree/sub/beta.txt", "beta content\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst1/tree/extra.txt", "unlisted\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst1/test.proto",
+        "alpha.txt\nsub\n\tbeta.txt\n");
+    unused WriteEntireFile("build/dis-legacy-math/inst1/abs.proto",
+        "build\n\tdis-legacy-math\n\t\tinst1\n\t\t\ttree\n\t\t\t\talpha.txt\n\t\t\t\tsub\n\t\t\t\t\tbeta.txt\n");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%\n", WORK);
+    // 1. mkproto
+    BuilderPrint(*script, "/dis/install/mkproto% tree > result/mkp.out >[2] result/mkp.err\n", suffix);
+    BuilderPrint(*script, "/dis/install/mkproto% -extra.txt tree > result/mkp_ex.out >[2] result/mkp_ex.err\n", suffix);
+    // 2. ckproto
+    BuilderPrint(*script, "/dis/install/ckproto% -r /%/tree test.proto > result/ckp.out >[2] result/ckp.err\n", suffix, WORK);
+    BuilderPrint(*script, "/dis/install/ckproto% -v -r /%/tree test.proto > result/ckpv.out >[2] result/ckpv.err\n", suffix, WORK);
+    // 3. proto2list
+    BuilderPrint(*script, "/dis/install/proto2list% abs.proto > result/p2l.out >[2] result/p2l.err\n", suffix);
+    // 4. mergelog usage + path restriction
+    BuilderPrint(*script, "/dis/install/mergelog% > result/ml_u.out >[2] result/ml_u.err\n", suffix);
+    BuilderPrint(*script, "/dis/install/mergelog% a b c > result/ml_r.out >[2] result/ml_r.err\n", suffix);
+    unused WriteEntireFile("build/dis-legacy-math/inst1/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("mkp.out") == "alpha.txt\nextra.txt\nsub\n\tbeta.txt\n", "mkproto tree");
+    Expect(Result("mkp_ex.out") == "alpha.txt\nsub\n\tbeta.txt\n", "mkproto -extra.txt");
+    Expect(Contains(Result("ckp.out"), "/tree/extra.txt missing\n"), "ckproto missing file");
+    Expect(Contains(Result("p2l.out"), "/alpha.txt\t-\t12\t"), "proto2list alpha.txt");
+    Expect(Contains(Result("ml_u.err"), "usage: mergelog"), "mergelog usage");
+    Expect(Contains(Result("ml_r.err"), "restriction by path not yet done"), "mergelog path error");
+
+    if failures != 0 {
+        print("install_batch1_test: % failures\n", failures);
+        return 1;
+    }
+    print("install_batch1_test: all checks passed\n");
+    return 0;
+}
