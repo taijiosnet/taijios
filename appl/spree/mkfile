@@ -17,7 +17,6 @@ CLIENTS=\
 	clients/cards.dis \
 	clients/gather.dis \
 	clients/lobby.dis \
-	clients/othello.dis \
 
 LIB=\
 	lib/allow.dis \
@@ -45,9 +44,18 @@ ALL= ${ENGINES:%=$DEST/%} \
 	${CLIENTS:%=$DEST/%} \
 	${LIB:%=$DEST/%} \
 	${MAIN:%=$DEST/%} \
-	$DEST/joinsession.zx
+	$DEST/joinsession.zx \
+	$DEST/clients/othello.zx
 
-all:V: $ENGINES $CLIENTS $LIB $MAIN joinsession.zx
+all:V: $ENGINES $CLIENTS $LIB $MAIN joinsession.zx clients/othello.zx
+
+clients/othello.zx: clients/othello.zi clients/othello_model.zi ../cmd/tcltk/tcltk.zi ../cmd/tcltk/zx_surface.zi ../cmd/taijios_files.zi ../cmd/taijios_stdin.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi mkfile
+	(cd clients && ziran bundle --project --root . --module-path . --module-path ../../cmd/tcltk --module-path ../../cmd --bind-host zx_surface --bind-host taijios_files --bind-host taijios_stdin --bind-host taijios_args --bind-host taijios_io --entry othello:main -o othello.zx othello.zi)
+
+$DEST/clients/othello.zx: clients/othello.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 clients/othello.zx "$staged" && mv "$staged" "$target"
 
 joinsession.zx: joinsession.zi join_model.zi ../cmd/taijios_args.zi ../cmd/taijios_io.zi ../cmd/taijios_namespace.zi ../cmd/taijios_process.zi mkfile
 	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process --entry joinsession:main -o $target joinsession.zi

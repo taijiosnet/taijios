@@ -1,0 +1,179 @@
+// Spree Othello Tk client, ported from appl/spree/clients/othello.b.
+#import "std/vec"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Model :: #import "othello_model"
+
+state: Model.BoardState;
+line_buf: Text;
+notify_msg: Text;
+notify_ticks: s32 = 0;
+pending_click: bool = false;
+click_x: s32 = 0;
+click_y: s32 = 0;
+
+ReadSmallFile :: (path: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [512]u8;
+    n := IO.Read(fd, buf[:]);
+    unused IO.Close(fd);
+    if n <= 0 { return false }
+    end := cast(s64)n;
+    while end > 0 && (buf[end - 1] == 10 || buf[end - 1] == 13) { end -= 1 }
+    unused BuilderAppend(out.bytes, TextView(buf[:end]));
+    return true;
+}
+
+BoardCanvas :: () -> *Canvas.State {
+    return *Tk.widgets[Tk.Find(".c")].canvas;
+}
+
+RenderBoard :: () {
+    cid := Tk.Find(".c");
+    if cid < 0 { return }
+    canvas := *Tk.widgets[cid].canvas;
+    Canvas.DeleteAll(canvas);
+    // 8x8 grid squares
+    for y: 0..Model.N-1 {
+        for x: 0..Model.N-1 {
+            x0 := cast(s32)(x * Model.SQ);
+            y0 := cast(s32)(y * Model.SQ);
+            x1 := cast(s32)((x + 1) * Model.SQ);
+            y1 := cast(s32)((y + 1) * Model.SQ);
+            unused Canvas.Add(canvas, .Rectangle, .{x0, y0, x1, y1}, Canvas.NONE, Canvas.BLACK, .Center);
+            col := state.cells[y * Model.N + x];
+            if col == Model.BLACK || col == Model.WHITE {
+                fill: s32 = ifx col == Model.WHITE then 0xffffff else 0x000000;
+                outline: s32 = ifx col == Model.WHITE then 0x000000 else 0xffffff;
+                unused Canvas.Add(canvas, .Oval, .{x0 + 2, y0 + 2, x1 - 2, y1 - 2}, fill, outline, .Center);
+            }
+        }
+    }
+    if notify_ticks > 0 && notify_msg.bytes.count > 0 {
+        unused Canvas.Add(canvas, .Rectangle, .{0, 0, 240, 22}, 0xffffaa, Canvas.BLACK, .Center);
+        unused Canvas.AddText(canvas, 4, 11, .West, TextView(notify_msg), cast(s32)0xcc0000);
+    }
+    canvas.viewport.resized = true;
+}
+
+SyncLabels :: (tcl: *Tcl.Interpreter) {
+    c1: Text;
+    unused BuilderAppend(c1.bytes, ".status configure -text {");
+    unused BuilderAppend(c1.bytes, TextView(state.status));
+    unused BuilderAppend(c1.bytes, "}");
+    unused Window.Execute(tcl, TextView(c1));
+
+    c2: Text;
+    unused BuilderAppend(c2.bytes, ".f.l configure -text {");
+    unused BuilderAppend(c2.bytes, TextView(state.role_label));
+    unused BuilderAppend(c2.bytes, "}");
+    unused Window.Execute(tcl, TextView(c2));
+
+    c3: Text;
+    unused BuilderAppend(c3.bytes, ".f.turn configure -text {");
+    unused BuilderAppend(c3.bytes, TextView(state.turn_label));
+    unused BuilderAppend(c3.bytes, "}");
+    unused Window.Execute(tcl, TextView(c3));
+}
+
+OthelloDraw :: (_: s64, args: []Text, result: *T.Result) {
+    RenderBoard();
+}
+
+OthelloClick :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count < 2 { return }
+    click_x = Model.ParseInt(TextView(args[0]));
+    click_y = Model.ParseInt(TextView(args[1]));
+    pending_click = true;
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    changed := false;
+    if pending_click {
+        pending_click = false;
+        inboard, bx, by := Model.BoardPos(click_x, click_y);
+        if inboard {
+            cmd: Text;
+            Model.FormatMoveCmd(bx, by, *cmd);
+            if IO.Write(0, TextView(cmd)) < 0 {
+                unused VecResize(notify_msg.bytes, 0);
+                unused BuilderAppend(notify_msg.bytes, "move rejected");
+                notify_ticks = 15; // ~750ms at 50ms tick
+                changed = true;
+            }
+        }
+    }
+
+    if notify_ticks > 0 {
+        notify_ticks -= 1;
+        if notify_ticks == 0 { changed = true }
+    }
+
+    // Poll clique updates from stdin (fd 0).
+    buf: [4096]u8;
+    n := IO.PollRead(0, buf[:]);
+    if n > 0 {
+        unused BuilderAppend(line_buf.bytes, TextView(buf[:n]));
+        rem: Text;
+        consumed := false;
+        {
+            s := TextView(line_buf);
+            pos: s64 = 0;
+            while pos < s.count {
+                nl := pos;
+                while nl < s.count && s[nl] != 10 { nl += 1 }
+                if nl >= s.count { break }
+                line := s[pos:nl];
+                if line.count > 0 {
+                    if Model.ApplyUpdate(*state, line) { changed = true }
+                }
+                pos = nl + 1;
+            }
+            if pos > 0 {
+                consumed = true;
+                if pos < s.count { unused BuilderAppend(rem.bytes, s[pos:]) }
+            }
+        }
+        if consumed {
+            unused VecResize(line_buf.bytes, 0);
+            unused BuilderAppend(line_buf.bytes, TextView(rem));
+        }
+    }
+
+    if changed || state.dirty {
+        state.dirty = false;
+        RenderBoard();
+        SyncLabels(tcl);
+        return .Changed;
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    mname: Text;
+    if Args.OperandCount() >= 1 {
+        npath: Text;
+        unused BuilderAppend(npath.bytes, Args.Operand(0));
+        unused BuilderAppend(npath.bytes, "/name");
+        unused ReadSmallFile(TextView(npath), *mname);
+    }
+    Model.InitState(*state, TextView(mname));
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "othello_click", OthelloClick) ||
+       !Tcl.RegisterCommand(*tcl, "othello_draw", OthelloDraw) { return 1 }
+    rc := Window.RunPolled(*tcl, Model.OTHELLO_UI, "Othello", 260, 300, Start, Tick, 50);
+    // Notify clique on exit (0-byte write matching othello.b).
+    unused IO.Write(0, "");
+    return rc;
+}

@@ -662,7 +662,7 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/alphabet/reports.dis | appl/alphabet/reports.b | module/alphabet/reports.m | - |  |
 | dis/alphabet/rexecsrv.dis | appl/alphabet/auxi/rexecsrv.b |  | - |  |
 
-### 9. Spree - multiuser engine family - 23 rows
+### 9. Spree - multiuser engine family - 22 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -670,7 +670,6 @@ Catalog applications that still need the legacy chain (38): avi bounce brutus c4
 | dis/spree/clients/cards.dis | appl/spree/clients/cards.b |  | - |  |
 | dis/spree/clients/gather.dis | appl/spree/clients/gather.b |  | - |  |
 | dis/spree/clients/lobby.dis | appl/spree/clients/lobby.b |  | - |  |
-| dis/spree/clients/othello.dis | appl/spree/clients/othello.b |  | - |  |
 | dis/spree/engines/afghan.dis | appl/spree/engines/afghan.b |  | - |  |
 | dis/spree/engines/bounce.dis | appl/spree/engines/bounce.b |  | - |  |
 | dis/spree/engines/canfield.dis | appl/spree/engines/canfield.b |  | - |  |

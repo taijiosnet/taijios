@@ -1,0 +1,65 @@
+// Table-driven unit + Tk UI tests for appl/spree/clients/othello_model.zi.
+#import "std/vec"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Model :: #import "othello_model"
+
+failures: s32;
+
+NoopCmd :: (_: s64, args: []Text, result: *T.Result) {}
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+main :: () -> s32 {
+    st: Model.BoardState;
+    Model.InitState(*st, "Alice");
+    Expect(TextView(st.status) == "No clique in progress", "init status");
+    Expect(TextView(st.role_label) == "watching", "init role");
+
+    Expect(Model.ApplyUpdate(*st, "create 0 -1 board"), "create");
+    Expect(Model.ApplyUpdate(*st, "set 0 members Alice Bob"), "members");
+    Expect(TextView(st.status) == "Alice(Black) vs. Bob(White)", "members status");
+    Expect(TextView(st.role_label) == "Black", "Alice is Black");
+
+    Expect(Model.ApplyUpdate(*st, "set 0 turn 0"), "turn 0");
+    Expect(TextView(st.turn_label) == "(Your turn)", "Alice turn");
+    Expect(Model.ApplyUpdate(*st, "set 0 turn 1"), "turn 1");
+    Expect(TextView(st.turn_label) == "", "Bob turn");
+
+    Expect(Model.ApplyUpdate(*st, "set 0 dd 0"), "piece dd black");
+    Expect(Model.ApplyUpdate(*st, "set 0 de 1"), "piece de white");
+    Expect(st.cells[3 * 8 + 3] == Model.BLACK, "cell (3,3) black");
+    Expect(st.cells[4 * 8 + 3] == Model.WHITE, "cell (3,4) white");
+
+    Expect(Model.ApplyUpdate(*st, "set 0 winner 0"), "winner black");
+    Expect(TextView(st.status) == "clique over. black won.", "winner status");
+    Expect(TextView(st.role_label) == "watching", "reset to watching");
+
+    inb, bx, by := Model.BoardPos(95, 125);
+    Expect(inb && bx == 3 && by == 4, "BoardPos(95,125)");
+    outb, _, _ := Model.BoardPos(250, 10);
+    Expect(!outb, "BoardPos out of bounds");
+
+    mcmd: Text;
+    Model.FormatMoveCmd(3, 4, *mcmd);
+    Expect(TextView(mcmd) == "move 3 4\n", "FormatMoveCmd");
+
+    // Verify Tk UI script evaluates cleanly
+    tcl: Tcl.Interpreter;
+    Expect(Tk.Attach(*tcl), "Tk.Attach");
+    Expect(Tcl.RegisterCommand(*tcl, "othello_click", NoopCmd), "reg click");
+    Expect(Tcl.RegisterCommand(*tcl, "othello_draw", NoopCmd), "reg draw");
+    res := Tcl.Eval(*tcl, Model.OTHELLO_UI);
+    Expect(res.code == .OK, TextView(res.value));
+    Tk.Layout(260, 300);
+    Expect(Tk.Find(".c") >= 0 && Tk.Find(".status") >= 0, "widgets exist");
+
+    if failures == 0 { print("othello_client_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

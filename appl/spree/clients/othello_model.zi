@@ -1,0 +1,165 @@
+// Pure board state, coordinate math, and update-protocol parser for
+// spree/clients/othello, ported from appl/spree/clients/othello.b.
+#import "std/vec"
+#import "std/number_text"
+
+SQ :: 30;
+N :: 8;
+
+BLACK :: 0;
+WHITE :: 1;
+NOCOLOUR :: 2;
+
+BoardState :: struct {
+    cells: [64]s32;
+    member_name: Text;
+    black_name: Text;
+    white_name: Text;
+    status: Text;
+    role_label: Text;
+    turn_label: Text;
+    dirty: bool;
+}
+
+InitState :: (st: *BoardState, member_name: string) {
+    for i: 0..63 { st.cells[i] = NOCOLOUR }
+    unused VecResize(st.member_name.bytes, 0);
+    unused BuilderAppend(st.member_name.bytes, member_name);
+    unused VecResize(st.black_name.bytes, 0);
+    unused VecResize(st.white_name.bytes, 0);
+    unused VecResize(st.status.bytes, 0);
+    unused BuilderAppend(st.status.bytes, "No clique in progress");
+    unused VecResize(st.role_label.bytes, 0);
+    unused BuilderAppend(st.role_label.bytes, "watching");
+    unused VecResize(st.turn_label.bytes, 0);
+    st.dirty = true;
+}
+
+BoardPos :: (px: s32, py: s32) -> (inboard: bool, x: s32, y: s32) {
+    if px < 0 || py < 0 { return false, 0, 0 }
+    x := px / SQ;
+    y := py / SQ;
+    if x < 0 || x >= N || y < 0 || y >= N { return false, 0, 0 }
+    return true, x, y;
+}
+
+FormatMoveCmd :: (x: s32, y: s32, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    b1: [16]u8;
+    b2: [16]u8;
+    unused BuilderAppend(out.bytes, "move ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)x, b1[:]));
+    unused BuilderAppend(out.bytes, " ");
+    unused BuilderAppend(out.bytes, FormatInteger(cast(s64)y, b2[:]));
+    unused BuilderAppend(out.bytes, "\n");
+}
+
+ParseInt :: (s: string) -> s32 {
+    v: s32 = 0;
+    neg := false;
+    i: s64 = 0;
+    if s.count > 0 && s[0] == 45 { neg = true; i = 1 }
+    while i < s.count {
+        c := s[i];
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48) }
+        else { break }
+        i += 1;
+    }
+    return ifx neg then -v else v;
+}
+
+SplitSpaces :: (line: string, out: []string) -> s32 {
+    n: s32 = 0;
+    i: s64 = 0;
+    while i < line.count && cast(s64)n < out.count {
+        while i < line.count && (line[i] == 32 || line[i] == 9 || line[i] == 13) { i += 1 }
+        if i >= line.count { break }
+        start := i;
+        while i < line.count && line[i] != 32 && line[i] != 9 && line[i] != 13 { i += 1 }
+        out[n] = line[start:i];
+        n += 1;
+    }
+    return n;
+}
+
+ApplyUpdate :: (st: *BoardState, line: string) -> bool {
+    toks: [8]string;
+    nt := SplitSpaces(line, toks[:]);
+    if nt <= 0 { return false }
+    if toks[0] == "create" { return true }
+    if toks[0] != "set" || nt < 4 { return false }
+
+    attr := toks[2];
+    val := toks[3];
+    if attr == "members" && nt >= 5 {
+        unused VecResize(st.black_name.bytes, 0);
+        unused BuilderAppend(st.black_name.bytes, toks[3]);
+        unused VecResize(st.white_name.bytes, 0);
+        unused BuilderAppend(st.white_name.bytes, toks[4]);
+        unused VecResize(st.status.bytes, 0);
+        unused BuilderAppend(st.status.bytes, toks[3]);
+        unused BuilderAppend(st.status.bytes, "(Black) vs. ");
+        unused BuilderAppend(st.status.bytes, toks[4]);
+        unused BuilderAppend(st.status.bytes, "(White)");
+        if TextView(st.member_name) == toks[3] {
+            unused VecResize(st.role_label.bytes, 0);
+            unused BuilderAppend(st.role_label.bytes, "Black");
+        } else if TextView(st.member_name) == toks[4] {
+            unused VecResize(st.role_label.bytes, 0);
+            unused BuilderAppend(st.role_label.bytes, "White");
+        }
+        st.dirty = true;
+        return true;
+    }
+    if attr == "turn" {
+        turn := ParseInt(val);
+        if turn == BLACK || turn == WHITE {
+            cur := ifx turn == BLACK then TextView(st.black_name) else TextView(st.white_name);
+            other := ifx turn == BLACK then TextView(st.white_name) else TextView(st.black_name);
+            if TextView(st.member_name) == cur {
+                unused VecResize(st.turn_label.bytes, 0);
+                unused BuilderAppend(st.turn_label.bytes, "(Your turn)");
+            } else if TextView(st.member_name) == other {
+                unused VecResize(st.turn_label.bytes, 0);
+            }
+            st.dirty = true;
+        }
+        return true;
+    }
+    if attr == "winner" {
+        winner := ParseInt(val);
+        unused VecResize(st.status.bytes, 0);
+        unused BuilderAppend(st.status.bytes, "clique over. ");
+        if winner == BLACK { unused BuilderAppend(st.status.bytes, "black won.") }
+        else if winner == WHITE { unused BuilderAppend(st.status.bytes, "white won.") }
+        else { unused BuilderAppend(st.status.bytes, "it was a draw") }
+        unused VecResize(st.role_label.bytes, 0);
+        unused BuilderAppend(st.role_label.bytes, "watching");
+        st.dirty = true;
+        return true;
+    }
+    if attr.count == 2 && attr[0] >= 97 && attr[0] < 97 + N && attr[1] >= 97 && attr[1] < 97 + N {
+        x := cast(s32)(attr[0] - 97);
+        y := cast(s32)(attr[1] - 97);
+        col := ParseInt(val);
+        if col < 0 || col > NOCOLOUR { col = NOCOLOUR }
+        st.cells[y * N + x] = col;
+        st.dirty = true;
+        return true;
+    }
+    return false;
+}
+
+OTHELLO_UI :: #string END_UI
+canvas .c -height 240 -width 240 -bg #008800
+label .status -text {No clique in progress}
+frame .f
+label .f.l -text {watching}
+label .f.turn -text {}
+pack .f.l -side left -expand 1 -fill x
+pack .f.turn -side left -fill x -expand 1
+pack .c -side top
+pack .status .f -side top -fill x
+bind .c <ButtonPress-1> {othello_click %x %y}
+othello_draw
+END_UI;
