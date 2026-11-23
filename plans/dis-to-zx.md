@@ -19,7 +19,7 @@ A family is done only when every one of its `.dis` rows (including acme helper b
 
 ## Default desktop load chain (verified in source)
 
-Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window manager, `appl/wm/native_wm.zi`) -> `/dis/wm/rill.zx`. It takes effect in a root once `cd appl/wm && mk install-wm-zx` has installed `wm.zx`; until then the emulator starts `emuinit.dis` as before. `tests/desktop/zx_boot_test.py --graphics` boots this chain in a root with no `.dis`.
+Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window manager, `appl/wm/native_wm.zi`) -> `/dis/wm/rill.zx`. It takes effect in a root once `cd appl/wm && mk install-wm-zx` has installed `wm.zx`; until then the emulator starts `emuinit.dis` as before. `tests/desktop/zx_boot_test.py --graphics` boots this chain in a root with no `.dis`. Neither `wm.zx` nor `wm.dis` overlaps window client content with its 32px Sweet-Dark title bar: `native_wm.zi` places the caption at `[bounds.top - 32, bounds.top)` above the client surface, and the 8-row title-bar strip in `appl/cmd/tcltk/about_stock_art.png` was an artifact of the legacy `STOCK_ORIGIN = (7, 25)` capture offset in `test_about.py`.
 
 Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
 
@@ -454,7 +454,7 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/usb/usbd.dis | appl/cmd/usb/usbd.b |  | - |  |
 | dis/vacfs.dis | appl/cmd/vacfs.b |  | - |  |
 
-### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 50 rows
+### 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 48 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -476,7 +476,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/wm/deb.dis | appl/wm/deb.b |  | - |  |
 | dis/wm/debdata.dis | appl/wm/debdata.b |  | - |  |
 | dis/wm/debsrc.dis | appl/wm/debsrc.b |  | - |  |
-| dis/wm/dir.dis | appl/wm/dir.b |  | - | zx-twin |
 | dis/wm/dmview.dis | appl/wm/drawmux/dmview.b |  | - |  |
 | dis/wm/dmwm.dis | appl/wm/drawmux/dmwm.b |  | - |  |
 | dis/wm/edit.dis | appl/wm/edit.b |  | - |  |
@@ -504,7 +503,6 @@ Catalog applications that still need the legacy chain (35): avi bounce brutus c4
 | dis/wm/task.dis | appl/wm/task.b |  | - |  |
 | dis/wm/telnet.dis | appl/wm/telnet.b |  | - |  |
 | dis/wm/unibrowse.dis | appl/wm/unibrowse.b |  | - |  |
-| dis/wm/view.dis | appl/wm/view.b |  | - | zx-twin |
 | dis/wm/vt.dis | appl/wm/vt.b |  | - |  |
 | dis/wm/wish.dis | appl/wm/wish.b |  | - |  |
 | dis/wm/wmplay.dis | appl/wm/wmplay.b |  | - |  |

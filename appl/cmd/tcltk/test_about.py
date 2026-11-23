@@ -18,7 +18,9 @@ from test_tcltk import BUILD, ROOT, RUNNER_FLAGS, SOURCES, color_bounds, command
 DESKTOP = (119, 119, 119)
 VERSION_INK = (255, 85, 0)
 ART_SIZE = 300, 207
-# Both window managers draw their title bar over the logo's first rows.
+# about_stock_art.png was recorded with the pre-Sweet-Dark STOCK_ORIGIN (7, 25),
+# 8 rows into the 32px Sweet-Dark title bar above .f's ridge border. Neither
+# wm.dis nor wm.zx overlaps client content; the comparison skips those 8 rows.
 COVERED_ROWS = 8
 FIXTURE = SOURCES / "about_bitmap_commands.tcl"
 REFERENCE = SOURCES / "about_bitmap_commands.expected"
