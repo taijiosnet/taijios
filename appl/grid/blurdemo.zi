@@ -1,0 +1,663 @@
+// Grid distributed image blur demo launcher GUI, ported from appl/grid/blurdemo.b.
+#import "std/vec"
+#import "std/number_text"
+using Args :: #import "taijios_args"
+using IO :: #import "taijios_io"
+using Dial :: #import "taijios_dial"
+using Namespace :: #import "taijios_namespace"
+using Proc :: #import "taijios_process"
+using Stat :: #import "taijios_stat"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Canvas :: #import "tk/canvas"
+using Surface :: #import "zx_surface"
+using Window :: #import "tcltk"
+using Reg :: #import "registry_client"
+using Srv :: #import "srvbrowse"
+using Jpg :: #import "jpg2bit_model"
+using Model :: #import "blurdemo_model"
+
+SELECTED_COLOR :: 0x0000cc;
+
+store: Srv.ServiceStore;
+items: [Srv.MAX_SERVICES]Srv.DirItem;
+item_count: s32 = 0;
+selected_idx: s32 = -1;
+curr_step: s32 = Model.STEP_IMAGE;
+sysname_buf: Text;
+cur_path: Text;
+cur_qid: s32 = 0;
+cur_srv_addr: Text;
+cur_srv_name: Text;
+cur_srv_local: bool = true;
+blur_image: Text;
+blur_srv_addr: Text;
+blur_srv_name: Text;
+blur_srv_local: bool = true;
+log_buf: Text;
+pending_act: s32 = 0; // 1=refresh, 2=back, 3=open, 4=select, 5=preview, 6=del, 7=run, 8=local, 9=info, 10=locate
+
+AppendLog :: (msg: string) {
+    unused BuilderAppend(log_buf.bytes, msg);
+}
+
+ListCanvas :: () -> *Canvas.State {
+    return *Tk.widgets[Tk.Find(".f.flb.c")].canvas;
+}
+
+RenderList :: () {
+    canvas := ListCanvas();
+    Canvas.DeleteAll(canvas);
+    y: s32 = 12;
+    for i: 0..cast(s64)item_count-1 {
+        row: Text;
+        if items[i].is_dir { unused BuilderAppend(row.bytes, "[+] ") }
+        unused BuilderAppend(row.bytes, TextView(items[i].name));
+        fill := ifx cast(s32)i == selected_idx then SELECTED_COLOR else Canvas.BLACK;
+        unused Canvas.AddText(canvas, 8, y, .West, TextView(row), cast(s32)fill);
+        y += 18;
+    }
+    w := ifx canvas.viewport.width > 0 then canvas.viewport.width else 520;
+    canvas.viewport.region = .{0, 0, cast(s64)w * Canvas.FRACTION, cast(s64)(y + 8) * Canvas.FRACTION};
+    canvas.viewport.y = 0;
+    Canvas.ClampViewport(*canvas.viewport);
+    canvas.viewport.resized = true;
+}
+
+ReadSmall :: (path: string, out: *Text) -> bool {
+    unused VecResize(out.bytes, 0);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [512]u8;
+    n := IO.Read(fd, buf[:]);
+    unused IO.Close(fd);
+    if n <= 0 { return false }
+    end := cast(s64)n;
+    while end > 0 && (buf[end - 1] == 10 || buf[end - 1] == 13) { end -= 1 }
+    unused BuilderAppend(out.bytes, TextView(buf[:end]));
+    return true;
+}
+
+ReadWhole :: (path: string, out: *Vec(u8)) -> bool {
+    unused VecResize(<<out, 0);
+    fd := IO.Open(path, 0);
+    if fd < 0 { return false }
+    buf: [8192]u8;
+    ok := true;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n < 0 { ok = false; break }
+        if n == 0 { break }
+        if out.count + cast(s64)n > 16777216 { ok = false; break }
+        unused BuilderAppend(<<out, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    return ok;
+}
+
+ReadHeader :: (path: string, out: []u8) -> s32 {
+    fd := IO.Open(path, 0);
+    if fd < 0 { return -1 }
+    n := IO.Read(fd, out);
+    unused IO.Close(fd);
+    return n;
+}
+
+WriteWhole :: (path: string, data: string) -> bool {
+    fd := IO.Create(path, 1, 0x1b6);
+    if fd < 0 { return false }
+    off: s64 = 0;
+    ok := true;
+    while off < data.count {
+        n := IO.Write(fd, data[off:]);
+        if n <= 0 { ok = false; break }
+        off += cast(s64)n;
+    }
+    unused IO.Close(fd);
+    return ok;
+}
+
+FetchServices :: (query_str: string, out_store: *Srv.ServiceStore) {
+    out_store.count = 0;
+    if !Reg.EnsureRegistry() { return }
+    fd := IO.Open("/mnt/registry/find", 2);
+    if fd < 0 { return }
+    unused IO.Write(fd, query_str);
+    unused IO.Seek(fd, 0, 0);
+    raw: Text;
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw.bytes, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    Srv.LoadServicesFromText(out_store, TextView(raw));
+}
+
+StringLess :: (a: string, b: string) -> bool {
+    n := ifx a.count < b.count then a.count else b.count;
+    for k: 0..n-1 {
+        if a[k] != b[k] { return a[k] < b[k] }
+    }
+    return a.count < b.count;
+}
+
+SwapDirItems :: (i: s64, j: s64) {
+    tmp_a: Text;
+    tmp_b: Text;
+    unused BuilderAppend(tmp_a.bytes, TextView(items[i].name));
+    unused BuilderAppend(tmp_b.bytes, TextView(items[j].name));
+    qid_a := items[i].qid;
+    dir_a := items[i].is_dir;
+    items[i].qid = items[j].qid;
+    items[i].is_dir = items[j].is_dir;
+    items[j].qid = qid_a;
+    items[j].is_dir = dir_a;
+    unused VecResize(items[i].name.bytes, 0);
+    unused BuilderAppend(items[i].name.bytes, TextView(tmp_b));
+    unused VecResize(items[j].name.bytes, 0);
+    unused BuilderAppend(items[j].name.bytes, TextView(tmp_a));
+}
+
+LoadDirEntries :: (dir_path: string) {
+    item_count = 0;
+    fd := IO.Open(dir_path, 0);
+    if fd < 0 { return }
+    raw: Vec(u8);
+    buf: [8192]u8;
+    while true {
+        n := IO.Read(fd, buf[:]);
+        if n <= 0 { break }
+        unused BuilderAppend(raw, TextView(buf[:n]));
+    }
+    unused IO.Close(fd);
+    data := VecSlice(raw, 0, raw.count);
+    off: s64 = 0;
+    while off < data.count && item_count < Srv.MAX_SERVICES {
+        info := Stat.Decode(data[off:]);
+        if info.size <= 0 { break }
+        is_dir := (info.mode & cast(u32)Stat.Directory) != 0;
+        if is_dir || Model.IsImageFile(info.name) {
+            unused VecResize(items[item_count].name.bytes, 0);
+            unused BuilderAppend(items[item_count].name.bytes, info.name);
+            items[item_count].qid = 0;
+            items[item_count].is_dir = is_dir;
+            item_count += 1;
+        }
+        off += info.size;
+    }
+    if item_count > 1 {
+        for i: 0..cast(s64)item_count-2 {
+            for j: i+1..cast(s64)item_count-1 {
+                if StringLess(TextView(items[j].name), TextView(items[i].name)) {
+                    SwapDirItems(i, j);
+                }
+            }
+        }
+    }
+}
+
+UpdateButtonStates :: (tcl: *Tcl.Interpreter) {
+    has_sel := blur_image.bytes.count > 0;
+    sel_st := ifx has_sel then "normal" else "disabled";
+    back_st := ifx curr_step == Model.STEP_MOUNT || TextView(cur_path) != "services/" then "normal" else "disabled";
+
+    c1: Text;
+    unused BuilderAppend(c1.bytes, ".f.ftop.bp configure -state ");
+    unused BuilderAppend(c1.bytes, back_st);
+    unused Window.Execute(tcl, TextView(c1));
+
+    c2: Text;
+    unused BuilderAppend(c2.bytes, ".f.fsel.run configure -state ");
+    unused BuilderAppend(c2.bytes, sel_st);
+    unused Window.Execute(tcl, TextView(c2));
+
+    c3: Text;
+    unused BuilderAppend(c3.bytes, ".f.ftop.bd configure -state ");
+    unused BuilderAppend(c3.bytes, sel_st);
+    unused Window.Execute(tcl, TextView(c3));
+
+    c4: Text;
+    unused BuilderAppend(c4.bytes, ".f.fsel.info configure -state ");
+    unused BuilderAppend(c4.bytes, sel_st);
+    unused Window.Execute(tcl, TextView(c4));
+
+    c5: Text;
+    unused BuilderAppend(c5.bytes, ".f.fsel.loc configure -state ");
+    unused BuilderAppend(c5.bytes, sel_st);
+    unused Window.Execute(tcl, TextView(c5));
+}
+
+RefreshView :: (tcl: *Tcl.Interpreter) {
+    if curr_step == Model.STEP_IMAGE {
+        cnt, _ := Srv.ServicePath2Dir(*store, TextView(cur_path), cur_qid, items[:]);
+        item_count = cnt;
+    } else {
+        LoadDirEntries(TextView(cur_path));
+    }
+    selected_idx = ifx item_count > 0 then 0 else -1;
+    RenderList();
+
+    pcmd: Text;
+    unused BuilderAppend(pcmd.bytes, ".f.path configure -text {");
+    unused BuilderAppend(pcmd.bytes, TextView(cur_path));
+    unused BuilderAppend(pcmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(pcmd));
+
+    scmd: Text;
+    unused BuilderAppend(scmd.bytes, ".f.fsel.l configure -text {Selected image: ");
+    if blur_image.bytes.count > 0 { unused BuilderAppend(scmd.bytes, TextView(blur_image)) }
+    else { unused BuilderAppend(scmd.bytes, "(none)") }
+    unused BuilderAppend(scmd.bytes, "}");
+    unused Window.Execute(tcl, TextView(scmd));
+
+    UpdateButtonStates(tcl);
+
+    if log_buf.bytes.count > 0 {
+        lcmd: Text;
+        unused BuilderAppend(lcmd.bytes, ".f.flog.t insert end {");
+        unused BuilderAppend(lcmd.bytes, TextView(log_buf));
+        unused BuilderAppend(lcmd.bytes, "}");
+        unused Window.Execute(tcl, TextView(lcmd));
+        unused VecResize(log_buf.bytes, 0);
+    }
+}
+
+RunBlurJob :: (ncpus: s32) {
+    if blur_image.bytes.count == 0 {
+        AppendLog("Error: no image selected\n");
+        return;
+    }
+    unused Namespace.Fork();
+    imgpath: Text;
+    if !blur_srv_local {
+        handles: [2]s32 = .[-1, -1];
+        dir_buf: [Dial.DirectoryBytes]u8;
+        if Dial.Dial(TextView(blur_srv_addr), "", handles[:], dir_buf[:]) != 0 {
+            AppendLog("Error: cannot connect to data source\n");
+            return;
+        }
+        ok_m := handles[0] >= 0 && Namespace.Mount(handles[0], -1, "/n/local", Namespace.Replace, "") == 0;
+        if handles[0] >= 0 { unused IO.Close(handles[0]) }
+        if handles[1] >= 0 { unused IO.Close(handles[1]) }
+        if !ok_m { AppendLog("Error: img mount failed\n"); return }
+        unused BuilderAppend(imgpath.bytes, "/n/local");
+        unused BuilderAppend(imgpath.bytes, TextView(blur_image));
+        AppendLog("Found image namespace\n");
+    } else {
+        unused BuilderAppend(imgpath.bytes, TextView(blur_image));
+    }
+
+    pool_store: Srv.ServiceStore;
+    FetchServices(Model.CPUPOOL_SERVICE_QUERY, *pool_store);
+    if pool_store.count == 0 {
+        AppendLog("Error: cannot find Cpu Pool resource\n");
+        return;
+    }
+    cpupool_addr := TextView(pool_store.services[0].addr);
+    ph: [2]s32 = .[-1, -1];
+    pdir: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(cpupool_addr, "", ph[:], pdir[:]) != 0 {
+        AppendLog("Error: cannot connect to Cpu Pool resource\n");
+        return;
+    }
+    mounted := ph[0] >= 0 && Namespace.Mount(ph[0], -1, "/n/remote", Namespace.Replace, "") == 0;
+    if ph[0] >= 0 { unused IO.Close(ph[0]) }
+    if ph[1] >= 0 { unused IO.Close(ph[1]) }
+    if !mounted {
+        AppendLog("Error: Cpu Pool mount failed\n");
+        return;
+    }
+    AppendLog("Connected to Cpu Pool resource\n");
+
+    if Model.IsJpgFile(TextView(imgpath)) {
+        AppendLog("Converting jpg => bit image\n");
+        raw_jpg: Vec(u8);
+        if !ReadWhole(TextView(imgpath), *raw_jpg) {
+            AppendLog("Error: cannot read jpg\n");
+            unused Namespace.Unmount("", "/n/remote");
+            return;
+        }
+        bit_out: Vec(u8);
+        if !Jpg.ConvertJpegToBit(VecSlice(raw_jpg, 0, raw_jpg.count), *bit_out) {
+            AppendLog("Error: converting jpg\n");
+            unused Namespace.Unmount("", "/n/remote");
+            return;
+        }
+        unused IO.Remove("/n/remote/data/blurimage.bit");
+        if !WriteWhole("/n/remote/data/blurimage.bit", TextView(VecSlice(bit_out, 0, bit_out.count))) {
+            AppendLog("Error: saving bit\n");
+            unused Namespace.Unmount("", "/n/remote");
+            return;
+        }
+        unused VecResize(imgpath.bytes, 0);
+        unused BuilderAppend(imgpath.bytes, "/n/remote/data/blurimage.bit");
+    }
+
+    afd: [20]s32;
+    wdirs: [20]Text;
+    ngot: s32 = 0;
+    for i: 0..cast(s64)ncpus-1 {
+        fd := IO.Open("/n/remote/clone", 2);
+        if fd < 0 { break }
+        afd[ngot] = fd;
+        ngot += 1;
+    }
+    if ngot == 0 {
+        AppendLog("Error: no cpu resources available\n");
+        unused Namespace.Unmount("", "/n/remote");
+        return;
+    }
+    bf: [24]u8;
+    if ngot < ncpus {
+        AppendLog("Only found ");
+        AppendLog(FormatInteger(cast(s64)ngot, bf[:]));
+        AppendLog(" cpus available; continuing.\n");
+    }
+    AppendLog("Found ");
+    AppendLog(FormatInteger(cast(s64)ngot, bf[:]));
+    AppendLog(" Cpu resource(s)\n");
+
+    bfd := IO.Create("/n/remote/data/blur", 0, cast(s32)0x800001ff);
+    if bfd >= 0 { unused IO.Close(bfd) }
+
+    wcmd: Text;
+    Model.BuildWorkerCmd("/data/", *wcmd);
+    for i: 0..cast(s64)ngot-1 {
+        unused IO.Write(afd[i], TextView(wcmd));
+        unused IO.Seek(afd[i], 0, 0);
+        dbuf: [128]u8;
+        dn := IO.Read(afd[i], dbuf[:]);
+        if dn > 0 {
+            end := cast(s64)dn;
+            while end > 0 && (dbuf[end - 1] == 10 || dbuf[end - 1] == 13) { end -= 1 }
+            unused BuilderAppend(wdirs[i].bytes, TextView(dbuf[:end]));
+        }
+    }
+
+    ops: [2]string = .["/n/remote/data", TextView(imgpath)];
+    res := Proc.Run("/dis/grid/demo/blur.zx", ops[:]);
+    if res.status < 0 {
+        AppendLog("Error: blur master failed\n");
+    }
+
+    // Collect worker stdout logs from /n/remote/<dir>/data, matching blurdemo.b go().
+    for i: 0..cast(s64)ngot-1 {
+        if wdirs[i].bytes.count > 0 {
+            dpath: Text;
+            unused BuilderAppend(dpath.bytes, "/n/remote/");
+            unused BuilderAppend(dpath.bytes, TextView(wdirs[i]));
+            unused BuilderAppend(dpath.bytes, "/data");
+            fdout := IO.Open(TextView(dpath), 0);
+            if fdout >= 0 {
+                obuf: [4096]u8;
+                while true {
+                    on := IO.Read(fdout, obuf[:]);
+                    if on <= 0 { break }
+                    AppendLog("Cpu ");
+                    AppendLog(FormatInteger(i, bf[:]));
+                    AppendLog(": ");
+                    AppendLog(TextView(obuf[:on]));
+                    if obuf[on - 1] != 10 { AppendLog("\n") }
+                }
+                unused IO.Close(fdout);
+            }
+        }
+        unused IO.Close(afd[i]);
+    }
+    unused Namespace.Unmount("", "/n/remote");
+    AppendLog("Finished\n");
+}
+
+BdDraw :: (_: s64, args: []Text, result: *T.Result) {
+    RenderList();
+}
+
+BdSel :: (_: s64, args: []Text, result: *T.Result) {
+    canvas := ListCanvas();
+    row := cast(s32)(canvas.current - 1);
+    if row >= 0 && row < item_count {
+        selected_idx = row;
+        RenderList();
+    }
+}
+
+BdCmd :: (_: s64, args: []Text, result: *T.Result) {
+    if args.count == 0 { result.code = .Error; return }
+    v := TextView(args[0]);
+    if v == "refresh" { pending_act = 1 }
+    else if v == "back" { pending_act = 2 }
+    else if v == "open" { pending_act = 3 }
+    else if v == "select" { pending_act = 4 }
+    else if v == "preview" { pending_act = 5 }
+    else if v == "del" { pending_act = 6 }
+    else if v == "run" { pending_act = 7 }
+    else if v == "local" { pending_act = 8 }
+    else if v == "info" { pending_act = 9 }
+    else if v == "locate" { pending_act = 10 }
+}
+
+Start :: () -> bool { return true }
+
+Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
+    if pending_act == 0 { return .Idle }
+    act := pending_act;
+    pending_act = 0;
+    if act == 1 {
+        if curr_step == Model.STEP_IMAGE { FetchServices(Model.IMAGE_SERVICE_QUERY, *store) }
+        RefreshView(tcl);
+        return .Changed;
+    }
+    if act == 2 {
+        if curr_step == Model.STEP_MOUNT {
+            if !cur_srv_local { unused Namespace.Unmount("", "/n/remote") }
+            curr_step = Model.STEP_IMAGE;
+            unused VecResize(cur_path.bytes, 0);
+            unused BuilderAppend(cur_path.bytes, "services/");
+            FetchServices(Model.IMAGE_SERVICE_QUERY, *store);
+        } else {
+            p: Text;
+            Srv.PrevPath(TextView(cur_path), *p);
+            unused VecResize(cur_path.bytes, 0);
+            unused BuilderAppend(cur_path.bytes, TextView(p));
+        }
+        RefreshView(tcl);
+        return .Changed;
+    }
+    if act == 8 {
+        if curr_step == Model.STEP_MOUNT && !cur_srv_local {
+            unused Namespace.Unmount("", "/n/remote");
+        }
+        cur_srv_local = true;
+        unused VecResize(cur_srv_addr.bytes, 0);
+        unused BuilderAppend(cur_srv_addr.bytes, "Local Machine");
+        unused VecResize(cur_srv_name.bytes, 0);
+        unused BuilderAppend(cur_srv_name.bytes, TextView(sysname_buf));
+        curr_step = Model.STEP_MOUNT;
+        unused VecResize(cur_path.bytes, 0);
+        unused BuilderAppend(cur_path.bytes, "/");
+        RefreshView(tcl);
+        return .Changed;
+    }
+    if act == 9 {
+        if blur_image.bytes.count > 0 {
+            info: Text;
+            Model.FormatSelectionInfo(TextView(blur_image), TextView(blur_srv_name), TextView(blur_srv_addr), *info);
+            AppendLog(TextView(info));
+            RefreshView(tcl);
+            return .Changed;
+        }
+        return .Idle;
+    }
+    if act == 10 {
+        if blur_image.bytes.count > 0 && blur_srv_local {
+            curr_step = Model.STEP_MOUNT;
+            cur_srv_local = true;
+            unused VecResize(cur_path.bytes, 0);
+            unused BuilderAppend(cur_path.bytes, Model.DirName(TextView(blur_image)));
+            RefreshView(tcl);
+            return .Changed;
+        }
+        return .Idle;
+    }
+    if act == 3 {
+        sel := selected_idx;
+        if sel < 0 || sel >= item_count { return .Idle }
+        if curr_step == Model.STEP_IMAGE {
+            next_p: Text;
+            unused BuilderAppend(next_p.bytes, TextView(cur_path));
+            unused BuilderAppend(next_p.bytes, TextView(items[sel].name));
+            unused BuilderAppend(next_p.bytes, "/");
+            sidx := Srv.FindServiceByPath(*store, TextView(next_p), items[sel].qid);
+            if sidx >= 0 {
+                AppendLog("Connecting...\n");
+                addr := TextView(store.services[sidx].addr);
+                ph: [2]s32 = .[-1, -1];
+                pdir: [Dial.DirectoryBytes]u8;
+                if Dial.Dial(addr, "", ph[:], pdir[:]) == 0 && ph[0] >= 0 {
+                    AppendLog("Mounting...\n");
+                    if Namespace.Mount(ph[0], -1, "/n/remote", Namespace.Replace, "") == 0 {
+                        unused IO.Close(ph[0]);
+                        if ph[1] >= 0 { unused IO.Close(ph[1]) }
+                        unused VecResize(cur_srv_addr.bytes, 0);
+                        unused BuilderAppend(cur_srv_addr.bytes, addr);
+                        unused VecResize(cur_srv_name.bytes, 0);
+                        unused BuilderAppend(cur_srv_name.bytes, TextView(items[sel].name));
+                        cur_srv_local = false;
+                        curr_step = Model.STEP_MOUNT;
+                        unused VecResize(cur_path.bytes, 0);
+                        unused BuilderAppend(cur_path.bytes, "/n/remote/");
+                    } else {
+                        unused IO.Close(ph[0]);
+                        if ph[1] >= 0 { unused IO.Close(ph[1]) }
+                        AppendLog("Mount failed\n");
+                    }
+                } else {
+                    if ph[0] >= 0 { unused IO.Close(ph[0]) }
+                    if ph[1] >= 0 { unused IO.Close(ph[1]) }
+                    AppendLog("Attach failed\n");
+                }
+            } else if items[sel].is_dir {
+                unused VecResize(cur_path.bytes, 0);
+                unused BuilderAppend(cur_path.bytes, TextView(next_p));
+                if items[sel].qid != 0 { cur_qid = items[sel].qid }
+            }
+        } else if items[sel].is_dir {
+            unused BuilderAppend(cur_path.bytes, TextView(items[sel].name));
+            unused BuilderAppend(cur_path.bytes, "/");
+        }
+        RefreshView(tcl);
+        return .Changed;
+    }
+    if act == 4 {
+        sel := selected_idx;
+        if sel >= 0 && sel < item_count && !items[sel].is_dir && Model.IsImageFile(TextView(items[sel].name)) {
+            full: Text;
+            unused BuilderAppend(full.bytes, TextView(cur_path));
+            unused BuilderAppend(full.bytes, TextView(items[sel].name));
+            if Model.IsBitFile(TextView(items[sel].name)) {
+                hdr: [80]u8;
+                hn := ReadHeader(TextView(full), hdr[:]);
+                if hn < 60 || !Model.ValidateBitHeader(hdr[:hn]) {
+                    AppendLog("Alert: Invalid '.bit' image\n");
+                    RefreshView(tcl);
+                    return .Changed;
+                }
+            }
+            unused VecResize(blur_image.bytes, 0);
+            unused BuilderAppend(blur_image.bytes, Model.StripRemotePrefix(TextView(full), cur_srv_local));
+            unused VecResize(blur_srv_addr.bytes, 0);
+            unused BuilderAppend(blur_srv_addr.bytes, TextView(cur_srv_addr));
+            unused VecResize(blur_srv_name.bytes, 0);
+            unused BuilderAppend(blur_srv_name.bytes, TextView(cur_srv_name));
+            blur_srv_local = cur_srv_local;
+            RefreshView(tcl);
+            return .Changed;
+        }
+        return .Idle;
+    }
+    if act == 5 {
+        sel := selected_idx;
+        if sel >= 0 && sel < item_count && !items[sel].is_dir && Model.IsBitFile(TextView(items[sel].name)) {
+            full: Text;
+            unused BuilderAppend(full.bytes, TextView(cur_path));
+            unused BuilderAppend(full.bytes, TextView(items[sel].name));
+            hdr: [80]u8;
+            hn := ReadHeader(TextView(full), hdr[:]);
+            if hn < 60 || !Model.ValidateBitHeader(hdr[:hn]) {
+                AppendLog("Alert: Invalid '.bit' image\n");
+                RefreshView(tcl);
+                return .Changed;
+            }
+            ops: [1]string = .[TextView(full)];
+            unused Proc.Start("/dis/wm/view.zx", ops[:]);
+        }
+        return .Idle;
+    }
+    if act == 6 {
+        unused VecResize(blur_image.bytes, 0);
+        unused VecResize(blur_srv_addr.bytes, 0);
+        unused VecResize(blur_srv_name.bytes, 0);
+        RefreshView(tcl);
+        return .Changed;
+    }
+    if act == 7 {
+        res := Tcl.Eval(tcl, ".f.fsel.ce get");
+        ncpus := ifx res.code == .OK then Model.ParseCpuCount(TextView(res.value)) else 1;
+        RunBlurJob(ncpus);
+        RefreshView(tcl);
+        return .Changed;
+    }
+    return .Idle;
+}
+
+main :: () -> s32 {
+    unused Namespace.Fork();
+    if !ReadSmall("/dev/sysname", *sysname_buf) || sysname_buf.bytes.count == 0 {
+        unused BuilderAppend(sysname_buf.bytes, "Localhost");
+    }
+    unused BuilderAppend(cur_srv_addr.bytes, "Local Machine");
+    unused BuilderAppend(cur_srv_name.bytes, TextView(sysname_buf));
+    unused BuilderAppend(cur_path.bytes, "services/");
+
+    pool_check: Srv.ServiceStore;
+    FetchServices(Model.CPUPOOL_SERVICE_QUERY, *pool_check);
+    if pool_check.count == 0 {
+        AppendLog("Alert: Cannot find a Cpu Pool Resource\n");
+    }
+    FetchServices(Model.IMAGE_SERVICE_QUERY, *store);
+
+    if Args.OperandCount() >= 1 {
+        unused BuilderAppend(blur_image.bytes, Args.Operand(0));
+        unused BuilderAppend(blur_srv_addr.bytes, "Local Machine");
+        unused BuilderAppend(blur_srv_name.bytes, TextView(sysname_buf));
+        blur_srv_local = true;
+    }
+
+    cnt, _ := Srv.ServicePath2Dir(*store, TextView(cur_path), cur_qid, items[:]);
+    item_count = cnt;
+    selected_idx = ifx item_count > 0 then 0 else -1;
+
+    script: Text;
+    unused BuilderAppend(script.bytes, Model.BLURDEMO_UI);
+    if blur_image.bytes.count > 0 {
+        unused BuilderAppend(script.bytes, "\n.f.fsel.l configure -text {Selected image: ");
+        unused BuilderAppend(script.bytes, TextView(blur_image));
+        unused BuilderAppend(script.bytes, "}\n.f.fsel.run configure -state normal\n.f.ftop.bd configure -state normal\n.f.fsel.info configure -state normal\n.f.fsel.loc configure -state normal");
+    }
+    if log_buf.bytes.count > 0 {
+        unused BuilderAppend(script.bytes, "\n.f.flog.t insert end {");
+        unused BuilderAppend(script.bytes, TextView(log_buf));
+        unused BuilderAppend(script.bytes, "}");
+        unused VecResize(log_buf.bytes, 0);
+    }
+    unused BuilderAppend(script.bytes, "\n");
+
+    tcl: Tcl.Interpreter;
+    if !Tcl.RegisterCommand(*tcl, "bd_act", BdCmd) ||
+       !Tcl.RegisterCommand(*tcl, "bd_sel", BdSel) ||
+       !Tcl.RegisterCommand(*tcl, "bd_draw", BdDraw) { return 1 }
+    return Window.RunPolled(*tcl, TextView(script), "BlurDemo", 560, 440, Start, Tick, 50);
+}

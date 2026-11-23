@@ -1,0 +1,166 @@
+// Pure state machine, file filtering, .bit header validation, and path helpers
+// for grid/blurdemo, ported from appl/grid/blurdemo.b.
+#import "std/vec"
+#import "std/number_text"
+
+STEP_IMAGE :: 0;
+STEP_MOUNT :: 4;
+IMAGE_SERVICE_QUERY :: "proto styx auth none 'Image resource' 1";
+CPUPOOL_SERVICE_QUERY :: "resource 'Cpu Pool'";
+
+BLURDEMO_UI :: #string END_UI
+frame .f
+frame .f.ftop
+button .f.ftop.br -text {Refresh} -command {bd_act refresh}
+button .f.ftop.bp -text {Services} -command {bd_act back} -state disabled
+button .f.ftop.bl -text {Local} -command {bd_act local}
+button .f.ftop.bm -text {Open/Mount} -command {bd_act open}
+button .f.ftop.bs -text {Select} -command {bd_act select}
+button .f.ftop.bv -text {Preview} -command {bd_act preview}
+button .f.ftop.bd -text {Remove} -command {bd_act del} -state disabled
+pack .f.ftop.br .f.ftop.bp .f.ftop.bl .f.ftop.bm .f.ftop.bs .f.ftop.bv .f.ftop.bd -side left -padx 2
+label .f.path -text {services/}
+frame .f.flb
+scrollbar .f.flb.sb -command {.f.flb.c yview}
+canvas .f.flb.c -relief sunken -borderwidth 2 -bg #ffffff -width 500 -height 180 -yscrollcommand {.f.flb.sb set}
+.f.flb.c bind all <Button-1> {bd_sel}
+.f.flb.c bind all <Double-Button-1> {bd_act open}
+pack .f.flb.sb -side left -fill y
+pack .f.flb.c -fill both -expand 1
+frame .f.fsel
+label .f.fsel.l -text {Selected image: (none)}
+button .f.fsel.info -text {Info} -command {bd_act info} -state disabled
+button .f.fsel.loc -text {Locate} -command {bd_act locate} -state disabled
+label .f.fsel.cl -text {CPUs:}
+entry .f.fsel.ce
+button .f.fsel.run -text {Run} -command {bd_act run} -state disabled
+pack .f.fsel.l -side left -fill x -expand 1
+pack .f.fsel.info .f.fsel.loc .f.fsel.cl .f.fsel.ce .f.fsel.run -side left -padx 2
+frame .f.flog
+scrollbar .f.flog.sb -command {.f.flog.t yview}
+text .f.flog.t -yscrollcommand {.f.flog.sb set} -height 120
+pack .f.flog.sb -side left -fill y
+pack .f.flog.t -fill both -expand 1
+pack .f.ftop -side top -fill x -pady 2
+pack .f.path -side top -fill x
+pack .f.flb -side top -fill both -expand 1
+pack .f.fsel -side top -fill x -pady 2
+pack .f.flog -side top -fill both -expand 1
+pack .f -fill both -expand 1
+.f.fsel.ce insert 0 {2}
+bd_draw
+END_UI;
+
+IsImageFile :: (name: string) -> bool {
+    if name.count < 5 { return false }
+    ext := name[name.count - 4:];
+    return ext == ".bit" || ext == ".jpg";
+}
+
+IsJpgFile :: (name: string) -> bool {
+    if name.count < 5 { return false }
+    return name[name.count - 4:] == ".jpg";
+}
+
+IsBitFile :: (name: string) -> bool {
+    if name.count < 5 { return false }
+    return name[name.count - 4:] == ".bit";
+}
+
+BaseName :: (path: string) -> string {
+    last_slash: s64 = -1;
+    for i: 0..path.count-1 {
+        if path[i] == 47 { last_slash = i }
+    }
+    return ifx last_slash >= 0 then path[last_slash + 1:] else path;
+}
+
+DirName :: (path: string) -> string {
+    last_slash: s64 = -1;
+    for i: 0..path.count-1 {
+        if path[i] == 47 { last_slash = i }
+    }
+    if last_slash < 0 { return "/" }
+    return path[:last_slash + 1];
+}
+
+StripRemotePrefix :: (path: string, is_local: bool) -> string {
+    if is_local { return path }
+    prefix := "/n/remote";
+    if path.count >= prefix.count && path[:prefix.count] == prefix {
+        return path[prefix.count:];
+    }
+    return path;
+}
+
+ClampCpuCount :: (n: s32) -> s32 {
+    if n < 1 { return 1 }
+    if n > 20 { return 20 }
+    return n;
+}
+
+ParseCpuCount :: (s: string) -> s32 {
+    v: s32 = 0;
+    any := false;
+    for c: s {
+        if c >= 48 && c <= 57 { v = v * 10 + cast(s32)(c - 48); any = true }
+        else if any { break }
+    }
+    return ifx any then ClampCpuCount(v) else 1;
+}
+
+BuildWorkerCmd :: (work_dir: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, "/dis/grid/demo/blur.zx ");
+    unused BuilderAppend(out.bytes, work_dir);
+}
+
+// Validate Plan 9 / Inferno uncompressed or compressed image header.
+// Uncompressed: 60-byte header (12-byte chan + 4 x 12-byte coords).
+// Compressed: starts with "compressed\n" followed by 60-byte header.
+ValidateBitHeader :: (data: []u8) -> bool {
+    off: s64 = 0;
+    if data.count >= 11 && TextView(data[:11]) == "compressed\n" {
+        off = 11;
+    }
+    if data.count < off + 60 { return false }
+    // Channel descriptor is 11 chars + space; must contain at least one channel letter (r,g,b,k,m,a,x).
+    has_chan := false;
+    for i: off..off+11 {
+        c := data[i];
+        if c == 114 || c == 103 || c == 98 || c == 107 || c == 109 || c == 97 || c == 120 {
+            has_chan = true;
+            break;
+        }
+    }
+    if !has_chan { return false }
+    // Parse minx, miny, maxx, maxy (4 x 12-byte right-justified decimal fields).
+    coords: [4]s32;
+    for f: 0..3 {
+        base := off + 12 + cast(s64)f * 12;
+        val: s32 = 0;
+        neg := false;
+        any := false;
+        for i: base..base+11 {
+            c := data[i];
+            if c == 32 || c == 9 { continue }
+            if c == 45 && !any { neg = true; continue }
+            if c >= 48 && c <= 57 { val = val * 10 + cast(s32)(c - 48); any = true }
+            else { return false }
+        }
+        if !any { return false }
+        coords[f] = ifx neg then -val else val;
+    }
+    return coords[2] > coords[0] && coords[3] > coords[1];
+}
+
+// Format "path — name (addr)\n" for selection info popup/log.
+FormatSelectionInfo :: (path: string, srv_name: string, srv_addr: string, out: *Text) {
+    unused VecResize(out.bytes, 0);
+    unused BuilderAppend(out.bytes, path);
+    unused BuilderAppend(out.bytes, " - ");
+    unused BuilderAppend(out.bytes, ifx srv_name.count > 0 then srv_name else "Localhost");
+    unused BuilderAppend(out.bytes, " (");
+    unused BuilderAppend(out.bytes, ifx srv_addr.count > 0 then srv_addr else "Local Machine");
+    unused BuilderAppend(out.bytes, ")\n");
+}

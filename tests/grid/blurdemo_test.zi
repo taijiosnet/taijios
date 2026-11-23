@@ -1,0 +1,83 @@
+// Table-driven unit + Tk UI tests for appl/grid/blurdemo_model.zi.
+#import "std/vec"
+using Tcl :: #import "tcl/interpreter"
+using T :: #import "tcl/types"
+using Tk :: #import "tk/widgets"
+using Model :: #import "blurdemo_model"
+
+failures: s32;
+
+NoopCmd :: (_: s64, args: []Text, result: *T.Result) {}
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+TestUI :: () {
+    tcl: Tcl.Interpreter;
+    Expect(Tk.Attach(*tcl), "Tk.Attach");
+    Expect(Tcl.RegisterCommand(*tcl, "bd_act", NoopCmd), "reg bd_act");
+    Expect(Tcl.RegisterCommand(*tcl, "bd_sel", NoopCmd), "reg bd_sel");
+    Expect(Tcl.RegisterCommand(*tcl, "bd_draw", NoopCmd), "reg bd_draw");
+    // Eval line by line to pinpoint any unsupported option.
+    s := Model.BLURDEMO_UI;
+    start: s64 = 0;
+    line_no: s32 = 0;
+    while start < s.count {
+        end := start;
+        while end < s.count && s[end] != 10 { end += 1 }
+        line := s[start:end];
+        line_no += 1;
+        if line.count > 0 {
+            res := Tcl.Eval(*tcl, line);
+            if res.code != .OK {
+                failures += 1;
+                print("FAIL UI line % [%]: %\n", line_no, line, TextView(res.value));
+            }
+        }
+        start = end + 1;
+    }
+    Tk.Layout(560, 440);
+    Expect(Tk.Find(".f.flb.c") >= 0, "canvas .f.flb.c exists");
+    Expect(Tk.Find(".f.fsel.ce") >= 0, "entry .f.fsel.ce exists");
+    ce := Tcl.Eval(*tcl, ".f.fsel.ce get");
+    Expect(ce.code == .OK && TextView(ce.value) == "2", "default CPUs entry is 2");
+}
+
+main :: () -> s32 {
+    Expect(Model.IsImageFile("photo.bit") && Model.IsBitFile("photo.bit"), "photo.bit");
+    Expect(Model.IsImageFile("photo.jpg") && Model.IsJpgFile("photo.jpg"), "photo.jpg");
+    Expect(!Model.IsImageFile("readme.txt"), "reject txt");
+    Expect(Model.BaseName("/n/remote/dir/pic.bit") == "pic.bit", "BaseName");
+    Expect(Model.DirName("/n/remote/dir/pic.bit") == "/n/remote/dir/", "DirName");
+    Expect(Model.StripRemotePrefix("/n/remote/img/a.bit", false) == "/img/a.bit", "StripRemotePrefix remote");
+    Expect(Model.StripRemotePrefix("/n/remote/img/a.bit", true) == "/n/remote/img/a.bit", "StripRemotePrefix local");
+    Expect(Model.ParseCpuCount("4") == 4 && Model.ParseCpuCount("99") == 20 && Model.ParseCpuCount("0") == 1, "ParseCpuCount");
+
+    cmd: Text;
+    Model.BuildWorkerCmd("/data/", *cmd);
+    Expect(TextView(cmd) == "/dis/grid/demo/blur.zx /data/", "BuildWorkerCmd");
+
+    // Valid uncompressed and compressed .bit headers vs invalid header
+    good_bit: Text;
+    unused BuilderAppend(good_bit.bytes, "   r8g8b8             0           0          64          48 ");
+    Expect(Model.ValidateBitHeader(VecSlice(good_bit.bytes, 0, good_bit.bytes.count)), "ValidateBitHeader uncompressed");
+    good_comp: Text;
+    unused BuilderAppend(good_comp.bytes, "compressed\n   r8g8b8             0           0          64          48 ");
+    Expect(Model.ValidateBitHeader(VecSlice(good_comp.bytes, 0, good_comp.bytes.count)), "ValidateBitHeader compressed");
+    bad_bit: Text;
+    unused BuilderAppend(bad_bit.bytes, "not a bit image at all, just plain text that is over sixty bytes long!!");
+    Expect(!Model.ValidateBitHeader(VecSlice(bad_bit.bytes, 0, bad_bit.bytes.count)), "ValidateBitHeader rejects text");
+
+    info: Text;
+    Model.FormatSelectionInfo("/img/a.bit", "node1", "tcp!node1!6677", *info);
+    Expect(TextView(info) == "/img/a.bit - node1 (tcp!node1!6677)\n", "FormatSelectionInfo");
+
+    TestUI();
+
+    if failures == 0 { print("blurdemo_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}
