@@ -30,7 +30,7 @@ WORDS :: "one two  three\nfour\tfive\n";
 QUICK :: "The quick brown fox\n";
 UNSORTED :: "banana\napple\nCherry\napple\n10\n9\n100\n-5\n";
 
-cases: [237]Case = Case.[
+cases: [242]Case = Case.[
     .{tool = "pwd", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "ignored arguments", out = "/build/tests/commands-m-z/work\n"},
     .{tool = "pwd", args = "-x", out = "/build/tests/commands-m-z/work\n"},
@@ -316,6 +316,13 @@ fakenet/2/status
     // A target that is not there yet still reports the rename refusal here,
     // as the Limbo stat of a missing name did.
     .{args = "{ mkdir -p mdir; mv tree mdir }", status = "error", err = "mv: can't rename a directory to an existing name\n"},
+    // xargs: one command run per input line, the line's words appended.
+    .{args = "xargs echo pre < lines.txt", out = "pre line 1\npre line 2\npre line 3\npre line 4\npre line 5\npre line 6\npre line 7\npre line 8\npre line 9\npre line 10\npre line 11\npre line 12\npre line 13\npre line 14\npre line 15\npre line 16\npre line 17\npre line 18\npre line 19\npre line 20\npre line 21\npre line 22\npre line 23\npre line 24\npre line 25\npre line 26\npre line 27\npre line 28\npre line 29\npre line 30\npre line 31\npre line 32\npre line 33\npre line 34\npre line 35\npre line 36\npre line 37\npre line 38\npre line 39\npre line 40\npre line 41\npre line 42\npre line 43\npre line 44\npre line 45\npre line 46\npre line 47\npre line 48\npre line 49\npre line 50\n"},
+    .{args = "xargs echo < short", out = "short\n"},
+    .{args = "xargs echo x < blankin"},
+    .{tool = "xargs", status = "", err = "Usage: xargs command [command args] <[list of last command arg]\n"},
+    // The shell reports the missing command with the path it searched.
+    .{args = "xargs nosuchcmd arg < short", out = "", err = "sh: nosuchcmd: './nosuchcmd' file does not exist\n"},
 ];
 
 failures: s32;
@@ -407,6 +414,7 @@ Prepare :: (binary: string) -> bool {
         Write("s1", one) && Write("s2", two) && Write("short", "short\n") &&
         Write("lines.txt", Lines()) &&
         Write("unsorted", UNSORTED) &&
+        Write("blankin", "\n \n\t\n") &&
         Write("graph", "a b c\nb d\nc d\nd\n") && Write("graph2", "x y\nx z\ny z\n") &&
         Write("chain", "1 2\n2 3\n3 4\n4 5\n") && Write("solo", "solo\n") &&
         Write("blank", "\n  \n\t\n") && Write("selfedge", "a a\n") &&

@@ -65,6 +65,7 @@ y.debug
 /appl/cmd/tsort.zx
 /appl/cmd/unicode.zx
 /appl/cmd/mv.zx
+/appl/cmd/xargs.zx
 /appl/cmd/sleep.zx
 /appl/cmd/pause.zx
 /appl/cmd/runas.zx
@@ -127,6 +128,7 @@ y.debug
 /dis/tsort.zx
 /dis/unicode.zx
 /dis/mv.zx
+/dis/xargs.zx
 /dis/sleep.zx
 /dis/pause.zx
 /dis/runas.zx

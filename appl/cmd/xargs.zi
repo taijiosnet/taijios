@@ -1,0 +1,114 @@
+// Run a command once per line of standard input, replacing the Limbo xargs.
+#import "std/vec"
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Proc :: #import "taijios_process";
+using Cli :: #import "zx_cli";
+
+Usage :: "Usage: xargs command [command args] <[list of last command arg]\n";
+
+// One line at a time from a block buffer, the way bufio gets did.
+Reader :: struct {
+    handle: s32;
+    buffer: [4096]u8;
+    start: s64;
+    end: s64;
+    done: bool;
+}
+
+Line :: (reader: *Reader) -> (text: string, ok: bool) {
+    line: Vec(u8)
+    while true {
+        if reader.start >= reader.end {
+            if reader.done { break }
+            count := Io.ReadBytes(reader.handle, reader.buffer[:])
+            if count <= 0 {
+                reader.done = true
+                break
+            }
+            reader.start = 0
+            reader.end = count
+        }
+        byte := reader.buffer[reader.start]
+        reader.start += 1
+        unused VecPush(line, byte)
+        if byte == cast(u8)10 { break }
+    }
+    if line.count == 0 { return "", false }
+    return TextDetach(BuilderFinish(line)), true
+}
+
+// Split on spaces, tabs and newlines, as sys->tokenize did.
+Words :: (line: string, words: *Vec(string)) {
+    start: s64 = 0
+    at: s64 = 0
+    while at <= line.count {
+        blank := at == line.count
+        if !blank {
+            byte := line[at]
+            blank = byte == cast(u8)32 || byte == cast(u8)9 || byte == cast(u8)10
+        }
+        if blank {
+            if at > start { unused VecPush(words.*, TextDetach(TextCopy(line[start:at]))) }
+            start = at + 1
+        }
+        at += 1
+    }
+}
+
+// An owned copy, so a kept word does not outlive its line.
+Copy :: (text: string) -> string { return TextDetach(TextCopy(text)); }
+
+// A shell word for the command line, quoted when it needs to be.
+Quote :: (out: *Vec(u8), word: string) {
+    needs := word.count == 0
+    for word {
+        if it <= cast(u8)32 || it == #char "'" || it == #char "\"" { needs = true; break }
+    }
+    if !needs {
+        unused BuilderAppend(out.*, word);
+        return
+    }
+    unused VecPush(out.*, #char "'")
+    for word {
+        if it == #char "'" { unused VecPush(out.*, #char "'") }
+        unused VecPush(out.*, it)
+    }
+    unused VecPush(out.*, #char "'")
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 {
+        unused Cli.WriteAll(2, Usage);
+        return 0
+    }
+    // The command and its own operands, kept for every line.
+    fixed: Vec(string);
+    for i: 0..count-1 { unused VecPush(fixed, Copy(Args.Operand(i))) }
+    reader: Reader
+    reader.handle = 0
+    while true {
+        line, ok := Line(*reader)
+        if !ok { break }
+        words: Vec(string)
+        Words(line, *words)
+        if words.count == 0 { continue }
+        // The shell runs the command with the line's words appended.
+        script: Vec(u8)
+        for i: 0..fixed.count-1 {
+            if i > 0 { unused BuilderAppend(script, " ") }
+            Quote(*script, fixed[i])
+        }
+        for words {
+            unused BuilderAppend(script, " ")
+            Quote(*script, it)
+        }
+        operands: Vec(string)
+        unused VecPush(operands, "-c")
+        unused VecPush(operands, TextDetach(BuilderFinish(script)))
+        unused Proc.Run("/dis/sh.zx", operands[:])
+    }
+    return 0
+}
