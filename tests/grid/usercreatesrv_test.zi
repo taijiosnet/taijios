@@ -1,0 +1,104 @@
+// Table-driven unit test for appl/grid/usercreatesrv_model.zi.
+#import "std/vec"
+using Model :: #import "usercreatesrv_model"
+
+failures: s32;
+created_user: Text;
+created_secret: [20]u8;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+MockCreate :: (uname: string, secret: []u8, err_out: *Text) -> bool {
+    unused VecResize(err_out.bytes, 0);
+    if uname == "exists" {
+        unused BuilderAppend(err_out.bytes, "cannot create account: file exists");
+        return false;
+    }
+    unused VecResize(created_user.bytes, 0);
+    unused BuilderAppend(created_user.bytes, uname);
+    for i: 0..19 { created_secret[i] = secret[i] }
+    return true;
+}
+
+MakePacket :: (kind: u8, tag: u16, payload: []u8, out: *Vec(u8)) {
+    unused VecResize(<<out, 0);
+    Model.PushU32(out, cast(u32)(7 + payload.count));
+    Model.PushU8(out, kind);
+    Model.PushU16(out, tag);
+    unused BuilderAppend(<<out, TextView(payload));
+}
+
+main :: () -> s32 {
+    // 1. SHA-1 known vector: SHA1("abc") = a9993e36 4706816a ba3e2571 7850c26c 9cd0d89d
+    digest: [20]u8;
+    Model.Sha1("abc", digest[:]);
+    Expect(digest[0] == 0xA9 && digest[1] == 0x99 && digest[2] == 0x3E && digest[3] == 0x36 &&
+           digest[16] == 0x9C && digest[17] == 0xD0 && digest[18] == 0xD8 && digest[19] == 0x9D, "SHA1(abc)");
+
+    // 2. Request parsing
+    u: Text;
+    p: Text;
+    Expect(Model.ParseRequest("alice secret123\n", *u, *p) && TextView(u) == "alice" && TextView(p) == "secret123", "parse plain");
+    Expect(Model.ParseRequest("'bob' 'my pass'", *u, *p) && TextView(u) == "bob" && TextView(p) == "my pass", "parse quoted");
+    Expect(!Model.ParseRequest("onlyone", *u, *p), "reject 1 token");
+    Expect(!Model.ParseRequest("a b c", *u, *p), "reject 3 tokens");
+
+    // 3. 9P2000 flow: attach -> walk createuser -> open -> read (error) -> write (ok) -> write (error)
+    srv: Model.Server;
+    Model.InitServer(*srv);
+    pkt: Vec(u8);
+    body: Vec(u8);
+    reply: Text;
+
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 0xFFFFFFFF);
+    Model.PushStr(*body, "inferno");
+    Model.PushStr(*body, "");
+    MakePacket(Model.TATTACH, 1, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockCreate, *reply);
+    Expect(reply.bytes[4] == Model.RATTACH, "Rattach");
+
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 1);
+    Model.PushU32(*body, 2);
+    Model.PushU16(*body, 1);
+    Model.PushStr(*body, "createuser");
+    MakePacket(Model.TWALK, 2, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockCreate, *reply);
+    Expect(reply.bytes[4] == Model.RWALK, "Rwalk createuser");
+
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU8(*body, 1);
+    MakePacket(Model.TOPEN, 3, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockCreate, *reply);
+    Expect(reply.bytes[4] == Model.ROPEN, "Ropen createuser");
+
+    // Read is denied
+    unused VecResize(body, 0);
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, 64);
+    MakePacket(Model.TREAD, 4, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockCreate, *reply);
+    Expect(reply.bytes[4] == Model.RERROR, "Tread denied");
+
+    // Write valid account
+    unused VecResize(body, 0);
+    req := "alice abc";
+    Model.PushU32(*body, 2);
+    Model.PushU64(*body, 0);
+    Model.PushU32(*body, cast(u32)req.count);
+    unused BuilderAppend(body, req);
+    MakePacket(Model.TWRITE, 5, VecSlice(body, 0, body.count), *pkt);
+    Model.HandlePacket(*srv, VecSlice(pkt, 0, pkt.count), MockCreate, *reply);
+    Expect(reply.bytes[4] == Model.RWRITE && TextView(created_user) == "alice" && created_secret[0] == 0xA9, "Twrite creates user");
+
+    if failures == 0 { print("usercreatesrv_test: all checks passed\n") }
+    return ifx failures == 0 then 0 else 1;
+}

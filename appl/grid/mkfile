@@ -14,7 +14,6 @@ TARG=\
 		reglisten.dis\
 		regstyxlisten.dis\
 		remotelogon.dis\
-		usercreatesrv.dis\
 
 MODULES=\
 
@@ -58,5 +57,13 @@ $DISBIN/jpg2bit.zx: jpg2bit.zx
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 jpg2bit.zx "$staged" && mv "$staged" "$target"
 
-install:V: $DISBIN/jpg2bit.zx
+usercreatesrv.zx: usercreatesrv.zi usercreatesrv_model.zi ../cmd/taijios_io.zi mkfile
+	ziran bundle --project --root . --module-path . --module-path ../cmd --bind-host taijios_io --entry usercreatesrv:main -o $target usercreatesrv.zi
+
+$DISBIN/usercreatesrv.zx: usercreatesrv.zx
+	staged=$(mktemp "$target.XXXXXX") &&
+	trap 'rm -f "$staged"' EXIT &&
+	install -m 0644 usercreatesrv.zx "$staged" && mv "$staged" "$target"
+
+install:V: $DISBIN/jpg2bit.zx $DISBIN/usercreatesrv.zx
 

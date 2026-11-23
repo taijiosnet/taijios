@@ -756,7 +756,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/grid/reglisten.dis | appl/grid/reglisten.b |  | - |  |
 | dis/grid/regstyxlisten.dis | appl/grid/regstyxlisten.b |  | - |  |
 | dis/grid/remotelogon.dis | appl/grid/remotelogon.b |  | - |  |
-| dis/grid/usercreatesrv.dis | appl/grid/usercreatesrv.b |  | - |  |
 
 ### 11. Demo - demonstration apps - 12 rows
 

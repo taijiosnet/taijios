@@ -1,0 +1,67 @@
+// 9P2000 user creation service over fd 0, ported from appl/grid/usercreatesrv.b.
+#import "std/vec"
+using IO :: #import "taijios_io"
+using Model :: #import "usercreatesrv_model"
+
+OREAD :: 0;
+OWRITE :: 1;
+DMDIR_PERM :: -2147483137; // DMDIR (0x80000000) | 0777
+PERM_600 :: 384;
+
+CreateAccount :: (uname: string, secret: []u8, err_out: *Text) -> bool {
+    unused VecResize(err_out.bytes, 0);
+    dir: Text;
+    unused BuilderAppend(dir.bytes, "/mnt/keys/");
+    unused BuilderAppend(dir.bytes, uname);
+    dfd := IO.Create(TextView(dir), OREAD, DMDIR_PERM);
+    if dfd < 0 {
+        unused BuilderAppend(err_out.bytes, "cannot create account: ");
+        unused BuilderAppend(err_out.bytes, IO.Error());
+        return false;
+    }
+    unused IO.Close(dfd);
+
+    sec_path: Text;
+    unused BuilderAppend(sec_path.bytes, TextView(dir));
+    unused BuilderAppend(sec_path.bytes, "/secret");
+    sfd := IO.Create(TextView(sec_path), OWRITE, PERM_600);
+    if sfd >= 0 {
+        unused IO.Write(sfd, TextView(secret));
+        unused IO.Close(sfd);
+    }
+    return true;
+}
+
+ReadExact :: (fd: s32, buf: []u8) -> bool {
+    got: s64 = 0;
+    while got < buf.count {
+        n := IO.Read(fd, buf[got:]);
+        if n <= 0 { return false }
+        got += cast(s64)n;
+    }
+    return true;
+}
+
+main :: () -> s32 {
+    srv: Model.Server;
+    Model.InitServer(*srv);
+    pkt: Vec(u8);
+    reply: Text;
+    hdr: [4]u8;
+
+    while ReadExact(0, hdr[:]) {
+        size := cast(s64)Model.ReadU32(hdr[:], 0);
+        if size < 7 || size > 65536 { break }
+        if !VecResizeBounded(pkt, size, 65536) { break }
+        pkt_slice := VecSlice(pkt, 0, size);
+        for i: 0..3 { pkt_slice[i] = hdr[i] }
+        if !ReadExact(0, pkt_slice[4:size]) { break }
+
+        Model.HandlePacket(*srv, pkt_slice, CreateAccount, *reply);
+        if reply.bytes.count > 0 {
+            out := TextView(reply);
+            if IO.Write(0, out) < out.count { return 1 }
+        }
+    }
+    return 0;
+}
