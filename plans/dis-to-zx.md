@@ -714,10 +714,20 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/demo/camera/readjpg.dis | unknown | module/grid/readjpg.m | - |  |
 | dis/demo/camera/tkinterface.dis | appl/demo/camera/tkinterface.b |  | - |  |
 
-### 12. Ebook - readers - 0 rows
+### 12. Ebook - readers - 10 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
+| dis/ebook/cssfont.dis | appl/ebook/cssfont.b |  | - |  |
+| dis/ebook/cssparser.dis | appl/ebook/cssparser.b |  | - |  |
+| dis/ebook/ebook.dis | appl/ebook/ebook.b |  | - |  |
+| dis/ebook/mimeimage.dis | appl/ebook/mimeimage.b |  | - |  |
+| dis/ebook/oebpackage.dis | appl/ebook/oebpackage.b |  | - |  |
+| dis/ebook/reader.dis | appl/ebook/reader.b |  | - |  |
+| dis/ebook/strmap.dis | appl/ebook/strmap.b |  | - |  |
+| dis/ebook/stylesheet.dis | appl/ebook/stylesheet.b |  | - |  |
+| dis/ebook/table.dis | appl/ebook/table.b |  | - |  |
+| dis/ebook/units.dis | appl/ebook/units.b |  | - |  |
 
 ### 13. Math - numeric modules - 9 rows
 
