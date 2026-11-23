@@ -145,6 +145,13 @@ zxwindowreply(ZxNativeWindow *window, int accepted)
 	return pending;
 }
 
+/*
+ * Queue one input event for the app. Returns 1 when it was queued, 0 when the
+ * window is closed or gone, and -1 when the window's queue is full: the event
+ * was not taken, so the caller keeps it and tries again rather than treating a
+ * busy app as a dead one. The caller decides whether to retry; this function
+ * never blocks, so a busy application cannot stall the window manager.
+ */
 int
 zxwindowinput(ZxNativeWindow *window, int *fields, vlong millis)
 {
@@ -166,7 +173,9 @@ zxwindowinput(ZxNativeWindow *window, int *fields, vlong millis)
 			event->millis = millis;
 			pthread_cond_signal(&window->changed);
 			queued = 1;
-		}
+		}else if(fields[0] != ZX_Move)
+			/* Full: not taken. A Move has already been folded above. */
+			queued = -1;
 	}
 	pthread_mutex_unlock(&window->lock);
 	return queued;

@@ -2772,7 +2772,7 @@ zxnativemanager(void *context, const char *module, const char *function,
 	ZxProcess *process;
 	ZxNativeRequest request;
 	ZxNativeWindow *window;
-	int i, kind, fields[9];
+	int i, kind, queued, fields[9];
 
 	USED(module);
 	if(strcmp(function, "StartWindow") == 0 || strcmp(function, "StartDesktop") == 0){
@@ -2899,10 +2899,19 @@ zxnativemanager(void *context, const char *module, const char *function,
 			return 0;
 		fields[i] = args[1].elements[i].integer;
 	}
-	if(fields[0] == ZX_Closed)
+	if(fields[0] == ZX_Closed){
+		/*
+		 * A window that closed is torn down here, and the dispatch itself
+		 * counts as done so the manager then closes the application.
+		 */
 		zxwindowdisconnect(window);
-	zxbool(result, fields[0] == ZX_Closed ? window != nil : zxwindowinput(window, fields, args[2].integer));
-	return 1;
+		return zxs32(result, 1);
+	}
+	queued = zxwindowinput(window, fields, args[2].integer);
+	/* Delivering an event is progress for the manager, as for any host call. */
+	if(queued >= 0)
+		BundleHostRenewSteps();
+	return zxs32(result, queued);
 }
 #endif
 

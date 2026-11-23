@@ -285,7 +285,7 @@ TaskWindow :: (manager: *Manager, app: *Application, task: bool) -> bool {
                 bounds := app.bounds;
                 fields: [9]s32 = .{Surface.Visibility, 0, 0, cast(s32)task, 0, 0,
                     bounds.right - bounds.left, bounds.bottom - bounds.top, 0};
-                if !Link.Dispatch(app.id, fields[:], -1) { Link.Disconnect(app.id) }
+                if Link.Dispatch(app.id, fields[:], -1) == 0 { Link.Disconnect(app.id) }
             }
         }
         return ok;
@@ -322,7 +322,7 @@ SetBounds :: (manager: *Manager, app: *Application, bounds: Draw.Rect) -> bool {
 
 NotifyResize :: (app: *Application, width: s32, height: s32) {
     fields: [9]s32 = .{Surface.Resize, 0, 0, 0, 0, 0, width, height, 0};
-    if !Link.Dispatch(app.id, fields[:], -1) { Link.Disconnect(app.id) }
+    if Link.Dispatch(app.id, fields[:], -1) == 0 { Link.Disconnect(app.id) }
 }
 
 CloseWindow :: (manager: *Manager, app: *Application) {
@@ -409,6 +409,14 @@ RefreshCaptions :: (manager: *Manager) -> bool {
 Run :: (manager: *Manager, input: s32) -> s32 {
     status: s32 = 0;
     while manager.apps.count != 0 {
+        // Hand over what a busy application's full queue refused, before
+        // reading more input or waiting for activity.
+        made_progress := false;
+        if retry_count > 0 {
+            before := retry_count;
+            FlushRetries();
+            made_progress = retry_count < before;
+        }
         for i: 0 .. 31 {
             event := Input.Next(input);
             if event.kind == 0 { break }
@@ -451,6 +459,10 @@ Run :: (manager: *Manager, input: s32) -> s32 {
             if !Paint(manager) { return Fail("repaint desktop") }
             manager.dirty = false;
         }
+        // A retry that gets through means the next turn must run even if
+        // nothing else happens, so skip the blocking wait once. Retries that
+        // keep failing fall through to the wait, which bounds the spin.
+        if made_progress { continue }
         if manager.apps.count != 0 && !Link.WaitActivity() { return Fail("wait for desktop activity") }
     }
     return status;
@@ -770,5 +782,44 @@ HandleInput :: (manager: *Manager, event: Input.Event) {
 Send :: (id: s32, kind: s32, x: s32, y: s32, button: s32, key: s32,
          modifiers: s32, rune: s32, millis: s64) {
     fields: [9]s32 = .{kind, x, y, button, key, modifiers, 0, 0, rune};
-    if !Link.Dispatch(id, fields[:], millis) { Link.Disconnect(id) }
+    // A busy app's full queue reports -1: keep the event for a retry next turn
+    // instead of dropping it, and never disconnect an app just for being busy.
+    status := Link.Dispatch(id, fields[:], millis);
+    if status == 0 { Link.Disconnect(id); return }
+    if status < 0 { QueueRetry(id, kind, x, y, button, key, modifiers, rune, millis) }
+}
+
+// Events the window manager could not hand over because the application's
+// queue was full. They are tried again before new input is read.
+RetryLimit :: 64;
+
+retry_count: s32;
+retry_fields: [RetryLimit][9]s32;
+retry_ids: [RetryLimit]s32;
+retry_millis: [RetryLimit]s64;
+
+QueueRetry :: (id: s32, kind: s32, x: s32, y: s32, button: s32, key: s32,
+               modifiers: s32, rune: s32, millis: s64) {
+    if retry_count >= RetryLimit { return }
+    retry_ids[retry_count] = id;
+    retry_fields[retry_count] = .{kind, x, y, button, key, modifiers, 0, 0, rune};
+    retry_millis[retry_count] = millis;
+    retry_count += 1;
+}
+
+FlushRetries :: () {
+    keep: s32 = 0;
+    for i: 0 .. retry_count - 1 {
+        id := retry_ids[i];
+        status := Link.Dispatch(id, retry_fields[i][:], retry_millis[i]);
+        if status == 0 { Link.Disconnect(id) }
+        else if status < 0 {
+            // Still full: hold it in the compacted list.
+            retry_ids[keep] = id;
+            retry_fields[keep] = retry_fields[i];
+            retry_millis[keep] = retry_millis[i];
+            keep += 1;
+        }
+    }
+    retry_count = keep;
 }

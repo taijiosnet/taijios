@@ -33,7 +33,9 @@ LaunchWindow :: (id: s32) -> s32 #foreign host_api;
 ApplyCursor :: (bytes: []u8) -> bool #reads #foreign host_api;
 
 // Events use zx_surface.SurfaceEvent order. The last field is the text rune.
-Dispatch :: (id: s32, fields: []s32, pointer_millis: s64) -> bool #reads #foreign host_api;
+// 1 means queued, 0 that the window is gone, and -1 that its event queue is
+// full right now: the event was not taken, so keep it and retry.
+Dispatch :: (id: s32, fields: []s32, pointer_millis: s64) -> s32 #reads #foreign host_api;
 Disconnect :: (id: s32) #foreign host_api;
 
 // Wait for input, an application request, or a completed child process.
