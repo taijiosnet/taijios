@@ -1,0 +1,104 @@
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+#import "kryon/geometry"
+#import "kryon/input_protocol"
+#import "kryon/session"
+#import "kryon/tree"
+#import "kryon/tree_input"
+
+Width :: 96;
+Height :: 64;
+
+stage: s32;
+
+Fail :: (reason: string, x: s32, y: s32) {
+    if stage >= 0 {
+        print("ZX_TERTIARY_FAIL % % %\n", reason, x, y);
+        stage = -1;
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch};
+    pointer := PointerSample(session);
+    secondary := SecondaryPointerSample(session);
+    tertiary := TertiaryPointerSample(session);
+    x := cast(s32)pointer.x;
+    y := cast(s32)pointer.y;
+
+    if stage == 0 {
+        if tertiary.pressed {
+            if tertiary.down && !tertiary.released &&
+               !pointer.down && !pointer.pressed && !pointer.released &&
+               !secondary.down && !secondary.pressed && !secondary.released &&
+               x == 24 && y == 20 {
+                stage = 1;
+                print("ZX_TERTIARY_PRESS % %\n", x, y);
+            } else {
+                Fail("press", x, y);
+            }
+        }
+    } else if stage == 1 {
+        if tertiary.down && !tertiary.pressed && !tertiary.released &&
+           !pointer.down && !secondary.down &&
+           x == 52 && y == 36 {
+            stage = 2;
+            print("ZX_TERTIARY_HOLD % %\n", x, y);
+        } else if tertiary.released {
+            Fail("early-release", x, y);
+        }
+    } else if stage == 2 {
+        if tertiary.released {
+            if !tertiary.down && !tertiary.pressed &&
+               !pointer.down && !pointer.released &&
+               !secondary.down && !secondary.released &&
+               x == 52 && y == 36 {
+                stage = 3;
+                print("ZX_TERTIARY_RELEASE % %\n", x, y);
+            } else {
+                Fail("release", x, y);
+            }
+        }
+    } else if stage == 3 {
+        if pointer.pressed {
+            if pointer.down && !secondary.down && !tertiary.down && !tertiary.pressed {
+                stage = 4;
+            } else {
+                Fail("primary-press", x, y);
+            }
+        }
+    } else if stage == 4 {
+        if pointer.released {
+            if !pointer.down && !secondary.down && !tertiary.down && !tertiary.released {
+                stage = 5;
+            } else {
+                Fail("primary-release", x, y);
+            }
+        }
+    } else if stage == 5 {
+        if secondary.pressed {
+            if secondary.down && !pointer.down && !tertiary.down && !tertiary.pressed {
+                stage = 6;
+            } else {
+                Fail("secondary-press", x, y);
+            }
+        }
+    } else if stage == 6 {
+        if secondary.released {
+            if !secondary.down && !pointer.down && !tertiary.down && !tertiary.released {
+                stage = 7;
+                print("ZX_TERTIARY_OK\n");
+            } else {
+                Fail("secondary-release", x, y);
+            }
+        }
+    }
+
+    unused Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, cast(float32)Width, cast(float32)Height},
+                               .fill = .{48, 128, 84, 255}});
+}
+
+#program_export
+main :: () -> s32 {
+    return Surface.RunRetained(.{.title = "Tertiary probe", .width = Width, .height = Height}, Draw, 0);
+}

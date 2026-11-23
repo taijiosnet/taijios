@@ -4,8 +4,8 @@ module_roots = ["."]
 
 [toolchain]
 git = "https://git.waozi.xyz/ziranlang/ziran.git"
-ref = "62d90ff97d10373f44f428bfff538f75185512e5"
+ref = "c041afb6de9b5f5f8be13c367563c267841e1cb6"
 
 [dependencies.kryon]
 git = "https://git.waozi.xyz/kryonlabs/kryon.git"
-ref = "39f7540d193ccaa2096e1115df608da8116b32b7"
+ref = "d0effa16a90b217a241145dd9f2f379627dfa8a7"

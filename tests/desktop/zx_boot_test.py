@@ -373,6 +373,68 @@ def check_window_manager(emulator, root, env):
     print('Native ZX WM placed, composited, switched and routed input to two real ZX windows')
 
 
+def check_tertiary_pointer(emulator, root, env):
+    from PIL import Image
+    from test_logwindow import private_display
+    from test_tcltk import launch, stop, until
+
+    wm = ROOT / 'appl/wm'
+    subprocess.run([
+        'ziran', 'bundle', '--project', '--bind-host', 'kryon/pixmap',
+        '--entry', 'tertiary_probe_test:main', '-o', root / 'tertiary.zx', 'tertiary_probe_test.zi',
+    ], cwd=wm, env=env, check=True, timeout=120)
+
+    with private_display() as display:
+        private_env = env | {'DISPLAY': display['DISPLAY']}
+        app = launch(private_env, emulator, '-v', '-r', root, '-g', '640x480', '/wm.zx',
+                     '/tertiary.zx', stdin=subprocess.DEVNULL,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        transcript = bytearray()
+
+        def desktop(*args, check=True):
+            return subprocess.run(args, env=private_env, capture_output=True, check=check, timeout=5).stdout
+
+        def wait_marker(label):
+            def seen():
+                assert app.poll() is None, f'tertiary probe exited early with {app.returncode}'
+                while select.select([app.stdout], [], [], 0)[0]:
+                    chunk = app.stdout.read1(1024)
+                    if not chunk:
+                        break
+                    transcript.extend(chunk)
+                assert b'ZX_TERTIARY_FAIL' not in transcript, transcript.decode(errors='replace')
+                return label.encode() + b'\n' in transcript
+            until(seen, f'missing {label}', timeout=10)
+
+        try:
+            window = until(lambda: desktop('xdotool', 'search', '--onlyvisible', '--name',
+                                           '^inferno$', check=False).decode().strip(), 'tertiary WM window missing')
+
+            def visible():
+                assert app.poll() is None, f'tertiary WM exited with {app.returncode}'
+                frame = Image.open(io.BytesIO(desktop('import', '-window', window, 'png:-'))).convert('RGB')
+                return frame.getpixel((24, 20)) == (48, 128, 84)
+
+            until(visible, 'tertiary probe window was not painted')
+            desktop('xdotool', 'windowfocus', window)
+            desktop('xdotool', 'mousemove', '--window', window, '24', '20', 'mousedown', '2')
+            wait_marker('ZX_TERTIARY_PRESS 24 20')
+            desktop('xdotool', 'mousemove', '--window', window, '52', '36')
+            wait_marker('ZX_TERTIARY_HOLD 52 36')
+            desktop('xdotool', 'mouseup', '2')
+            wait_marker('ZX_TERTIARY_RELEASE 52 36')
+            desktop('xdotool', 'mousemove', '--window', window, '30', '30', 'click', '1')
+            desktop('xdotool', 'mousemove', '--window', window, '34', '30', 'click', '3')
+            wait_marker('ZX_TERTIARY_OK')
+        except (AssertionError, subprocess.SubprocessError) as error:
+            stop(app)
+            raise AssertionError(f'{error}\n{transcript.decode(errors="replace")}') from error
+        finally:
+            stop(app)
+            app.stdout.close()
+    print('Native ZX WM delivered middle-button press, hold and release at the right position without changing buttons 1 and 3')
+
+
 def check_desktop_shell(emulator, root, env):
     from PIL import Image
     from test_logwindow import private_display
@@ -921,6 +983,7 @@ def main():
         if args.graphics:
             check_draw(emulator, root, env)
             check_window_manager(emulator, root, env)
+            check_tertiary_pointer(emulator, root, env)
             check_desktop_shell(emulator, root, env)
             check_catalog_apps(emulator, root, env)
             check_image_viewer(emulator, root, env)
