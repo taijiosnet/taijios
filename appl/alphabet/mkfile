@@ -94,9 +94,29 @@ ZXSOURCES=\
 	abc/type.zi\
 	abc/typeset.zi\
 	abc/undeclare.zi\
+	fs/fsvalue.zi\
+	fs/filepat.zi\
+	fs/fstypes.zi\
+	fs/walk.zi\
+	fs/entries.zi\
+	fs/print.zi\
+	fs/size.zi\
+	fs/ls.zi\
+	fs/filter.zi\
+	fs/match.zi\
+	fs/select.zi\
+	fs/and.zi\
+	fs/or.zi\
+	fs/not.zi\
+	fs/depth.zi\
+	fs/mode.zi\
+	fs/path.zi\
+	fs/newer.zi\
+	fs/compose.zi\
+	fs/setroot.zi\
 
 alphabet.zx: $ZXSOURCES mkfile
-	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../lib --module-path main=main --module-path abc=abc --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
+	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../lib --module-path main=main --module-path abc=abc --module-path fs=fs --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_files --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
 
 $ROOT/dis/alphabet.zx: alphabet.zx
 	staged=$(mktemp "$target.XXXXXX") &&

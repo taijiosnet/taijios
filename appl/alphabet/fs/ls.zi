@@ -1,0 +1,121 @@
+// /fs/ls [-um] entries -> fd: each entry as ls -l writes it: mode, device
+// type and number, owner, group, length, modification time (-u: access
+// time) and path; -m puts the last modifier first.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+Ty :: #import "alpha_types";
+Files :: #import "taijios_files";
+Time :: #import "taijios_time";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "ls", "ft-u-m", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    v := St.FillStream(Fill);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "/fs/ls"));
+    flags: s32 = 0;
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "m" { flags |= 1 }
+        if Al.OptLetter(call, i) == #char "u" { flags |= 2 }
+    }
+    Va.SetRawHandle(v, flags);
+    return v;
+}
+
+#scope_file
+
+MODES: [8]string = .["---", "--x", "-w-", "-wx", "r--", "r-x", "rw-", "rwx"];
+MONTHS: [12]string = .["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+Fill :: (v: s32) -> St.Chunk {
+    e := EntriesNext(Va.Kid(v, 0), true);
+    if !e.ok { return St.Chunk.{text = "", more = false} }
+    flags := Va.RawHandle(v);
+    d := e.dir;
+    out: Vec(u8);
+    if (flags & 1) != 0 { BuilderPrint(*out, "[%] ", d.muid) }
+    BuilderAppend(out, Modes(d.mode));
+    VecPush(out, #char " ");
+    Ty.AppendRune(*out, d.dtype);
+    t := ifx (flags & 2) != 0 then d.atime else d.mtime;
+    BuilderPrint(*out, " % % % % % %\n", d.dev, d.uid, d.gid, d.length, Filet(Now(), cast(s64)t), e.path);
+    return St.Chunk.{text = BuilderFinish(out), more = true};
+}
+
+Modes :: (mode: u32) -> string {
+    out: Vec(u8);
+    if (mode & DMDIR) != 0 {
+        VecPush(out, #char "d");
+    } else if (mode & DMAPPEND) != 0 {
+        VecPush(out, #char "a");
+    } else if (mode & DMAUTH) != 0 {
+        VecPush(out, #char "A");
+    } else {
+        VecPush(out, #char "-");
+    }
+    VecPush(out, ifx (mode & DMEXCL) != 0 then #char "l" else #char "-");
+    BuilderAppend(out, MODES[(mode >> 6) & 7]);
+    BuilderAppend(out, MODES[(mode >> 3) & 7]);
+    BuilderAppend(out, MODES[mode & 7]);
+    return BuilderFinish(out);
+}
+
+Now :: () -> s64 {
+    time: [32]u8;
+    size := Files.ReadBytesAt("/dev/time", 0, time[:]);
+    if size <= 0 { return 0 }
+    micros: s64 = 0;
+    for time[:size] {
+        if it < #char "0" || it > #char "9" { break }
+        micros = micros * 10 + cast(s64)(it - #char "0");
+    }
+    return micros / 1000000;
+}
+
+// Daytime's filet: "Mmm dd hh:mm" for a time within six months, else
+// "Mmm dd  yyyy", in local time.
+Filet :: (now: s64, file: s64) -> string {
+    zone: [2048]u8;
+    n := Files.ReadBytesAt("/env/timezone", 0, zone[:]);
+    if n <= 0 { n = Files.ReadBytesAt("/locale/timezone", 0, zone[:]) }
+    local := file;
+    if n > 0 { local += Time.ZoneOffset(TextView(zone[:n]), file) }
+    days := local / 86400;
+    secs := local % 86400;
+    if secs < 0 {
+        secs += 86400;
+        days -= 1;
+    }
+    year, month, day := Civil(days);
+    out: Vec(u8);
+    if now - file < 6 * 30 * 24 * 3600 {
+        BuilderPrint(*out, "% %:", MONTHS[month - 1], Two(day));
+        BuilderPrint(*out, "%:%", Two(secs / 3600), Two((secs / 60) % 60));
+    } else {
+        BuilderPrint(*out, "% %  %", MONTHS[month - 1], Two(day), year);
+    }
+    return BuilderFinish(out);
+}
+
+Two :: (n: s64) -> string {
+    out: Vec(u8);
+    if n < 10 { VecPush(out, #char "0") }
+    BuilderPrint(*out, "%", n);
+    return BuilderFinish(out);
+}
+
+// The civil date of a day count from 1970-01-01.
+Civil :: (z_in: s64) -> (year: s64, month: s64, day: s64) {
+    z := z_in + 719468;
+    era := ifx z >= 0 then z / 146097 else (z - 146096) / 146097;
+    doe := z - era * 146097;
+    yoe := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y := yoe + era * 400;
+    doy := doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp := (5 * doy + 2) / 153;
+    d := doy - (153 * mp + 2) / 5 + 1;
+    m := ifx mp < 10 then mp + 3 else mp - 9;
+    return ifx m <= 2 then y + 1 else y, m, d;
+}

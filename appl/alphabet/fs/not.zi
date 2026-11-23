@@ -1,0 +1,19 @@
+// /fs/not gate -> gate: the entries the gate stops.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "not", "pp", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("not", Gate) }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetKids(v, call.args[0:1]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Gate :: (v: s32, e: *EntryItem) -> bool { return !Query(Va.Kid(v, 0), e) }

@@ -1,0 +1,99 @@
+// /fs/entries fs -> entries: each entry of a tree with its path and depth.
+#import "std/vec";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "entries", "tx", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = EntriesProducer("entries", Next1) }
+    v := Va.NewValue(#char "t", prod);
+    Va.SetKids(v, call.args[0:1]);
+    e: EntriesState;
+    e.reply = Start;
+    VecPush(entries_states, e);
+    Va.SetN0(v, entries_states.count - 1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+EntriesState :: struct {
+    names: Vec(string);
+    name: string;
+    indent: s64;
+    reply: s32;  // the answer the tree gets with the next request
+    started: bool;
+    over: bool;
+}
+
+entries_states: Vec(EntriesState);
+
+Next1 :: (v: s32, go: bool) -> EntryItem {
+    s := Va.N0(v);
+    src := Va.Kid(v, 0);
+    none: EntryItem;
+    if entries_states[s].over { return none }
+    if !entries_states[s].started {
+        entries_states[s].started = true;
+        if !go {
+            entries_states[s].over = true;
+            first := FsNext(src, Start);
+            if first.kind != Done { unused FsNext(src, Quit) }
+            return none;
+        }
+    }
+    while true {
+        item := FsNext(src, entries_states[s].reply);
+        if item.kind == Done {
+            entries_states[s].over = true;
+            return none;
+        }
+        if item.kind == Entry {
+            d := item.dir;
+            depth := entries_states[s].indent;
+            p: string;
+            if IsDir(d) {
+                VecPush(entries_states[s].names, entries_states[s].name);
+                if entries_states[s].indent == 0 {
+                    entries_states[s].name = d.name;
+                } else {
+                    entries_states[s].name = Slash(entries_states[s].name, d.name);
+                }
+                entries_states[s].indent += 1;
+                entries_states[s].reply = Down;
+                p = entries_states[s].name;
+            } else {
+                p = Slash(entries_states[s].name, d.name);
+                entries_states[s].reply = Next;
+            }
+            return EntryItemOf(d, p, depth);
+        }
+        entries_states[s].reply = Next;
+        if item.kind == End {
+            entries_states[s].indent -= 1;
+            if entries_states[s].indent == 0 {
+                unused FsNext(src, Next);
+                entries_states[s].over = true;
+                return none;
+            }
+            last := VecPop(entries_states[s].names);
+            entries_states[s].name = last.value;
+        }
+    }
+    return none;
+}
+
+// a/b, with one slash between.
+Slash :: (a: string, b: string) -> string {
+    out: Vec(u8);
+    BuilderAppend(out, a);
+    if a.count == 0 || a[a.count - 1] != #char "/" { VecPush(out, #char "/") }
+    BuilderAppend(out, b);
+    return BuilderFinish(out);
+}
+
+#import "std/option";

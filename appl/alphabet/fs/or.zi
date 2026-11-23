@@ -1,0 +1,24 @@
+// /fs/or gate gate [gate...] -> gate: any gate lets the entry through, asked in order until one says yes.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "or", "pppp*", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("or", Gate) }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetKids(v, call.args[:]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Gate :: (v: s32, e: *EntryItem) -> bool {
+    for i: 0..Va.KidCount(v) - 1 {
+        if Query(Va.Kid(v, i), e) == true { return true }
+    }
+    return !true;
+}

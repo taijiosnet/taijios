@@ -1,0 +1,28 @@
+// /fs/size entries -> fd: the sum of the entries' lengths.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "size", "ft", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    v := St.FillStream(Fill);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "size"));
+    return v;
+}
+
+#scope_file
+
+Fill :: (v: s32) -> St.Chunk {
+    size: s64 = 0;
+    while true {
+        e := EntriesNext(Va.Kid(v, 0), true);
+        if !e.ok { break }
+        size += e.dir.length;
+    }
+    out: Vec(u8);
+    BuilderPrint(*out, "%\n", size);
+    return St.Chunk.{text = BuilderFinish(out), more = false};
+}

@@ -1,0 +1,26 @@
+// /fs/newer [-d] -> selector: of two entries the newer, or the one there
+// is; -d takes both of two directories.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "newer", "m-d", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = SelectorProducer("newer", Cmp) }
+    v := Va.NewValue(#char "m", prod);
+    Va.SetN0(v, ifx Al.OptCount(call) > 0 then 1 else 0);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Cmp :: (v: s32, d0: *FsDir, d1: *FsDir, has0: bool, has1: bool) -> s32 {
+    if !has0 { return 2 }
+    if !has1 { return 1 }
+    if Va.N0(v) == 1 && IsDir(<<d0) { return 3 }
+    if d0.mtime > d1.mtime { return 1 }
+    return 2;
+}

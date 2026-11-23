@@ -1,0 +1,52 @@
+// /fs/compose [-d] string -> selector: of entries in A and B, those a
+// compositing op names: AinB, BinA, AoutB, BoutA, A, B, AoverB, AatopB,
+// AxorB, BoverA or BatopA; -d takes both of two directories.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "compose", "ms-d", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = SelectorProducer("compose", Cmp) }
+    s := Va.ValueText(call.args[0]);
+    op: s64 = -1;
+    for OPS { if it == s { op = it_index } }
+    if op < 0 {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: join: bad op %\n", Ty.Q(s));
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return -1;
+    }
+    v := Va.NewValue(#char "m", prod);
+    t: s64 = 0;
+    // t[x] for x = (d1 there) << 1 | (d0 there), two bits each
+    if (op & AinB) != 0 { t |= 1 << 6 }
+    if (op & BinA) != 0 { t = (t & ~(3 << 6)) | (2 << 6) }
+    if (op & AoutB) != 0 { t |= 1 << 2 }
+    if (op & BoutA) != 0 { t |= 2 << 4 }
+    Va.SetN0(v, t);
+    Va.SetN1(v, ifx Al.OptCount(call) > 0 then 1 else 0);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+AinB :: 8;
+BinA :: 4;
+AoutB :: 2;
+BoutA :: 1;
+
+// The op names at their bits, as the Dis table held them.
+OPS: [12]string = .["", "BoutA", "AoutB", "AxorB", "BinA", "B", "BatopA", "BoverA", "AinB", "AatopB", "A", "AoverB"];
+
+Cmp :: (v: s32, d0: *FsDir, d1: *FsDir, has0: bool, has1: bool) -> s32 {
+    x: s64 = (ifx has1 then 2 else 0) | (ifx has0 then 1 else 0);
+    r := cast(s32)((Va.N0(v) >> (2 * x)) & 3);
+    if Va.N1(v) == 1 && r == 0 && x == 3 && (d0.mode & d1.mode & DMDIR) != 0 { r = 3 }
+    return r;
+}

@@ -39,6 +39,30 @@ WfdHandle :: (handle: s32, errc: s32) -> s32 {
     return v;
 }
 
+// The next chunk of a filled stream; more is false with the last one.
+Chunk :: struct {
+    text: string;
+    more: bool;
+}
+
+FillOp :: #type (v: s32) -> Chunk;
+
+// An fd value whose bytes come in chunks from fill, until it has no more.
+FillStream :: (fill: FillOp) -> s32 {
+    k: s64 = -1;
+    for fills { if it == fill { k = it_index } }
+    if k < 0 {
+        p := Va.BlankProducer("fill");
+        p.read = FillRead;
+        VecPush(fill_prods, Va.AddProducer(p));
+        VecPush(fills, fill);
+        k = fills.count - 1;
+    }
+    v := Va.NewValue(#char "f", fill_prods[k]);
+    Va.SetN1(v, k);
+    return v;
+}
+
 // A handle for descriptor number n of the process, as sys->fildes gave
 // one, or -1 when it is not open.
 Fildes :: (n: s64, mode: s32) -> s32 {
@@ -56,6 +80,22 @@ ReleaseHandle :: (h: s32) {
 #scope_file
 
 text_prod: s32 = -1;
+fills: Vec(FillOp);
+fill_prods: Vec(s32);
+
+// Serves the chunk in hand, then asks fill for the next; N2 is 1 once
+// fill has said there is no more.
+FillRead :: (v: s32, buffer: []u8) -> s64 {
+    while true {
+        n := TextRead(v, buffer);
+        if n > 0 || Va.N2(v) == 1 { return n }
+        chunk := fills[Va.N1(v)](v);
+        Va.SetText(v, chunk.text);
+        Va.SetN0(v, 0);
+        if !chunk.more { Va.SetN2(v, 1) }
+    }
+    return 0;
+}
 handle_prod: s32 = -1;
 
 TextRead :: (v: s32, buffer: []u8) -> s64 {

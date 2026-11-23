@@ -1,0 +1,41 @@
+// /fs/match [-ar] string -> gate: entries whose name fits a shell pattern;
+// -a tries the whole path, -r takes the pattern as a regular expression.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+using Io :: #import "taijios_io";
+using Fs :: #import "fs/fsvalue";
+Filepat :: #import "fs/filepat";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "match", "ps-a-r", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("match", Gate) }
+    pat := Va.ValueText(call.args[0]);
+    all := false;
+    regex := false;
+    for i: 0..Al.OptCount(call) - 1 {
+        if Al.OptLetter(call, i) == #char "a" { all = true }
+        if Al.OptLetter(call, i) == #char "r" { regex = true }
+    }
+    if regex {
+        // no ZX regex library yet
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: match: regex error on %: regular expressions are not available to ZX programs yet\n", Ty.QQ(pat));
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return -1;
+    }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetText(v, pat);
+    Va.SetN0(v, ifx all then 1 else 0);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Gate :: (v: s32, e: *EntryItem) -> bool {
+    name := ifx Va.N0(v) == 1 then e.path else e.dir.name;
+    return Filepat.Match(Va.ValueText(v), name);
+}

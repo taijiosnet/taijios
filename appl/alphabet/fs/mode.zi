@@ -1,0 +1,93 @@
+// /fs/mode string -> gate: entries whose mode fits a chmod-style
+// specification such as u+x, go-w or =rw.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "mode", "ps", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("mode", Gate) }
+    spec := Va.ValueText(call.args[0]);
+    ok, mask, mode := ParseMode(spec);
+    if !ok {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: mode: bad mode %\n", Ty.QQ(spec));
+        unused Io.WriteBytes(2, BuilderFinish(out));
+        return -1;
+    }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetN0(v, mask);
+    Va.SetN1(v, mode & mask);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+USER :: 0x1C0;  // 0700
+GROUP :: 0x38;  // 070
+OTHER :: 0x7;   // 07
+ALL :: 0x1FF;   // 0777
+READ :: 0x124;  // 0444
+WRITE :: 0x92;  // 0222
+EXEC :: 0x49;   // 0111
+
+Gate :: (v: s32, e: *EntryItem) -> bool {
+    return ((cast(s64)e.dir.mode & Va.N0(v)) ^ Va.N1(v)) == 0;
+}
+
+// chmod's mode parsing: (ok, mask, mode).
+ParseMode :: (spec: string) -> (ok: bool, mask: s64, mode: s64) {
+    mask: s64 = cast(s64)(DMAPPEND | DMEXCL | DMDIR | DMAUTH);
+    i: s64 = 0;
+    while i < spec.count {
+        c := spec[i];
+        if c == #char "u" {
+            mask |= USER;
+        } else if c == #char "g" {
+            mask |= GROUP;
+        } else if c == #char "o" {
+            mask |= OTHER;
+        } else if c == #char "a" {
+            mask |= ALL;
+        } else {
+            break;
+        }
+        i += 1;
+    }
+    if i == spec.count { return false, 0, 0 }
+    if i == 0 { mask |= ALL }
+    op := spec[i];
+    i += 1;
+    if op != #char "+" && op != #char "-" && op != #char "=" { return false, 0, 0 }
+    mode: s64 = 0;
+    while i < spec.count {
+        c := spec[i];
+        if c == #char "r" {
+            mode |= READ;
+        } else if c == #char "w" {
+            mode |= WRITE;
+        } else if c == #char "x" {
+            mode |= EXEC;
+        } else if c == #char "a" {
+            mode |= DMAPPEND;
+        } else if c == #char "l" {
+            mode |= DMEXCL;
+        } else if c == #char "d" {
+            mode |= DMDIR;
+        } else if c == #char "A" {
+            mode |= DMAUTH;
+        } else {
+            return false, 0, 0;
+        }
+        i += 1;
+    }
+    if op == #char "+" || op == #char "-" { mask &= mode }
+    if op == #char "-" { mode = ~mode }
+    // Limbo's int is 32 bits
+    return true, mask & 0xFFFFFFFF, mode & 0xFFFFFFFF;
+}

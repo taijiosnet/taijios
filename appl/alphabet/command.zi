@@ -57,6 +57,7 @@ RunText :: (state: *Bu.State, text: string) -> string {
             status = "parse error";
         } else if n >= 0 {
             status = Bu.RunTree(state, n);
+            if state.raised { break }
         }
         if next <= at { break }
         at = next;

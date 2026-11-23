@@ -16,9 +16,12 @@ Arg :: struct {
     cmd: s32; // a block, or -1
 }
 
-// The alphabet the builtins act on; clear replaces it.
+// The alphabet the builtins act on; clear replaces it. raised is set when
+// a builtin failed as the shell's builtins did, by an exception that ends
+// the script it is in.
 State :: struct {
     alphabet: s32;
+    raised: bool;
 }
 
 DeclaresOp :: #type (sx: s32, decls: s32, errc: s32) -> string;
@@ -348,23 +351,32 @@ RunTree :: (state: *State, n: s32) -> string {
     if n < 0 { return "" }
     k := Sh.Kind(n);
     if k == Sh.Seq {
-        unused RunTree(state, Sh.Left(n));
+        status := RunTree(state, Sh.Left(n));
+        if state.raised { return status }
         return RunTree(state, Sh.Right(n));
     }
     if k == Sh.Nowait || k == Sh.Block { return RunTree(state, Sh.Left(n)) }
     argv: Vec(Arg);
     status := Glom(state, n, *argv);
-    if status.count > 0 { return status }
+    if status.count > 0 {
+        state.raised = true;
+        return status;
+    }
     if argv.count == 0 { return "" }
     name := argv[0].word;
     if IsBuiltin(name) {
-        status := Run(state, argv[:]);
-        return TextDetach(TextCopy(status));
+        result := Run(state, argv[:]);
+        // only the evaluation's own status is not an exception
+        if result.count > 0 && (name != "-" || result == "usage") { state.raised = true }
+        return TextDetach(TextCopy(result));
     }
     if IsSBuiltin(name) {
         words: Vec(Arg);
         failed := RunS(state, argv[:], *words);
-        if failed.count > 0 { return TextDetach(TextCopy(failed)) }
+        if failed.count > 0 {
+            state.raised = true;
+            return TextDetach(TextCopy(failed));
+        }
         Echo(words[:]);
         return "";
     }
@@ -374,7 +386,10 @@ RunTree :: (state: *State, n: s32) -> string {
     }
     if name == "load" { return "" }
     if name == "whatis" {
-        if argv.count < 2 { return Usage("whatis name ...") }
+        if argv.count < 2 {
+            state.raised = true;
+            return Usage("whatis name ...");
+        }
         for argv[1:] {
             w := Whatis(state, Word(it));
             if w.count > 0 {

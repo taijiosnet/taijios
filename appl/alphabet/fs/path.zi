@@ -1,0 +1,50 @@
+// /fs/path [-x] string [string...] -> gate: entries at or above or below
+// one of the paths; -x: entries not at or below any of them.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "path", "pss*-x", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("path", Gate) }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetKids(v, call.args[:]);
+    Va.SetN0(v, ifx Al.OptCount(call) > 0 then 1 else 0);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+// The paths were listed last first.
+Gate :: (v: s32, e: *EntryItem) -> bool {
+    path := e.path;
+    xflag := Va.N0(v) == 1;
+    i := Va.KidCount(v) - 1;
+    while i >= 0 {
+        p := Va.ValueText(Va.Kid(v, i));
+        i -= 1;
+        if xflag {
+            r := true;
+            if path.count > p.count {
+                r = path[p.count] != #char "/" || path[0:p.count] != p;
+            } else if path.count == p.count {
+                r = path != p;
+            }
+            if !r { return false }
+        } else {
+            r := false;
+            if path.count > p.count {
+                r = path[p.count] == #char "/" && path[0:p.count] == p;
+            } else if path.count == p.count {
+                r = path == p;
+            } else {
+                r = p[path.count] == #char "/" && p[0:path.count] == path;
+            }
+            if r { return true }
+        }
+    }
+    return xflag;
+}

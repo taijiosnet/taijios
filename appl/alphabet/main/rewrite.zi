@@ -14,7 +14,7 @@ Run :: (call: *Al.Call) -> s32 {
     none: []Bu.Arg;
     Bu.Init(*state, none);
     status := Bu.RunTree(*state, decls);
-    if status.count == 0 {
+    if !state.raised {
         argv: Vec(Bu.Arg);
         VecPush(argv, Bu.Arg.{word = "rewrite", cmd = -1});
         VecPush(argv, Bu.Arg.{cmd = expr});

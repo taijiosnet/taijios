@@ -1,0 +1,189 @@
+// /fs/setroot [-c] fs string -> fs: the tree with its root renamed; with
+// -c the root's path is made of directories, one for each element.
+#import "std/vec";
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "setroot", "xxs-c", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = FsProducer("setroot", Next1) }
+    root := Va.ValueText(call.args[1]);
+    cflag := Al.OptCount(call) > 0;
+    if root.count == 0 && !cflag {
+        unused Io.WriteBytes(2, "fs: setroot: empty path\n");
+        return -1;
+    }
+    v := Va.NewValue(#char "x", prod);
+    Va.SetKids(v, call.args[0:1]);
+    s: SetrootState;
+    s.root = root;
+    s.cflag = cflag;
+    VecPush(setroot_states, s);
+    Va.SetN0(v, setroot_states.count - 1);
+    return v;
+}
+
+// fs->copy, item by item: passes the contents of the current directory
+// on until its end. The caller keeps indent, starting at 1.
+CopyItem :: (src: s32, reply: s32, indent: *s64, last: *Item) -> (item: Item, over: bool, quit: bool) {
+    if reply == Quit {
+        unused FsNext(src, Quit);
+        return ItemOf(Done), true, true;
+    }
+    if reply == Next && last.kind == End {
+        <<indent = indent.* - 1;
+        if indent.* == 0 {
+            unused FsNext(src, Next);
+            return ItemOf(Done), true, false;
+        }
+    } else if reply == Skip {
+        <<indent = indent.* - 1;
+        if indent.* == 0 {
+            unused FsNext(src, Skip);
+            return ItemOf(Done), true, false;
+        }
+    } else if reply == Down && last.kind == Entry {
+        <<indent = indent.* + 1;
+    }
+    item := FsNext(src, reply);
+    <<last = item;
+    return item, false, false;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+ROOT :: 0;
+ELEMS :: 1;
+COPY :: 2;
+ENDS :: 3;
+OVER :: 4;
+
+SetrootState :: struct {
+    root: string;
+    cflag: bool;
+    phase: s32;
+    started: bool;
+    dir: s64;           // the source's root, in root_dirs
+    elems: Vec(string);
+    k: s64;
+    lev: s64;
+    r: s32;
+    indent: s64;
+    last: Item;
+}
+
+setroot_states: Vec(SetrootState);
+root_dirs: Vec(FsDir);
+
+Next1 :: (v: s32, reply: s32) -> Item {
+    s := Va.N0(v);
+    src := Va.Kid(v, 0);
+    if setroot_states[s].phase == OVER { return ItemOf(Done) }
+    if !setroot_states[s].started {
+        setroot_states[s].started = true;
+        first := FsNext(src, Start);
+        if first.kind == Done { return Over(s) }
+        VecPush(root_dirs, first.dir);
+        setroot_states[s].dir = root_dirs.count - 1;
+        if !setroot_states[s].cflag {
+            d := first.dir;
+            d.name = setroot_states[s].root;
+            setroot_states[s].phase = ROOT;
+            return EntryOf(d);
+        }
+        root := setroot_states[s].root;
+        if root.count == 0 { root = first.dir.name }
+        if root[0] == #char "/" { VecPush(setroot_states[s].elems, "/") }
+        for Tokens(root) { VecPush(setroot_states[s].elems, it) }
+        setroot_states[s].phase = ELEMS;
+        return Elem(s);
+    }
+    phase := setroot_states[s].phase;
+    if phase == ROOT {
+        if reply != Down {
+            unused FsNext(src, Quit);
+            return Over(s);
+        }
+        setroot_states[s].indent = 1;
+        setroot_states[s].phase = COPY;
+        return Copy(s, src, Down);
+    }
+    if phase == ELEMS {
+        r := reply;
+        setroot_states[s].r = r;
+        if r == Quit {
+            unused FsNext(src, Quit);
+            return Over(s);
+        }
+        // a break in a Limbo case leaves only the case
+        if r == Next { setroot_states[s].lev += 1 }
+        setroot_states[s].lev += 1;
+        setroot_states[s].k += 1;
+        if setroot_states[s].k < setroot_states[s].elems.count { return Elem(s) }
+        if r != Down {
+            unused FsNext(src, Quit);
+            return Ends(s);
+        }
+        setroot_states[s].indent = 1;
+        setroot_states[s].phase = COPY;
+        return Copy(s, src, Down);
+    }
+    if phase == COPY {
+        item, over, quit := CopyItem(src, reply, *setroot_states[s].indent, *setroot_states[s].last);
+        if quit { return Over(s) }
+        if over {
+            if !setroot_states[s].cflag { return Over(s) }
+            return Ends(s);
+        }
+        return item;
+    }
+    // ENDS: the answer to an end of a made directory
+    if reply == Quit { return Over(s) }
+    return Ends(s);
+}
+
+Elem :: (s: s64) -> Item {
+    d := root_dirs[setroot_states[s].dir];
+    d.name = setroot_states[s].elems[setroot_states[s].k];
+    return EntryOf(d);
+}
+
+// The first item of the root's contents.
+Copy :: (s: s64, src: s32, reply: s32) -> Item {
+    item := FsNext(src, reply);
+    setroot_states[s].last = item;
+    return item;
+}
+
+// An end for each made directory but the last.
+Ends :: (s: s64) -> Item {
+    setroot_states[s].phase = ENDS;
+    if setroot_states[s].lev > 1 {
+        setroot_states[s].lev -= 1;
+        return ItemOf(End);
+    }
+    return Over(s);
+}
+
+Over :: (s: s64) -> Item {
+    setroot_states[s].phase = OVER;
+    return ItemOf(Done);
+}
+
+// sys->tokenize(root, "/"): the elements between slashes.
+Tokens :: (s: string) -> Vec(string) {
+    out: Vec(string);
+    i: s64 = 0;
+    while i < s.count {
+        while i < s.count && s[i] == #char "/" { i += 1 }
+        start := i;
+        while i < s.count && s[i] != #char "/" { i += 1 }
+        if i > start { VecPush(out, s[start:i]) }
+    }
+    return out;
+}

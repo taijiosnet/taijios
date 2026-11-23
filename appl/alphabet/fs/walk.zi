@@ -1,0 +1,271 @@
+// /fs/walk string -> fs: the file tree below a directory, entries in name
+// order, a file's data read as it is asked for. A directory met twice on
+// the way down is a loop and is left out.
+#import "std/vec";
+#import "std/option";
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+Ty :: #import "alpha_types";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "walk", "xs-bs", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = FsProducer("walk", WalkNext) }
+    path := Va.ValueText(call.args[0]);
+    d, ok := StatPath(path);
+    if !ok {
+        Line(Va.WithError(Al.Join("fs: walk: cannot stat ", Ty.Q(path))));
+        return -1;
+    }
+    if !IsDir(d) {
+        out: Vec(u8);
+        BuilderPrint(*out, "fs: walk: % is not a directory", Ty.Q(path));
+        Line(BuilderFinish(out));
+        return -1;
+    }
+    v := Va.NewValue(#char "x", prod);
+    w: Walk;
+    w.root = path;
+    w.errc = Va.ReportStart(call.report, "walk");
+    w.fh = -1;
+    VecPush(walks, w);
+    Va.SetN0(v, walks.count - 1);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+// What the item given last was, so a reply knows what it answers.
+NONE :: 0;
+ROOT :: 1;
+DIRENTRY :: 2;
+FILEENTRY :: 3;
+DATA :: 4;
+FILEEND :: 5;
+DIREND :: 6;
+OVER :: 7;
+
+Frame :: struct {
+    path: string;    // with a trailing /
+    entries: Vec(FsDir);
+    loop: Vec(bool); // an entry that would make a loop
+    i: s64;
+}
+
+Walk :: struct {
+    root: string;
+    errc: s32;
+    frames: Vec(Frame);
+    entered: Vec(FsDir); // the directories on the way down, for loops
+    last: s32;
+    fh: s32;
+    fpath: string;
+    flength: s64;
+    fread: s64;
+}
+
+walks: Vec(Walk);
+
+Line :: (message: string) {
+    out: Vec(u8);
+    BuilderPrint(*out, "%\n", message);
+    unused Io.WriteBytes(2, BuilderFinish(out));
+}
+
+Report :: (w: s64, message: string) { Va.Report(walks[w].errc, message) }
+
+SameDir :: (a: FsDir, b: FsDir) -> bool {
+    return a.qpath == b.qpath && a.qtype == b.qtype && a.dtype == b.dtype && a.dev == b.dev;
+}
+
+// Loopcheck.enter: false when d is already on the way down.
+Enter :: (w: s64, d: FsDir) -> bool {
+    i: s64 = 0;
+    while i < walks[w].entered.count {
+        if SameDir(walks[w].entered[i], d) { return false }
+        i += 1;
+    }
+    VecPush(walks[w].entered, d);
+    return true;
+}
+
+Leave :: (w: s64) {
+    if walks[w].entered.count > 0 { unused VecResize(walks[w].entered, walks[w].entered.count - 1) }
+}
+
+// fswalkdir's start: read the directory and mark its loops.
+Push :: (w: s64, path: string) {
+    f: Frame;
+    f.path = path;
+    if !ReadDir(path, *f.entries) {
+        Report(w, Va.WithError(Al.Join("cannot readdir ", Ty.Q(path))));
+        VecClear(f.entries);
+    }
+    for f.entries {
+        loop := false;
+        if IsDir(it) { loop = !Enter(w, it) }
+        VecPush(f.loop, loop);
+    }
+    VecPush(walks[w].frames, f);
+}
+
+// The end of the innermost directory: its loop marks are let go.
+Pop :: (w: s64) -> Item {
+    k := walks[w].frames.count - 1;
+    i := walks[w].frames[k].entries.count - 1;
+    while i >= 0 {
+        if IsDir(walks[w].frames[k].entries[i]) && !walks[w].frames[k].loop[i] { Leave(w) }
+        i -= 1;
+    }
+    unused VecPop(walks[w].frames);
+    walks[w].last = DIREND;
+    return ItemOf(End);
+}
+
+Over :: (w: s64) -> Item {
+    if walks[w].fh >= 0 {
+        unused Io.CloseFile(walks[w].fh);
+        walks[w].fh = -1;
+    }
+    walks[w].last = OVER;
+    return ItemOf(Done);
+}
+
+// The next entry of the innermost directory from its index on, or its end.
+Advance :: (w: s64) -> Item {
+    k := walks[w].frames.count - 1;
+    while walks[w].frames[k].i < walks[w].frames[k].entries.count {
+        i := walks[w].frames[k].i;
+        d := walks[w].frames[k].entries[i];
+        name := Al.Join(walks[w].frames[k].path, d.name);
+        if IsDir(d) {
+            if walks[w].frames[k].loop[i] {
+                Report(w, Al.Join("filesystem loop at ", Ty.QQ(name)));
+                walks[w].frames[k].i += 1;
+                continue;
+            }
+            h := Io.OpenFile(name, 0);
+            if h < 0 {
+                Report(w, Va.WithError(Al.Join("cannot cd to ", Ty.QQ(name))));
+                walks[w].frames[k].i += 1;
+                continue;
+            }
+            unused Io.CloseFile(h);
+            walks[w].last = DIRENTRY;
+            return EntryOf(d);
+        }
+        h := Io.OpenFile(name, 0);
+        if h < 0 {
+            Report(w, Va.WithError(Al.Join("cannot open ", Ty.Q(name))));
+            walks[w].frames[k].i += 1;
+            continue;
+        }
+        walks[w].fh = h;
+        walks[w].fpath = name;
+        walks[w].flength = d.length;
+        walks[w].fread = 0;
+        walks[w].last = FILEENTRY;
+        return EntryOf(d);
+    }
+    return Pop(w);
+}
+
+// Past the current entry of the innermost directory.
+NextEntry :: (w: s64) -> Item {
+    k := walks[w].frames.count - 1;
+    walks[w].frames[k].i += 1;
+    return Advance(w);
+}
+
+CloseFile :: (w: s64) {
+    if walks[w].fh >= 0 { unused Io.CloseFile(walks[w].fh) }
+    walks[w].fh = -1;
+}
+
+// The next block of the open file, or the end of its data.
+Block :: (w: s64) -> Item {
+    if walks[w].fread < walks[w].flength {
+        want := walks[w].flength - walks[w].fread;
+        if want > ATOMICIO { want = ATOMICIO }
+        buffer: Vec(u8);
+        unused VecResize(buffer, want);
+        n := Io.ReadBytes(walks[w].fh, buffer[:]);
+        if n <= 0 {
+            if n < 0 {
+                Report(w, Va.WithError(Al.Join("error reading ", Ty.Q(walks[w].fpath))));
+            } else {
+                out: Vec(u8);
+                BuilderPrint(*out, "% is shorter than expected (%/%)", Ty.Q(walks[w].fpath), walks[w].fread, walks[w].flength);
+                Report(w, BuilderFinish(out));
+            }
+        } else {
+            walks[w].fread += n;
+            walks[w].last = DATA;
+            item := ItemOf(Data);
+            item.data = TextDetach(TextCopy(TextView(buffer[:n])));
+            return item;
+        }
+    }
+    walks[w].last = FILEEND;
+    return ItemOf(End);
+}
+
+WalkNext :: (v: s32, reply: s32) -> Item {
+    w := Va.N0(v);
+    last := walks[w].last;
+    if last == OVER { return ItemOf(Done) }
+    if last == NONE {
+        d, ok := StatPath(walks[w].root);
+        if !ok {
+            Report(w, Va.WithError(Al.Join("cannot stat ", Ty.Q(walks[w].root))));
+            return Over(w);
+        }
+        d.name = walks[w].root;
+        walks[w].last = ROOT;
+        return EntryOf(d);
+    }
+    if reply == Quit { return Over(w) }
+    if last == ROOT {
+        if reply != Down { return Over(w) }
+        d, ok := StatPath(walks[w].root);
+        unused Enter(w, d);
+        path := walks[w].root;
+        if path.count == 0 || path[path.count - 1] != #char "/" { path = Al.Join(path, "/") }
+        Push(w, path);
+        return Advance(w);
+    }
+    if last == DIRENTRY {
+        k := walks[w].frames.count - 1;
+        if reply == Down {
+            d := walks[w].frames[k].entries[walks[w].frames[k].i];
+            Push(w, Al.Join3(walks[w].frames[k].path, d.name, "/"));
+            return Advance(w);
+        }
+        if reply == Skip { return Pop(w) }
+        return NextEntry(w);
+    }
+    if last == FILEENTRY {
+        if reply == Down { return Block(w) }
+        CloseFile(w);
+        if reply == Skip { return Pop(w) }
+        return NextEntry(w);
+    }
+    if last == DATA {
+        if reply == Skip {
+            CloseFile(w);
+            return NextEntry(w);
+        }
+        return Block(w);
+    }
+    if last == FILEEND {
+        CloseFile(w);
+        return NextEntry(w);
+    }
+    // the end of a directory: the root's ends the walk
+    if walks[w].frames.count == 0 { return Over(w) }
+    return NextEntry(w);
+}

@@ -1,0 +1,25 @@
+// /fs/depth string -> gate: entries no deeper than a depth.
+using Io :: #import "taijios_io";
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "depth", "ps", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = GateProducer("depth", Gate) }
+    d := Al.LimboInt(Va.ValueText(call.args[0]));
+    if d <= 0 {
+        unused Io.WriteBytes(2, "fs: depth: invalid depth\n");
+        return -1;
+    }
+    v := Va.NewValue(#char "p", prod);
+    Va.SetN0(v, d);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Gate :: (v: s32, e: *EntryItem) -> bool { return e.depth <= Va.N0(v) }

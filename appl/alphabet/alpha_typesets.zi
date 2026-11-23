@@ -2,8 +2,10 @@
 // as their ports land, abc, fs and grid.
 Main :: #import "main/typeset";
 Abc :: #import "abc/abctypes";
+Fs :: #import "fs/fstypes";
 
 Register :: () {
     Main.Register();
     Abc.Register();
+    Fs.Register();
 }

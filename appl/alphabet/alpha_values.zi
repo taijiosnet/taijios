@@ -135,6 +135,7 @@ SetN1 :: (v: s32, x: s64) { values[v].n1 = x }
 N2 :: (v: s32) -> s64 { return values[v].n2 }
 SetN2 :: (v: s32, x: s64) { values[v].n2 = x }
 KidCount :: (v: s32) -> s64 { return values[v].kids_n }
+ProducerOf :: (v: s32) -> s32 { return values[v].prod }
 
 IsString :: (v: s32) -> bool { return values[v].tc == #char "s" }
 

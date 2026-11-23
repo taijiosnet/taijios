@@ -1,0 +1,22 @@
+// /fs/print entries -> fd: each entry's path on a line.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+St :: #import "alpha_streams";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "print", "ft", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    v := St.FillStream(Fill);
+    Va.SetKids(v, call.args[0:1]);
+    Va.SetErrc(v, Va.ReportStart(call.report, "/fs/print"));
+    return v;
+}
+
+#scope_file
+
+Fill :: (v: s32) -> St.Chunk {
+    e := EntriesNext(Va.Kid(v, 0), true);
+    if !e.ok { return St.Chunk.{text = "", more = false} }
+    return St.Chunk.{text = Al.Join(e.path, "\n"), more = true};
+}

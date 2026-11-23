@@ -1,6 +1,9 @@
 // Guest regression for Alphabet in Ziran: the core (parser, type checker,
 // evaluator, the builtins of "load alphabet"), the modules of the root
-// typeset "/" and the abc typeset, whose values are alphabets. Each case is a script of alphabet builtin commands; it runs
+// typeset "/", the abc typeset, whose values are alphabets, and the fs
+// typeset's file trees, entries, gates and selectors. An fs case's tree is
+// made afresh with fixed modes and times; @USER@ stands for the user
+// running the test, who owns its files. Each case is a script of alphabet builtin commands; it runs
 // as /dis/alphabet.zx SCRIPT, and its status, output and diagnostics must
 // be what the Dis "load alphabet" builtin gave for the same script, run
 // with sh. A case with a note says where the Dis original could not be
@@ -9,6 +12,7 @@
 //
 // /filter runs shell commands and waits for /dis/sh.zx; /auth's protocol
 // waits for a ZX Inferno Auth client; only its key file is checked here.
+// /fs/match -r waits for a regular expression library.
 //
 // From the TaijiOS root, after "(cd appl/alphabet && mk install-zx)":
 //     ziran run --target=c --root tests/alphabet tests/alphabet/alphabet_test.zi -- [EMU]
@@ -17,6 +21,8 @@
 #import "std/file_linux";
 #import "std/file_tree_linux";
 #import "std/process_run_linux";
+#import "std/environment_linux";
+#import "std/text_tools";
 
 Case :: struct {
     name: string;
@@ -169,7 +175,42 @@ block6: [16]Case = Case.[
     .{name = "abc-err-badabc", script = "typeset /abc\n- {/abc/eval /x \"{/echo hi}}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /abc/abc\nalphabet: 0. eval: error: conversion failed for /abc/eval\nalphabet: 0. eval: error: usage: /abc/eval /abc/abc /cmd [/string...] -> /status\n"},
 ];
 
-CASES :: 112;
+block7: [16]Case = Case.[
+    .{name = "fs:fs-types", script = "typeset /fs\necho ${types /fs}\n", input = "", status = "", out = "selector gate entries fs\n", err = ""},
+    .{name = "fs:walk-print", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/walk tree}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:walk-sub", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/walk tree/sub}}} 1}\n", input = "", status = "", out = "tree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:walk-missing", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/walk nosuch}}} 1}\n", input = "", status = "no value", out = "", err = "fs: walk: cannot stat nosuch: 'nosuch' file does not exist\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:walk-notdir", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/walk tree/a.txt}}} 1}\n", input = "", status = "no value", out = "", err = "fs: walk: tree/a.txt is not a directory\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:filter-match", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/filter {/fs/walk tree} {/fs/match '*.b'}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\n", err = ""},
+    .{name = "fs:filter-d", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/filter -d {/fs/walk tree} {/fs/match '*.b'}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\ntree/sub\ntree/sub/d.b\ntree/sub/deep\n", err = ""},
+    .{name = "fs:match-a", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -a 'tree/sub/*'}}} 1}\n", input = "", status = "", out = "tree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:match-class", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match '[a-c]*'}}} 1}\n", input = "", status = "", out = "tree/a.txt\ntree/b.b\ntree/sub/c.txt\n", err = ""},
+    .{name = "fs:and", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/and {/fs/match '*.txt'} {/fs/depth 1}}}} 1}\n", input = "", status = "", out = "tree/a.txt\n", err = ""},
+    .{name = "fs:or", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/or {/fs/match '*.b'} {/fs/match 'e*'}}}} 1}\n", input = "", status = "", out = "tree/b.b\ntree/sub/d.b\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:not", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/not {/fs/match '*.txt'}}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\ntree/sub\ntree/sub/d.b\ntree/sub/deep\n", err = ""},
+    .{name = "fs:depth", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/depth 2}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\n", err = ""},
+    .{name = "fs:depth-bad", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/depth 0}}} 1}\n", input = "", status = "no value", out = "", err = "fs: depth: invalid depth\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:mode", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/mode d}}} 1}\n", input = "", status = "no value", out = "", err = "fs: mode: bad mode 'd'\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:mode-x", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/mode u+x}}} 1}\n", input = "", status = "", out = "tree\ntree/b.b\ntree/sub\ntree/sub/deep\n", err = ""},
+];
+
+block8: [13]Case = Case.[
+    .{name = "fs:mode-bad", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/mode zz}}} 1}\n", input = "", status = "no value", out = "", err = "fs: mode: bad mode 'zz'\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:path", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/path tree/sub}}} 1}\n", input = "", status = "", out = "tree\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:path-x", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/path -x tree/sub tree/b.b}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\n", err = ""},
+    .{name = "fs:size", script = "typeset /fs\n- {/print {/fs/size {/fs/entries {/fs/walk tree}}} 1}\n", input = "", status = "", out = "20\n", err = ""},
+    .{name = "fs:ls", script = "typeset /fs\n- {/print {/fs/ls {/fs/entries {/fs/walk tree/sub}}} 1}\n", input = "", status = "", out = "d-rwx------ U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n--rw------- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n--rw------- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\nd-rwx------ U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n--rw------- U 0 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:ls-m", script = "typeset /fs\n- {/print {/fs/ls -m {/fs/entries {/fs/walk tree/sub}}} 1}\n", input = "", status = "", out = "[] d-rwx------ U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub\n[] --rw------- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/c.txt\n[] --rw------- U 0 @USER@ @USER@ 4 Jan 02  2020 tree/sub/d.b\n[] d-rwx------ U 0 @USER@ @USER@ 0 Jan 02  2020 tree/sub/deep\n[] --rw------- U 0 @USER@ @USER@ 2 Jan 02  2020 tree/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:setroot", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/setroot {/fs/walk tree} newroot}}} 1}\n", input = "", status = "", out = "newroot\nnewroot/a.txt\nnewroot/b.b\nnewroot/sub\nnewroot/sub/c.txt\nnewroot/sub/d.b\nnewroot/sub/deep\nnewroot/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:setroot-c", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/setroot -c {/fs/walk tree} a/b}}} 1}\n", input = "", status = "", out = "a\na/b\na/b/a.txt\na/b/b.b\na/b/sub\na/b/sub/c.txt\na/b/sub/d.b\na/b/sub/deep\na/b/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:setroot-cabs", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/setroot -c {/fs/walk tree} /x/y}}} 1}\n", input = "", status = "", out = "/\n/x\n/x/y\n/x/y/a.txt\n/x/y/b.b\n/x/y/sub\n/x/y/sub/c.txt\n/x/y/sub/d.b\n/x/y/sub/deep\n/x/y/sub/deep/e.txt\n", err = ""},
+    .{name = "fs:setroot-empty", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/setroot {/fs/walk tree} ''}}} 1}\n", input = "", status = "no value", out = "", err = "fs: setroot: empty path\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:compose-bad", script = "typeset /fs\n- {/print {/fs/print {/fs/entries {/fs/walk tree}}} 1}\n- {/fs/compose nosuch}\n", input = "", status = "no value", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = "fs: join: bad op nosuch\nalphabet: 0. eval: error: command failed\n"},
+    .{name = "fs:err-type", script = "typeset /fs\n- {/print {/fs/print {/fs/entries tree}} 1}\n", input = "", status = "no value", out = "", err = "alphabet: 0. eval: error: no way to get from /string to /fs/fs\nalphabet: 0. eval: error: conversion failed for /fs/entries\nalphabet: 0. eval: error: usage: /fs/entries /fs/fs -> /fs/entries\n"},
+    .{name = "fs:auto", script = "typeset /fs\ntype /fs/fs /fs/entries\nautoconvert string fs /fs/walk\nautoconvert fs entries /fs/entries\nautoconvert entries fd /fs/print\n- {/print tree/sub 1}\n", input = "", status = "error", out = "", err = "cannot autoconvert string to fs via /fs/walk: unknown type string\n"},
+];
+
+CASES :: 141;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -186,6 +227,10 @@ CaseAt :: (i: s64) -> Case {
     if i < 96 { return block5[i - 80] }
 
     if i < 112 { return block6[i - 96] }
+
+    if i < 128 { return block7[i - 112] }
+
+    if i < 141 { return block8[i - 128] }
 
     return block0[0];
 }
@@ -220,10 +265,48 @@ Prepare :: () -> bool {
     a: Vec(u8);
     BuilderPrint(*a, "%/work/a.txt", WORK);
     if !WriteEntireFile(BuilderFinish(a), "alpha\nbeta\n") { return false }
+    if !Tree() { return false }
     for i: 0..CASES - 1 {
         if !WriteEntireFile(Path("cases", "script", i), CaseAt(i).script) { return false }
     }
     return true;
+}
+
+// The fs cases' tree: every file and directory dated 2020-01-02 and
+// private to its owner, b.b executable.
+Tree :: () -> bool {
+    dirs := string.["tree", "tree/sub", "tree/sub/deep"];
+    for dirs { if !CreateDirectory(WorkPath(it)) { return false } }
+    names := string.["tree/a.txt", "tree/b.b", "tree/sub/c.txt", "tree/sub/d.b", "tree/sub/deep/e.txt"];
+    texts := string.["alpha\n", "bee\n", "sea\n", "dee\n", "e\n"];
+    for names { if !WriteEntireFile(WorkPath(it), texts[it_index]) { return false } }
+    for names {
+        mode := ifx it == "tree/b.b" then "755" else "600";
+        if !Host3("chmod", mode, WorkPath(it)) { return false }
+    }
+    for dirs { if !Host3("chmod", "700", WorkPath(it)) { return false } }
+    order := string.["tree/a.txt", "tree/b.b", "tree/sub/c.txt", "tree/sub/d.b", "tree/sub/deep/e.txt",
+        "tree/sub/deep", "tree/sub", "tree"];
+    for order { if !Host4("touch", "-d", "@1577979240", WorkPath(it)) { return false } }
+    return true;
+}
+
+WorkPath :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/work/%", WORK, name);
+    return BuilderFinish(path);
+}
+
+Host3 :: (tool: string, a: string, path: string) -> bool {
+    command: [3]string = .[tool, a, path];
+    run: ProcessRun;
+    return RunProcess(.{arguments = command[:]}, *run) && run.code == 0;
+}
+
+Host4 :: (tool: string, a: string, b: string, path: string) -> bool {
+    command: [4]string = .[tool, a, b, path];
+    run: ProcessRun;
+    return RunProcess(.{arguments = command[:]}, *run) && run.code == 0;
 }
 
 // One guest shell script runs every case and keeps each result in files.
@@ -262,6 +345,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
         print("cannot start %\n", emu);
         return 1;
     }
+    user := EnvironmentText("USER");
     for i: 0..CASES - 1 {
         c := CaseAt(i);
         status: Vec(u8);
@@ -270,7 +354,8 @@ main :: (argc: s32, argv: **u8) -> s32 {
         got := Result("status", i);
         Expect(got == want_status, c, "status", got, want_status);
         out := Result("out", i);
-        Expect(out == c.out, c, "stdout", out, c.out);
+        want_out: Text = TextReplace(c.out, "@USER@", user);
+        Expect(out == TextView(want_out), c, "stdout", out, TextView(want_out));
         err := Result("err", i);
         Expect(err == c.err, c, "stderr", err, c.err);
     }

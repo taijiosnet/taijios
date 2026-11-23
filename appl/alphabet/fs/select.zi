@@ -1,0 +1,31 @@
+// /fs/select entries gate -> entries: the entries the gate lets through.
+Al :: #import "alpha_eval";
+Va :: #import "alpha_values";
+using Fs :: #import "fs/fsvalue";
+
+Register :: (reg: s32) { Al.RegisterModule(reg, "select", "ttp", Run) }
+
+Run :: (call: *Al.Call) -> s32 {
+    if prod < 0 { prod = EntriesProducer("select", Next1) }
+    v := Va.NewValue(#char "t", prod);
+    Va.SetKids(v, call.args[0:2]);
+    return v;
+}
+
+#scope_file
+
+prod: s32 = -1;
+
+Next1 :: (v: s32, go: bool) -> EntryItem {
+    none: EntryItem;
+    if !go {
+        unused EntriesNext(Va.Kid(v, 0), false);
+        return none;
+    }
+    while true {
+        e := EntriesNext(Va.Kid(v, 0), true);
+        if !e.ok { return none }
+        if Query(Va.Kid(v, 1), *e) { return e }
+    }
+    return none;
+}

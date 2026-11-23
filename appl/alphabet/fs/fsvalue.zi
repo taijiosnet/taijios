@@ -1,0 +1,284 @@
+// The values of the fs typeset and how they are read, from
+// typesets/fs.b and module/alphabet/fs.m. In the Dis version each was a
+// channel protocol between processes; here each is pulled by its consumer:
+//
+// - fs: a file tree in pre-order. Next(v, reply) answers the item given
+//   before (Start for none yet) and gives the next: a directory entry, a
+//   block of the last file's data, the end of a directory's contents or of
+//   a file's data, or Done when the tree is over. A reply is Next (go on
+//   past this entry), Down (into it), Skip (past the rest of the
+//   directory) or Quit.
+// - entries: (dir, path, depth) for each file, then none.
+// - gate: a yes or no for an entry.
+// - selector: for two entries of the same name, one or both of them, as
+//   bits 2r01 (the first) and 2r10 (the second).
+#import "std/vec";
+using Io :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Va :: #import "alpha_values";
+
+Start :: -1;
+Next :: 0;
+Down :: 1;
+Skip :: 2;
+Quit :: 3;
+
+// Item kinds.
+Entry :: 1;
+Data :: 2;
+End :: 3;
+Done :: 4;
+
+DMDIR :: 0x80000000;
+DMAPPEND :: 0x40000000;
+DMEXCL :: 0x20000000;
+DMAUTH :: 0x08000000;
+ATOMICIO :: 8192;
+
+FsDir :: struct {
+    name: string;
+    uid: string;
+    gid: string;
+    muid: string;
+    qpath: u64;
+    qvers: u32;
+    qtype: u8;
+    mode: u32;
+    atime: u32;
+    mtime: u32;
+    length: s64;
+    dtype: s32;
+    dev: s32;
+}
+
+Item :: struct {
+    kind: s32;
+    dir: FsDir;
+    data: string;
+}
+
+IsDir :: (d: FsDir) -> bool { return (d.mode & DMDIR) != 0 }
+
+// A FsDir from a stat record, its strings copied.
+DirOf :: (info: Stat.Info) -> FsDir {
+    d: FsDir;
+    d.name = Keep(info.name);
+    d.uid = Keep(info.owner);
+    d.gid = Keep(info.group);
+    d.muid = Keep(info.modifier);
+    d.qpath = info.identity.qid;
+    d.qvers = cast(u32)info.identity.version;
+    d.qtype = info.identity.qtype;
+    d.mode = info.mode;
+    d.atime = cast(u32)info.accessed;
+    d.mtime = cast(u32)info.modified;
+    d.length = info.length;
+    d.dtype = cast(s32)(info.identity.dev & 0xFFFF);
+    d.dev = cast(s32)(info.identity.dev >> 16);
+    return d;
+}
+
+Keep :: (s: string) -> string { return TextDetach(TextCopy(s)) }
+
+// sys->stat: the FsDir of a path, or ok false.
+StatPath :: (path: string) -> (dir: FsDir, ok: bool) {
+    record: [Stat.BufferSize]u8;
+    size := Io.StatPacked(path, record[:]);
+    if size <= 0 { return .{}, false }
+    info := Stat.Decode(record[:size]);
+    if info.size == 0 { return .{}, false }
+    return DirOf(info), true;
+}
+
+// readdir with NAME|COMPACT: a directory's entries sorted by name, each name
+// once. ok false when it cannot be read.
+ReadDir :: (path: string, out: *Vec(FsDir)) -> bool {
+    h := Io.OpenFile(path, 0);
+    if h < 0 { return false }
+    bytes: [Stat.BufferSize]u8;
+    while true {
+        size := Io.ReadBytes(h, bytes[:]);
+        if size < 0 {
+            unused Io.CloseFile(h);
+            return false;
+        }
+        if size == 0 { break }
+        offset: s64 = 0;
+        while offset < size {
+            info := Stat.Decode(bytes[offset:size]);
+            if info.size == 0 { break }
+            offset += info.size;
+            seen := false;
+            i: s64 = 0;
+            while i < out.count {
+                if out.*[i].name == info.name { seen = true }
+                i += 1;
+            }
+            if !seen { VecPush(<<out, DirOf(info)) }
+        }
+    }
+    unused Io.CloseFile(h);
+    SortDirs(out);
+    return true;
+}
+
+SortDirs :: (dirs: *Vec(FsDir)) {
+    // insertion sort of their positions keeps it stable, as Readdir's merge sort was
+    order: Vec(s64);
+    i: s64 = 0;
+    while i < dirs.count {
+        VecPush(order, i);
+        j := order.count - 2;
+        while j >= 0 && NameLess(dirs.*[i].name, dirs.*[order[j]].name) {
+            order[j + 1] = order[j];
+            j -= 1;
+        }
+        order[j + 1] = i;
+        i += 1;
+    }
+    sorted: Vec(FsDir);
+    for order { VecPush(sorted, dirs.*[it]) }
+    VecSwap(<<dirs, sorted);
+}
+
+NameLess :: (a: string, b: string) -> bool {
+    n := ifx a.count < b.count then a.count else b.count;
+    for i: 0..n - 1 { if a[i] != b[i] { return a[i] < b[i] } }
+    return a.count < b.count;
+}
+
+// ---- the operations of each kind of value, by producer
+
+NextOp :: #type (v: s32, reply: s32) -> Item;
+EntryOp :: #type (v: s32, go: bool) -> EntryItem;
+GateOp :: #type (v: s32, e: *EntryItem) -> bool;
+CmpOp :: #type (v: s32, d0: *FsDir, d1: *FsDir, has0: bool, has1: bool) -> s32;
+
+// An entry of an entries value; ok false for none.
+EntryItem :: struct {
+    dir: FsDir;
+    path: string;
+    depth: s64;
+    ok: bool;
+}
+
+Ops :: struct {
+    prod: s32;
+    next: NextOp;
+    entry: EntryOp;
+    gate: GateOp;
+    cmp: CmpOp;
+}
+
+ops: Vec(Ops);
+
+OpsOf :: (prod: s32) -> s64 {
+    for ops { if it.prod == prod { return it_index } }
+    return -1;
+}
+
+// A producer of fs values; Free of an unused one quits it. Its next
+// procedure keeps giving Done once the tree is over.
+FsProducer :: (name: string, next: NextOp) -> s32 {
+    p := Va.BlankProducer(name);
+    p.free = FsFree;
+    prod := Va.AddProducer(p);
+    o: Ops;
+    o.prod = prod;
+    o.next = next;
+    VecPush(ops, o);
+    return prod;
+}
+
+EntriesProducer :: (name: string, entry: EntryOp) -> s32 {
+    p := Va.BlankProducer(name);
+    p.free = EntriesFree;
+    prod := Va.AddProducer(p);
+    o: Ops;
+    o.prod = prod;
+    o.entry = entry;
+    VecPush(ops, o);
+    return prod;
+}
+
+GateProducer :: (name: string, gate: GateOp) -> s32 {
+    p := Va.BlankProducer(name);
+    prod := Va.AddProducer(p);
+    o: Ops;
+    o.prod = prod;
+    o.gate = gate;
+    VecPush(ops, o);
+    return prod;
+}
+
+SelectorProducer :: (name: string, cmp: CmpOp) -> s32 {
+    p := Va.BlankProducer(name);
+    prod := Va.AddProducer(p);
+    o: Ops;
+    o.prod = prod;
+    o.cmp = cmp;
+    VecPush(ops, o);
+    return prod;
+}
+
+// The next item of fs value v, answering the item before with reply.
+FsNext :: (v: s32, reply: s32) -> Item {
+    k := OpsOf(Va.ProducerOf(v));
+    if k < 0 { return ItemOf(Done) }
+    return ops[k].next(v, reply);
+}
+
+// The next entry of entries value v; go false declines them all.
+EntriesNext :: (v: s32, go: bool) -> EntryItem {
+    k := OpsOf(Va.ProducerOf(v));
+    if k < 0 { return .{} }
+    return ops[k].entry(v, go);
+}
+
+Query :: (v: s32, e: *EntryItem) -> bool {
+    k := OpsOf(Va.ProducerOf(v));
+    if k < 0 { return false }
+    return ops[k].gate(v, e);
+}
+
+Compare :: (v: s32, d0: *FsDir, d1: *FsDir, has0: bool, has1: bool) -> s32 {
+    k := OpsOf(Va.ProducerOf(v));
+    if k < 0 { return 0 }
+    return ops[k].cmp(v, d0, d1, has0, has1);
+}
+
+EntryItemOf :: (d: FsDir, path: string, depth: s64) -> EntryItem {
+    e: EntryItem;
+    e.dir = d;
+    e.path = path;
+    e.depth = depth;
+    e.ok = true;
+    return e;
+}
+
+ItemOf :: (kind: s32) -> Item {
+    i: Item;
+    i.kind = kind;
+    return i;
+}
+
+EntryOf :: (d: FsDir) -> Item {
+    i: Item;
+    i.kind = Entry;
+    i.dir = d;
+    return i;
+}
+
+#scope_file
+
+FsFree :: (v: s32, used: bool) -> s32 {
+    if used { return 0 }
+    first := FsNext(v, Start);
+    if first.kind != Done { unused FsNext(v, Quit) }
+    return 0;
+}
+
+EntriesFree :: (v: s32, used: bool) -> s32 {
+    if !used { unused EntriesNext(v, false) }
+    return 0;
+}

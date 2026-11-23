@@ -1,0 +1,45 @@
+// The fs typeset: file trees as streams (fs), entries, gates and
+// selectors, with the modules in fs/ that make and use them.
+Ty :: #import "alpha_types";
+And :: #import "fs/and";
+Compose :: #import "fs/compose";
+Depth :: #import "fs/depth";
+Entries :: #import "fs/entries";
+Filter :: #import "fs/filter";
+Ls :: #import "fs/ls";
+Match :: #import "fs/match";
+Mode :: #import "fs/mode";
+Newer :: #import "fs/newer";
+Not :: #import "fs/not";
+Or :: #import "fs/or";
+Path :: #import "fs/path";
+Print :: #import "fs/print";
+Select :: #import "fs/select";
+Setroot :: #import "fs/setroot";
+Size :: #import "fs/size";
+Walk :: #import "fs/walk";
+
+Register :: () {
+    reg := Ty.RegisterTypeset("fs", "rdcfsmptx");
+    Ty.RegisterType(reg, #char "m", "selector");
+    Ty.RegisterType(reg, #char "p", "gate");
+    Ty.RegisterType(reg, #char "t", "entries");
+    Ty.RegisterType(reg, #char "x", "fs");
+    And.Register(reg);
+    Compose.Register(reg);
+    Depth.Register(reg);
+    Entries.Register(reg);
+    Filter.Register(reg);
+    Ls.Register(reg);
+    Match.Register(reg);
+    Mode.Register(reg);
+    Newer.Register(reg);
+    Not.Register(reg);
+    Or.Register(reg);
+    Path.Register(reg);
+    Print.Register(reg);
+    Select.Register(reg);
+    Setroot.Register(reg);
+    Size.Register(reg);
+    Walk.Register(reg);
+}
