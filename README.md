@@ -435,6 +435,34 @@ python3 -u appl/wm/tetris_zx_test.py
 python3 -u appl/wm/polyhedra_zx_test.py
 ```
 
+### Use the ZX Calendar
+
+`(cd appl/wm && mk install-kryon-zx)` also installs Calendar at
+`/dis/wm/calendar.zx`. It keeps the Dis version's month grid, prev and next
+month and day, Show, Del and Save, the coloured oval, diamond and square
+marks, the schedule records of a raw schedule file or a dbfs directory, and
+the Set Time dialog that writes `/dev/time`. The schedule text area scrolls
+with its scrollbar. `calendar_zx_test.py` checks the 28 recorded date and mark
+rules, the recorded window, the marks and the schedule edits.
+
+```sh
+python3 -u appl/wm/calendar_zx_test.py
+```
+
+### Use the ZX File Chooser
+
+`(cd appl/wm && mk install-filename-zx)` installs the File Chooser at
+`/dis/wm/filename.zx`. Like the Dis `filename`, it takes `-d startdir`,
+`-t title` and glob patterns, prints the chosen path or an empty line on
+standard output, and lists the start directory in Miller columns: clicking an
+entry fills the path row, a second click on the same entry or OK accepts it, and
+Tab expands the typed path to the browsed one. `filename_test.py` runs the model
+of the argument and path rules and opens the chooser in a private guest.
+
+```sh
+python3 -u appl/wm/filename_test.py
+```
+
 ### Build and run ZX Task Manager
 
 Build the guest target in the canonical Task Manager repository and install its

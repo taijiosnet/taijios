@@ -24,7 +24,6 @@ TARG=\
 	debdata.dis\
 	debsrc.dis\
 	edit.dis\
-	filename.dis\
 	getauthinfo.dis\
 	keyboard.dis\
 	logon.dis\
@@ -162,7 +161,10 @@ tetris.zx: tetris.zi tetris_model.zi score_table.zi inferno_rand.zi ../cmd/taiji
 polyhedra.zx: polyhedra_app.zi polyhedra_render.zi ../math/polyhedra.zi ../math/math_util.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --module-path ../math --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry polyhedra_app:main -o $target polyhedra_app.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx
+calendar.zx: calendar_app.zi calendar_model.zi ../cmd/taijios_time.zi ../cmd/taijios_io.zi ../cmd/taijios_stat.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_time --bind-host taijios_io --bind-host taijios_stat --bind-host taijios_args --entry calendar_app:main -o $target calendar_app.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:
@@ -227,3 +229,8 @@ view.zx: view.zi image_document.zi image_guest.zi gif_image.zi inferno_image.zi 
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_image --bind-host taijios_io --bind-host taijios_args --bind-host taijios_wm --bind-host taijios_clock --entry view:main -o $target view.zi
 
 install-view-zx:V: $DISBIN/view.zx
+
+filename.zx: filename.zi filename_model.zi ../cmd/taijios_stat.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_stat --bind-host taijios_args --bind-host taijios_clock --entry filename:main -o $target filename.zi
+
+install-filename-zx:V: $DISBIN/filename.zx
