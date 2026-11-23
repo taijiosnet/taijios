@@ -59,7 +59,7 @@ RSA keys are now used by default.
 .SH FILES
 .B /keydb/signerkey
 .SH SOURCE
-.B /appl/cmd/auth/createsignerkey.b
+.B /appl/cmd/auth/createsignerkey.zi
 .SH SEE ALSO
 .IR security-auth (2),
 .IR keyring-gensk (2),

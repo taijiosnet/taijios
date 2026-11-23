@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **707** open rows = **685** on-disk `dis/` files (**143** top-level `dis/*.dis` + **542** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **705** open rows = **683** on-disk `dis/` files (**143** top-level `dis/*.dis` + **540** under `dis/**/`) + **22** tracked acme helper binaries outside `dis/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
 
 Every `.dis` in the measured universe - on-disk `dis/` plus tracked acme helper binaries outside `dis/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
 
@@ -44,9 +44,9 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 
 1. `dis/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `dis/tclsh.zx` and the Tcl/Tk app `dis/tcltk.zx` already replace their other uses.
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
-3. Services (97 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
+3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (61 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (11), demo (3), ebook (0), math (9).
+5. App families: acme (25 `dis/` rows + 22 helper binaries outside `dis/`), charon (15), alphabet (83), spree (23), grid (10), demo (3), ebook (0), math (9).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
@@ -371,7 +371,7 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/yacc.dis | appl/cmd/yacc.b |  | - |  |
 | dis/zeros.dis | appl/cmd/zeros.b |  | - |  |
 
-### 4. Services - storage, network, name, auth, collab, usb and aux daemons - 97 rows
+### 4. Services - storage, network, name, auth, collab, usb and aux daemons - 96 rows
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
@@ -381,7 +381,6 @@ Catalog applications that still need the legacy chain (39): avi bounce brutus c4
 | dis/archfs.dis | appl/cmd/archfs.b |  | - |  |
 | dis/auth/changelogin.dis | appl/cmd/auth/changelogin.b |  | - |  |
 | dis/auth/convpasswd.dis | appl/cmd/auth/convpasswd.b |  | - |  |
-| dis/auth/createsignerkey.dis | appl/cmd/auth/createsignerkey.b |  | - |  |
 | dis/auth/factotum.dis | appl/cmd/auth/factotum/factotum.b | module/factotum.m | - |  |
 | dis/auth/feedkey.dis | appl/cmd/auth/factotum/feedkey.b |  | - |  |
 | dis/auth/infauth.dis | appl/cmd/auth/factotum/proto/infauth.b |  | - |  |

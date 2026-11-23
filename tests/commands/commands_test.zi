@@ -2,7 +2,8 @@
 // basename, cleanname, wc, uniq, tr, tee, cp, test, ls, mkdir, tclsh,
 // ndb/csquery, ndb/dnsquery, ndb/mkhash, ndb/query, ndb/regquery,
 // auxi/digest, export, mntgen, auth/aescbc, auth/rsagen, auth/dsagen,
-// auth/getpk, auth/ai2key, auth/verify and auth/countersigner.
+// auth/getpk, auth/ai2key, auth/verify, auth/countersigner and
+// auth/createsignerkey.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
 // guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
@@ -54,7 +55,7 @@ AUTHINFO_SHORT :: "303030340a7273610a";
 TCL_LINES :: "set x 5\nputs hi\nproc p {} {\nreturn 3\n}\np\nexpr {1+\n2}\nnoSuchCmd\nputs \"a\nb\"\nset y\nexit\n";
 
 
-cases: [182]Case = Case.[
+cases: [198]Case = Case.[
     .{tool = "cat", args = "a.txt empty - a.txt", input = "words", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\nalpha\nbeta\nbeta\ncafé κ\n"},
     .{tool = "cat", input = "bin", binary_out = true},
     .{tool = "cat", args = "missing a.txt", status = "bad open", err = "cat: cannot open missing: 'missing' file does not exist\n"},
@@ -253,6 +254,24 @@ cases: [182]Case = Case.[
     .{args = "bind emptydb /keydb"},
     .{args = "auth/verify box1 < yes", status = "no certificate", err = "signer: can't open signed/box1: 'signed' file does not exist\n"},
     .{args = "unmount /keydb"},
+    // auth/createsignerkey makes random keys: ai2key shows their fields
+    // with the numbers masked. The failures are exact.
+    .{args = "auth/createsignerkey -f csk.rsa -b 256 signer; auth/ai2key csk.rsa | sed 's/\\^[A-Za-z0-9+\\/]+=*/^B64/g; s/dh-(alpha|p)=[0-9A-F]+/dh-\\1=H/g; s/expires=[0-9]+/expires=N/'", out = "key proto=infauth dom=csk.rsa server=csk.rsa sigalg=rsa-sha1 user=signer signer=signer pk=rsa^B64^B64^B64 !sk=rsa^B64^B64^B64^B64^B64^B64^B64^B64^B64 spk=rsa^B64^B64^B64 cert=rsa^B64^B64^B64^B64 dh-alpha=H dh-p=H\n"},
+    .{args = "auth/createsignerkey -a elgamal -f csk.eg -b 128 'eg owner'; auth/ai2key csk.eg | sed 's/\\^[A-Za-z0-9+\\/]+=*/^B64/g; s/dh-(alpha|p)=[0-9A-F]+/dh-\\1=H/g; s/expires=[0-9]+/expires=N/'", out = "key proto=infauth dom=csk.eg server=csk.eg sigalg=elgamal-sha1 user='eg owner' signer='eg owner' pk=elgamal^B64 owner^B64^B64^B64 !sk=elgamal^B64 owner^B64^B64^B64^B64 spk=elgamal^B64 owner^B64^B64^B64 cert=elgamal^B64^B64 owner^B64^B64^B64 dh-alpha=H dh-p=H\n"},
+    .{args = "auth/createsignerkey -f csk.exp -b 128 -e 01012030 beta; auth/ai2key csk.exp | sed 's/\\^[A-Za-z0-9+\\/]+=*/^B64/g; s/dh-(alpha|p)=[0-9A-F]+/dh-\\1=H/g; s/expires=[0-9]+/expires=N/'", out = "key proto=infauth dom=csk.exp server=csk.exp sigalg=rsa-sha1 user=beta signer=beta pk=rsa^B64^B64^B64 !sk=rsa^B64^B64^B64^B64^B64^B64^B64^B64^B64 spk=rsa^B64^B64^B64 cert=rsa^B64^B64^B64^B64 dh-alpha=H dh-p=H expires=N\n"},
+    .{args = "auth/createsignerkey -a x -f x.key owner", status = "error", err = "createsignerkey: unknown algorithm: x\n"},
+    .{args = "auth/createsignerkey -b 10 -f x.key owner", status = "error", err = "createsignerkey: modulus must be in the range of 32 to 4096 bits\n"},
+    .{args = "auth/createsignerkey -b 5000 -f x.key owner", status = "error", err = "createsignerkey: modulus must be in the range of 32 to 4096 bits\n"},
+    .{args = "auth/createsignerkey -e 123 -f x.key owner", status = "error", err = "createsignerkey: !date must be in form ddmmyyyy\n"},
+    .{args = "auth/createsignerkey -e 32012030 -f x.key owner", status = "error", err = "createsignerkey: !bad day of month\n"},
+    .{args = "auth/createsignerkey -e 01132030 -f x.key owner", status = "error", err = "createsignerkey: !bad month\n"},
+    .{args = "auth/createsignerkey -e 01011960 -f x.key owner", status = "error", err = "createsignerkey: !bad year\n"},
+    .{args = "auth/createsignerkey -e 01012099 -f x.key owner", status = "error", err = "createsignerkey: !expiration date must be in the future\n"},
+    .{args = "auth/createsignerkey -e 01012020 -f x.key owner", status = "error", err = "createsignerkey: !expiration date must be in the future\n"},
+    .{args = "auth/createsignerkey -f x.key", status = "usage", err = "usage: createsignerkey [-a algorithm] [-f keyfile] [-e ddmmyyyy] [-b size-in-bits] name-of-owner\n"},
+    .{args = "auth/createsignerkey -q owner", status = "usage", err = "usage: createsignerkey [-a algorithm] [-f keyfile] [-e ddmmyyyy] [-b size-in-bits] name-of-owner\n"},
+    .{args = "auth/createsignerkey -a", status = "usage", err = "usage: createsignerkey [-a algorithm] [-f keyfile] [-e ddmmyyyy] [-b size-in-bits] name-of-owner\n"},
+    .{args = "auth/createsignerkey -f /nonexist/dir/k -b 128 owner", status = "error", err = "createsignerkey: can't write signerkey file /nonexist/dir/k: '/nonexist' file does not exist\n"},
     // Dis commands that load other commands start the ZX bundles too.
     .{args = "echo a.txt words | xargs cat", out = "alpha\nbeta\nbeta\ncafé κ\none two  three\nfour\tfive\n"},
     .{args = "time cat empty >[2] /dev/null"},

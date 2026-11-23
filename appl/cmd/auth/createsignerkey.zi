@@ -1,0 +1,216 @@
+// auth/createsignerkey [-a algorithm] [-f keyfile] [-e ddmmyyyy]
+//     [-b size-in-bits] name-of-owner
+// makes the signer's key: a new rsa (the default) or elgamal key of 1024
+// bits unless asked otherwise, a certificate the key signs for itself,
+// expiring at the end of the given day or never, and 1024-bit
+// Diffie-Hellman numbers, written as an authinfo file to /keydb/signerkey
+// or the file given, as the Limbo command wrote it through Oldauth.
+//
+// The numbers are written in base64 with a zero byte before one whose top
+// bit is set, except the rsa key's last, c2, which Oldauth wrote without.
+// The certificate signs the SHA-1 of the key's text followed by
+// "owner expiry".
+#import "std/vec";
+#import "std/base64";
+using Args :: #import "taijios_args";
+using Io :: #import "taijios_io";
+using Crypto :: #import "taijios_keyring";
+using Clock :: #import "taijios_clock";
+using Time :: #import "taijios_time";
+using Cli :: #import "zx_cli";
+using Arg :: #import "zx_arg";
+using Key :: #import "keygen";
+using Keydb :: #import "keydb";
+
+USAGE :: "usage: createsignerkey [-a algorithm] [-f keyfile] [-e ddmmyyyy] [-b size-in-bits] name-of-owner\n";
+
+Fail :: (message: string) -> s32 {
+    out: Vec(u8);
+    BuilderPrint(*out, "createsignerkey: %\n", message);
+    unused Cli.WriteAll(2, TextView(out[:]));
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+Wrap :: (x: s64) -> s64 {
+    low := x & 0xFFFFFFFF;
+    return ifx low >= 0x80000000 then low - 0x100000000 else low;
+}
+
+YearDays :: (year: s64) -> s64 {
+    return ifx year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) then 366 else 365;
+}
+
+// The end of a day given as ddmmyyyy in seconds since 1970, as the Limbo
+// command reckoned it in 32 bits from the local time zone of now; "" or
+// the error it gave.
+Expiry :: (word: string, now: s64) -> (seconds: s64, error: string) {
+    if word.count != 8 { return 0, "!date must be in form ddmmyyyy" }
+    day := Key.Int(word[0:2]);
+    if day > 31 || day < 1 { return 0, "!bad day of month" }
+    month := Key.Int(word[2:4]) - 1;
+    if month > 11 { return 0, "!bad month" }
+    year := Key.Int(word[4:8]) - 1900;
+    if year < 70 { return 0, "!bad year" }
+    Time.LoadZone();
+    offset: s64 = 0;
+    if Time.zone_length > 0 { offset = Time.ZoneOffset(TextView(Time.zone[:Time.zone_length]), now) }
+    seconds: s64 = 0;
+    for y: 1970..year + 1900 - 1 { seconds += YearDays(y) * 86400 }
+    lengths := s64.[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    for m: 0..month - 1 {
+        days := lengths[m];
+        if m == 1 && YearDays(year + 1900) == 366 { days = 29 }
+        seconds += days * 86400;
+    }
+    // 59 seconds past 23:59 is 24:59:59 to Daytime, an hour into the next day.
+    seconds += (day - 1) * 86400 + 24 * 3600 + 59 * 60 + 59 - offset;
+    seconds = Wrap(seconds);
+    if seconds < now { return 0, "!expiration date must be in the future" }
+    return seconds, "";
+}
+
+// The bytes of a hexadecimal number, big-endian, without leading zeros.
+Bytes :: (hex: string) -> Vec(u8) {
+    bytes: Vec(u8);
+    digits := hex;
+    if digits.count % 2 == 1 { VecPush(bytes, Nibble(digits[0])); digits = digits[1:] }
+    i: s64 = 0;
+    while i + 1 < digits.count {
+        VecPush(bytes, Nibble(digits[i]) * 16 + Nibble(digits[i + 1]));
+        i += 2;
+    }
+    start: s64 = 0;
+    while start < bytes.count && bytes[start] == 0 { start += 1 }
+    out: Vec(u8);
+    for start..bytes.count - 1 { VecPush(out, bytes[it]) }
+    return out;
+}
+
+Nibble :: (c: u8) -> u8 {
+    if c >= #char "0" && c <= #char "9" { return c - #char "0" }
+    if c >= #char "a" && c <= #char "f" { return c - #char "a" + 10 }
+    return c - #char "A" + 10;
+}
+
+// Appends a hexadecimal number in base64 and a newline; zero_byte puts a
+// zero byte before a number whose top bit is set.
+Number :: (out: *Vec(u8), hex: string, zero_byte: bool) {
+    bytes := Bytes(hex);
+    padded: Vec(u8);
+    if zero_byte && bytes.count > 0 && (bytes[0] & 0x80) != 0 { VecPush(padded, 0) }
+    for bytes { VecPush(padded, it) }
+    Base64EncodeInto(padded[:], out);
+    VecPush(<<out, #char "\n");
+}
+
+main :: () -> s32 {
+    scan: Arg.Scan;
+    algorithm := "rsa";
+    file := "/keydb/signerkey";
+    expiry: s64 = 0;
+    bits: s64 = 1024;
+    now := Clock.UnixMillis() / 1000;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option != #char "a" && option != #char "f" && option != #char "k" && option != #char "e" && option != #char "b" {
+            return Cli.Usage(USAGE);
+        }
+        value, ok := Arg.Value(*scan);
+        if !ok { return Cli.Usage(USAGE) }
+        if option == #char "a" {
+            if value != "rsa" && value != "elgamal" {
+                message: Vec(u8);
+                BuilderPrint(*message, "unknown algorithm: %", value);
+                return Fail(TextView(message[:]));
+            }
+            algorithm = value;
+        } else if option == #char "f" || option == #char "k" {
+            file = value;
+        } else if option == #char "e" {
+            seconds, error := Expiry(value, now);
+            if error.count > 0 { return Fail(error) }
+            expiry = seconds;
+        } else {
+            bits = Key.Int(value);
+            if bits < 32 || bits > 4096 { return Fail("modulus must be in the range of 32 to 4096 bits") }
+        }
+    }
+    if scan.next >= Args.OperandCount() { return Cli.Usage(USAGE) }
+    owner := Args.Operand(scan.next);
+    rsa := algorithm == "rsa";
+
+    // The key, tried again until an rsa modulus has exactly the bits asked for.
+    made: [16384]u8;
+    count: s32 = 0;
+    while true {
+        count = ifx rsa then Crypto.RsaGenerate(cast(s32)bits, 6, 18, made[:]) else Crypto.EgGenerate(cast(s32)bits, 0, made[:]);
+        if count <= 0 {
+            message: Vec(u8);
+            BuilderPrint(*message, "algorithm % not configured in system", algorithm);
+            return Fail(TextView(message[:]));
+        }
+        if !rsa { break }
+        first: s64 = 0;
+        while first < count && made[first] != #char "\n" { first += 1 }
+        if Crypto.BigBits(TextView(made[:first])) == bits { break }
+    }
+    numbers := Key.Lines(TextView(made[:count]));
+    if numbers.count < (ifx rsa then 8 else 4) { return Fail("unable to generate key") }
+
+    // rsa numbers: n, e, d, p, q, kp, kq, c2; elgamal: p, alpha, key, secret.
+    public: Vec(u8);
+    BuilderPrint(*public, "%\n%\n", algorithm, owner);
+    for i: 0..(ifx rsa then 2 else 3) - 1 { Number(*public, numbers[i], true) }
+    secret: Vec(u8);
+    BuilderPrint(*secret, "%\n%\n", algorithm, owner);
+    for i: 0..numbers.count - 1 { Number(*secret, numbers[i], !rsa || i < 7) }
+
+    // The certificate.
+    signed: Vec(u8);
+    BuilderAppend(signed, TextView(public[:]));
+    BuilderPrint(*signed, "% %", owner, Wrap(expiry));
+    digest: [20]u8;
+    unused Crypto.Digest(Crypto.SHA1, TextView(signed[:]), digest[:]);
+    hex: Vec(u8);
+    digits := "0123456789ABCDEF";
+    for digest { VecPush(hex, digits[it >> 4]); VecPush(hex, digits[it & 15]) }
+    signature: [4096]u8;
+    signature_count: s32 = 0;
+    if rsa {
+        signature_count = Crypto.Big(Crypto.PowerModulo, TextView(hex[:]), numbers[2], numbers[0], signature[:]);
+    } else {
+        signature_count = Crypto.EgSign(numbers[0], numbers[1], numbers[3], TextView(hex[:]), signature[:]);
+    }
+    if signature_count <= 0 { return Fail("unable to sign key") }
+    certificate: Vec(u8);
+    BuilderPrint(*certificate, "%\nsha1\n%\n%\n", algorithm, owner, cast(u64)expiry & 0xFFFFFFFF);
+    parts := Key.Lines(TextView(signature[:signature_count]));
+    for parts { Number(*certificate, it, true) }
+
+    // The Diffie-Hellman numbers: 1024-bit DSA primes, the 160-bit one as alpha.
+    group: [4096]u8;
+    group_count := Crypto.DsaGenerate("", "", "", group[:]);
+    if group_count <= 0 { return Fail("unable to make Diffie-Hellman parameters") }
+    dh := Key.Lines(TextView(group[:group_count]));
+    alpha: Vec(u8);
+    Number(*alpha, dh[1], true);
+    modulus: Vec(u8);
+    Number(*modulus, dh[0], true);
+
+    fd := Io.Open(file, 1 | 16);
+    if fd < 0 { fd = Io.Create(file, 1, 384) }
+    if fd < 0 { fd = Io.Open(file, 1) }
+    messages := string.[TextView(public[:]), TextView(certificate[:]), TextView(secret[:]),
+        TextView(alpha[:alpha.count - 1]), TextView(modulus[:modulus.count - 1])];
+    written := fd >= 0;
+    for messages { if written && !Keydb.SendMessage(fd, it) { written = false } }
+    if !written {
+        message: Vec(u8);
+        BuilderPrint(*message, "can't write signerkey file %: %", file, Io.Error());
+        return Fail(TextView(message[:]));
+    }
+    unused Io.Close(fd);
+    return 0;
+}
