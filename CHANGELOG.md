@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Reversi only as ZX and remove its Dis version. It keeps the 8 by 8 board, ring-weight and corner-line alpha-beta minimax at full default level 6, Black and White Human/Machine menus, level entries, last move replay, and `-a`, `-p` and `-s` flags; the model replays a complete 63-1 game recorded from the Dis version and matches its minimax evaluations and leaf counts.
+
 - Ship Mand (Fractals) only as ZX and remove its Dis version. It keeps the 60-bit fixed-point Mandelbrot and Julia sets, the 256-entry RGB colour cube (`[R [G [B]]]`), the Green's-theorem contour-crawl Fill toggle, the Depth divisor entry, button-1 drag-rectangle zoom, button-2 Julia selection, and button-3 view-stack zoom-out.
 
 - Ship Collide only as ZX and remove its Dis version. It keeps the cube, sphere and ellipsoid surrounds (`-c`, `-s`, `-e`), flat mode (`-f`), orthographic and perspective projections (`-o`, `-p`), object counts (`-b`, `-v`), pairwise equal-mass elastic collisions, depth-sorted rendering, and the zoomin, stop, zoomout, slow, objects and fast buttons.

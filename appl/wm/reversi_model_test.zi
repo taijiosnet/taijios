@@ -1,0 +1,122 @@
+// Replays a complete game recorded from Dis Reversi (wm/reversi -a -p -s)
+// through the Ziran model and checks final score, pass handling, minimax eval
+// and leaf counts against the Dis printout.
+Rev :: #import "reversi_model";
+Rand :: #import "inferno_rand";
+Fixture :: #import "reversi_games_fixture";
+
+Fail :: (code: s32) -> s32 { return code }
+
+ParseInt :: (text: string) -> s32 {
+    v: s32 = 0
+    for i: cast(s64)0..text.count - 1 {
+        c := text[i]
+        if c < cast(u8)48 || c > cast(u8)57 { break }
+        v = v * 10 + cast(s32)(c - cast(u8)48)
+    }
+    return v
+}
+
+main :: () -> s32 {
+    game: Rev.Game
+    Rev.Init(*game)
+    Rev.Reset(*game)
+
+    // Verify ring weights and initial state.
+    if game.val[Rev.Cell(1, 1)] != 343 || game.val[Rev.Cell(2, 2)] != -49 ||
+       game.val[Rev.Cell(3, 3)] != 7 || game.val[Rev.Cell(4, 4)] != -1 {
+        return Fail(1)
+    }
+
+    // Check opening minimax at plies=6 matches Dis printout: eval=0, goes=4, leaves=859.
+    rng: Rand.Random
+    Rand.Seed(*rng, 1)
+    st: Rev.SearchState
+    Rev.SearchBegin(*game, *st, Rev.Black, Rev.White, *rng)
+    while !Rev.SearchSlice(*game, *st, *rng, 2048) { }
+    if st.goes != 4 || st.plies_used != 6 || st.result.value != 0 || st.leaves != 859 {
+        return Fail(2)
+    }
+
+    // Replay every move recorded from Dis wm/reversi -a -p -s.
+    text := Fixture.Games
+    start: s64 = 0
+    first_loaded := false
+    turn: s32 = Rev.Black
+    move_num: s32 = 0
+    expect_b: s32 = 0
+    expect_w: s32 = 0
+    flips: Rev.FlipList
+    legal: [32]Rev.Coord
+
+    for at: cast(s64)0..text.count {
+        if at < text.count && text[at] != cast(u8)10 { continue }
+        line := text[start:at]
+        start = at + 1
+        if line.count == 0 || line[0] == cast(u8)35 { continue }
+        if line.count >= 6 && line[0] == cast(u8)115 {
+            // "score 63 1"
+            sp: s64 = 6
+            while sp < line.count && line[sp] != cast(u8)32 { sp += 1 }
+            expect_b = ParseInt(line[6:sp])
+            if sp + 1 < line.count { expect_w = ParseInt(line[sp + 1:]) }
+            break
+        }
+        code := ParseInt(line)
+        if !first_loaded {
+            turn = code
+            first_loaded = true
+            continue
+        }
+        other := 1 - turn
+        // Before Black's 3rd move (move_num == 4, code == 43), Dis reported eval=400, goes=6.
+        if move_num == 4 {
+            Rev.SearchBegin(*game, *st, turn, other, *rng)
+            while !Rev.SearchSlice(*game, *st, *rng, 4096) { }
+            if st.goes != 6 || st.plies_used != 6 || st.result.value != 400 {
+                return Fail(3)
+            }
+        }
+        // Before Black's 7th move (move_num == 12, code == 36), Dis reported eval=888, goes=8.
+        if move_num == 12 {
+            Rev.SearchBegin(*game, *st, turn, other, *rng)
+            while !Rev.SearchSlice(*game, *st, *rng, 4096) { }
+            if st.goes != 8 || st.plies_used != 6 || st.result.value != 888 {
+                return Fail(4)
+            }
+        }
+        if code == 0 {
+            if Rev.FindMoves(*game, turn, other, legal[:]) != 0 { return Fail(5) }
+        } else {
+            m := code / Rev.SZF
+            n := code % Rev.SZF
+            if !Rev.MakeMove(*game, m, n, turn, other, *flips) { return Fail(6) }
+            // Verify UndoMove and re-MakeMove preserve pieces and values on move 0.
+            if move_num == 0 {
+                pb := game.pieces[Rev.Black]
+                pw := game.pieces[Rev.White]
+                vb := game.value[Rev.Black]
+                vw := game.value[Rev.White]
+                Rev.UndoMove(*game, m, n, turn, other, *flips)
+                if game.pieces[Rev.Black] != 2 || game.pieces[Rev.White] != 2 ||
+                   game.value[Rev.Black] != -2 || game.value[Rev.White] != -2 {
+                    return Fail(7)
+                }
+                if !Rev.MakeMove(*game, m, n, turn, other, *flips) { return Fail(8) }
+                if game.pieces[Rev.Black] != pb || game.pieces[Rev.White] != pw ||
+                   game.value[Rev.Black] != vb || game.value[Rev.White] != vw {
+                    return Fail(9)
+                }
+            }
+        }
+        move_num += 1
+        turn = other
+    }
+
+    if game.pieces[Rev.Black] != expect_b || game.pieces[Rev.White] != expect_w {
+        return Fail(10)
+    }
+
+    print("Reversi replayed a complete Dis game to 63-1 and matched Dis minimax evaluations\n")
+    return 0
+}

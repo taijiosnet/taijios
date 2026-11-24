@@ -33,7 +33,6 @@ TARG=\
 	prof.dis\
 	readmail.dis\
 	remotelogon.dis\
-	reversi.dis\
 	rmtdir.dis\
 	rt.dis\
 	sendmail.dis\
@@ -171,7 +170,10 @@ collide.zx: collide.zi collide_model.zi inferno_rand.zi ../cmd/taijios_io.zi ../
 mand.zx: mand.zi mand_model.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_args --entry mand:main -o $target mand.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx
+reversi.zx: reversi.zi reversi_model.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry reversi:main -o $target reversi.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:
