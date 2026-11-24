@@ -1,0 +1,16 @@
+# One game the Dis Connect printed with -a -p -s on a private guest: machine
+# black at level 8 against machine white at level 0. Each row is the mover, the
+# move as the Dis encoded it (column*1024+row) and the two line values after it.
+black 4096 5 0
+white 2048 3 3
+black 2049 10 2
+white 3072 8 7
+black 2050 22 7
+white 0 21 13
+black 1024 25 4
+white 5120 25 6
+black 3073 45 4
+white 1 41 9
+black 4097 59 7
+white 3074 49 11
+black 5121 1048640 10

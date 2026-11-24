@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Connect only as ZX and remove its Dis version. It keeps the 7 by 6 board with its incremental line values, the machine's minimax with its alpha-beta and tie-breaks, the Human and Machine menus, the level entries and a click's column. The model replays a game the Dis printed move by move with the same values, and the search runs in slices between frames where the Dis's process thought through one turn. Black's default level is 3, not the Dis's 8, because the ZX host runs the search about seventy times slower than the Dis interpreter; the entry still takes 0 to 10.
+
 - Ship Bounce only as ZX and remove its Dis version. It keeps the toolbar's ball buttons and count label, lines drawn from either pointer button's press to its release, and the random balls with their speeds and colours; the model replays ten bounces recorded from the Dis rules, stopping where the Dis's own int-truncation boundary check turns on the host's last-bit rounding.
 
 - Remove the MPEG Player, a stale pre-4e Dis binary that fails at load and whose source no longer compiles.

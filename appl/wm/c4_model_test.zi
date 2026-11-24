@@ -1,0 +1,115 @@
+// Replays the game the Dis Connect printed with -a -p -s (c4_games.expected)
+// through the Ziran rules, comparing the two line values after every move,
+// and checks the machine's winning and blocking moves.
+Connect :: #import "c4_model";
+Rand :: #import "inferno_rand";
+Fixture :: #import "c4_games_fixture";
+#import "std/vec"
+
+Field :: (line: string, index: s32) -> string {
+    at: s64 = 0
+    for field: 0..index {
+        start := at
+        while at < line.count && line[at] != cast(u8)32 { at += 1 }
+        if field == index { return line[start:at] }
+        at += 1
+    }
+    return ""
+}
+
+Number :: (text: string) -> s32 {
+    value: s32 = 0
+    negative := text.count > 0 && text[0] == cast(u8)45
+    for i: cast(s64)(ifx negative then 1 else 0)..text.count-1 {
+        if text[i] < cast(u8)48 || text[i] > cast(u8)57 { break }
+        value = value * 10 + cast(s32)(text[i] - cast(u8)48)
+    }
+    return ifx negative then -value else value
+}
+
+main :: () -> s32 {
+    game: Connect.Game
+    Connect.Init(*game)
+    Connect.Reset(*game)
+    moves: s32 = 0
+    text := Fixture.Games
+    start: s64 = 0
+    joined: Vec(u8)
+    defer VecFree(joined)
+    for at: cast(s64)0..text.count-1 {
+        if text[at] != cast(u8)10 { continue }
+        piece := text[start:at]
+        start = at + 1
+        // The generated fixture continues a long line after a trailing backslash.
+        if piece.count > 0 && piece[piece.count-1] == cast(u8)92 {
+            unused BuilderAppend(joined, piece[:piece.count-1])
+            continue
+        }
+        unused BuilderAppend(joined, piece)
+        defer VecClear(joined)
+        line := TextView(joined[:])
+        if line.count == 0 || line[0] == cast(u8)35 { continue }
+        mover := Connect.Black
+        if Field(line, 0) == "white" { mover = Connect.White }
+        if moves % 2 != mover { print("c4 move % out of turn\n", moves + 1); return 1 }
+        move := Number(Field(line, 1))
+        column := move / Connect.MoveScale
+        row := move % Connect.MoveScale
+        if column < 0 || column >= Connect.Columns || row != game.heights[column] {
+            print("c4 move % does not fit the board\n", moves + 1)
+            return 2
+        }
+        if mover == Connect.Black {
+            Connect.MakeMove(*game, column, row, Connect.Black, Connect.White)
+        } else {
+            Connect.MakeMove(*game, column, row, Connect.White, Connect.Black)
+        }
+        if game.value[Connect.Black] != Number(Field(line, 2)) ||
+            game.value[Connect.White] != Number(Field(line, 3)) {
+            print("c4 move % differs: % %\n", moves + 1,
+                game.value[Connect.Black], game.value[Connect.White])
+            return 3
+        }
+        moves += 1
+    }
+    if moves != 13 { return 4 }
+    // The recorded game: black's last piece closed a horizontal four.
+    if !Connect.Win(*game, Connect.Black) || Connect.Win(*game, Connect.White) { return 5 }
+    if game.pieces[Connect.Black] != 7 || game.pieces[Connect.White] != 6 { return 6 }
+
+    // makemove and undomove restore the exact state.
+    Connect.Reset(*game)
+    Connect.MakeMove(*game, 0, 0, Connect.Black, Connect.White)
+    first := game.value[Connect.Black]
+    Connect.UndoMove(*game, 0, 0, Connect.Black, Connect.White)
+    if game.value[Connect.Black] != 0 || game.value[Connect.White] != 0 ||
+        game.pieces[Connect.Black] != 0 || game.heights[0] != 0 ||
+        game.cells[Connect.CellAt(0, 0)] != Connect.Empty { return 7 }
+    Connect.MakeMove(*game, 0, 0, Connect.Black, Connect.White)
+    if game.value[Connect.Black] != first { return 8 }
+
+    // A machine move takes a win in one.
+    Connect.Reset(*game)
+    game.skill[Connect.Black] = 2
+    Connect.MakeMove(*game, 3, 0, Connect.Black, Connect.White)
+    Connect.MakeMove(*game, 3, 1, Connect.Black, Connect.White)
+    Connect.MakeMove(*game, 3, 2, Connect.Black, Connect.White)
+    random: Rand.Random
+    Rand.Seed(*random, 12)
+    found := Connect.GenMove(*game, Connect.Black, Connect.White, *random)
+    if found / Connect.MoveScale != 3 || !Connect.Win(*game, Connect.Black) { return 9 }
+
+    // A machine move blocks a loss in one.
+    Connect.Reset(*game)
+    game.skill[Connect.Black] = 2
+    Connect.MakeMove(*game, 2, 0, Connect.White, Connect.Black)
+    Connect.MakeMove(*game, 2, 1, Connect.White, Connect.Black)
+    Connect.MakeMove(*game, 2, 2, Connect.White, Connect.Black)
+    Connect.MakeMove(*game, 0, 0, Connect.Black, Connect.White)
+    Rand.Seed(*random, 12)
+    found = Connect.GenMove(*game, Connect.Black, Connect.White, *random)
+    if found / Connect.MoveScale != 2 || Connect.Win(*game, Connect.White) { return 10 }
+
+    print("Connect replayed a recorded Dis game and took its winning and blocking moves\n")
+    return 0
+}

@@ -1,0 +1,345 @@
+// The rules of Inferno's Connect (appl/wm/c4.b): a 7 by 6 board, four in a row
+// wins, a value per colour counted incrementally over the 69 straight runs,
+// and a machine player that minimaxes its level with alpha-beta and a
+// reservoir tie-break. See ../../NOTICE.
+Rand :: #import "inferno_rand";
+
+Columns :: 7
+Rows :: 6
+WinRun :: 4
+Pieces :: Columns * Rows
+// genmove returned a move as column*MoveScale + row.
+MoveScale :: 1024
+// BLACK, WHITE, EMPTY = iota in c4.b, so Empty is 2.
+Black :: 0
+White :: 1
+Empty :: 2
+// MACHINE, HUMAN = iota.
+Machine :: 0
+Human :: 1
+MaxPlies :: 10
+SKILLB :: 8
+SKILLW :: 0
+WinBonus :: 1048576
+Infinity :: 1073741824
+// c4.b's minimax yielded to its scheduler every MAXVISITS leaf visits; the
+// search state counts them the same way.
+MaxVisits :: 1024
+// Vertical, horizontal and both diagonal runs: 21 + 24 + 24.
+LineCount :: Columns * (Rows - WinRun + 1) + Rows * (Columns - WinRun + 1) +
+    2 * (Rows - WinRun + 1) * (Columns - WinRun + 1)
+// A cell lies on at most 13 runs.
+CellSlots :: 16
+
+Game :: struct {
+    cells: [Columns * Rows]s32
+    heights: [Columns]s32
+    pieces: [2]s32
+    value: [2]s32
+    runs: [LineCount * 2]s32
+    cell_run_count: [Columns * Rows]s32
+    cell_runs: [Columns * Rows * CellSlots]s32
+    kind: [2]s32
+    skill: [2]s32
+}
+
+MiniMaxResult :: struct {
+    value: s32
+    column: s32
+    row: s32
+}
+
+CellAt :: (column: s32, row: s32) -> s32 { return column * Rows + row }
+
+AddRun :: (game: *Game, column: s32, row: s32, run: s32) {
+    cell := CellAt(column, row)
+    at := game.cell_run_count[cell]
+    game.cell_runs[cell * CellSlots + at] = run
+    game.cell_run_count[cell] = at + 1
+}
+
+// initboard's four passes: every vertical, horizontal and both diagonal run,
+// in the order c4.b numbered them.
+Init :: (game: *Game) {
+    for cell: 0..Columns * Rows - 1 { game.cell_run_count[cell] = 0 }
+    run: s32 = 0
+    for column: 0..Columns - 1 {
+        for start: 0..Rows - WinRun {
+            for k: 0..WinRun - 1 { AddRun(game, cast(s32)column, cast(s32)(start + k), run) }
+            run += 1
+        }
+    }
+    for row: 0..Rows - 1 {
+        for start: 0..Columns - WinRun {
+            for k: 0..WinRun - 1 { AddRun(game, cast(s32)(start + k), cast(s32)row, run) }
+            run += 1
+        }
+    }
+    for start: 0..Columns - WinRun {
+        for top: 0..Rows - WinRun {
+            for k: 0..WinRun - 1 { AddRun(game, cast(s32)(start + k), cast(s32)(top + k), run) }
+            run += 1
+        }
+    }
+    for start: 0..Columns - WinRun {
+        for top: 0..Rows - WinRun {
+            for k: 0..WinRun - 1 { AddRun(game, cast(s32)(Columns - 1 - start - k), cast(s32)(top + k), run) }
+            run += 1
+        }
+    }
+    game.kind[Black] = Machine
+    game.kind[White] = Human
+    game.skill[Black] = SKILLB
+    game.skill[White] = SKILLW
+}
+
+// initbrd: an empty board and no counted runs.
+Reset :: (game: *Game) {
+    for cell: 0..Columns * Rows - 1 { game.cells[cell] = Empty }
+    for column: 0..Columns - 1 { game.heights[column] = 0 }
+    game.pieces[Black] = 0
+    game.pieces[White] = 0
+    game.value[Black] = 0
+    game.value[White] = 0
+    for at: 0..LineCount * 2 - 1 { game.runs[at] = 0 }
+}
+
+// makemove: the piece, the column height, and the run values. A run empty of
+// the opponent adds 2a+1 with a WIN bonus at a == WinRun-1, and the first
+// piece in an opponent run gives back b*b.
+MakeMove :: (game: *Game, column: s32, row: s32, me: s32, you: s32) {
+    game.pieces[me] += 1
+    game.cells[CellAt(column, row)] = me
+    game.heights[column] += 1
+    cell := CellAt(column, row)
+    for at: 0..game.cell_run_count[cell] - 1 {
+        run := game.cell_runs[cell * CellSlots + at]
+        mine := game.runs[run * 2 + me]
+        yours := game.runs[run * 2 + you]
+        game.runs[run * 2 + me] = mine + 1
+        if yours == 0 {
+            game.value[me] += 2 * mine + 1
+            if mine == WinRun - 1 { game.value[me] += WinBonus }
+        } else if mine == 0 {
+            game.value[you] -= yours * yours
+        }
+    }
+}
+
+// undomove: the exact inverse, with the counts read after the move.
+UndoMove :: (game: *Game, column: s32, row: s32, me: s32, you: s32) {
+    game.pieces[me] -= 1
+    game.cells[CellAt(column, row)] = Empty
+    game.heights[column] -= 1
+    cell := CellAt(column, row)
+    for at: 0..game.cell_run_count[cell] - 1 {
+        run := game.cell_runs[cell * CellSlots + at]
+        mine := game.runs[run * 2 + me]
+        yours := game.runs[run * 2 + you]
+        game.runs[run * 2 + me] = mine - 1
+        if yours == 0 {
+            game.value[me] -= 2 * mine - 1
+            if mine == WinRun { game.value[me] -= WinBonus }
+        } else if mine == 1 {
+            game.value[you] += yours * yours
+        }
+    }
+}
+
+Win :: (game: *Game, me: s32) -> bool {
+    return game.value[me] > WinBonus / 2
+}
+
+// findmoves: the open columns, newest column first as c4.b's list ran.
+OpenColumns :: (game: *Game, out: []s32) -> s32 {
+    count: s32 = 0
+    for index: 0..Columns - 1 {
+        column := cast(s32)(Columns - 1 - index)
+        if game.heights[column] < Rows {
+            out[count] = column
+            count += 1
+        }
+    }
+    return count
+}
+
+// The search stack: c4.b's recursive minimax as a resumable stack, so a host
+// runs it in slices between its frames where the Dis ran one blocking turn.
+// One step is a leaf evaluation or one move trial of one level, with the same
+// ∞ cutoff and reservoir tie-break.
+SearchFrame :: struct {
+    me: s32
+    you: s32
+    plies: s32
+    alphabeta: s32
+    open: [Columns]s32
+    open_count: s32
+    at: s32
+    best: MiniMaxResult
+    equal: s32
+    waiting_child: bool
+    cut: bool
+    move_column: s32
+    move_row: s32
+    child_value: s32
+}
+
+SearchState :: struct {
+    active: bool
+    depth: s32
+    frames: [MaxPlies + 1]SearchFrame
+    result: MiniMaxResult
+    visits: s32
+    leaves: s32
+}
+
+// genmove's plies stretch near the game's end.
+SearchPlies :: (game: *Game, me: s32) -> s32 {
+    plies := game.skill[me]
+    left := Pieces - (game.pieces[Black] + game.pieces[White])
+    if left < plies {
+        plies = left
+    } else if left < 2 * plies {
+        plies = left
+    } else {
+        step := left / plies
+        if step < 3 { plies = ((step + 2) * plies) / (step + 1) }
+    }
+    return plies
+}
+
+SearchBegin :: (game: *Game, state: *SearchState, me: s32, you: s32, random: *Rand.Random) {
+    state.visits = 0
+    state.leaves = 0
+    state.depth = 0
+    if game.skill[me] == 0 {
+        // A level 0 machine plays a random open column at once.
+        open: [Columns]s32
+        count := OpenColumns(game, open[:])
+        pick := Rand.Next(random, count)
+        column := open[pick]
+        state.result = .{0, column, game.heights[column]}
+        state.active = false
+        return
+    }
+    root := *state.frames[0]
+    root.me = me
+    root.you = you
+    root.plies = SearchPlies(game, me)
+    root.alphabeta = Infinity
+    root.open_count = OpenColumns(game, root.open[:])
+    root.at = 0
+    root.best = .{-Infinity, 0, 0}
+    root.equal = 0
+    root.waiting_child = false
+    root.cut = false
+    state.active = true
+}
+
+// A finished level hands its value to the one above; the root hands its best
+// move to the caller. c4.b returned ∞ when it cut off at alpha-beta.
+SearchDeliver :: (state: *SearchState, value: s32) {
+    if state.depth == 0 {
+        state.result = state.frames[0].best
+        state.active = false
+        return
+    }
+    state.depth -= 1
+    parent := *state.frames[state.depth]
+    parent.waiting_child = true
+    parent.child_value = value
+}
+
+// The update body of minimax's loop: keep the better move, break ties the
+// reservoir way, and cut off once the level's best reaches alpha-beta.
+SearchImprove :: (frame: *SearchFrame, score: s32, random: *Rand.Random) {
+    if score > frame.best.value {
+        frame.equal = 1
+    } else if score == frame.best.value {
+        frame.equal += 1
+        if Rand.Next(random, frame.equal) != 0 { return }
+    } else {
+        return
+    }
+    frame.best = .{score, frame.move_column, frame.move_row}
+    if frame.best.value >= frame.alphabeta { frame.cut = true }
+}
+
+// One slice of the search: up to budget steps. Returns true once the whole
+// search has finished and left its choice in state.result.
+SearchSlice :: (game: *Game, state: *SearchState, random: *Rand.Random, budget: s32) -> bool {
+    if !state.active { return true }
+    while budget > 0 {
+        budget -= 1
+        frame := *state.frames[state.depth]
+        if frame.plies == 0 {
+            state.visits += 1
+            state.leaves += 1
+            SearchDeliver(state, game.value[frame.me] - game.value[frame.you])
+            continue
+        }
+        if frame.waiting_child {
+            // The level below has answered; finish this trial.
+            UndoMove(game, frame.move_column, frame.move_row, frame.me, frame.you)
+            SearchImprove(frame, -frame.child_value, random)
+            frame.waiting_child = false
+            if frame.cut {
+                frame.cut = false
+                SearchDeliver(state, Infinity)
+            } else {
+                frame.at += 1
+            }
+            continue
+        }
+        if frame.at >= frame.open_count {
+            SearchDeliver(state, frame.best.value)
+            continue
+        }
+        column := frame.open[frame.at]
+        row := game.heights[column]
+        frame.move_column = column
+        frame.move_row = row
+        MakeMove(game, column, row, frame.me, frame.you)
+        if Win(game, frame.me) {
+            UndoMove(game, column, row, frame.me, frame.you)
+            SearchImprove(frame, game.value[frame.me] - game.value[frame.you], random)
+            if frame.cut {
+                frame.cut = false
+                SearchDeliver(state, Infinity)
+            } else {
+                frame.at += 1
+            }
+            continue
+        }
+        frame.waiting_child = true
+        child := *state.frames[state.depth + 1]
+        child.me = frame.you
+        child.you = frame.me
+        child.plies = frame.plies - 1
+        child.alphabeta = -frame.best.value
+        child.open_count = OpenColumns(game, child.open[:])
+        child.at = 0
+        child.best = .{-Infinity, 0, 0}
+        child.equal = 0
+        child.waiting_child = false
+        child.cut = false
+        state.depth += 1
+    }
+    return !state.active
+}
+
+// genmove's last act: make the chosen move, as c4.b did.
+SearchFinish :: (game: *Game, state: *SearchState, me: s32, you: s32) -> s32 {
+    column := state.result.column
+    row := state.result.row
+    MakeMove(game, column, row, me, you)
+    return column * MoveScale + row
+}
+
+// The blocking genmove, the whole search in one call: for tests.
+GenMove :: (game: *Game, me: s32, you: s32, random: *Rand.Random) -> s32 {
+    state: SearchState
+    SearchBegin(game, *state, me, you, random)
+    while SearchSlice(game, *state, random, 1024) == false { }
+    return SearchFinish(game, *state, me, you)
+}

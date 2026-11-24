@@ -428,7 +428,13 @@ thirteen greys lit from above with z-buffered concave faces, and turns at about
 1 to 2 frames a second under the ZX engine. Bounce keeps the toolbar's ball
 buttons and its count label, draws a line from either pointer button's press to
 its release, and seeds its balls from the same generator state as the Dis
-version; its model replays ten bounces recorded from the Dis rules. Each test
+version; its model replays ten bounces recorded from the Dis rules. Connect
+keeps the Dis version's 7 by 6 board, its machine's minimax with the level
+entries and the Human and Machine menus, replays a game the Dis printed with
+the same values after every move, and runs the machine's search in slices
+between frames; Black's default level is 3, not the Dis's 8, because the ZX
+host runs the search about seventy times slower than the Dis interpreter.
+Each test
 compares the rules and the window with games recorded from the Dis version.
 
 ```sh
@@ -437,6 +443,7 @@ python3 -u appl/wm/sweeper_zx_test.py
 python3 -u appl/wm/tetris_zx_test.py
 python3 -u appl/wm/polyhedra_zx_test.py
 python3 -u appl/wm/bounce_zx_test.py
+python3 -u appl/wm/c4_zx_test.py
 ```
 
 ### Use the ZX Calendar
