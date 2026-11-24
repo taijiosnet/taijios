@@ -193,7 +193,10 @@ rt.zx: rt.zi rt_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taij
 brutus.zx: brutus.zi brutus_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_process --bind-host taijios_namespace --entry brutus:main -o $target brutus.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx $DISBIN/avi.zx $DISBIN/wmplay.zx $DISBIN/sendmail.zx $DISBIN/readmail.zx $DISBIN/telnet.zx $DISBIN/vt.zx $DISBIN/rt.zx $DISBIN/brutus.zx
+sam.zx: sam.zi sam_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_namespace.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_namespace --bind-host taijios_clock --entry sam:main -o $target sam.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx $DISBIN/avi.zx $DISBIN/wmplay.zx $DISBIN/sendmail.zx $DISBIN/readmail.zx $DISBIN/telnet.zx $DISBIN/vt.zx $DISBIN/rt.zx $DISBIN/brutus.zx $DISBIN/sam.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

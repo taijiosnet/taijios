@@ -1,0 +1,686 @@
+// Port of Inferno's Sam terminal (appl/wm/sam.b, samstub.b, samtk.b), built as sam.zx.
+// See ../../NOTICE.
+// Keeps the full Plan 9 `sam -R` binary protocol over #C (/cmd/clone), rasp section
+// buffer, split command (~~sam~~) and work flayers, Button-2 Edit menu (cut, paste,
+// snarf, look, send / search), Button-3 File menu (new, zerox, close, write, sorted
+// file list with zerox cycling), scrollbars, double-click Tdclick, /chan/snarf sync,
+// samterm.log tracing, and clean offline/local fallback when host `sam -R` is absent.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+TextArea :: #import "kryon/text_area";
+Model :: #import "sam_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Ns :: #import "taijios_namespace";
+Clock :: #import "taijios_clock";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+
+WinW :: 720
+WinH :: 540
+MaxDoc :: 524288
+DefaultSamCmd :: "sam -R"
+
+grey: Color = .{221, 221, 221, 255};
+header_bg: Color = .{202, 212, 226, 255};
+active_bg: Color = .{152, 184, 224, 255};
+menu_bg: Color = .{245, 245, 245, 255};
+track_bg: Color = .{210, 210, 210, 255};
+thumb_bg: Color = .{112, 128, 148, 255};
+dark: Color = .{140, 140, 140, 255};
+
+st: Model.SamState;
+sam_cmd: Vec(u8);
+sam_ctl_fd: s32 = -1;
+sam_data_fd: s32 = -1;
+log_fd: s32 = -1;
+status_text: Vec(u8);
+cmd_vis_buf: Vec(u8);
+work_vis_buf: Vec(u8);
+
+// Command pane TextArea state.
+cmd_cursor: s32;
+cmd_anchor: s32;
+cmd_scroll_y: s32;
+cmd_focused: bool;
+cmd_selecting: bool;
+cmd_pref_x: s32;
+cmd_pref_x_valid: bool;
+
+// Work pane TextArea state.
+work_cursor: s32;
+work_anchor: s32;
+work_scroll_y: s32;
+work_focused: bool = true;
+work_selecting: bool;
+work_pref_x: s32;
+work_pref_x_valid: bool;
+
+// Popup menus: 0=none, 2=Button-2 Edit menu, 3=Button-3 File menu.
+popup_mode: s32;
+popup_x: float32;
+popup_y: float32;
+
+// Double-click detection (for Tdclick).
+last_click_ms: s64;
+last_click_x: float32;
+last_click_y: float32;
+
+SetStatus :: (s: string) {
+    VecClear(status_text)
+    unused BuilderAppend(status_text, s)
+}
+
+WriteLog :: () {
+    if log_fd >= 0 && st.log_buf.count > 0 {
+        unused IO.Write(log_fd, TextView(st.log_buf[:]))
+    }
+    VecClear(st.log_buf)
+}
+
+FlushWire :: () {
+    if sam_data_fd >= 0 && st.out_wire.count > 0 {
+        unused IO.Write(sam_data_fd, TextView(st.out_wire[:]))
+    }
+    VecClear(st.out_wire)
+    WriteLog()
+}
+
+CloseTransport :: () {
+    if sam_data_fd >= 0 { unused IO.Close(sam_data_fd); sam_data_fd = -1 }
+    if sam_ctl_fd >= 0 { unused IO.Close(sam_ctl_fd); sam_ctl_fd = -1 }
+}
+
+SnarfPut :: (s: string) {
+    if s.count == 0 { return }
+    Model.SetVecStr(*st.snarf_buf, s)
+    st.snarflen = Model.RuneCount(s)
+    fd := IO.Open("/chan/snarf", 1)
+    if fd >= 0 {
+        unused IO.Write(fd, s)
+        unused IO.Close(fd)
+    }
+}
+
+SnarfSyncFromChan :: () {
+    fd := IO.Open("/chan/snarf", 0)
+    if fd >= 0 {
+        buf: [4096]u8
+        n := IO.Read(fd, buf[:])
+        unused IO.Close(fd)
+        if n > 0 {
+            Model.SetVecStr(*st.snarf_buf, TextView(buf[:n]))
+            st.snarflen = Model.RuneCount(TextView(buf[:n]))
+        }
+    }
+}
+
+StartSamHost :: (cmd: string) -> bool {
+    CloseTransport()
+    unused Ns.Bind("#C", "/", Ns.After)
+    ctl := IO.Open("/cmd/clone", 2)
+    if ctl < 0 { return false }
+
+    id_buf: [32]u8
+    n := IO.Read(ctl, id_buf[:])
+    if n <= 0 {
+        unused IO.Close(ctl)
+        return false
+    }
+    id_len := cast(s64)n
+    while id_len > 0 && (id_buf[id_len - 1] == cast(u8)10 || id_buf[id_len - 1] == cast(u8)13 || id_buf[id_len - 1] == cast(u8)32) {
+        id_len -= 1
+    }
+
+    exec_cmd: Vec(u8)
+    defer VecFree(exec_cmd)
+    unused BuilderAppend(exec_cmd, "exec ")
+    unused BuilderAppend(exec_cmd, cmd)
+    if IO.Write(ctl, TextView(exec_cmd[:])) <= 0 {
+        unused IO.Close(ctl)
+        return false
+    }
+
+    data_path: Vec(u8)
+    defer VecFree(data_path)
+    unused BuilderAppend(data_path, "/cmd/")
+    unused BuilderAppend(data_path, TextView(id_buf[:id_len]))
+    unused BuilderAppend(data_path, "/data")
+    data := IO.Open(TextView(data_path[:]), 2)
+    if data < 0 {
+        unused IO.Close(ctl)
+        return false
+    }
+
+    sam_ctl_fd = ctl
+    sam_data_fd = data
+    Model.StartSession(*st)
+    FlushWire()
+
+    msg: Vec(u8)
+    defer VecFree(msg)
+    unused BuilderAppend(msg, "Connected: ")
+    unused BuilderAppend(msg, cmd)
+    SetStatus(TextView(msg[:]))
+    return true
+}
+
+PollHost :: () {
+    if sam_data_fd < 0 { return }
+    buf: [2048]u8
+    msgs: Vec(Model.SamMsg)
+    defer VecFree(msgs)
+
+    for _: 0..15 {
+        n := IO.PollRead(sam_data_fd, buf[:])
+        if n == -2 { break }
+        if n <= 0 {
+            CloseTransport()
+            st.connected = false
+            st.lock = 0
+            if st.menus.count == 0 {
+                Model.InitOffline(*st)
+            }
+            SetStatus("sam host closed (offline local mode)")
+            break
+        }
+        if !Model.FeedWire(*st, buf[:n], *msgs) {
+            CloseTransport()
+            st.connected = false
+            st.lock = 0
+            SetStatus("sam protocol framing error")
+            break
+        }
+    }
+    for i: cast(s64)0..msgs.count - 1 {
+        if Model.HandleHostMsg(*st, *msgs[i]) {
+            FlushWire()
+            CloseTransport()
+            Surface.Close()
+            return
+        }
+    }
+    FlushWire()
+}
+
+CmdFlayerId :: () -> s32 {
+    return Model.CmdFlayerId(*st)
+}
+
+ActiveFlayerId :: () -> s32 {
+    if cmd_focused {
+        cid := CmdFlayerId()
+        if cid >= 0 { return cid }
+    }
+    if st.work_flayer >= 0 { return st.work_flayer }
+    return CmdFlayerId()
+}
+
+SyncDotFromTextArea :: (fid: s32, vis: string, cur_byte: s32, anc_byte: s32) {
+    sc := Model.FlayerScope(*st, fid)
+    a := cur_byte
+    b := anc_byte
+    if a > b { t := a; a = b; b = t }
+    r0 := sc.first + Model.ByteToRune(vis, cast(s64)a)
+    r1 := sc.first + Model.ByteToRune(vis, cast(s64)b)
+    Model.SetFlayerDot(*st, fid, r0, r1)
+}
+
+ApplyTextAreaEdit :: (fid: s32, vis: string, edit: TextArea.Edit, cur_out: *s32, anc_out: *s32) {
+    if !edit.changed || st.lock > 0 { return }
+    sc := Model.FlayerScope(*st, fid)
+    r0 := sc.first + Model.ByteToRune(vis, cast(s64)edit.start)
+    r1 := sc.first + Model.ByteToRune(vis, cast(s64)edit.end)
+    Model.SetFlayerDot(*st, fid, r0, r1)
+
+    if edit.replacement.count == 0 && r1 > r0 {
+        if r1 - r0 == 1 {
+            Model.SetFlayerDot(*st, fid, r1, r1)
+            Model.Keypress(*st, fid, "\x08")
+        } else {
+            Model.Cut(*st, fid)
+        }
+    } else {
+        if r1 > r0 {
+            Model.Cut(*st, fid)
+        }
+        rep := edit.replacement
+        seg_start: s64 = 0
+        for i: cast(s64)0..rep.count - 1 {
+            if rep[i] == cast(u8)10 {
+                if i > seg_start {
+                    Model.Keypress(*st, fid, rep[seg_start:i])
+                }
+                Model.Keypress(*st, fid, "\n")
+                seg_start = i + 1
+            }
+        }
+        if seg_start < rep.count {
+            Model.Keypress(*st, fid, rep[seg_start:])
+        }
+    }
+    FlushWire()
+
+    nsc := Model.FlayerScope(*st, fid)
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    Model.FlayerVisible(*st, fid, *tmp)
+    nvis := TextView(tmp[:])
+    rel := Model.FlayerDotFirst(*st, fid) - nsc.first
+    if rel < 0 { rel = 0 }
+    cb := cast(s32)Model.RuneToByte(nvis, rel)
+    cur_out.* = cb
+    anc_out.* = cb
+}
+
+DrawScrollbar :: (session: Session, key_base: u64, x: float32, y: float32, w: float32, h: float32, fid: s32, ptr: PointerFrame) {
+    Box.Draw(session, .{.key = key_base, .bounds = .{x, y, w, h}, .fill = track_bg})
+    if fid < 0 || h <= 4.0 { return }
+    total := Model.FlayerTotalRunes(*st, fid)
+    sc := Model.FlayerScope(*st, fid)
+    f1: float32 = 0.0
+    f2: float32 = 1.0
+    if total > 0 {
+        f1 = cast(float32)sc.first / cast(float32)total
+        f2 = cast(float32)sc.last / cast(float32)total
+        if f1 < 0.0 { f1 = 0.0 }
+        if f2 > 1.0 { f2 = 1.0 }
+        if f2 < f1 + 0.06 { f2 = f1 + 0.06 }
+        if f2 > 1.0 { f2 = 1.0 }
+    }
+    ty := y + f1 * h
+    th := (f2 - f1) * h
+    if th < 8.0 { th = 8.0 }
+    if ty + th > y + h { ty = y + h - th }
+    Box.Draw(session, .{.key = key_base + 1, .bounds = .{x + 1.0, ty, w - 2.0, th}, .fill = thumb_bg})
+
+    if ptr.pressed && ptr.x >= x && ptr.x <= x + w && ptr.y >= y && ptr.y <= y + h && st.lock == 0 {
+        if ptr.y < ty {
+            Model.ScrollAction(*st, fid, Model.ScrollPage, -1)
+        } else if ptr.y > ty + th {
+            Model.ScrollAction(*st, fid, Model.ScrollPage, 1)
+        } else {
+            permille := cast(s32)(((ptr.y - y) / h) * 1000.0)
+            Model.ScrollAction(*st, fid, Model.ScrollMoveTo, permille)
+        }
+        FlushWire()
+    }
+}
+
+DoMenu2Action :: (act: s32) {
+    fid := ActiveFlayerId()
+    if fid < 0 || st.lock > 0 { return }
+    if act == 0 {
+        Model.Cut(*st, fid)
+        SnarfPut(TextView(st.snarf_buf[:]))
+    } else if act == 1 {
+        SnarfSyncFromChan()
+        Model.Paste(*st, fid)
+    } else if act == 2 {
+        Model.Snarf(*st, fid)
+        SnarfPut(TextView(st.snarf_buf[:]))
+    } else if act == 3 {
+        Model.Look(*st, fid)
+    } else if act == 4 {
+        cid := CmdFlayerId()
+        if fid == cid {
+            Model.Send(*st, fid)
+        } else {
+            Model.Search(*st, fid)
+        }
+    }
+    FlushWire()
+}
+
+DoMenu3Action :: (act: s32) {
+    fid := ActiveFlayerId()
+    if st.lock > 0 { return }
+    if act == 0 {
+        Model.StartNewFile(*st)
+    } else if act == 1 && fid >= 0 {
+        unused Model.Zerox(*st, fid)
+    } else if act == 2 && fid >= 0 {
+        Model.CloseFlayer(*st, fid)
+        if st.exited {
+            FlushWire()
+            CloseTransport()
+            Surface.Close()
+            return
+        }
+    } else if act == 3 && fid >= 0 {
+        Model.WriteFlayer(*st, fid)
+    }
+    FlushWire()
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 420.0 { w = cast(float32)WinW }
+    if h < 300.0 { h = cast(float32)WinH }
+
+    PollHost()
+    if st.exited { return }
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    ta_in := TextAreaInputFor(key, mods, text)
+
+    ptr := PointerSample(session)
+    mid := TertiaryPointerSample(session)
+    sec := SecondaryPointerSample(session)
+
+    if mid.pressed && ptr.y > 54.0 {
+        popup_mode = 2
+        popup_x = ptr.x
+        popup_y = ptr.y
+        if popup_x + 110.0 > w { popup_x = w - 110.0 }
+        if popup_y + 120.0 > h { popup_y = h - 120.0 }
+    } else if sec.pressed && ptr.y > 54.0 {
+        popup_mode = 3
+        popup_x = ptr.x
+        popup_y = ptr.y
+        if popup_x + 150.0 > w { popup_x = w - 150.0 }
+        if popup_y + 180.0 > h { popup_y = h - 180.0 }
+    }
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Row 1: Edit actions (Button-2) + File actions (Button-3) + Lock/Connection state.
+    if Button.Draw(session, .{.key = 10, .bounds = .{4.0, 3.0, 44.0, 22.0}, .label = "Cut"}) > 0 { DoMenu2Action(0) }
+    if Button.Draw(session, .{.key = 11, .bounds = .{52.0, 3.0, 50.0, 22.0}, .label = "Paste"}) > 0 { DoMenu2Action(1) }
+    if Button.Draw(session, .{.key = 12, .bounds = .{106.0, 3.0, 50.0, 22.0}, .label = "Snarf"}) > 0 { DoMenu2Action(2) }
+    if Button.Draw(session, .{.key = 13, .bounds = .{160.0, 3.0, 46.0, 22.0}, .label = "Look"}) > 0 { DoMenu2Action(3) }
+
+    s5_lbl: Vec(u8)
+    defer VecFree(s5_lbl)
+    if cmd_focused {
+        unused BuilderAppend(s5_lbl, "Send")
+    } else if st.last_pat.count > 0 {
+        unused BuilderAppend(s5_lbl, "/")
+        lim := ifx st.last_pat.count > 10 then cast(s64)10 else st.last_pat.count
+        unused BuilderAppend(s5_lbl, TextView(st.last_pat[:lim]))
+    } else {
+        unused BuilderAppend(s5_lbl, "/")
+    }
+    if Button.Draw(session, .{.key = 14, .bounds = .{210.0, 3.0, 74.0, 22.0}, .label = TextView(s5_lbl[:])}) > 0 { DoMenu2Action(4) }
+
+    if Button.Draw(session, .{.key = 15, .bounds = .{294.0, 3.0, 46.0, 22.0}, .label = "New"}) > 0 { DoMenu3Action(0) }
+    if Button.Draw(session, .{.key = 16, .bounds = .{344.0, 3.0, 54.0, 22.0}, .label = "Zerox"}) > 0 { DoMenu3Action(1) }
+    if Button.Draw(session, .{.key = 17, .bounds = .{402.0, 3.0, 50.0, 22.0}, .label = "Close"}) > 0 { DoMenu3Action(2) }
+    if Button.Draw(session, .{.key = 18, .bounds = .{456.0, 3.0, 50.0, 22.0}, .label = "Write"}) > 0 { DoMenu3Action(3) }
+
+    state_lbl := ifx st.lock > 0 then "Busy" else (ifx st.connected then "sam -R" else "Offline")
+    Text.Draw(session, .{.key = 19, .bounds = .{512.0, 3.0, w - 518.0, 22.0},
+        .text = state_lbl, .size = 11, .align = .TextAlignEnd, .vertical_align = .TextAlignCenter})
+
+    // Row 2: Sorted file list tabs (Menu-3 file list).
+    tab_x: float32 = 4.0
+    max_tabs := ifx st.menus.count > 12 then cast(s64)12 else st.menus.count
+    tab_nm: Vec(u8)
+    lbl: Vec(u8)
+    defer VecFree(tab_nm)
+    defer VecFree(lbl)
+    for mi: cast(s64)0..max_tabs - 1 {
+        Model.CopyMenuName(*st, mi, *tab_nm)
+        nm := ifx tab_nm.count > 0 then TextView(tab_nm[:]) else "(unnamed)"
+        VecClear(lbl)
+        if Model.MenuIsCurrentWork(*st, mi) { unused BuilderAppend(lbl, "*") }
+        unused BuilderAppend(lbl, nm)
+        tw := cast(float32)(lbl.count * 7 + 16)
+        if tw < 56.0 { tw = 56.0 }
+        if tw > 140.0 { tw = 140.0 }
+        if tab_x + tw > w - 4.0 { break }
+        if Button.Draw(session, .{.key = cast(u64)(100 + mi), .bounds = .{tab_x, 29.0, tw, 22.0},
+            .label = TextView(lbl[:])}) > 0 {
+            Model.SelectMenuFile(*st, mi)
+            if Model.MenuTextId(*st, mi) == st.cmd_text_id {
+                cmd_focused = true
+                work_focused = false
+            } else {
+                cmd_focused = false
+                work_focused = true
+            }
+            FlushWire()
+        }
+        tab_x += tw + 4.0
+    }
+
+    // Geometry for split Command (~8 lines = 116px) + Work pane.
+    cmd_y: float32 = 55.0
+    cmd_hdr_h: float32 = 20.0
+    cmd_body_h: float32 = 116.0
+    if h < 360.0 { cmd_body_h = 80.0 }
+    work_y := cmd_y + cmd_hdr_h + cmd_body_h + 6.0
+    work_hdr_h: float32 = 20.0
+    work_body_h := h - work_y - work_hdr_h - 4.0
+    if work_body_h < 80.0 { work_body_h = 80.0 }
+
+    // Command pane header + scrollbar + TextArea.
+    cid := CmdFlayerId()
+    cfi := Model.FindFlayerById(*st, cid)
+    title_buf: Vec(u8)
+    defer VecFree(title_buf)
+    if cfi >= 0 { Model.CopyFlayerTitle(*st, cfi, *title_buf) }
+    cmd_title := ifx title_buf.count > 0 then TextView(title_buf[:]) else "~~sam~~"
+    Box.Draw(session, .{.key = 30, .bounds = .{4.0, cmd_y, w - 8.0, cmd_hdr_h},
+        .fill = ifx cmd_focused then active_bg else header_bg})
+    Text.Draw(session, .{.key = 31, .bounds = .{8.0, cmd_y, w - 16.0, cmd_hdr_h},
+        .text = cmd_title, .size = 11, .vertical_align = .TextAlignCenter})
+
+    DrawScrollbar(session, 32, 4.0, cmd_y + cmd_hdr_h, 14.0, cmd_body_h, cid, ptr)
+    Model.FlayerVisible(*st, cid, *cmd_vis_buf)
+    cmd_vis := TextView(cmd_vis_buf[:])
+    cmd_res := TextArea.Draw(session, .{
+        .key = 35,
+        .focus_id = 35,
+        .bounds = .{20.0, cmd_y + cmd_hdr_h, w - 24.0, cmd_body_h},
+        .value = cmd_vis,
+        .cursor = cmd_cursor,
+        .anchor = cmd_anchor,
+        .scroll_y = cmd_scroll_y,
+        .focused = cmd_focused,
+        .selecting = cmd_selecting,
+        .preferred_x = cmd_pref_x,
+        .preferred_x_valid = cmd_pref_x_valid,
+        .max_bytes = MaxDoc,
+        .wrap = true,
+        .input = ta_in,
+    })
+    cmd_cursor = cmd_res.cursor
+    cmd_anchor = cmd_res.anchor
+    cmd_scroll_y = cmd_res.scroll_y
+    if cmd_res.focused && !cmd_focused {
+        cmd_focused = true
+        work_focused = false
+        if cid >= 0 { Model.CleanOut(*st); Model.NewCur(*st, cid); FlushWire() }
+    }
+    cmd_selecting = cmd_res.selecting
+    cmd_pref_x = cmd_res.preferred_x
+    cmd_pref_x_valid = cmd_res.preferred_x_valid
+    if cid >= 0 {
+        SyncDotFromTextArea(cid, cmd_vis, cmd_cursor, cmd_anchor)
+        ApplyTextAreaEdit(cid, cmd_vis, cmd_res.edit, *cmd_cursor, *cmd_anchor)
+    }
+
+    // Work pane header + scrollbar + TextArea.
+    wid := st.work_flayer
+    wfi := Model.FindFlayerById(*st, wid)
+    if wid >= 0 {
+        Model.ResizeFlayer(*st, wid, cast(s32)(work_body_h / 16.0))
+        FlushWire()
+        wfi = Model.FindFlayerById(*st, wid)
+    }
+    VecClear(title_buf)
+    if wfi >= 0 { Model.CopyFlayerTitle(*st, wfi, *title_buf) }
+    work_title := ifx title_buf.count > 0 then TextView(title_buf[:]) else "No work file"
+    Box.Draw(session, .{.key = 40, .bounds = .{4.0, work_y, w - 8.0, work_hdr_h},
+        .fill = ifx work_focused then active_bg else header_bg})
+    Text.Draw(session, .{.key = 41, .bounds = .{8.0, work_y, w * 0.55, work_hdr_h},
+        .text = work_title, .size = 11, .vertical_align = .TextAlignCenter})
+    Text.Draw(session, .{.key = 42, .bounds = .{w * 0.55 + 8.0, work_y, w * 0.45 - 16.0, work_hdr_h},
+        .text = TextView(status_text[:]), .size = 11, .align = .TextAlignEnd, .vertical_align = .TextAlignCenter})
+
+    DrawScrollbar(session, 43, 4.0, work_y + work_hdr_h, 14.0, work_body_h, wid, ptr)
+    Model.FlayerVisible(*st, wid, *work_vis_buf)
+    work_vis := TextView(work_vis_buf[:])
+    work_res := TextArea.Draw(session, .{
+        .key = 46,
+        .focus_id = 46,
+        .bounds = .{20.0, work_y + work_hdr_h, w - 24.0, work_body_h},
+        .value = work_vis,
+        .cursor = work_cursor,
+        .anchor = work_anchor,
+        .scroll_y = work_scroll_y,
+        .focused = work_focused,
+        .selecting = work_selecting,
+        .preferred_x = work_pref_x,
+        .preferred_x_valid = work_pref_x_valid,
+        .max_bytes = MaxDoc,
+        .wrap = true,
+        .input = ta_in,
+    })
+    work_cursor = work_res.cursor
+    work_anchor = work_res.anchor
+    work_scroll_y = work_res.scroll_y
+    if work_res.focused && !work_focused {
+        work_focused = true
+        cmd_focused = false
+        if wid >= 0 { Model.CleanOut(*st); Model.NewCur(*st, wid); FlushWire() }
+    }
+    work_selecting = work_res.selecting
+    work_pref_x = work_res.preferred_x
+    work_pref_x_valid = work_res.preferred_x_valid
+    if wid >= 0 {
+        SyncDotFromTextArea(wid, work_vis, work_cursor, work_anchor)
+        ApplyTextAreaEdit(wid, work_vis, work_res.edit, *work_cursor, *work_anchor)
+    }
+
+    // Double-click detection inside panes -> Tdclick (sam.b:124-127).
+    if ptr.pressed && popup_mode == 0 && ptr.x > 20.0 && ptr.y > cmd_y + cmd_hdr_h {
+        now_ms := Clock.MonotonicMillis()
+        dx := ptr.x - last_click_x
+        dy := ptr.y - last_click_y
+        if dx < 0.0 { dx = -dx }
+        if dy < 0.0 { dy = -dy }
+        if now_ms - last_click_ms < 350 && dx < 6.0 && dy < 6.0 && st.lock == 0 {
+            afid := ActiveFlayerId()
+            if afid >= 0 {
+                Model.DoubleClick(*st, afid, Model.FlayerDotFirst(*st, afid))
+                FlushWire()
+            }
+            last_click_ms = 0
+        } else {
+            last_click_ms = now_ms
+            last_click_x = ptr.x
+            last_click_y = ptr.y
+        }
+    }
+
+    // Button-2 Edit popup menu (cut, paste, snarf, look, send/search).
+    if popup_mode == 2 {
+        pw: float32 = 104.0
+        ph: float32 = 114.0
+        Box.Draw(session, .{.key = 200, .bounds = .{popup_x, popup_y, pw, ph}, .fill = menu_bg})
+        Box.Draw(session, .{.key = 201, .bounds = .{popup_x, popup_y + ph - 1.0, pw, 1.0}, .fill = dark})
+        if Button.Draw(session, .{.key = 202, .bounds = .{popup_x + 2.0, popup_y + 2.0, pw - 4.0, 20.0}, .label = "cut"}) > 0 { DoMenu2Action(0); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 203, .bounds = .{popup_x + 2.0, popup_y + 24.0, pw - 4.0, 20.0}, .label = "paste"}) > 0 { DoMenu2Action(1); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 204, .bounds = .{popup_x + 2.0, popup_y + 46.0, pw - 4.0, 20.0}, .label = "snarf"}) > 0 { DoMenu2Action(2); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 205, .bounds = .{popup_x + 2.0, popup_y + 68.0, pw - 4.0, 20.0}, .label = "look"}) > 0 { DoMenu2Action(3); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 206, .bounds = .{popup_x + 2.0, popup_y + 90.0, pw - 4.0, 20.0}, .label = TextView(s5_lbl[:])}) > 0 { DoMenu2Action(4); popup_mode = 0 }
+        if ptr.pressed && (ptr.x < popup_x || ptr.x > popup_x + pw || ptr.y < popup_y || ptr.y > popup_y + ph) {
+            popup_mode = 0
+        }
+    }
+
+    // Button-3 File popup menu (new, zerox, close, write, plus menu files).
+    if popup_mode == 3 {
+        nfiles := ifx st.menus.count > 8 then cast(s64)8 else st.menus.count
+        pw: float32 = 144.0
+        ph: float32 = cast(float32)(92 + nfiles * 22)
+        if popup_y + ph > h { popup_y = h - ph; if popup_y < 0.0 { popup_y = 0.0 } }
+        Box.Draw(session, .{.key = 220, .bounds = .{popup_x, popup_y, pw, ph}, .fill = menu_bg})
+        Box.Draw(session, .{.key = 221, .bounds = .{popup_x, popup_y + ph - 1.0, pw, 1.0}, .fill = dark})
+        if Button.Draw(session, .{.key = 222, .bounds = .{popup_x + 2.0, popup_y + 2.0, pw - 4.0, 20.0}, .label = "new"}) > 0 { DoMenu3Action(0); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 223, .bounds = .{popup_x + 2.0, popup_y + 24.0, pw - 4.0, 20.0}, .label = "zerox"}) > 0 { DoMenu3Action(1); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 224, .bounds = .{popup_x + 2.0, popup_y + 46.0, pw - 4.0, 20.0}, .label = "close"}) > 0 { DoMenu3Action(2); popup_mode = 0 }
+        if Button.Draw(session, .{.key = 225, .bounds = .{popup_x + 2.0, popup_y + 68.0, pw - 4.0, 20.0}, .label = "write"}) > 0 { DoMenu3Action(3); popup_mode = 0 }
+        for mi: cast(s64)0..nfiles - 1 {
+            Model.CopyMenuName(*st, mi, *tab_nm)
+            nm := ifx tab_nm.count > 0 then TextView(tab_nm[:]) else "(unnamed)"
+            if Button.Draw(session, .{.key = cast(u64)(230 + mi),
+                .bounds = .{popup_x + 2.0, popup_y + 90.0 + cast(float32)(mi * 22), pw - 4.0, 20.0},
+                .label = nm}) > 0 {
+                Model.SelectMenuFile(*st, mi)
+                FlushWire()
+                popup_mode = 0
+            }
+        }
+        if ptr.pressed && (ptr.x < popup_x || ptr.x > popup_x + pw || ptr.y < popup_y || ptr.y > popup_y + ph) {
+            popup_mode = 0
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    Model.Init(*st)
+    unused BuilderAppend(sam_cmd, DefaultSamCmd)
+
+    log_path: Vec(u8)
+    defer VecFree(log_path)
+    unused BuilderAppend(log_path, "/tmp/samterm.log")
+
+    offline_only := false
+    argc := Args.OperandCount()
+    idx: s32 = 0
+    while idx < argc {
+        a := Args.Operand(idx)
+        if (a == "-c" || a == "-r") && idx + 1 < argc {
+            idx += 1
+            VecClear(sam_cmd)
+            unused BuilderAppend(sam_cmd, Args.Operand(idx))
+        } else if a == "-l" && idx + 1 < argc {
+            idx += 1
+            VecClear(log_path)
+            unused BuilderAppend(log_path, Args.Operand(idx))
+        } else if a == "-o" {
+            offline_only = true
+        }
+        idx += 1
+    }
+
+    log_fd = IO.Create(TextView(log_path[:]), 1, 438)
+    if log_fd >= 0 { unused IO.Write(log_fd, "Samterm started\n") }
+
+    if offline_only || !StartSamHost(TextView(sam_cmd[:])) {
+        Model.InitOffline(*st)
+        SetStatus("sam -R unavailable (offline local mode)")
+    }
+
+    rc := Surface.RunRetained(.{.title = "SamTerm", .width = WinW, .height = WinH}, Draw, 16)
+    if st.connected {
+        Model.SendExit(*st)
+        FlushWire()
+    }
+    CloseTransport()
+    if log_fd >= 0 { unused IO.Close(log_fd); log_fd = -1 }
+    Model.Free(*st)
+    VecFree(sam_cmd)
+    VecFree(status_text)
+    VecFree(cmd_vis_buf)
+    VecFree(work_vis_buf)
+    return rc
+}

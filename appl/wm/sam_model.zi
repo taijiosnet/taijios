@@ -1,0 +1,2012 @@
+// Pure-Ziran protocol, rasp (section list), and multi-flayer model for Inferno's
+// Sam terminal (appl/wm/sam.b, samstub.b, samstub.m, samterm.m, samtk.b, samtk.m).
+// See ../../NOTICE.
+#import "std/vec"
+#import "std/number_text"
+
+#scope_export
+
+VERSION :: 0
+UTFmax :: 3
+TBLOCKSIZE :: 512
+DATASIZE :: UTFmax * TBLOCKSIZE + 30
+SNARFSIZE :: 4096
+
+Dirty :: 1
+LDirty :: 2
+
+MaxFlayersPerText :: 16
+MaxNameBytes :: 256
+MaxTitleBytes :: 300
+
+// Terminal -> Host message types (samstub.m lines 82-104).
+Tversion :: 0
+Tstartcmdfile :: 1
+Tcheck :: 2
+Trequest :: 3
+Torigin :: 4
+Tstartfile :: 5
+Tworkfile :: 6
+Ttype :: 7
+Tcut :: 8
+Tpaste :: 9
+Tsnarf :: 10
+Tstartnewfile :: 11
+Twrite :: 12
+Tclose :: 13
+Tlook :: 14
+Tsearch :: 15
+Tsend :: 16
+Tdclick :: 17
+Tstartsnarf :: 18
+Tsetsnarf :: 19
+Tack :: 20
+Texit :: 21
+TMAX :: 22
+
+// Host -> Terminal message types (samstub.m lines 106-131).
+Hversion :: 0
+Hbindname :: 1
+Hcurrent :: 2
+Hnewname :: 3
+Hmovname :: 4
+Hgrow :: 5
+Hcheck0 :: 6
+Hcheck :: 7
+Hunlock :: 8
+Hdata :: 9
+Horigin :: 10
+Hunlockfile :: 11
+Hsetdot :: 12
+Hgrowdata :: 13
+Hmoveto :: 14
+Hclean :: 15
+Hdirty :: 16
+Hcut :: 17
+Hsetpat :: 18
+Hdelname :: 19
+Hclose :: 20
+Hsetsnarf :: 21
+Hsnarflen :: 22
+Hack :: 23
+Hexit :: 24
+HMAX :: 25
+
+// Scroll actions matching samtk.b:454-518.
+ScrollMoveTo :: 0
+ScrollPage :: 1
+ScrollUnit :: 2
+
+Range :: struct {
+    first: s32;
+    last: s32;
+}
+
+Pair :: struct {
+    a: s32;
+    b: s32;
+}
+
+Section :: struct {
+    owner: s32;   // text id owning this section
+    nrunes: s32;
+    off: s64;     // byte offset into pool
+    len: s64;     // byte length in pool (0 or rune_count < nrunes => hole at tail)
+}
+
+Flayer :: struct {
+    id: s32;
+    tag: s32;
+    text_id: s32;
+    is_cmd: bool;
+    scope: Range;
+    dot: Range;
+    lines: s32;
+    scrollbar: Range;
+    typepoint: s32; // -1 when no unsent typed runes
+    title: [MaxTitleBytes]u8;
+    title_len: s32;
+}
+
+TextBuf :: struct {
+    id: s32;
+    tag: s32;
+    lock: s32;
+    nrunes: s32;
+    state: s32; // Dirty | LDirty
+    flayers: [MaxFlayersPerText]s32; // index 0 is current flayer for this text
+    nflayers: s32;
+}
+
+MenuEntry :: struct {
+    tag: s32;
+    text_id: s32; // -1 if not yet opened
+    name: [MaxNameBytes]u8;
+    name_len: s32;
+}
+
+ReqKey :: struct {
+    tag: s32;
+    pos: s32;
+}
+
+SamMsg :: struct {
+    mtype: s32;
+    mcount: s32;
+    mdata: [DATASIZE]u8;
+}
+
+SamState :: struct {
+    next_tag: s32;
+    next_text_id: s32;
+    next_flayer_id: s32;
+    lock: s32;
+    snarflen: s32;
+    connected: bool;
+    exited: bool;
+    cmd_text_id: s32;
+    which_flayer: s32;
+    work_flayer: s32;
+
+    texts: Vec(TextBuf);
+    flayers: Vec(Flayer);
+    menus: Vec(MenuEntry);
+    sects: Vec(Section);
+    pool: Vec(u8);
+    requested: Vec(ReqKey);
+
+    last_pat: Vec(u8);
+    snarf_buf: Vec(u8);
+    out_wire: Vec(u8);
+    log_buf: Vec(u8);
+
+    // Wire streaming decoder state (samstub.b:168-216).
+    dec_state: s32;
+    dec_type: s32;
+    dec_count: s32;
+    dec_pos: s32;
+    dec_buf: [DATASIZE]u8;
+    dec_bad: bool;
+}
+
+// --- UTF-8 rune helpers (Limbo strings are rune-indexed) ---
+
+Utf8SeqLen :: (lead: u8) -> s64 {
+    if lead < cast(u8)0x80 { return 1 }
+    if (lead & cast(u8)0xE0) == cast(u8)0xC0 { return 2 }
+    if (lead & cast(u8)0xF0) == cast(u8)0xE0 { return 3 }
+    if (lead & cast(u8)0xF8) == cast(u8)0xF0 { return 4 }
+    return 1
+}
+
+RuneCount :: (s: string) -> s32 {
+    n: s32 = 0
+    i: s64 = 0
+    while i < s.count {
+        step := Utf8SeqLen(s[i])
+        if i + step > s.count { step = 1 }
+        i += step
+        n += 1
+    }
+    return n
+}
+
+RuneToByte :: (s: string, r: s32) -> s64 {
+    if r <= 0 { return 0 }
+    i: s64 = 0
+    n: s32 = 0
+    while i < s.count && n < r {
+        step := Utf8SeqLen(s[i])
+        if i + step > s.count { step = 1 }
+        i += step
+        n += 1
+    }
+    return i
+}
+
+ByteToRune :: (s: string, b: s64) -> s32 {
+    if b <= 0 { return 0 }
+    limit := ifx b > s.count then s.count else b
+    i: s64 = 0
+    n: s32 = 0
+    while i < limit {
+        step := Utf8SeqLen(s[i])
+        if i + step > limit { step = 1 }
+        i += step
+        n += 1
+    }
+    return n
+}
+
+RuneSlice :: (s: string, r0: s32, r1: s32) -> string {
+    if r1 <= r0 { return "" }
+    b0 := RuneToByte(s, r0)
+    b1 := RuneToByte(s, r1)
+    if b1 <= b0 { return "" }
+    return s[b0:b1]
+}
+
+// --- Message names & string helpers ---
+
+TName :: (t: s32) -> string {
+    names: [TMAX]string = .[
+        "Tversion", "Tstartcmdfile", "Tcheck", "Trequest", "Torigin",
+        "Tstartfile", "Tworkfile", "Ttype", "Tcut", "Tpaste",
+        "Tsnarf", "Tstartnewfile", "Twrite", "Tclose", "Tlook",
+        "Tsearch", "Tsend", "Tdclick", "Tstartsnarf", "Tsetsnarf",
+        "Tack", "Texit",
+    ]
+    if t >= 0 && t < TMAX { return names[t] }
+    return "Tunknown"
+}
+
+HName :: (h: s32) -> string {
+    names: [HMAX]string = .[
+        "Hversion", "Hbindname", "Hcurrent", "Hnewname", "Hmovname",
+        "Hgrow", "Hcheck0", "Hcheck", "Hunlock", "Hdata",
+        "Horigin", "Hunlockfile", "Hsetdot", "Hgrowdata", "Hmoveto",
+        "Hclean", "Hdirty", "Hcut", "Hsetpat", "Hdelname",
+        "Hclose", "Hsetsnarf", "Hsnarflen", "Hack", "Hexit",
+    ]
+    if h >= 0 && h < HMAX { return names[h] }
+    return "Hunknown"
+}
+
+LogLine :: (st: *SamState, s: string) {
+    if st.log_buf.count > 65536 { VecClear(st.log_buf) }
+    unused BuilderAppend(st.log_buf, s)
+    unused VecPush(st.log_buf, cast(u8)10)
+}
+
+SetVecStr :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+CopyFixed :: (dst: []u8, s: string) -> s32 {
+    lim := ifx s.count > dst.count then dst.count else s.count
+    for i: cast(s64)0..lim - 1 { dst[i] = s[i] }
+    return cast(s32)lim
+}
+
+StrLess :: (a: string, b: string) -> bool {
+    lim := ifx a.count < b.count then a.count else b.count
+    for i: cast(s64)0..lim - 1 {
+        if a[i] != b[i] { return a[i] < b[i] }
+    }
+    return a.count < b.count
+}
+
+CopyMenuName :: (st: *SamState, mi: s64, out: *Vec(u8)) {
+    VecClear(out.*)
+    if mi < 0 || mi >= st.menus.count { return }
+    for k: cast(s32)0..st.menus[mi].name_len - 1 {
+        unused VecPush(out.*, st.menus[mi].name[k])
+    }
+}
+
+CopyFlayerTitle :: (st: *SamState, fi: s64, out: *Vec(u8)) {
+    VecClear(out.*)
+    if fi < 0 || fi >= st.flayers.count { return }
+    for k: cast(s32)0..st.flayers[fi].title_len - 1 {
+        unused VecPush(out.*, st.flayers[fi].title[k])
+    }
+}
+
+UpdateMenuTextTitle :: (st: *SamState, ti: s64, mi: s64) {
+    nm: Vec(u8)
+    defer VecFree(nm)
+    CopyMenuName(st, mi, *nm)
+    UpdateTextTitles(st, ti, TextView(nm[:]))
+}
+
+// --- Wire little-endian codecs (samstub.b:379-499) ---
+
+InShort :: (data: []u8, n: s64) -> s32 {
+    if n + 2 > data.count { return 0 }
+    return (cast(s32)data[n + 1] << 8) | cast(s32)data[n]
+}
+
+InLong :: (data: []u8, n: s64) -> s32 {
+    if n + 4 > data.count { return 0 }
+    u: u32 = (cast(u32)data[n + 3] << 24) |
+             (cast(u32)data[n + 2] << 16) |
+             (cast(u32)data[n + 1] << 8) |
+             cast(u32)data[n]
+    return cast(s32)u
+}
+
+InVlong :: (data: []u8, n: s64) -> s64 {
+    if n + 8 > data.count { return 0 }
+    u: u64 = (cast(u64)data[n + 7] << 56) |
+             (cast(u64)data[n + 6] << 48) |
+             (cast(u64)data[n + 5] << 40) |
+             (cast(u64)data[n + 4] << 32) |
+             (cast(u64)data[n + 3] << 24) |
+             (cast(u64)data[n + 2] << 16) |
+             (cast(u64)data[n + 1] << 8) |
+             cast(u64)data[n]
+    return cast(s64)u
+}
+
+PushShort :: (out: *Vec(u8), s: s32) {
+    unused VecPush(out.*, cast(u8)(s & 255))
+    unused VecPush(out.*, cast(u8)((s >> 8) & 255))
+}
+
+PushLong :: (out: *Vec(u8), s: s32) {
+    u := cast(u32)s
+    unused VecPush(out.*, cast(u8)(u & 255))
+    unused VecPush(out.*, cast(u8)((u >> 8) & 255))
+    unused VecPush(out.*, cast(u8)((u >> 16) & 255))
+    unused VecPush(out.*, cast(u8)((u >> 24) & 255))
+}
+
+PushVlong :: (out: *Vec(u8), s: s64) {
+    u := cast(u64)s
+    for k: cast(u64)0..7 {
+        unused VecPush(out.*, cast(u8)((u >> (k * 8)) & 255))
+    }
+}
+
+EmitHeader :: (out: *Vec(u8), mtype: s32, count: s32) {
+    unused VecPush(out.*, cast(u8)(mtype & 255))
+    PushShort(out, count)
+}
+
+OutT0 :: (st: *SamState, t: s32) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, 0)
+}
+
+OutTs :: (st: *SamState, t: s32, s: s32) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, 2)
+    PushShort(*st.out_wire, s)
+}
+
+OutTv :: (st: *SamState, t: s32, v: s64) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, 8)
+    PushVlong(*st.out_wire, v)
+}
+
+OutTsl :: (st: *SamState, t: s32, m: s32, l: s32) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, 6)
+    PushShort(*st.out_wire, m)
+    PushLong(*st.out_wire, l)
+}
+
+OutTsls :: (st: *SamState, t: s32, m: s32, l1: s32, l2: s32) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, 8)
+    PushShort(*st.out_wire, m)
+    PushLong(*st.out_wire, l1)
+    PushShort(*st.out_wire, l2)
+}
+
+OutTsll :: (st: *SamState, t: s32, m: s32, l1: s32, l2: s32) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, 10)
+    PushShort(*st.out_wire, m)
+    PushLong(*st.out_wire, l1)
+    PushLong(*st.out_wire, l2)
+}
+
+OutTslS :: (st: *SamState, t: s32, s1: s32, l1: s32, s: string) {
+    LogLine(st, TName(t))
+    if !st.connected { return }
+    EmitHeader(*st.out_wire, t, cast(s32)(6 + s.count))
+    PushShort(*st.out_wire, s1)
+    PushLong(*st.out_wire, l1)
+    unused BuilderAppend(st.out_wire, s)
+}
+
+// Feed raw bytes from host into the wire state machine (samstub.b:168-216).
+FeedWire :: (st: *SamState, bytes: []u8, out: *Vec(SamMsg)) -> bool {
+    for i: cast(s64)0..bytes.count - 1 {
+        c := cast(s32)bytes[i]
+        if st.dec_state == 0 {
+            st.dec_type = c
+            st.dec_count = 0
+            st.dec_pos = 0
+            st.dec_state = 1
+            continue
+        }
+        if st.dec_state == 1 {
+            st.dec_count = c
+            st.dec_state = 2
+            continue
+        }
+        if st.dec_state == 2 {
+            st.dec_count = st.dec_count | (c << 8)
+            if st.dec_count > DATASIZE || st.dec_count < 0 {
+                st.dec_bad = true
+                st.dec_state = 0
+                return false
+            }
+            if st.dec_count > 0 {
+                st.dec_state = 3
+                continue
+            }
+            msg: SamMsg = .{.mtype = st.dec_type, .mcount = 0}
+            unused VecPush(out.*, msg)
+            st.dec_state = 0
+            continue
+        }
+        // dec_state == 3
+        st.dec_buf[st.dec_pos] = cast(u8)c
+        st.dec_pos += 1
+        if st.dec_pos >= st.dec_count {
+            msg: SamMsg = .{.mtype = st.dec_type, .mcount = st.dec_count}
+            for k: cast(s32)0..st.dec_count - 1 {
+                msg.mdata[k] = st.dec_buf[k]
+            }
+            unused VecPush(out.*, msg)
+            st.dec_state = 0
+            st.dec_pos = 0
+        }
+    }
+    return true
+}
+
+// --- Rasp / Section list operations (samstub.b:848-928, 1175-1304, samtk.b:580-617) ---
+
+PoolAppend :: (pool: *Vec(u8), s: string) -> s64 {
+    off := pool.count
+    unused BuilderAppend(pool.*, s)
+    return off
+}
+
+PoolText :: (pool: []u8, sct: Section) -> string {
+    if sct.len <= 0 { return "" }
+    return TextView(pool[sct.off:sct.off + sct.len])
+}
+
+CopyPoolText :: (pool: *Vec(u8), sct: Section, out: *Vec(u8)) {
+    VecClear(out.*)
+    if sct.len <= 0 { return }
+    for k: cast(s64)0..sct.len - 1 {
+        unused VecPush(out.*, pool.*[sct.off + k])
+    }
+}
+
+InsertSectionAt :: (sects: *Vec(Section), idx: s64, sct: Section) {
+    unused VecPush(sects.*, sct)
+    j := sects.count - 1
+    while j > idx {
+        sects.*[j] = sects.*[j - 1]
+        j -= 1
+    }
+    sects.*[idx] = sct
+}
+
+RemoveSectionAt :: (sects: *Vec(Section), idx: s64) {
+    for j: idx..sects.count - 2 {
+        sects.*[j] = sects.*[j + 1]
+    }
+    unused VecResize(sects.*, sects.count - 1)
+}
+
+RemoveOwnerSections :: (sects: *Vec(Section), owner: s32) {
+    w: s64 = 0
+    for r: cast(s64)0..sects.count - 1 {
+        if sects.*[r].owner != owner {
+            sects.*[w] = sects.*[r]
+            w += 1
+        }
+    }
+    unused VecResize(sects.*, w)
+}
+
+// Copy runes [p1..p2) for owner from section list into out. Returns false on hole.
+SctGet :: (sects: []Section, pool: []u8, owner: s32, p1_in: s32, p2_in: s32, out: *Vec(u8)) -> bool {
+    p1 := p1_in
+    p2 := p2_in
+    if p2 <= p1 { return true }
+    for idx: cast(s64)0..sects.count - 1 {
+        if sects[idx].owner != owner { continue }
+        nr := sects[idx].nrunes
+        txt := PoolText(pool, sects[idx])
+        ln := RuneCount(txt)
+        if p1 < nr {
+            take_end := ifx p2 > nr then nr else p2
+            if ln < nr && take_end > ln {
+                return false
+            }
+            seg := RuneSlice(txt, p1, take_end)
+            unused BuilderAppend(out.*, seg)
+            if p2 <= nr { return true }
+            p1 = 0
+            p2 -= nr
+        } else {
+            p1 -= nr
+            p2 -= nr
+        }
+    }
+    return true
+}
+
+// Read up to n lines starting at rune p into out (samstub.b:1197-1216).
+SctGetLines :: (sects: []Section, pool: []u8, owner: s32, p_in: s32, n_in: s32, out: *Vec(u8)) -> s32 {
+    p := p_in
+    n := n_in
+    for idx: cast(s64)0..sects.count - 1 {
+        if sects[idx].owner != owner { continue }
+        nr := sects[idx].nrunes
+        txt := PoolText(pool, sects[idx])
+        ln := RuneCount(txt)
+        if p < nr {
+            if p > ln { return n }
+            b := ifx p > 0 then p else 0
+            b_byte := RuneToByte(txt, b)
+            i_byte := b_byte
+            while i_byte < txt.count && n > 0 {
+                if txt[i_byte] == cast(u8)10 { n -= 1 }
+                step := Utf8SeqLen(txt[i_byte])
+                if i_byte + step > txt.count { step = 1 }
+                i_byte += step
+            }
+            if i_byte > b_byte {
+                unused BuilderAppend(out.*, txt[b_byte:i_byte])
+            }
+            if n == 0 || ln < nr { return n }
+        }
+        p -= nr
+    }
+    return n
+}
+
+// Find first hole at or after rune f, capped at TBLOCKSIZE (samstub.b:848-881).
+SctHole :: (sects: []Section, pool: []u8, owner: s32, f_in: s32) -> Pair {
+    f := f_in
+    p: s32 = 0
+    h: s32 = -1
+    l: s32 = 0
+    for idx: cast(s64)0..sects.count - 1 {
+        if sects[idx].owner != owner { continue }
+        nr := sects[idx].nrunes
+        nt := RuneCount(PoolText(pool, sects[idx]))
+        if h >= 0 {
+            if nt == 0 {
+                l += nr
+                if l >= TBLOCKSIZE { return .{h, TBLOCKSIZE} }
+            } else {
+                return .{h, l}
+            }
+        }
+        if h < 0 && f < nr {
+            if nt < nr {
+                if f < nt {
+                    h = p + nt
+                    l = nr - nt
+                } else {
+                    h = p + f
+                    l = nr - f
+                }
+                if l >= TBLOCKSIZE { return .{h, TBLOCKSIZE} }
+            }
+        }
+        p += nr
+        f -= nr
+    }
+    if h == -1 { return .{p, 0} }
+    return .{h, l}
+}
+
+// Return (x, p): x=-1 hole at p; x=0 line n at p; x>0 eof at p (samstub.b:884-905).
+SctLineCount :: (sects: []Section, pool: []u8, owner: s32, pos_in: s32, n_in: s32) -> Pair {
+    pos := pos_in
+    n := n_in
+    p: s32 = 0
+    for idx: cast(s64)0..sects.count - 1 {
+        if sects[idx].owner != owner { continue }
+        nr := sects[idx].nrunes
+        txt := PoolText(pool, sects[idx])
+        nt := RuneCount(txt)
+        if pos < nr {
+            start_r := ifx pos > 0 then pos else 0
+            byte_i := RuneToByte(txt, start_r)
+            cur_r := start_r
+            while byte_i < txt.count {
+                ch := txt[byte_i]
+                step := Utf8SeqLen(ch)
+                if byte_i + step > txt.count { step = 1 }
+                byte_i += step
+                cur_r += 1
+                if ch == cast(u8)10 { n -= 1 }
+                if n == 0 { return .{0, p + cur_r} }
+            }
+            if nt < nr { return .{-1, p + nt} }
+        }
+        p += nr
+        pos -= nr
+    }
+    return .{n, p}
+}
+
+// Walk backward n newlines from pos (samstub.b:907-928).
+SctRevCnt :: (sects: []Section, pool: []u8, owner: s32, pos: s32, n: s32) -> Pair {
+    idxs: Vec(s64)
+    starts: Vec(s32)
+    defer VecFree(idxs)
+    defer VecFree(starts)
+    acc: s32 = 0
+    for i: cast(s64)0..sects.count - 1 {
+        if sects[i].owner != owner { continue }
+        unused VecPush(idxs, i)
+        unused VecPush(starts, acc)
+        acc += sects[i].nrunes
+    }
+    if idxs.count == 0 { return .{n, 0} }
+
+    rem_n := n
+    cur_pos := pos
+    k := idxs.count - 1
+    while k >= 0 {
+        idx := idxs[k]
+        st_off := starts[k]
+        nr := sects[idx].nrunes
+        if cur_pos >= st_off {
+            local := cur_pos - st_off
+            if local > nr { local = nr }
+            txt := PoolText(pool, sects[idx])
+            nt := RuneCount(txt)
+            if rem_n > 0 {
+                if nt < nr && local > nt {
+                    return .{-1, st_off + local}
+                }
+                lim_b := RuneToByte(txt, local)
+                r := local
+                b := lim_b
+                while r > 0 {
+                    b -= 1
+                    while b > 0 && (txt[b] & cast(u8)0xC0) == cast(u8)0x80 { b -= 1 }
+                    r -= 1
+                    if txt[b] == cast(u8)10 {
+                        rem_n -= 1
+                        if rem_n == 0 {
+                            return .{0, st_off + r + 1}
+                        }
+                    }
+                }
+                cur_pos = st_off
+            } else {
+                return .{0, cur_pos}
+            }
+        }
+        k -= 1
+    }
+    return .{rem_n, 0}
+}
+
+// RaspLines (samtk.b:580-617): forward (>0) or backward (<0) line count.
+// Returns (pos, remaining_nlines); pos=-1 on hole.
+RaspLines :: (sects: []Section, pool: []u8, owner: s32, pos_in: s32, nlines_in: s32) -> Pair {
+    if nlines_in < 0 {
+        res := SctRevCnt(sects, pool, owner, pos_in, -nlines_in)
+        if res.a < 0 { return .{-1, nlines_in} }
+        return .{res.b, -res.a}
+    }
+    pos := pos_in
+    nlines := nlines_in
+    p: s32 = 0
+    for idx: cast(s64)0..sects.count - 1 {
+        if sects[idx].owner != owner { continue }
+        nr := sects[idx].nrunes
+        txt := PoolText(pool, sects[idx])
+        if pos < nr {
+            start_r := ifx pos > 0 then pos else 0
+            byte_i := RuneToByte(txt, start_r)
+            cur_r := start_r
+            while byte_i < txt.count {
+                ch := txt[byte_i]
+                step := Utf8SeqLen(ch)
+                if byte_i + step > txt.count { step = 1 }
+                byte_i += step
+                cur_r += 1
+                if ch == cast(u8)10 { nlines -= 1 }
+                if nlines == 0 { return .{p + cur_r, 0} }
+            }
+            if cur_r < nr { return .{-1, nlines} }
+        }
+        pos -= nr
+        if pos < 0 { pos = 0 }
+        p += nr
+    }
+    return .{p, nlines}
+}
+
+// Fill hole at rune pos with s (samstub.b:1218-1246).
+SctPut :: (sects: *Vec(Section), pool: *Vec(u8), owner: s32, pos_in: s32, s_in: string) {
+    pos := pos_in
+    s := s_in
+    cur_buf: Vec(u8)
+    idx: s64 = 0
+    while s.count > 0 && idx < sects.count {
+        if sects.*[idx].owner != owner {
+            idx += 1
+            continue
+        }
+        nr := sects.*[idx].nrunes
+        if nr <= pos {
+            pos -= nr
+            idx += 1
+            continue
+        }
+        CopyPoolText(pool, sects.*[idx], *cur_buf)
+        cur_txt := TextView(cur_buf[:])
+        l := RuneCount(cur_txt)
+        if pos < l { break }
+        s_runes := RuneCount(s)
+        if pos == l {
+            avail := nr - l
+            take := ifx s_runes > avail then avail else s_runes
+            head := RuneSlice(s, 0, take)
+            new_off := pool.count
+            if cur_txt.count > 0 { unused BuilderAppend(pool.*, cur_txt) }
+            unused BuilderAppend(pool.*, head)
+            sects.*[idx].off = new_off
+            sects.*[idx].len = cur_txt.count + head.count
+            if s_runes > avail {
+                s = RuneSlice(s, avail, s_runes)
+                pos = 0
+                idx += 1
+                continue
+            }
+            break
+        }
+        // pos > l: split section into [0..pos) and [pos..nr) with s at start of second.
+        sects.*[idx].nrunes = pos
+        rem_nr := nr - pos
+        take := ifx s_runes > rem_nr then rem_nr else s_runes
+        head := RuneSlice(s, 0, take)
+        off2 := PoolAppend(pool, head)
+        second: Section = .{.owner = owner, .nrunes = rem_nr, .off = off2, .len = head.count}
+        InsertSectionAt(sects, idx + 1, second)
+        if s_runes > rem_nr {
+            s = RuneSlice(s, rem_nr, s_runes)
+            pos = 0
+            idx += 2
+            continue
+        }
+        break
+    }
+    VecFree(cur_buf)
+}
+
+// Open a hole of l runes at pos (samstub.b:1248-1270).
+SctMakeRoom :: (sects: *Vec(Section), pool: *Vec(u8), owner: s32, pos_in: s32, l: s32) {
+    if l <= 0 { return }
+    pos := pos_in
+    cur_buf: Vec(u8)
+    done := false
+    idx: s64 = 0
+    while idx < sects.count {
+        if sects.*[idx].owner != owner {
+            idx += 1
+            continue
+        }
+        nr := sects.*[idx].nrunes
+        if nr < pos {
+            pos -= nr
+            idx += 1
+            continue
+        }
+        CopyPoolText(pool, sects.*[idx], *cur_buf)
+        txt := TextView(cur_buf[:])
+        nt := RuneCount(txt)
+        if nt <= pos {
+            sects.*[idx].nrunes += l
+            done = true
+            break
+        }
+        if pos == 0 {
+            hole: Section = .{.owner = owner, .nrunes = l, .off = 0, .len = 0}
+            InsertSectionAt(sects, idx, hole)
+            done = true
+            break
+        }
+        split_b := RuneToByte(txt, pos)
+        old_off := sects.*[idx].off
+        old_len := sects.*[idx].len
+        sects.*[idx].nrunes = pos + l
+        sects.*[idx].len = split_b
+        esct: Section = .{.owner = owner, .nrunes = nr - pos, .off = old_off + split_b, .len = old_len - split_b}
+        InsertSectionAt(sects, idx + 1, esct)
+        done = true
+        break
+    }
+    if !done {
+        hole: Section = .{.owner = owner, .nrunes = l, .off = 0, .len = 0}
+        unused VecPush(sects.*, hole)
+    }
+    VecFree(cur_buf)
+}
+
+// Delete n runes starting at start (samstub.b:1272-1303).
+SctDelete :: (sects: *Vec(Section), pool: *Vec(u8), owner: s32, start_in: s32, n_in: s32) {
+    start := start_in
+    n := n_in
+    cur_buf: Vec(u8)
+    idx: s64 = 0
+    while n > 0 && idx < sects.count {
+        if sects.*[idx].owner != owner {
+            idx += 1
+            continue
+        }
+        nr := sects.*[idx].nrunes
+        if start >= nr {
+            start -= nr
+            idx += 1
+            continue
+        }
+        CopyPoolText(pool, sects.*[idx], *cur_buf)
+        txt := TextView(cur_buf[:])
+        nt := RuneCount(txt)
+        if start + n < nt {
+            b0 := RuneToByte(txt, start)
+            b1 := RuneToByte(txt, start + n)
+            new_off := pool.count
+            if b0 > 0 { unused BuilderAppend(pool.*, txt[:b0]) }
+            if b1 < txt.count { unused BuilderAppend(pool.*, txt[b1:]) }
+            sects.*[idx].off = new_off
+            sects.*[idx].len = b0 + (txt.count - b1)
+            sects.*[idx].nrunes -= n
+            break
+        }
+        if start > 0 {
+            if start < nt {
+                b0 := RuneToByte(txt, start)
+                sects.*[idx].len = b0
+            }
+            if start + n <= nr {
+                sects.*[idx].nrunes -= n
+                break
+            }
+            removed := nr - start
+            sects.*[idx].nrunes = start
+            n -= removed
+            start = 0
+            idx += 1
+            continue
+        }
+        // start == 0
+        if n < nr {
+            sects.*[idx].len = 0
+            sects.*[idx].nrunes -= n
+            break
+        }
+        n -= nr
+        RemoveSectionAt(sects, idx)
+    }
+    VecFree(cur_buf)
+}
+
+// --- Lookup helpers ---
+
+FindMenuByTag :: (st: *SamState, tag: s32) -> s64 {
+    for i: cast(s64)0..st.menus.count - 1 {
+        if st.menus[i].tag == tag { return i }
+    }
+    return -1
+}
+
+FindTextByTag :: (st: *SamState, tag: s32) -> s64 {
+    for i: cast(s64)0..st.texts.count - 1 {
+        if st.texts[i].tag == tag { return i }
+    }
+    return -1
+}
+
+FindTextById :: (st: *SamState, id: s32) -> s64 {
+    for i: cast(s64)0..st.texts.count - 1 {
+        if st.texts[i].id == id { return i }
+    }
+    return -1
+}
+
+FindFlayerById :: (st: *SamState, id: s32) -> s64 {
+    for i: cast(s64)0..st.flayers.count - 1 {
+        if st.flayers[i].id == id { return i }
+    }
+    return -1
+}
+
+// Extract the currently visible slice of a flayer into out.
+FlayerVisible :: (st: *SamState, flayer_id: s32, out: *Vec(u8)) {
+    VecClear(out.*)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    sc := st.flayers[fi].scope
+    if sc.last > sc.first {
+        unused SctGet(st.sects[:], st.pool[:], st.flayers[fi].text_id, sc.first, sc.last, out)
+    }
+}
+
+SetFlayerDot :: (st: *SamState, flayer_id: s32, first: s32, last: s32) {
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    st.flayers[fi].dot = .{first, last}
+}
+
+FlayerDotFirst :: (st: *SamState, flayer_id: s32) -> s32 {
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return 0 }
+    return st.flayers[fi].dot.first
+}
+
+FlayerScope :: (st: *SamState, flayer_id: s32) -> Range {
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return .{0, 0} }
+    return st.flayers[fi].scope
+}
+
+FlayerTotalRunes :: (st: *SamState, flayer_id: s32) -> s32 {
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return 0 }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return 0 }
+    return st.texts[ti].nrunes
+}
+
+CmdFlayerId :: (st: *SamState) -> s32 {
+    ti := FindTextById(st, st.cmd_text_id)
+    if ti >= 0 && st.texts[ti].nflayers > 0 {
+        return st.texts[ti].flayers[0]
+    }
+    return -1
+}
+
+MenuTextId :: (st: *SamState, mi: s64) -> s32 {
+    if mi < 0 || mi >= st.menus.count { return -1 }
+    return st.menus[mi].text_id
+}
+
+MenuIsCurrentWork :: (st: *SamState, mi: s64) -> bool {
+    if mi < 0 || mi >= st.menus.count || st.menus[mi].text_id < 0 { return false }
+    ti := FindTextById(st, st.menus[mi].text_id)
+    if ti < 0 || st.texts[ti].nflayers <= 0 { return false }
+    return st.texts[ti].flayers[0] == st.work_flayer
+}
+
+// --- Title & flayer view sync (samtk.b:270-283) ---
+
+FormatTitle :: (st: *SamState, text_idx: s64, base: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    unused BuilderAppend(out.*, base)
+    if text_idx >= 0 && text_idx < st.texts.count {
+        t := st.texts[text_idx]
+        has_dirty := (t.state & Dirty) != 0
+        has_ldirty := t.id != st.cmd_text_id && (t.state & LDirty) != 0
+        if has_ldirty {
+            unused BuilderAppend(out.*, " (Modified)")
+        } else if has_dirty {
+            unused BuilderAppend(out.*, " (Dirty)")
+        }
+        if t.nflayers > 1 {
+            unused BuilderAppend(out.*, " (Zeroxed)")
+        }
+    }
+}
+
+UpdateTextTitles :: (st: *SamState, text_idx: s64, base: string) {
+    if text_idx < 0 || text_idx >= st.texts.count { return }
+    title: Vec(u8)
+    defer VecFree(title)
+    FormatTitle(st, text_idx, base, *title)
+    ts := TextView(title[:])
+    nf := st.texts[text_idx].nflayers
+    for k: cast(s32)0..nf - 1 {
+        fi := FindFlayerById(st, st.texts[text_idx].flayers[k])
+        if fi >= 0 {
+            st.flayers[fi].title_len = CopyFixed(st.flayers[fi].title[:], ts)
+        }
+    }
+}
+
+SetLock :: (st: *SamState) {
+    if !st.connected { return }
+    st.lock += 1
+}
+
+ClrLock :: (st: *SamState) {
+    if st.lock > 0 { st.lock -= 1 }
+}
+
+OutRequest :: (st: *SamState, tag: s32, h1: s32, h2: s32) {
+    for i: cast(s64)0..st.requested.count - 1 {
+        if st.requested[i].tag == tag && st.requested[i].pos == h1 { return }
+    }
+    OutTsls(st, Trequest, tag, h1, h2)
+    unused VecPush(st.requested, ReqKey.{.tag = tag, .pos = h1})
+    SetLock(st)
+}
+
+ScrollTo :: (st: *SamState, flayer_id: s32, where: s32) {
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    tid := st.flayers[fi].text_id
+    ti := FindTextById(st, tid)
+    if ti < 0 { return }
+    w := ifx where < 0 then cast(s32)0 else where
+    buf: Vec(u8)
+    defer VecFree(buf)
+    rem := SctGetLines(st.sects[:], st.pool[:], tid, w, st.flayers[fi].lines, *buf)
+    st.flayers[fi].scope.first = w
+    st.flayers[fi].scope.last = w + RuneCount(TextView(buf[:]))
+    if rem == 0 {
+        st.flayers[fi].scrollbar = st.flayers[fi].scope
+    } else {
+        hole := SctHole(st.sects[:], st.pool[:], tid, st.flayers[fi].scope.last)
+        st.flayers[fi].scope.last = hole.a
+        if hole.b > 0 {
+            OutRequest(st, st.flayers[fi].tag, hole.a, hole.b)
+        } else {
+            if st.flayers[fi].scope.first > st.texts[ti].nrunes {
+                st.flayers[fi].scope.first = st.texts[ti].nrunes
+                st.flayers[fi].scope.last = st.texts[ti].nrunes
+            }
+            st.flayers[fi].scrollbar = st.flayers[fi].scope
+        }
+    }
+}
+
+NewCur :: (st: *SamState, flayer_id: s32) {
+    if st.which_flayer == flayer_id { return }
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti >= 0 {
+        pos: s32 = -1
+        for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+            if st.texts[ti].flayers[k] == flayer_id { pos = k; break }
+        }
+        if pos > 0 {
+            j := pos
+            while j > 0 {
+                st.texts[ti].flayers[j] = st.texts[ti].flayers[j - 1]
+                j -= 1
+            }
+            st.texts[ti].flayers[0] = flayer_id
+        }
+        if st.texts[ti].id != st.cmd_text_id {
+            st.work_flayer = flayer_id
+        }
+    }
+    st.which_flayer = flayer_id
+}
+
+CreateFlayer :: (st: *SamState, tag: s32, text_id: s32, is_cmd: bool) -> s32 {
+    fid := st.next_flayer_id
+    st.next_flayer_id += 1
+    fl: Flayer = .{
+        .id = fid,
+        .tag = tag,
+        .text_id = text_id,
+        .is_cmd = is_cmd,
+        .lines = ifx is_cmd then cast(s32)8 else cast(s32)24,
+        .scrollbar = .{0, 1},
+        .typepoint = -1,
+    }
+    fl.title_len = CopyFixed(fl.title[:], "SamTerm")
+    unused VecPush(st.flayers, fl)
+    return fid
+}
+
+NewText :: (st: *SamState, tag: s32, is_cmd: bool) -> s32 {
+    tid := st.next_text_id
+    st.next_text_id += 1
+    fid := CreateFlayer(st, tag, tid, is_cmd)
+    tb: TextBuf = .{
+        .id = tid,
+        .tag = tag,
+        .nflayers = 1,
+    }
+    tb.flayers[0] = fid
+    unused VecPush(st.texts, tb)
+    NewCur(st, fid)
+    return tid
+}
+
+MenuInsAt :: (st: *SamState, pos: s64, name: string, text_id: s32, tag: s32) {
+    entry: MenuEntry = .{.tag = tag, .text_id = text_id}
+    entry.name_len = CopyFixed(entry.name[:], name)
+    unused VecPush(st.menus, entry)
+    j := st.menus.count - 1
+    while j > pos {
+        st.menus[j] = st.menus[j - 1]
+        j -= 1
+    }
+    st.menus[pos] = entry
+}
+
+MenuDelAt :: (st: *SamState, pos: s64) {
+    if pos < 0 || pos >= st.menus.count { return }
+    for j: pos..st.menus.count - 2 {
+        st.menus[j] = st.menus[j + 1]
+    }
+    unused VecResize(st.menus, st.menus.count - 1)
+}
+
+GrowText :: (st: *SamState, ti: s64, at: s32, l: s32) {
+    tid := st.texts[ti].id
+    SctMakeRoom(*st.sects, *st.pool, tid, at, l)
+    st.texts[ti].nrunes += l
+    for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+        fi := FindFlayerById(st, st.texts[ti].flayers[k])
+        if fi >= 0 {
+            if at < st.flayers[fi].scope.first { st.flayers[fi].scope.first += l }
+            if at < st.flayers[fi].scope.last { st.flayers[fi].scope.last += l }
+        }
+    }
+}
+
+UpdateFls :: (st: *SamState, ti: s64, l: s32) {
+    tid := st.texts[ti].id
+    tag := st.texts[ti].tag
+    for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+        fi := FindFlayerById(st, st.texts[ti].flayers[k])
+        if fi < 0 { continue }
+        if l < st.flayers[fi].scope.first || l > st.flayers[fi].scope.last { continue }
+        lc := SctLineCount(st.sects[:], st.pool[:], tid, st.flayers[fi].scope.first, st.flayers[fi].lines)
+        st.flayers[fi].scope.last = lc.b
+        if lc.a < 0 {
+            hole := SctHole(st.sects[:], st.pool[:], tid, l)
+            st.flayers[fi].scope.last = hole.a
+            if hole.b > 0 {
+                OutRequest(st, tag, hole.a, hole.b)
+            }
+        }
+        st.flayers[fi].scrollbar = st.flayers[fi].scope
+    }
+}
+
+InsertFls :: (st: *SamState, ti: s64, l: s32, s_runes: s32) {
+    for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+        fi := FindFlayerById(st, st.texts[ti].flayers[k])
+        if fi < 0 { continue }
+        if l < st.flayers[fi].scope.first || l > st.flayers[fi].scope.last { continue }
+        st.flayers[fi].scope.last += s_runes
+        st.flayers[fi].scrollbar = st.flayers[fi].scope
+    }
+}
+
+DeleteFls :: (st: *SamState, ti: s64, pos: s32, nrunes: s32) {
+    tid := st.texts[ti].id
+    tag := st.texts[ti].tag
+    for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+        fi := FindFlayerById(st, st.texts[ti].flayers[k])
+        if fi < 0 { continue }
+        if pos >= st.flayers[fi].scope.last { continue }
+        if pos + nrunes <= st.flayers[fi].scope.first {
+            st.flayers[fi].scope.first -= nrunes
+            st.flayers[fi].scope.last -= nrunes
+            continue
+        }
+        l1 := pos
+        l2 := pos + nrunes
+        if l1 <= st.flayers[fi].scope.first {
+            if l2 >= st.flayers[fi].scope.last {
+                st.flayers[fi].scope.first = l1
+                st.flayers[fi].scope.last = l1
+            } else {
+                st.flayers[fi].scope.last -= nrunes
+                st.flayers[fi].scope.first = l1
+            }
+        } else {
+            if l2 >= st.flayers[fi].scope.last {
+                st.flayers[fi].scope.last = l1
+            } else {
+                st.flayers[fi].scope.last -= nrunes
+            }
+        }
+        if st.flayers[fi].dot.first >= l2 { st.flayers[fi].dot.first -= nrunes }
+        else if st.flayers[fi].dot.first > l1 { st.flayers[fi].dot.first = l1 }
+        if st.flayers[fi].dot.last >= l2 { st.flayers[fi].dot.last -= nrunes }
+        else if st.flayers[fi].dot.last > l1 { st.flayers[fi].dot.last = l1 }
+
+        lc := SctLineCount(st.sects[:], st.pool[:], tid, st.flayers[fi].scope.first, st.flayers[fi].lines)
+        st.flayers[fi].scope.last = lc.b
+        if lc.a < 0 {
+            hole := SctHole(st.sects[:], st.pool[:], tid, st.flayers[fi].scope.last)
+            if hole.b > 0 {
+                OutRequest(st, tag, hole.a, hole.b)
+            }
+        }
+        st.flayers[fi].scrollbar = st.flayers[fi].scope
+    }
+}
+
+OutCmd :: (st: *SamState) {
+    if st.work_flayer >= 0 {
+        fi := FindFlayerById(st, st.work_flayer)
+        if fi >= 0 {
+            OutTsll(st, Tworkfile, st.flayers[fi].tag, st.flayers[fi].dot.first, st.flayers[fi].dot.last)
+        }
+    }
+}
+
+// --- Session init / lifecycle ---
+
+Init :: (st: *SamState) {
+    st.next_tag = 1000
+    st.next_text_id = 1
+    st.next_flayer_id = 1
+    st.lock = 0
+    st.snarflen = 0
+    st.connected = false
+    st.exited = false
+    st.cmd_text_id = -1
+    st.which_flayer = -1
+    st.work_flayer = -1
+    st.dec_state = 0
+    st.dec_bad = false
+}
+
+Free :: (st: *SamState) {
+    VecFree(st.texts)
+    VecFree(st.flayers)
+    VecFree(st.menus)
+    VecFree(st.sects)
+    VecFree(st.pool)
+    VecFree(st.requested)
+    VecFree(st.last_pat)
+    VecFree(st.snarf_buf)
+    VecFree(st.out_wire)
+    VecFree(st.log_buf)
+}
+
+StartCmdFile :: (st: *SamState) {
+    tag := st.next_tag
+    st.next_tag += 1
+    tid := NewText(st, tag, true)
+    st.cmd_text_id = tid
+    OutTv(st, Tstartcmdfile, cast(s64)tag)
+}
+
+StartSession :: (st: *SamState) {
+    st.connected = true
+    OutTs(st, Tversion, VERSION)
+    StartCmdFile(st)
+    SetLock(st)
+}
+
+InitOffline :: (st: *SamState) {
+    st.connected = false
+    cmd_tag := st.next_tag
+    st.next_tag += 1
+    cmd_tid := NewText(st, cmd_tag, true)
+    st.cmd_text_id = cmd_tid
+    MenuInsAt(st, 0, "~~sam~~", cmd_tid, cmd_tag)
+    cmd_ti := FindTextById(st, cmd_tid)
+    UpdateTextTitles(st, cmd_ti, "~~sam~~")
+
+    work_tag := st.next_tag
+    st.next_tag += 1
+    work_tid := NewText(st, work_tag, false)
+    MenuInsAt(st, 1, "untitled", work_tid, work_tag)
+    work_ti := FindTextById(st, work_tid)
+    UpdateTextTitles(st, work_ti, "untitled")
+    if work_ti >= 0 && st.texts[work_ti].nflayers > 0 {
+        st.work_flayer = st.texts[work_ti].flayers[0]
+        st.which_flayer = st.work_flayer
+    }
+}
+
+StartNewFile :: (st: *SamState) {
+    tag := st.next_tag
+    st.next_tag += 1
+    tid := NewText(st, tag, false)
+    if st.connected {
+        OutTv(st, Tstartnewfile, cast(s64)tag)
+    } else {
+        nbuf: [16]u8
+        nm: Vec(u8)
+        defer VecFree(nm)
+        unused BuilderAppend(nm, "buffer-")
+        unused BuilderAppend(nm, FormatInteger(cast(s64)tid, nbuf[:]))
+        MenuInsAt(st, st.menus.count, TextView(nm[:]), tid, tag)
+        ti := FindTextById(st, tid)
+        UpdateTextTitles(st, ti, TextView(nm[:]))
+    }
+}
+
+StartFile :: (st: *SamState, tag: s32) -> s32 {
+    tid := NewText(st, tag, false)
+    OutTv(st, Tstartfile, cast(s64)tag)
+    SetLock(st)
+    return tid
+}
+
+// --- Host message dispatcher (samstub.b:219-377) ---
+
+HandleHostMsg :: (st: *SamState, msg: *SamMsg) -> bool {
+    data := msg.mdata[:msg.mcount]
+    mt := msg.mtype
+    LogLine(st, HName(mt))
+
+    if mt == Hversion { return false }
+    if mt == Hbindname {
+        m := InShort(data, 0)
+        vl := cast(s32)InVlong(data, 2)
+        mi := FindMenuByTag(st, m)
+        ti := FindTextByTag(st, vl)
+        if mi >= 0 && ti >= 0 && st.menus[mi].text_id < 0 {
+            st.texts[ti].tag = m
+            for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+                fi := FindFlayerById(st, st.texts[ti].flayers[k])
+                if fi >= 0 { st.flayers[fi].tag = m }
+            }
+            st.menus[mi].text_id = st.texts[ti].id
+            UpdateMenuTextTitle(st, ti, mi)
+        }
+        return false
+    }
+    if mt == Hcurrent {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            if st.menus[mi].text_id < 0 {
+                tid := StartFile(st, tag)
+                st.menus[mi].text_id = tid
+                ti := FindTextById(st, tid)
+                if st.menus[mi].name_len > 0 {
+                    UpdateMenuTextTitle(st, ti, mi)
+                }
+            }
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 && st.texts[ti].nflayers > 0 {
+                st.work_flayer = st.texts[ti].flayers[0]
+            }
+        }
+        return false
+    }
+    if mt == Hnewname {
+        tag := InShort(data, 0)
+        MenuInsAt(st, 0, "dummy", -1, tag)
+        return false
+    }
+    if mt == Hmovname {
+        tag := InShort(data, 0)
+        name := ifx data.count > 2 then TextView(data[2:]) else ""
+        mi := FindMenuByTag(st, tag)
+        if mi < 0 { return false }
+        tid := st.menus[mi].text_id
+        MenuDelAt(st, mi)
+
+        pos: s64 = 0
+        if tid == st.cmd_text_id {
+            pos = 0
+        } else {
+            pos = ifx st.menus.count > 0 && st.menus[0].text_id == st.cmd_text_id then cast(s64)1 else cast(s64)0
+            cmp_nm: Vec(u8)
+            while pos < st.menus.count {
+                CopyMenuName(st, pos, *cmp_nm)
+                if StrLess(name, TextView(cmp_nm[:])) { break }
+                pos += 1
+            }
+            VecFree(cmp_nm)
+        }
+        if tid >= 0 {
+            ti := FindTextById(st, tid)
+            UpdateTextTitles(st, ti, name)
+        }
+        MenuInsAt(st, pos, name, tid, tag)
+        return false
+    }
+    if mt == Hgrow {
+        tag := InShort(data, 0)
+        l1 := InLong(data, 2)
+        l2 := InLong(data, 6)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 { GrowText(st, ti, l1, l2) }
+        }
+        return false
+    }
+    if mt == Hcheck0 {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 { st.texts[ti].lock += 1 }
+            OutTs(st, Tcheck, tag)
+        }
+        return false
+    }
+    if mt == Hcheck {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 {
+                if st.texts[ti].lock > 0 { st.texts[ti].lock -= 1 }
+                for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+                    fid := st.texts[ti].flayers[k]
+                    fi := FindFlayerById(st, fid)
+                    if fi >= 0 { ScrollTo(st, fid, st.flayers[fi].scope.first) }
+                }
+            }
+        }
+        return false
+    }
+    if mt == Hunlock || mt == Hunlockfile {
+        ClrLock(st)
+        return false
+    }
+    if mt == Hdata {
+        tag := InShort(data, 0)
+        l := InLong(data, 2)
+        s := ifx data.count > 6 then TextView(data[6:]) else ""
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 && s.count > 0 {
+                SctPut(*st.sects, *st.pool, st.texts[ti].id, l, s)
+                UpdateFls(st, ti, l)
+            }
+            w: s64 = 0
+            for k: cast(s64)0..st.requested.count - 1 {
+                rk := st.requested[k]
+                if rk.tag != tag || rk.pos != l {
+                    st.requested[w] = rk
+                    w += 1
+                }
+            }
+            unused VecResize(st.requested, w)
+            ClrLock(st)
+        }
+        return false
+    }
+    if mt == Horigin {
+        tag := InShort(data, 0)
+        l := InLong(data, 2)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 && st.texts[ti].nflayers > 0 {
+                ScrollTo(st, st.texts[ti].flayers[0], l)
+            }
+            ClrLock(st)
+        }
+        return false
+    }
+    if mt == Hsetdot {
+        tag := InShort(data, 0)
+        l1 := InLong(data, 2)
+        l2 := InLong(data, 6)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 && st.texts[ti].nflayers > 0 {
+                fi := FindFlayerById(st, st.texts[ti].flayers[0])
+                if fi >= 0 {
+                    st.flayers[fi].dot = .{l1, l2}
+                }
+            }
+        }
+        return false
+    }
+    if mt == Hgrowdata {
+        tag := InShort(data, 0)
+        l1 := InLong(data, 2)
+        l2 := InLong(data, 6)
+        s := ifx data.count > 10 then TextView(data[10:]) else ""
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 {
+                GrowText(st, ti, l1, l2)
+                SctPut(*st.sects, *st.pool, st.texts[ti].id, l1, s)
+                UpdateFls(st, ti, l1)
+            }
+        }
+        return false
+    }
+    if mt == Hmoveto {
+        tag := InShort(data, 0)
+        l := InLong(data, 2)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 && st.texts[ti].nflayers > 0 {
+                fid := st.texts[ti].flayers[0]
+                fi := FindFlayerById(st, fid)
+                if fi >= 0 {
+                    sc := st.flayers[fi].scope
+                    if sc.first <= l && (l < sc.last || sc.last == sc.first) {
+                        return false
+                    }
+                    rv := SctRevCnt(st.sects[:], st.pool[:], st.texts[ti].id, l, st.flayers[fi].lines / 2)
+                    if rv.a < 0 {
+                        OutTsll(st, Torigin, st.texts[ti].tag, l, st.flayers[fi].lines / 2)
+                        SetLock(st)
+                    } else {
+                        ScrollTo(st, fid, rv.b)
+                    }
+                }
+            }
+        }
+        return false
+    }
+    if mt == Hclean {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 {
+                st.texts[ti].state = st.texts[ti].state & (~Dirty)
+                UpdateMenuTextTitle(st, ti, mi)
+            }
+        }
+        return false
+    }
+    if mt == Hdirty {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 {
+                st.texts[ti].state = st.texts[ti].state | Dirty
+                UpdateMenuTextTitle(st, ti, mi)
+            }
+        }
+        return false
+    }
+    if mt == Hcut {
+        tag := InShort(data, 0)
+        where := InLong(data, 2)
+        howmuch := InLong(data, 6)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 {
+                st.texts[ti].nrunes -= howmuch
+                if st.texts[ti].nrunes < 0 { st.texts[ti].nrunes = 0 }
+                SctDelete(*st.sects, *st.pool, st.texts[ti].id, where, howmuch)
+                DeleteFls(st, ti, where, howmuch)
+            }
+        }
+        return false
+    }
+    if mt == Hsetpat {
+        SetVecStr(*st.last_pat, TextView(data))
+        return false
+    }
+    if mt == Hsetsnarf {
+        return false
+    }
+    if mt == Hsnarflen {
+        st.snarflen = InLong(data, 0)
+        return false
+    }
+    if mt == Hdelname {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 && st.menus[mi].text_id < 0 {
+            MenuDelAt(st, mi)
+        }
+        return false
+    }
+    if mt == Hclose {
+        tag := InShort(data, 0)
+        mi := FindMenuByTag(st, tag)
+        if mi >= 0 {
+            ti := FindTextById(st, st.menus[mi].text_id)
+            if ti >= 0 {
+                tid := st.texts[ti].id
+                for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+                    fid := st.texts[ti].flayers[k]
+                    fi := FindFlayerById(st, fid)
+                    if fi >= 0 {
+                        for j: fi..st.flayers.count - 2 { st.flayers[j] = st.flayers[j + 1] }
+                        unused VecResize(st.flayers, st.flayers.count - 1)
+                    }
+                    if st.which_flayer == fid { st.which_flayer = -1 }
+                    if st.work_flayer == fid { st.work_flayer = -1 }
+                }
+                RemoveOwnerSections(*st.sects, tid)
+                for j: ti..st.texts.count - 2 { st.texts[j] = st.texts[j + 1] }
+                unused VecResize(st.texts, st.texts.count - 1)
+            }
+            st.menus[mi].text_id = -1
+            cmd_ti := FindTextById(st, st.cmd_text_id)
+            if cmd_ti >= 0 && st.texts[cmd_ti].nflayers > 0 {
+                st.which_flayer = st.texts[cmd_ti].flayers[0]
+            }
+        }
+        return false
+    }
+    if mt == Hack {
+        OutT0(st, Tack)
+        return false
+    }
+    if mt == Hexit {
+        st.exited = true
+        return true
+    }
+    return false
+}
+
+// --- User / UI actions (sam.b & samstub.b:1017-1174) ---
+
+CleanOut :: (st: *SamState) {
+    if st.which_flayer < 0 { return }
+    fi := FindFlayerById(st, st.which_flayer)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+
+    tp := st.flayers[fi].typepoint
+    if tp >= 0 && st.flayers[fi].dot.first > tp {
+        tmp: Vec(u8)
+        defer VecFree(tmp)
+        if SctGet(st.sects[:], st.pool[:], st.texts[ti].id, tp, st.flayers[fi].dot.first, *tmp) {
+            OutTslS(st, Ttype, st.flayers[fi].tag, tp, TextView(tmp[:]))
+        }
+        st.texts[ti].state = st.texts[ti].state & (~LDirty)
+        mi := FindMenuByTag(st, st.flayers[fi].tag)
+        if mi >= 0 { UpdateMenuTextTitle(st, ti, mi) }
+    }
+    st.flayers[fi].typepoint = -1
+}
+
+Cut :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+    d0 := st.flayers[fi].dot.first
+    d1 := st.flayers[fi].dot.last
+    if d1 <= d0 { return }
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    if SctGet(st.sects[:], st.pool[:], st.texts[ti].id, d0, d1, *tmp) {
+        SetVecStr(*st.snarf_buf, TextView(tmp[:]))
+        st.snarflen = d1 - d0
+    }
+    OutTsll(st, Tcut, st.flayers[fi].tag, d0, d1)
+    n := d1 - d0
+    st.texts[ti].nrunes -= n
+    SctDelete(*st.sects, *st.pool, st.texts[ti].id, d0, n)
+    DeleteFls(st, ti, d0, n)
+}
+
+Snarf :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+    d0 := st.flayers[fi].dot.first
+    d1 := st.flayers[fi].dot.last
+    if d1 <= d0 { return }
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    if SctGet(st.sects[:], st.pool[:], st.texts[ti].id, d0, d1, *tmp) {
+        SetVecStr(*st.snarf_buf, TextView(tmp[:]))
+    }
+    st.snarflen = d1 - d0
+    OutTsll(st, Tsnarf, st.flayers[fi].tag, d0, d1)
+}
+
+Paste :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+    if st.snarflen == 0 && st.snarf_buf.count == 0 { return }
+    if st.flayers[fi].dot.first < st.flayers[fi].dot.last {
+        Cut(st, flayer_id)
+        fi = FindFlayerById(st, flayer_id)
+        ti = FindTextById(st, st.flayers[fi].text_id)
+    }
+    if st.connected {
+        OutTsl(st, Tpaste, st.flayers[fi].tag, st.flayers[fi].dot.first)
+    } else if st.snarf_buf.count > 0 {
+        s := TextView(st.snarf_buf[:])
+        nr := RuneCount(s)
+        pos := st.flayers[fi].dot.first
+        SctMakeRoom(*st.sects, *st.pool, st.texts[ti].id, pos, nr)
+        st.texts[ti].nrunes += nr
+        SctPut(*st.sects, *st.pool, st.texts[ti].id, pos, s)
+        InsertFls(st, ti, pos, nr)
+        st.flayers[fi].dot = .{pos + nr, pos + nr}
+    }
+}
+
+Look :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    if st.connected {
+        OutTsll(st, Tlook, st.flayers[fi].tag, st.flayers[fi].dot.first, st.flayers[fi].dot.last)
+        SetLock(st)
+    }
+}
+
+Send :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    if st.connected {
+        OutCmd(st)
+        OutTsll(st, Tsend, st.flayers[fi].tag, st.flayers[fi].dot.first, st.flayers[fi].dot.last)
+        SetLock(st)
+    }
+}
+
+Search :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    if st.connected {
+        OutCmd(st)
+        OutT0(st, Tsearch)
+        SetLock(st)
+    }
+}
+
+WriteFlayer :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    if st.connected {
+        OutTs(st, Twrite, st.flayers[fi].tag)
+        SetLock(st)
+    }
+}
+
+DoubleClick :: (st: *SamState, flayer_id: s32, pos: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    st.flayers[fi].dot = .{pos, pos}
+    if st.connected {
+        OutTsl(st, Tdclick, st.flayers[fi].tag, pos)
+        SetLock(st)
+    }
+}
+
+Zerox :: (st: *SamState, flayer_id: s32) -> s32 {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return -1 }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 || st.texts[ti].nflayers >= MaxFlayersPerText { return -1 }
+    tag := st.texts[ti].tag
+    is_cmd := st.texts[ti].id == st.cmd_text_id
+    nfid := CreateFlayer(st, tag, st.texts[ti].id, is_cmd)
+    j := st.texts[ti].nflayers
+    while j > 0 {
+        st.texts[ti].flayers[j] = st.texts[ti].flayers[j - 1]
+        j -= 1
+    }
+    st.texts[ti].flayers[0] = nfid
+    st.texts[ti].nflayers += 1
+    mi := FindMenuByTag(st, tag)
+    if mi >= 0 { UpdateMenuTextTitle(st, ti, mi) }
+    NewCur(st, nfid)
+    ScrollTo(st, nfid, 0)
+    return nfid
+}
+
+CloseFlayer :: (st: *SamState, flayer_id: s32) {
+    CleanOut(st)
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+    if st.texts[ti].id == st.cmd_text_id && st.texts[ti].nflayers == 1 {
+        SendExit(st)
+        return
+    }
+    if st.texts[ti].nflayers == 1 {
+        if st.connected {
+            OutTs(st, Tclose, st.texts[ti].tag)
+            SetLock(st)
+        } else {
+            tag := st.texts[ti].tag
+            dummy: SamMsg = .{.mtype = Hclose, .mcount = 2}
+            dummy.mdata[0] = cast(u8)(tag & 255)
+            dummy.mdata[1] = cast(u8)((tag >> 8) & 255)
+            unused HandleHostMsg(st, *dummy)
+            mi := FindMenuByTag(st, tag)
+            if mi >= 0 { MenuDelAt(st, mi) }
+        }
+        return
+    }
+    tag := st.texts[ti].tag
+    w: s32 = 0
+    for k: cast(s32)0..st.texts[ti].nflayers - 1 {
+        if st.texts[ti].flayers[k] != flayer_id {
+            st.texts[ti].flayers[w] = st.texts[ti].flayers[k]
+            w += 1
+        }
+    }
+    st.texts[ti].nflayers = w
+
+    for j: fi..st.flayers.count - 2 { st.flayers[j] = st.flayers[j + 1] }
+    unused VecResize(st.flayers, st.flayers.count - 1)
+
+    mi := FindMenuByTag(st, tag)
+    if mi >= 0 { UpdateMenuTextTitle(st, ti, mi) }
+    if st.which_flayer == flayer_id { st.which_flayer = st.texts[ti].flayers[0] }
+    if st.work_flayer == flayer_id { st.work_flayer = st.texts[ti].flayers[0] }
+}
+
+SelectMenuFile :: (st: *SamState, menu_idx: s64) {
+    if menu_idx < 0 || menu_idx >= st.menus.count { return }
+    CleanOut(st)
+    if st.menus[menu_idx].text_id < 0 {
+        tag := st.menus[menu_idx].tag
+        tid := StartFile(st, tag)
+        st.menus[menu_idx].text_id = tid
+        ti := FindTextById(st, tid)
+        UpdateMenuTextTitle(st, ti, menu_idx)
+        return
+    }
+    ti := FindTextById(st, st.menus[menu_idx].text_id)
+    if ti < 0 || st.texts[ti].nflayers == 0 { return }
+    if st.texts[ti].nflayers > 1 {
+        first := st.texts[ti].flayers[0]
+        for k: cast(s32)0..st.texts[ti].nflayers - 2 {
+            st.texts[ti].flayers[k] = st.texts[ti].flayers[k + 1]
+        }
+        st.texts[ti].flayers[st.texts[ti].nflayers - 1] = first
+    }
+    NewCur(st, st.texts[ti].flayers[0])
+}
+
+Keypress :: (st: *SamState, flayer_id: s32, key: string) {
+    if key.count == 0 { return }
+    if st.which_flayer != flayer_id {
+        CleanOut(st)
+        NewCur(st, flayer_id)
+    }
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+
+    if st.flayers[fi].dot.last != st.flayers[fi].dot.first {
+        Cut(st, flayer_id)
+        fi = FindFlayerById(st, flayer_id)
+        ti = FindTextById(st, st.flayers[fi].text_id)
+    }
+
+    if key == "\x08" {
+        if st.texts[ti].nrunes == 0 || st.flayers[fi].dot.first == 0 { return }
+        st.flayers[fi].dot.first -= 1
+        tp := st.flayers[fi].typepoint
+        if tp >= 0 && st.flayers[fi].dot.first >= tp {
+            n := st.flayers[fi].dot.last - st.flayers[fi].dot.first
+            st.texts[ti].nrunes -= n
+            SctDelete(*st.sects, *st.pool, st.texts[ti].id, st.flayers[fi].dot.first, n)
+            DeleteFls(st, ti, st.flayers[fi].dot.first, n)
+            if st.flayers[fi].dot.first == tp {
+                st.flayers[fi].typepoint = -1
+                st.texts[ti].state = st.texts[ti].state & (~LDirty)
+                mi := FindMenuByTag(st, st.flayers[fi].tag)
+                if mi >= 0 { UpdateMenuTextTitle(st, ti, mi) }
+            }
+        } else {
+            Cut(st, flayer_id)
+        }
+        return
+    }
+
+    if st.flayers[fi].typepoint < 0 {
+        st.flayers[fi].typepoint = st.flayers[fi].dot.first
+        st.texts[ti].state = st.texts[ti].state | LDirty
+        mi := FindMenuByTag(st, st.flayers[fi].tag)
+        if mi >= 0 { UpdateMenuTextTitle(st, ti, mi) }
+    }
+    pos := st.flayers[fi].dot.first
+    if pos > st.texts[ti].nrunes { pos = st.texts[ti].nrunes }
+    nr := RuneCount(key)
+    SctMakeRoom(*st.sects, *st.pool, st.texts[ti].id, pos, nr)
+    st.texts[ti].nrunes += nr
+    SctPut(*st.sects, *st.pool, st.texts[ti].id, pos, key)
+    InsertFls(st, ti, pos, nr)
+    f := pos + nr
+    st.flayers[fi].dot = .{f, f}
+
+    if key == "\n" {
+        if f >= st.flayers[fi].scope.last {
+            rv := SctRevCnt(st.sects[:], st.pool[:], st.texts[ti].id, f - 1, 2 * st.flayers[fi].lines / 3)
+            if rv.a < 0 {
+                OutTsll(st, Torigin, st.texts[ti].tag, f - 1, 2 * st.flayers[fi].lines / 3)
+                SetLock(st)
+            } else {
+                ScrollTo(st, flayer_id, rv.b)
+            }
+        }
+        if st.texts[ti].id == st.cmd_text_id && st.flayers[fi].dot.last == st.texts[ti].nrunes {
+            OutCmd(st)
+            SetLock(st)
+        }
+        CleanOut(st)
+    }
+}
+
+ScrollAction :: (st: *SamState, flayer_id: s32, kind: s32, arg: s32) {
+    if st.which_flayer != flayer_id {
+        CleanOut(st)
+        NewCur(st, flayer_id)
+    }
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    ti := FindTextById(st, st.flayers[fi].text_id)
+    if ti < 0 { return }
+
+    height := st.flayers[fi].scrollbar.last - st.flayers[fi].scrollbar.first
+    length := st.texts[ti].nrunes
+    spos: s32 = 0
+    slines: s32 = 0
+
+    if kind == ScrollMoveTo {
+        clamped := arg
+        if clamped < 0 { clamped = 0 }
+        if clamped > 1000 { clamped = 1000 }
+        spos = cast(s32)((cast(s64)clamped * cast(s64)length) / 1000) - height / 2
+        slines = 1
+    } else if kind == ScrollPage {
+        if arg < 0 {
+            spos = st.flayers[fi].scrollbar.first
+            slines = st.flayers[fi].lines
+        } else {
+            spos = st.flayers[fi].scrollbar.last
+            slines = 0
+        }
+    } else if kind == ScrollUnit {
+        if arg < 0 {
+            spos = st.flayers[fi].scrollbar.first - 1
+            slines = 1
+        } else {
+            rl := RaspLines(st.sects[:], st.pool[:], st.texts[ti].id, st.flayers[fi].scrollbar.first, 1)
+            spos = ifx rl.a > 0 then rl.a else st.flayers[fi].scrollbar.first
+            slines = 0
+        }
+    }
+
+    if spos > length { spos = length }
+    if spos < 0 { spos = 0; slines = 0 }
+
+    if slines > 0 {
+        if st.connected {
+            OutTsll(st, Torigin, st.flayers[fi].tag, spos, slines)
+            SetLock(st)
+        } else {
+            rv := SctRevCnt(st.sects[:], st.pool[:], st.texts[ti].id, spos, slines)
+            ScrollTo(st, flayer_id, ifx rv.a < 0 then cast(s32)0 else rv.b)
+        }
+    } else {
+        ScrollTo(st, flayer_id, spos)
+    }
+}
+
+ResizeFlayer :: (st: *SamState, flayer_id: s32, lines: s32) {
+    fi := FindFlayerById(st, flayer_id)
+    if fi < 0 { return }
+    nl := ifx lines < 4 then cast(s32)4 else lines
+    if st.flayers[fi].lines == nl { return }
+    st.flayers[fi].lines = nl
+    ScrollTo(st, flayer_id, st.flayers[fi].scope.first)
+}
+
+SendExit :: (st: *SamState) {
+    OutT0(st, Texit)
+    st.exited = true
+}

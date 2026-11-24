@@ -23,7 +23,7 @@ Default, loading no `.dis`: `emu -r root` -> `/dis/wm/wm.zx` (the Ziran window m
 
 Legacy chain, kept while a catalog application exists only as Dis: `emu -r root wm/wm` -> `/dis/emuinit.dis` -> `/dis/wm/wm.dis` (P0) -> `/dis/lib/wmclient.dis` -> `/dis/lib/wmlib.dis` + `/dis/lib/titlebar.dis`, `/dis/lib/wmsrv.dis`, `/dis/lib/string.dis`, `/dis/sh.dis` (P1) -> broker `/dis/wm/toolbar.dis` -> `/dis/lib/arg.dis`, `/dis/lib/tkclient.dis` -> `titlebar` (already loaded), `/dis/zxrun.dis` (P2) -> ZX desktop `/dis/wm/rill.zx` + panel `/dis/wm/desktop_panel.zx` (P3, no `.dis`). Without `rill.zx`, wm falls back to the classic toolbar panel. When `wm.dis` is deleted, `wm/wm` starts `/dis/wm/wm.zx` too.
 
-Catalog applications that still need the legacy chain (30): avi bounce brutus c4 collide cprof deb edit filename getauthinfo keyboard logon mand mash mprof pen prof readmail remotelogon reversi rmtdir rt sam sendmail sh telnet unibrowse vt wish wmplay. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
+Catalog applications that still need the legacy chain (12): cprof deb getauthinfo keyboard logon mash mprof pen prof remotelogon rmtdir sh. The boot test prints this list. Terminal entries also need it: they start through `/dis/sh.dis` and `wm/sh`.
 
 ## Column legend
 
@@ -68,7 +68,7 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 | 2 | [2. Libraries - dis/lib/** (boot-loaded rows first) - 155 rows](dis-to-zx/02-libraries.md) | Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane) | 155 |
 | 3 | [3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 111 rows](dis-to-zx/03-shell-commands.md) | Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`) | 111 |
 | 4 | [4. Services - storage, network, name, auth, collab, usb and aux daemons - 96 rows](dis-to-zx/04-services.md) | Services (unassigned after Claude commands-libs lane; next after section 2) | 96 |
-| 5 | [5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 43 rows](dis-to-zx/05-wm-apps.md) | WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner) | 43 |
+| 5 | [5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 27 rows](dis-to-zx/05-wm-apps.md) | WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner) | 27 |
 | 6 | [6. Acme - editor family - 24 rows](dis-to-zx/06-acme.md) | Acme (acme lane) | 24 |
 | 7 | [7. Charon - web browser family - 15 rows](dis-to-zx/07-charon.md) | Charon (unassigned; pending owner decision) | 15 |
 | 8 | [8. Alphabet - gridded documents family - 6 rows](dis-to-zx/08-alphabet.md) | Alphabet (`cmd-taijios-zx-alphabet-port`) | 6 |
@@ -81,4 +81,4 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 | 15 | [15. Acme helper binaries outside dis/ - 2 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside dis/ (acme lane) | 2 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **469**.
+Total open table rows across sections 1–16: **453**.

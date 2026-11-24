@@ -1,0 +1,213 @@
+// Standalone verification of the Sam protocol, rasp (section list), menu, zerox,
+// and keyboard/scroll rules matching appl/wm/sam.b, samstub.b, and samtk.b.
+Model :: #import "sam_model";
+Fixture :: #import "sam_states_fixture";
+#import "std/vec"
+
+PushPacket :: (wire: *Vec(u8), mtype: s32, payload: []u8) {
+    Model.EmitHeader(wire, mtype, cast(s32)payload.count)
+    for i: cast(s64)0..payload.count - 1 {
+        unused VecPush(wire.*, payload[i])
+    }
+}
+
+FeedOne :: (st: *Model.SamState, mtype: s32, payload: []u8) -> bool {
+    raw: Vec(u8)
+    msgs: Vec(Model.SamMsg)
+    defer VecFree(raw)
+    defer VecFree(msgs)
+    PushPacket(*raw, mtype, payload)
+    // Feed byte-by-byte to exercise streaming decoder state machine.
+    for i: cast(s64)0..raw.count - 1 {
+        one: [1]u8 = .[raw[i]]
+        if !Model.FeedWire(st, one[:], *msgs) { return false }
+    }
+    if msgs.count != 1 { return false }
+    return Model.HandleHostMsg(st, *msgs[0])
+}
+
+main :: () -> s32 {
+    unused Fixture.Games
+
+    // 1. Test rasp Section operations: SctMakeRoom, SctPut, SctHole, SctGet, SctGetLines,
+    //    SctLineCount, SctRevCnt, RaspLines, SctDelete.
+    sects: Vec(Model.Section)
+    pool: Vec(u8)
+    defer VecFree(sects)
+    defer VecFree(pool)
+
+    Model.SctMakeRoom(*sects, *pool, 1, 0, 20)
+    hole0 := Model.SctHole(sects[:], pool[:], 1, 0)
+    if hole0.a != 0 || hole0.b != 20 { return 1 }
+
+    // Fill [0..6) and [12..20) leaving a 6-rune hole in [6..12).
+    Model.SctPut(*sects, *pool, 1, 0, "hello\n")
+    hole1 := Model.SctHole(sects[:], pool[:], 1, 0)
+    if hole1.a != 6 || hole1.b != 14 { return 2 }
+
+    Model.SctPut(*sects, *pool, 1, 12, "world!\n\n")
+    hole2 := Model.SctHole(sects[:], pool[:], 1, 0)
+    if hole2.a != 6 || hole2.b != 6 { return 3 }
+
+    // Fill remaining hole [6..12) with "12345\n".
+    Model.SctPut(*sects, *pool, 1, 6, "12345\n")
+    hole3 := Model.SctHole(sects[:], pool[:], 1, 0)
+    if hole3.b != 0 { return 4 }
+
+    full: Vec(u8)
+    defer VecFree(full)
+    if !Model.SctGet(sects[:], pool[:], 1, 0, 20, *full) { return 5 }
+    if TextView(full[:]) != "hello\n12345\nworld!\n\n" { return 6 }
+
+    // Line reading and counting.
+    l2: Vec(u8)
+    defer VecFree(l2)
+    rem := Model.SctGetLines(sects[:], pool[:], 1, 0, 2, *l2)
+    if rem != 0 || TextView(l2[:]) != "hello\n12345\n" { return 7 }
+
+    lc := Model.SctLineCount(sects[:], pool[:], 1, 0, 2)
+    if lc.a != 0 || lc.b != 12 { return 8 }
+
+    rv := Model.SctRevCnt(sects[:], pool[:], 1, 19, 2)
+    if rv.a != 0 || rv.b != 12 { return 9 }
+
+    rl_fwd := Model.RaspLines(sects[:], pool[:], 1, 0, 1)
+    if rl_fwd.a != 6 || rl_fwd.b != 0 { return 10 }
+    rl_bwd := Model.RaspLines(sects[:], pool[:], 1, 19, -2)
+    if rl_bwd.a != 12 || rl_bwd.b != 0 { return 11 }
+
+    // Delete "12345\n" [6..12).
+    Model.SctDelete(*sects, *pool, 1, 6, 6)
+    VecClear(full)
+    if !Model.SctGet(sects[:], pool[:], 1, 0, 14, *full) { return 12 }
+    if TextView(full[:]) != "hello\nworld!\n\n" { return 13 }
+
+    // 2. Full protocol state machine test.
+    st: Model.SamState
+    Model.Init(*st)
+    defer Model.Free(*st)
+
+    Model.StartSession(*st)
+    if st.lock != 1 || st.out_wire.count != 16 { return 14 }
+    if st.out_wire[0] != cast(u8)Model.Tversion || st.out_wire[5] != cast(u8)Model.Tstartcmdfile { return 15 }
+    VecClear(st.out_wire)
+
+    // Host sends Hversion(0), Hnewname(0), Hbindname(0, 1000), Hmovname(0, "~~sam~~"), Hunlock.
+    p: Vec(u8)
+    defer VecFree(p)
+
+    Model.PushShort(*p, 0)
+    unused FeedOne(*st, Model.Hversion, p[:])
+
+    VecClear(p); Model.PushShort(*p, 0)
+    unused FeedOne(*st, Model.Hnewname, p[:])
+
+    VecClear(p); Model.PushShort(*p, 0); Model.PushVlong(*p, 1000)
+    unused FeedOne(*st, Model.Hbindname, p[:])
+
+    VecClear(p); Model.PushShort(*p, 0); unused BuilderAppend(p, "~~sam~~")
+    unused FeedOne(*st, Model.Hmovname, p[:])
+
+    nm: Vec(u8)
+    defer VecFree(nm)
+    VecClear(p)
+    unused FeedOne(*st, Model.Hunlock, p[:])
+    Model.CopyMenuName(*st, 0, *nm)
+    if st.lock != 0 || st.menus.count != 1 || TextView(nm[:]) != "~~sam~~" { return 16 }
+
+    // Host announces two files ("zeta.txt", "alpha.txt") -> menu stays sorted after ~~sam~~.
+    VecClear(p); Model.PushShort(*p, 2)
+    unused FeedOne(*st, Model.Hnewname, p[:])
+    VecClear(p); Model.PushShort(*p, 2); unused BuilderAppend(p, "zeta.txt")
+    unused FeedOne(*st, Model.Hmovname, p[:])
+
+    VecClear(p); Model.PushShort(*p, 1)
+    unused FeedOne(*st, Model.Hnewname, p[:])
+    VecClear(p); Model.PushShort(*p, 1); unused BuilderAppend(p, "alpha.txt")
+    unused FeedOne(*st, Model.Hmovname, p[:])
+
+    if st.menus.count != 3 { return 17 }
+    Model.CopyMenuName(*st, 0, *nm); if TextView(nm[:]) != "~~sam~~" { return 18 }
+    Model.CopyMenuName(*st, 1, *nm); if TextView(nm[:]) != "alpha.txt" { return 18 }
+    Model.CopyMenuName(*st, 2, *nm); if TextView(nm[:]) != "zeta.txt" { return 18 }
+
+    // Host makes alpha.txt current (tag 1) -> terminal sends Tstartfile(1) and locks.
+    VecClear(p); Model.PushShort(*p, 1)
+    unused FeedOne(*st, Model.Hcurrent, p[:])
+    if st.out_wire.count != 11 || st.out_wire[0] != cast(u8)Model.Tstartfile || st.lock != 1 { return 19 }
+    VecClear(st.out_wire)
+
+    // Host grows alpha.txt with 12 runes and sends Hcheck0 -> Hcheck -> Trequest -> Hdata -> Hunlock.
+    VecClear(p); Model.PushShort(*p, 1); Model.PushLong(*p, 0); Model.PushLong(*p, 12)
+    unused FeedOne(*st, Model.Hgrow, p[:])
+
+    VecClear(p); Model.PushShort(*p, 1)
+    unused FeedOne(*st, Model.Hcheck0, p[:])
+    if st.out_wire.count != 5 || st.out_wire[0] != cast(u8)Model.Tcheck { return 20 }
+    VecClear(st.out_wire)
+
+    VecClear(p); Model.PushShort(*p, 1)
+    unused FeedOne(*st, Model.Hcheck, p[:])
+    if st.out_wire.count != 11 || st.out_wire[0] != cast(u8)Model.Trequest { return 21 }
+    VecClear(st.out_wire)
+
+    VecClear(p); Model.PushShort(*p, 1); Model.PushLong(*p, 0); unused BuilderAppend(p, "Hello Sam!\n\n")
+    unused FeedOne(*st, Model.Hdata, p[:])
+    VecClear(p)
+    unused FeedOne(*st, Model.Hunlock, p[:])
+    if st.lock != 0 { return 22 }
+
+    vis: Vec(u8)
+    defer VecFree(vis)
+    Model.FlayerVisible(*st, st.work_flayer, *vis)
+    if TextView(vis[:]) != "Hello Sam!\n\n" { return 23 }
+
+    // Dirty / Clean / Zerox title checks.
+    VecClear(p); Model.PushShort(*p, 1)
+    unused FeedOne(*st, Model.Hdirty, p[:])
+    wfi := Model.FindFlayerById(*st, st.work_flayer)
+    Model.CopyFlayerTitle(*st, wfi, *nm)
+    if wfi < 0 || TextView(nm[:]) != "alpha.txt (Dirty)" { return 24 }
+
+    zfid := Model.Zerox(*st, st.work_flayer)
+    if zfid < 0 { return 25 }
+    zfi := Model.FindFlayerById(*st, zfid)
+    Model.CopyFlayerTitle(*st, zfi, *nm)
+    if TextView(nm[:]) != "alpha.txt (Dirty) (Zeroxed)" { return 26 }
+
+    // Closing one zerox flayer closes locally without sending Tclose.
+    VecClear(st.out_wire)
+    Model.CloseFlayer(*st, zfid)
+    if st.out_wire.count != 0 { return 27 }
+    wfi = Model.FindFlayerById(*st, st.work_flayer)
+    Model.CopyFlayerTitle(*st, wfi, *nm)
+    if TextView(nm[:]) != "alpha.txt (Dirty)" { return 28 }
+
+    // Typing updates LDirty -> "(Modified)", backspace within typepoint removes locally,
+    // newline flushes Ttype.
+    Model.SetFlayerDot(*st, st.work_flayer, 10, 10)
+    Model.Keypress(*st, st.work_flayer, "X")
+    Model.Keypress(*st, st.work_flayer, "Y")
+    wfi = Model.FindFlayerById(*st, st.work_flayer)
+    Model.CopyFlayerTitle(*st, wfi, *nm)
+    if TextView(nm[:]) != "alpha.txt (Modified)" { return 29 }
+    Model.Keypress(*st, st.work_flayer, "\x08")
+    Model.Keypress(*st, st.work_flayer, "\n")
+    if st.out_wire.count == 0 || st.out_wire[0] != cast(u8)Model.Ttype { return 30 }
+    VecClear(st.out_wire)
+
+    // Hsetpat + Hack -> Tack + Hexit.
+    VecClear(p); unused BuilderAppend(p, "foo.*bar")
+    unused FeedOne(*st, Model.Hsetpat, p[:])
+    if TextView(st.last_pat[:]) != "foo.*bar" { return 31 }
+
+    VecClear(p)
+    unused FeedOne(*st, Model.Hack, p[:])
+    if st.out_wire.count != 3 || st.out_wire[0] != cast(u8)Model.Tack { return 32 }
+
+    VecClear(p)
+    if !FeedOne(*st, Model.Hexit, p[:]) || !st.exited { return 33 }
+
+    print("Sam matched wire protocol, rasp sections, sorted menus, zerox, dirty/modified titles, and typing rules\n")
+    return 0
+}
