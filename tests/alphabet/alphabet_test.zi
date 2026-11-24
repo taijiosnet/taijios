@@ -319,7 +319,13 @@ block14: [12]Case = Case.[
     .{name = "fs:match-r-any", script = "typeset /fs\n- {/print {/fs/print {/fs/select {/fs/entries {/fs/walk tree}} {/fs/match -a -r '.'}}} 1}\n", input = "", status = "", out = "tree\ntree/a.txt\ntree/b.b\ntree/sub\ntree/sub/c.txt\ntree/sub/d.b\ntree/sub/deep\ntree/sub/deep/e.txt\n", err = ""},
 ];
 
-CASES :: 226;
+block15: [3]Case = Case.[
+    .{name = "filter-cat", script = "- {/print {/filter {/echo hello} \"{cat}} 1}\n", input = "", status = "", out = "hello\n", err = ""},
+    .{name = "filter-args", script = "- {/print {/filter {/echo hello} \"{echo $*} a b} 1}\n", input = "", status = "", out = "a b\n", err = ""},
+    .{name = "filter-stderr", script = "- {/print {/filter {/echo hello} \"{echo errline >[1=2]; cat}} 1}\n", input = "", status = "", out = "hello\n", err = "alphabet: 1. filter: errline\n"},
+];
+
+CASES :: 229;
 
 CaseAt :: (i: s64) -> Case {
 
@@ -352,6 +358,8 @@ CaseAt :: (i: s64) -> Case {
     if i < 214 { return block13[i - 208] }
 
     if i < 226 { return block14[i - 214] }
+
+    if i < 229 { return block15[i - 226] }
 
     return block0[0];
 }

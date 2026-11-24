@@ -36,7 +36,9 @@ Start :: (v: s32) -> bool {
     input := Va.Kid(v, 0);
     operands: Vec(string);
     VecPush(operands, "-c");
-    VecPush(operands, Sh.CmdString(Va.CmdOf(Va.Kid(v, 1))));
+    cmd: Vec(u8);
+    BuilderPrint(*cmd, "% $*", Sh.CmdString(Va.CmdOf(Va.Kid(v, 1))));
+    VecPush(operands, BuilderFinish(cmd));
     for i: 2..Va.KidCount(v) - 1 { VecPush(operands, Va.ValueText(Va.Kid(v, i))) }
     out: [2]s32;
     errors: [2]s32;

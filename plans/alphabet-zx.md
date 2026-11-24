@@ -2,14 +2,14 @@
 
 Owner: `claude-taijios-zx-alphabet-port`. Rows: section 8 of `plans/dis-to-zx.md` and `dis/sh/alphabet.dis`.
 
-Done and pushed: the core, the root typeset `/` (`appl/alphabet/main/`), the abc typeset (`appl/alphabet/abc/`), all 28 fs modules (`appl/alphabet/fs/`) and the working part of the grid typeset (`appl/alphabet/grid/`: endpoints, local, line2rec, gridtypes), all served by `/dis/alphabet.zx` (`cd appl/alphabet && mk install-zx`). Tests: `tests/alphabet/alphabet_test.zi` (guest, 226 cases against recorded Dis results), `tests/alphabet/shcmd_test.zi` and `tests/alphabet/grid_test.sh`.
+Done and retired: the core (`alphabet`, `alphabet.shmod`, `eval`, `extvalues`, `proxy`, `reports`), the root typeset `/` (`appl/alphabet/main/` except blocked `/auth`), the `abc` typeset (`appl/alphabet/abc/`), all 28 `fs` modules (`appl/alphabet/fs/` plus `fs`, `fstypes`, `fsfilter`), and the working part of the `grid` typeset (`endpoints`, `endpointsrv`, `grid`, `gridtypes`, `local`, `line2rec`) — 77 `dis/alphabet/**` binaries and 80 `appl/alphabet/**` `.b` sources removed once `/dis/sh.zx` `load alphabet` (commit `8bb9cf56`) and `/dis/alphabet.zx` (`cd appl/alphabet && mk install-zx`) verified parity. Tests: `tests/alphabet/alphabet_test.zi` (guest, 229 cases against recorded Dis results), `tests/alphabet/shcmd_test.zi` (24 cases) and `tests/alphabet/grid_test.sh`.
 
 ## Remaining
 
-1. The ZX shell's `load alphabet` builtin (owned by the shell port) runs `alpha_builtins.zi`. Then, in one commit: delete every `dis/alphabet/**` row, `dis/sh/alphabet.dis`, `appl/alphabet/**/*.b`, `module/alphabet*.m`, with the plan rows.
-2. grid typeset, the rest: `remote`, `rexec`, `farm` and `rexecsrv` need a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus the fd/handle passing a copy needs.
-3. `/auth` needs a ZX Inferno Auth client (dis/lib lane); today it reads the key and reports that the protocol is missing.
-4. `dis/alphabet/mktypeset.dis` has no source; port or drop with the owner's word.
+1. `grid` typeset, the rest (4 `.dis` rows): `remote`, `rexec`, `farm` and `rexecsrv` need a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus the fd/handle passing a copy needs.
+2. `/auth` (1 `.dis` row: `dis/alphabet/main/auth.dis`): needs a ZX Inferno Auth client (dis/lib lane); today `appl/alphabet/main/auth.zi` reads the key and reports that the protocol is missing.
+3. `dis/alphabet/mktypeset.dis` (1 `.dis` row): orphan binary with no Limbo source on disk; port or drop with the owner's word.
+4. `dis/sh/alphabet.dis` (owned by the shell lane in `plans/dis-to-zx/03-shell-commands.md`) and `module/alphabet*.m` (still included by the 5 remaining blocked `.b` files) stay until the remaining blocked rows and shell lane retire them.
 5. Ziran bundler: two modules with a file-private record of the same name break `ziran bundle` ("record member has no lowered field identity"); reported. Keep private record names unique until it is fixed.
 6. Merge `appl/alphabet/shcmd.zi` with the shell port's `appl/cmd/sh/shell_parse.zi` (same grammar).
 
