@@ -476,6 +476,9 @@ python3 -u appl/wm/wmplay_zx_test.py
 python3 -u appl/wm/sendmail_zx_test.py
 python3 -u appl/wm/readmail_zx_test.py
 python3 -u appl/wm/telnet_zx_test.py
+python3 -u appl/wm/vt_zx_test.py
+python3 -u appl/wm/rt_zx_test.py
+python3 -u appl/wm/brutus_zx_test.py
 ```
 
 ### Use the ZX Calendar

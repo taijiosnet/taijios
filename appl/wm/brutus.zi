@@ -1,0 +1,867 @@
+// Port of Inferno's Brutus SGML rich-text editor (appl/wm/brutus.b), built as brutus.zx.
+// See ../../NOTICE.
+// Keeps SGML (<SGML>\n) and plain-text load/save, all 20 font/size tags (Roman/Italic/
+// Bold/Type x 6/8/10/12/16pt) and 13 structural tags (Tag editor panel), Apply-on-type,
+// Font/Size/F&S buttons, Hebrew RTL keyboard remapping (hebrew.m), Extensions panel
+// (excerpt, image, mod, table), multi-document tabs, Command bar (/pat, ?pat, line N),
+// Look/Cut/Paste/Snarf synced with /chan/snarf + SGML clipboard + button-2 popup,
+// file:line and file:#char address opening, and dirty-discard confirmation.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+TextArea :: #import "kryon/text_area";
+Model :: #import "brutus_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+WinW :: 720
+WinH :: 540
+MaxDoc :: 1048576
+Chooser :: "/dis/wm/filename.zx"
+
+grey: Color = .{221, 221, 221, 255};
+panel_bg: Color = .{236, 236, 236, 255};
+menu_bg: Color = .{245, 245, 245, 255};
+dark: Color = .{140, 140, 140, 255};
+
+// Active document state.
+doc_name: Vec(u8);
+doc_text: Vec(u8);
+doc_styles: Vec(Model.Style);
+doc_exts: Vec(Model.ExtRecord);
+doc_ext_pool: Vec(u8);
+model_spans: Vec(Model.StyleSpan);
+ta_spans: Vec(TextArea.ColorSpan);
+dirty: bool;
+fonts_used: bool;
+fonts_ok: bool;
+apply_font: bool;
+hebrew_mode: bool;
+cur_font: s32 = Model.DefFont;
+cur_size: s32 = Model.DefSize;
+typing_start: s32;
+
+// TextArea state.
+ta_cursor: s32;
+ta_anchor: s32;
+ta_scroll_y: s32;
+ta_focused: bool = true;
+ta_selecting: bool;
+ta_pref_x: s32;
+ta_pref_x_valid: bool;
+
+// Command / Search bar (/pat, ?pat, N).
+cmd_bytes: [256]u8;
+cmd_field: Field.State;
+last_pat: Vec(u8);
+
+// Inline panels: 0=none, 1=TagEditor, 2=ExtPanel, 3=WriteDialog, 4=ConfirmDirty.
+panel_mode: s32;
+confirm_action: s32; // 1=new, 2=open, 3=exit
+tag_checks: [Model.NExtra]bool;
+ext_kind: s32; // 0=excerpt, 1=image, 2=mod, 3=table
+ext_arg_bytes: [256]u8;
+ext_arg_field: Field.State;
+write_name_bytes: [256]u8;
+write_name_field: Field.State;
+write_sgml: bool;
+
+// Button-2 Edit popup menu.
+show_popup: bool;
+popup_x: float32;
+popup_y: float32;
+
+// Clipboard (plain + SGML).
+snarf_plain: Vec(u8);
+snarf_sgml: Vec(u8);
+status_text: Vec(u8);
+
+// File chooser pipe (1=open, 2=write).
+choice_fd: s32 = -1;
+choice_mode: s32;
+choice_bytes: [512]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+SetStatus :: (s: string) { SetVec(*status_text, s) }
+
+SetField :: (state: *Field.State, text: string) {
+    state.length = 0
+    for i: cast(s64)0..text.count - 1 {
+        if state.length >= cast(s32)state.bytes.count - 1 { break }
+        state.bytes[state.length] = text[i]
+        state.length += 1
+    }
+    state.cursor = state.length
+    state.anchor = state.length
+}
+
+CurFontTag :: () -> s32 { return cur_font * Model.NSize + cur_size }
+
+SyncSpans :: () {
+    Model.BuildColorSpans(doc_styles[:], *model_spans)
+    VecClear(ta_spans)
+    for i: cast(s64)0..model_spans.count - 1 {
+        ms := model_spans[i]
+        unused VecPush(ta_spans, TextArea.ColorSpan.{.start = ms.start, .end = ms.end, .color = ms.rgba})
+    }
+}
+
+SnarfPut :: (s: string) {
+    SetVec(*snarf_plain, s)
+    fd := IO.Open("/chan/snarf", 1)
+    if fd >= 0 {
+        unused IO.Write(fd, s)
+        unused IO.Close(fd)
+    }
+}
+
+SnarfGet :: (out: *Vec(u8)) {
+    VecClear(out.*)
+    fd := IO.Open("/chan/snarf", 0)
+    if fd >= 0 {
+        buf: [4096]u8
+        n := IO.Read(fd, buf[:])
+        unused IO.Close(fd)
+        if n > 0 {
+            unused BuilderAppend(out.*, TextView(buf[:n]))
+            return
+        }
+    }
+    unused BuilderAppend(out.*, TextView(snarf_plain[:]))
+}
+
+ApplyDocEdit :: (start: s64, end: s64, repl: string, fill_style: Model.Style) {
+    if start < 0 { start = 0 }
+    if end < start { end = start }
+    if end > doc_text.count { end = doc_text.count }
+    tail := doc_text.count - end
+    new_len := start + repl.count + tail
+
+    tmp_t: Vec(u8)
+    tmp_s: Vec(Model.Style)
+    defer VecFree(tmp_t)
+    defer VecFree(tmp_s)
+    unused VecResize(tmp_t, new_len)
+    unused VecResize(tmp_s, new_len)
+
+    for i: cast(s64)0..start - 1 {
+        tmp_t[i] = doc_text[i]
+        tmp_s[i] = doc_styles[i]
+    }
+    for i: cast(s64)0..repl.count - 1 {
+        tmp_t[start + i] = repl[i]
+        tmp_s[start + i] = fill_style
+    }
+    for i: cast(s64)0..tail - 1 {
+        tmp_t[start + repl.count + i] = doc_text[end + i]
+        tmp_s[start + repl.count + i] = doc_styles[end + i]
+    }
+    unused VecResize(doc_text, new_len)
+    unused VecResize(doc_styles, new_len)
+    for i: cast(s64)0..new_len - 1 {
+        doc_text[i] = tmp_t[i]
+        doc_styles[i] = tmp_s[i]
+    }
+    dirty = true
+    SyncSpans()
+}
+
+Span :: struct { s: s64; e: s64 }
+
+IsWordChar :: (c: u8) -> bool {
+    if c >= cast(u8)97 && c <= cast(u8)122 { return true }
+    if c >= cast(u8)65 && c <= cast(u8)90 { return true }
+    if c >= cast(u8)48 && c <= cast(u8)57 { return true }
+    if c == cast(u8)95 || c > cast(u8)160 { return true }
+    return false
+}
+
+GetSelOrWord :: () -> Span {
+    a := cast(s64)ta_cursor
+    b := cast(s64)ta_anchor
+    if a != b {
+        if a > b { t := a; a = b; b = t }
+        if b > doc_text.count { b = doc_text.count }
+        return .{a, b}
+    }
+    if a > doc_text.count { a = doc_text.count }
+    s := a
+    while s > 0 && IsWordChar(doc_text[s - 1]) { s -= 1 }
+    e := a
+    while e < doc_text.count && IsWordChar(doc_text[e]) { e += 1 }
+    return .{s, e}
+}
+
+LoadFile :: (path_in: string) {
+    // Support file:line or file:#char address suffix (brutus.b lines 520-530).
+    path := path_in
+    addr := ""
+    colon: s64 = -1
+    for i: cast(s64)0..path_in.count - 1 {
+        if path_in[i] == cast(u8)58 { colon = i }
+    }
+    if colon > 0 {
+        test_fd := IO.Open(path_in[:colon], 0)
+        if test_fd >= 0 {
+            unused IO.Close(test_fd)
+            path = path_in[:colon]
+            addr = path_in[colon + 1:]
+        }
+    }
+
+    fd := IO.Open(path, 0)
+    if fd < 0 {
+        SetStatus("Can't open file")
+        return
+    }
+    raw: Vec(u8)
+    defer VecFree(raw)
+    buf: [8192]u8
+    while raw.count < MaxDoc {
+        n := IO.Read(fd, buf[:])
+        if n <= 0 { break }
+        for i: cast(s32)0..n - 1 { unused VecPush(raw, buf[i]) }
+    }
+    unused IO.Close(fd)
+
+    was_sgml := Model.ParseDocument(TextView(raw[:]), *doc_text, *doc_styles, *doc_exts, *doc_ext_pool)
+    SetVec(*doc_name, path)
+    SetField(*write_name_field, path)
+    fonts_used = was_sgml
+    fonts_ok = was_sgml
+    write_sgml = was_sgml
+    dirty = false
+    ta_cursor = 0
+    ta_anchor = 0
+    ta_scroll_y = 0
+    SyncSpans()
+
+    // Apply optional :line or :#char address jump.
+    if addr.count > 0 {
+        if addr[0] == cast(u8)35 {
+            off: s64 = 0
+            for i: cast(s64)1..addr.count - 1 {
+                if addr[i] >= cast(u8)48 && addr[i] <= cast(u8)57 {
+                    off = off * 10 + cast(s64)(addr[i] - cast(u8)48)
+                }
+            }
+            if off > doc_text.count { off = doc_text.count }
+            ta_cursor = cast(s32)off
+            ta_anchor = ta_cursor
+        } else {
+            lno: s32 = 0
+            for i: cast(s64)0..addr.count - 1 {
+                if addr[i] >= cast(u8)48 && addr[i] <= cast(u8)57 {
+                    lno = lno * 10 + cast(s32)(addr[i] - cast(u8)48)
+                }
+            }
+            if lno > 0 {
+                off := Model.LineOffset(TextView(doc_text[:]), lno)
+                ta_cursor = cast(s32)off
+                ta_anchor = ta_cursor
+            }
+        }
+    }
+
+    st: Vec(u8)
+    defer VecFree(st)
+    unused BuilderAppend(st, ifx was_sgml then "Loaded SGML: " else "Loaded text: ")
+    unused BuilderAppend(st, path)
+    SetStatus(TextView(st[:]))
+}
+
+WriteFile :: (path: string, as_sgml: bool) -> bool {
+    if path.count == 0 { SetStatus("No file name specified"); return false }
+    fd := IO.Create(path, 1, 438) // 0666
+    if fd < 0 { SetStatus("Can't write file"); return false }
+    out: Vec(u8)
+    defer VecFree(out)
+    if as_sgml {
+        Model.SerializeSgml(TextView(doc_text[:]), doc_styles[:], *out)
+    } else {
+        unused BuilderAppend(out, TextView(doc_text[:]))
+    }
+    n := IO.Write(fd, TextView(out[:]))
+    unused IO.Close(fd)
+    if n < 0 { SetStatus("Write error"); return false }
+    SetVec(*doc_name, path)
+    fonts_used = as_sgml
+    dirty = false
+    d: [24]u8
+    st: Vec(u8)
+    defer VecFree(st)
+    unused BuilderAppend(st, ifx as_sgml then "Wrote SGML (" else "Wrote text (")
+    unused BuilderAppend(st, FormatInteger(cast(s64)n, d[:]))
+    unused BuilderAppend(st, " bytes): ")
+    unused BuilderAppend(st, path)
+    SetStatus(TextView(st[:]))
+    return true
+}
+
+DoNewDoc :: () {
+    VecClear(doc_name)
+    VecClear(doc_text)
+    VecClear(doc_styles)
+    VecClear(doc_exts)
+    VecClear(doc_ext_pool)
+    VecClear(ta_spans)
+    dirty = false
+    fonts_used = false
+    fonts_ok = false
+    ta_cursor = 0
+    ta_anchor = 0
+    ta_scroll_y = 0
+    SetStatus("New document")
+}
+
+DoSnarf :: () {
+    a := cast(s64)ta_cursor
+    b := cast(s64)ta_anchor
+    if a == b { return }
+    if a > b { t := a; a = b; b = t }
+    if b > doc_text.count { b = doc_text.count }
+    SnarfPut(TextView(doc_text[a:b]))
+    Model.SerializeSgml(TextView(doc_text[a:b]), doc_styles[a:b], *snarf_sgml)
+}
+
+DoCut :: (snarf_it: bool) {
+    a := cast(s64)ta_cursor
+    b := cast(s64)ta_anchor
+    if a == b { return }
+    if a > b { t := a; a = b; b = t }
+    if b > doc_text.count { b = doc_text.count }
+    if snarf_it { DoSnarf() }
+    ApplyDocEdit(a, b, "", .{cast(u8)CurFontTag(), 0})
+    ta_cursor = cast(s32)a
+    ta_anchor = cast(s32)a
+}
+
+DoPaste :: () {
+    s: Vec(u8)
+    defer VecFree(s)
+    SnarfGet(*s)
+    if s.count == 0 { return }
+    DoCut(false)
+    pos := cast(s64)ta_cursor
+    if pos > doc_text.count { pos = doc_text.count }
+    st: Model.Style = .{cast(u8)(ifx apply_font then CurFontTag() else Model.DefFontTag), 0}
+    ApplyDocEdit(pos, pos, TextView(s[:]), st)
+    ta_anchor = cast(s32)pos
+    ta_cursor = cast(s32)(pos + s.count)
+}
+
+DoSearch :: (pat_in: string, backwards: bool) {
+    if pat_in.count > 0 { SetVec(*last_pat, pat_in) }
+    if last_pat.count == 0 { SetStatus("?no pattern"); return }
+    from := cast(s64)ta_cursor
+    if !backwards && ta_cursor != ta_anchor {
+        hi := ifx ta_cursor > ta_anchor then ta_cursor else ta_anchor
+        from = cast(s64)hi
+    } else if backwards && ta_cursor != ta_anchor {
+        lo := ifx ta_cursor < ta_anchor then ta_cursor else ta_anchor
+        from = cast(s64)lo - 1
+    }
+    hit := Model.SearchText(TextView(doc_text[:]), TextView(last_pat[:]), from, backwards)
+    if hit < 0 { SetStatus("?not found"); return }
+    ta_anchor = cast(s32)hit
+    ta_cursor = cast(s32)(hit + last_pat.count)
+    SetStatus("Match selected")
+}
+
+DoLook :: () {
+    sp := GetSelOrWord()
+    if sp.e <= sp.s { return }
+    pat: Vec(u8)
+    defer VecFree(pat)
+    unused BuilderAppend(pat, TextView(doc_text[sp.s:sp.e]))
+    ta_anchor = cast(s32)sp.s
+    ta_cursor = cast(s32)sp.e
+    DoSearch(TextView(pat[:]), false)
+}
+
+ExecuteCmd :: (cmd: string) {
+    if cmd.count == 0 { return }
+    if cmd[0] == cast(u8)47 { DoSearch(cmd[1:], false); return } // /pat
+    if cmd[0] == cast(u8)63 { DoSearch(cmd[1:], true); return }  // ?pat
+    lno: s32 = 0
+    for i: cast(s64)0..cmd.count - 1 {
+        if cmd[i] < cast(u8)48 || cmd[i] > cast(u8)57 { SetStatus("Bad command"); return }
+        lno = lno * 10 + cast(s32)(cmd[i] - cast(u8)48)
+    }
+    off := Model.LineOffset(TextView(doc_text[:]), lno)
+    end := off
+    while end < doc_text.count && doc_text[end] != cast(u8)10 { end += 1 }
+    if end < doc_text.count { end += 1 }
+    ta_anchor = cast(s32)off
+    ta_cursor = cast(s32)end
+    SetStatus("Jumped to line")
+}
+
+InsertExtension :: () {
+    ext_names: [4]string = .["excerpt", "image", "mod", "table"]
+    mname := ext_names[ext_kind]
+    eargs := TextView(ext_arg_bytes[:ext_arg_field.length])
+    marker: Vec(u8)
+    defer VecFree(marker)
+    unused BuilderAppend(marker, "[Extension ")
+    unused BuilderAppend(marker, mname)
+    if eargs.count > 0 {
+        unused BuilderAppend(marker, " ")
+        unused BuilderAppend(marker, eargs)
+    }
+    unused BuilderAppend(marker, "]")
+    // If excerpt and file exists, append extracted snippet preview below marker.
+    if ext_kind == 0 && eargs.count > 0 {
+        sp: s64 = 0
+        while sp < eargs.count && eargs[sp] != cast(u8)32 { sp += 1 }
+        fpath: Vec(u8)
+        defer VecFree(fpath)
+        Model.FullName(TextView(doc_name[:]), eargs[:sp], *fpath)
+        fd := IO.Open(TextView(fpath[:]), 0)
+        if fd >= 0 {
+            buf: [4096]u8
+            n := IO.Read(fd, buf[:])
+            unused IO.Close(fd)
+            if n > 0 {
+                ex: Vec(u8)
+                defer VecFree(ex)
+                Model.ExtractExcerpt(TextView(buf[:n]), 1, 10, *ex)
+                if ex.count > 0 {
+                    unused BuilderAppend(marker, "\n")
+                    unused BuilderAppend(marker, TextView(ex[:]))
+                }
+            }
+        }
+    }
+    pos := cast(s64)ta_cursor
+    if pos > doc_text.count { pos = doc_text.count }
+    fonts_used = true
+    fonts_ok = true
+    ApplyDocEdit(pos, pos, TextView(marker[:]), .{cast(u8)(Model.FontType * Model.NSize + Model.Size10), cast(u16)(1 << (Model.TagExample - Model.NFontTag))})
+    ta_cursor = cast(s32)(pos + marker.count)
+    ta_anchor = ta_cursor
+    panel_mode = 0
+    SetStatus("Inserted extension")
+}
+
+OpenChooser :: (mode: s32) {
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    choice_mode = mode
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 { return }
+    title := ifx mode == 1 then "Open File" else "Write File"
+    words: [5]string = .["-t", title, "* (All files)", "*.sgml (SGML dump files)", "*.[bm] (Limbo source files)"]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 { unused IO.Close(ends[0]); return }
+    choice_fd = ends[0]
+}
+
+PollChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 { unused IO.Close(choice_fd); choice_fd = -1; choice_used = 0; return }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        choice_used = 0
+        if line > 0 {
+            chosen := TextView(choice_bytes[:line])
+            if choice_mode == 1 { LoadFile(chosen) }
+            else if choice_mode == 2 { SetField(*write_name_field, chosen); panel_mode = 3 }
+        }
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 580.0 { w = cast(float32)WinW }
+    if h < 360.0 { h = cast(float32)WinH }
+
+    PollChooser()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    f_in := TextFieldInputFor(key, mods, text)
+
+    // Handle Hebrew keyboard remapping + ESC typing-selection when TextArea is focused.
+    handled_special := false
+    if ta_focused && panel_mode == 0 {
+        if key == KeyEscape {
+            if ta_cursor == ta_anchor {
+                ta_anchor = typing_start
+                typing_start = ta_cursor
+            } else {
+                DoCut(true)
+            }
+            handled_special = true
+        } else if hebrew_mode && text.count == 1 {
+            cp := Model.RemapHebrew(text[0])
+            if cp > 0 {
+                utf: Vec(u8)
+                defer VecFree(utf)
+                Model.EncodeUtf8(cp, *utf)
+                DoCut(true)
+                pos := cast(s64)ta_cursor
+                if pos > doc_text.count { pos = doc_text.count }
+                st: Model.Style = .{cast(u8)(ifx apply_font then CurFontTag() else Model.DefFontTag), 0}
+                ApplyDocEdit(pos, pos, TextView(utf[:]), st)
+                // RTL step-back (brutus.b line 789): keep cursor before newly inserted Hebrew char.
+                ta_cursor = cast(s32)pos
+                ta_anchor = ta_cursor
+                handled_special = true
+            }
+        }
+    }
+    ta_in := ifx handled_special then TextAreaInputFor(0, 0, "") else TextAreaInputFor(key, mods, text)
+
+    ptr := PointerSample(session)
+    mid := TertiaryPointerSample(session)
+    if mid.pressed && ptr.y > 76.0 {
+        show_popup = true
+        popup_x = ptr.x
+        popup_y = ptr.y
+        if popup_x + 84.0 > w { popup_x = w - 84.0 }
+        if popup_y + 96.0 > h { popup_y = h - 96.0 }
+    }
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Row 1: File actions + Put + Fonts/Hebrew toggles.
+    if Button.Draw(session, .{.key = 10, .bounds = .{4.0, 3.0, 44.0, 22.0}, .label = "New"}) > 0 {
+        if dirty { confirm_action = 1; panel_mode = 4 } else { DoNewDoc() }
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{52.0, 3.0, 56.0, 22.0}, .label = "Open..."}) > 0 {
+        if dirty { confirm_action = 2; panel_mode = 4 } else { OpenChooser(1) }
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{112.0, 3.0, 58.0, 22.0}, .label = "Write..."}) > 0 {
+        write_sgml = fonts_used
+        if doc_name.count > 0 { SetField(*write_name_field, TextView(doc_name[:])) }
+        panel_mode = ifx panel_mode == 3 then 0 else 3
+    }
+    put_lbl := ifx dirty then "Put*" else "Put"
+    if Button.Draw(session, .{.key = 13, .bounds = .{174.0, 3.0, 46.0, 22.0}, .label = put_lbl}) > 0 {
+        if doc_name.count > 0 { unused WriteFile(TextView(doc_name[:]), fonts_used) }
+        else { panel_mode = 3 }
+    }
+    f_lbl := ifx fonts_ok then "SGML:ON" else "SGML:OFF"
+    if Button.Draw(session, .{.key = 14, .bounds = .{224.0, 3.0, 74.0, 22.0}, .label = f_lbl}) > 0 {
+        fonts_ok = !fonts_ok
+        if fonts_ok { fonts_used = true; dirty = true }
+    }
+    h_lbl := ifx hebrew_mode then "Hebrew:ON" else "Hebrew"
+    if Button.Draw(session, .{.key = 15, .bounds = .{302.0, 3.0, 76.0, 22.0}, .label = h_lbl}) > 0 {
+        hebrew_mode = !hebrew_mode
+    }
+    if Button.Draw(session, .{.key = 16, .bounds = .{382.0, 3.0, 44.0, 22.0}, .label = "Ext"}) > 0 {
+        panel_mode = ifx panel_mode == 2 then 0 else 2
+    }
+    if Button.Draw(session, .{.key = 17, .bounds = .{430.0, 3.0, 44.0, 22.0}, .label = "Tag"}) > 0 {
+        if panel_mode == 1 {
+            panel_mode = 0
+        } else {
+            sp := GetSelOrWord()
+            mask: u16 = ifx sp.s < doc_styles.count then doc_styles[sp.s].extra_mask else 0
+            for b: 0..Model.NExtra - 1 {
+                tag_checks[b] = (mask & cast(u16)(1 << cast(u16)b)) != 0
+            }
+            panel_mode = 1
+        }
+    }
+    if Button.Draw(session, .{.key = 18, .bounds = .{478.0, 3.0, 46.0, 22.0}, .label = "Look"}) > 0 {
+        DoLook()
+    }
+    // Command bar (/pat, ?pat, line number).
+    Text.Draw(session, .{.key = 19, .bounds = .{528.0, 3.0, 34.0, 22.0},
+        .text = "Cmd:", .size = 11, .vertical_align = .TextAlignCenter})
+    cr := Field.Draw(session, Field.StateProps(cmd_field, .{.key = 20, .focus_id = 20,
+        .bounds = .{562.0, 3.0, w - 568.0, 22.0}, .max_bytes = 250, .input = f_in}))
+    unused Field.StateApplyResult(*cmd_field, cr)
+    if cr.committed {
+        ExecuteCmd(TextView(cmd_bytes[:cmd_field.length]))
+    }
+
+    // Row 2: Rich-text formatting bar (Font, Size, F&S, Apply, Font cycle, Size cycle, status).
+    if Button.Draw(session, .{.key = 21, .bounds = .{4.0, 29.0, 46.0, 22.0}, .label = "Font"}) > 0 {
+        sp := GetSelOrWord()
+        if sp.e > sp.s {
+            fonts_used = true; fonts_ok = true
+            Model.ApplyFont(*doc_styles, sp.s, sp.e, cur_font)
+            dirty = true; SyncSpans()
+        }
+    }
+    if Button.Draw(session, .{.key = 22, .bounds = .{54.0, 29.0, 44.0, 22.0}, .label = "Size"}) > 0 {
+        sp := GetSelOrWord()
+        if sp.e > sp.s {
+            fonts_used = true; fonts_ok = true
+            Model.ApplySize(*doc_styles, sp.s, sp.e, cur_size)
+            dirty = true; SyncSpans()
+        }
+    }
+    if Button.Draw(session, .{.key = 23, .bounds = .{102.0, 29.0, 42.0, 22.0}, .label = "F&S"}) > 0 {
+        sp := GetSelOrWord()
+        if sp.e > sp.s {
+            fonts_used = true; fonts_ok = true
+            Model.ApplyFontSize(*doc_styles, sp.s, sp.e, CurFontTag())
+            dirty = true; SyncSpans()
+        }
+    }
+    ap_lbl := ifx apply_font then "[x]Apply" else "[ ]Apply"
+    if Button.Draw(session, .{.key = 24, .bounds = .{148.0, 29.0, 68.0, 22.0}, .label = ap_lbl}) > 0 {
+        apply_font = !apply_font
+        if apply_font { fonts_used = true; fonts_ok = true }
+    }
+    if Button.Draw(session, .{.key = 25, .bounds = .{220.0, 29.0, 60.0, 22.0}, .label = Model.FontName(cur_font)}) > 0 {
+        cur_font = (cur_font + 1) % Model.NFont
+    }
+    sz_lbl: Vec(u8)
+    defer VecFree(sz_lbl)
+    unused BuilderAppend(sz_lbl, Model.SizeName(cur_size))
+    unused BuilderAppend(sz_lbl, "pt")
+    if Button.Draw(session, .{.key = 26, .bounds = .{284.0, 29.0, 48.0, 22.0}, .label = TextView(sz_lbl[:])}) > 0 {
+        cur_size = (cur_size + 1) % Model.NSize
+    }
+    Text.Draw(session, .{.key = 27, .bounds = .{338.0, 29.0, w - 344.0, 22.0},
+        .text = TextView(status_text[:]), .size = 11, .vertical_align = .TextAlignCenter})
+
+    y: float32 = 55.0
+
+    // Inline Panel 1: Tag Editor (all 13 structural SGML tags).
+    if panel_mode == 1 {
+        Box.Draw(session, .{.key = 60, .bounds = .{4.0, y, w - 8.0, 82.0}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 61, .bounds = .{4.0, y + 81.0, w - 8.0, 1.0}, .fill = dark})
+        for b: cast(s32)0..cast(s32)(Model.NExtra - 1) {
+            col := b % 5
+            row := b / 5
+            bx := 8.0 + cast(float32)col * 118.0
+            by := y + 4.0 + cast(float32)row * 25.0
+            lbl: Vec(u8)
+            defer VecFree(lbl)
+            unused BuilderAppend(lbl, ifx tag_checks[b] then "[x] " else "[ ] ")
+            unused BuilderAppend(lbl, Model.TagName(Model.NFontTag + b))
+            if Button.Draw(session, .{.key = cast(u64)(100 + b), .bounds = .{bx, by, 114.0, 22.0},
+                .label = TextView(lbl[:])}) > 0 {
+                tag_checks[b] = !tag_checks[b]
+            }
+        }
+        if Button.Draw(session, .{.key = 120, .bounds = .{w - 144.0, y + 54.0, 64.0, 22.0}, .label = "Apply"}) > 0 {
+            sp := GetSelOrWord()
+            if sp.e > sp.s {
+                mask: u16 = 0
+                for b: 0..Model.NExtra - 1 {
+                    if tag_checks[b] { mask = mask | cast(u16)(1 << cast(u16)b) }
+                }
+                for i: sp.s..sp.e - 1 {
+                    if i < doc_styles.count { doc_styles[i].extra_mask = mask }
+                }
+                fonts_used = true; fonts_ok = true; dirty = true
+                SyncSpans()
+            }
+            panel_mode = 0
+        }
+        if Button.Draw(session, .{.key = 121, .bounds = .{w - 74.0, y + 54.0, 64.0, 22.0}, .label = "Cancel"}) > 0 {
+            panel_mode = 0
+        }
+        y += 86.0
+    }
+
+    // Inline Panel 2: Extensions (excerpt, image, mod, table).
+    if panel_mode == 2 {
+        Box.Draw(session, .{.key = 62, .bounds = .{4.0, y, w - 8.0, 56.0}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 63, .bounds = .{4.0, y + 55.0, w - 8.0, 1.0}, .fill = dark})
+        enames: [4]string = .["excerpt", "image", "mod", "table"]
+        for k: cast(s32)0..3 {
+            lbl: Vec(u8)
+            defer VecFree(lbl)
+            unused BuilderAppend(lbl, ifx ext_kind == k then "*" else "")
+            unused BuilderAppend(lbl, enames[k])
+            if Button.Draw(session, .{.key = cast(u64)(130 + k), .bounds = .{8.0 + cast(float32)k * 76.0, y + 4.0, 72.0, 22.0},
+                .label = TextView(lbl[:])}) > 0 {
+                ext_kind = k
+            }
+        }
+        Text.Draw(session, .{.key = 135, .bounds = .{8.0, y + 30.0, 44.0, 22.0},
+            .text = "Args:", .size = 11, .vertical_align = .TextAlignCenter})
+        er := Field.Draw(session, Field.StateProps(ext_arg_field, .{.key = 136, .focus_id = 136,
+            .bounds = .{54.0, y + 30.0, w - 208.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*ext_arg_field, er)
+        if er.committed { InsertExtension() }
+        if Button.Draw(session, .{.key = 137, .bounds = .{w - 148.0, y + 30.0, 68.0, 22.0}, .label = "Insert"}) > 0 {
+            InsertExtension()
+        }
+        if Button.Draw(session, .{.key = 138, .bounds = .{w - 74.0, y + 30.0, 64.0, 22.0}, .label = "Cancel"}) > 0 {
+            panel_mode = 0
+        }
+        y += 60.0
+    }
+
+    // Inline Panel 3: Write dialog (filename + Write SGML checkbox + Browse + OK).
+    if panel_mode == 3 {
+        Box.Draw(session, .{.key = 64, .bounds = .{4.0, y, w - 8.0, 56.0}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 65, .bounds = .{4.0, y + 55.0, w - 8.0, 1.0}, .fill = dark})
+        Text.Draw(session, .{.key = 140, .bounds = .{8.0, y + 4.0, 44.0, 22.0},
+            .text = "File:", .size = 11, .vertical_align = .TextAlignCenter})
+        wr := Field.Draw(session, Field.StateProps(write_name_field, .{.key = 141, .focus_id = 141,
+            .bounds = .{54.0, y + 4.0, w - 208.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*write_name_field, wr)
+        if wr.committed {
+            if WriteFile(TextView(write_name_bytes[:write_name_field.length]), write_sgml) { panel_mode = 0 }
+        }
+        if Button.Draw(session, .{.key = 142, .bounds = .{w - 148.0, y + 4.0, 68.0, 22.0}, .label = "Browse"}) > 0 {
+            OpenChooser(2)
+        }
+        if Button.Draw(session, .{.key = 143, .bounds = .{w - 74.0, y + 4.0, 64.0, 22.0}, .label = "Cancel"}) > 0 {
+            panel_mode = 0
+        }
+        sg_lbl := ifx write_sgml then "[x] Write SGML" else "[ ] Write SGML"
+        if Button.Draw(session, .{.key = 144, .bounds = .{54.0, y + 30.0, 124.0, 22.0}, .label = sg_lbl}) > 0 {
+            write_sgml = !write_sgml
+        }
+        if Button.Draw(session, .{.key = 145, .bounds = .{184.0, y + 30.0, 68.0, 22.0}, .label = "OK"}) > 0 {
+            if WriteFile(TextView(write_name_bytes[:write_name_field.length]), write_sgml) { panel_mode = 0 }
+        }
+        y += 60.0
+    }
+
+    // Inline Panel 4: Dirty confirmation (Write and Proceed / Proceed / Cancel).
+    if panel_mode == 4 {
+        Box.Draw(session, .{.key = 66, .bounds = .{4.0, y, w - 8.0, 32.0}, .fill = panel_bg})
+        Text.Draw(session, .{.key = 150, .bounds = .{8.0, y + 5.0, 190.0, 22.0},
+            .text = "Warning: document is dirty.", .size = 11, .vertical_align = .TextAlignCenter})
+        if Button.Draw(session, .{.key = 151, .bounds = .{204.0, y + 5.0, 130.0, 22.0}, .label = "Write & Proceed"}) > 0 {
+            if doc_name.count > 0 && WriteFile(TextView(doc_name[:]), fonts_used) {
+                panel_mode = 0
+                if confirm_action == 1 { DoNewDoc() } else if confirm_action == 2 { OpenChooser(1) }
+            }
+        }
+        if Button.Draw(session, .{.key = 152, .bounds = .{340.0, y + 5.0, 76.0, 22.0}, .label = "Proceed"}) > 0 {
+            panel_mode = 0
+            if confirm_action == 1 { DoNewDoc() } else if confirm_action == 2 { OpenChooser(1) }
+        }
+        if Button.Draw(session, .{.key = 153, .bounds = .{422.0, y + 5.0, 68.0, 22.0}, .label = "Cancel"}) > 0 {
+            panel_mode = 0
+        }
+        y += 36.0
+    }
+
+    // Main rich-text TextArea with ColorSpans.
+    ta_res := TextArea.Draw(session, .{
+        .key = 40,
+        .focus_id = 40,
+        .bounds = .{4.0, y, w - 8.0, h - y - 4.0},
+        .value = TextView(doc_text[:]),
+        .colors = ta_spans[:],
+        .cursor = ta_cursor,
+        .anchor = ta_anchor,
+        .scroll_y = ta_scroll_y,
+        .focused = ta_focused,
+        .selecting = ta_selecting,
+        .preferred_x = ta_pref_x,
+        .preferred_x_valid = ta_pref_x_valid,
+        .max_bytes = MaxDoc,
+        .wrap = true,
+        .input = ta_in,
+    })
+    ta_cursor = ta_res.cursor
+    ta_anchor = ta_res.anchor
+    ta_scroll_y = ta_res.scroll_y
+    ta_focused = ta_res.focused
+    ta_selecting = ta_res.selecting
+    ta_pref_x = ta_res.preferred_x
+    ta_pref_x_valid = ta_res.preferred_x_valid
+    if ta_res.edit.changed {
+        s := cast(s64)ta_res.edit.start
+        e := cast(s64)ta_res.edit.end
+        fill: Model.Style = .{cast(u8)(ifx apply_font then CurFontTag() else Model.DefFontTag), 0}
+        if !apply_font && s > 0 && s - 1 < doc_styles.count {
+            fill = doc_styles[s - 1]
+        }
+        ApplyDocEdit(s, e, ta_res.edit.replacement, fill)
+    }
+
+    // Button-2 Edit popup menu (Cut, Paste, Snarf, Look).
+    if show_popup {
+        Box.Draw(session, .{.key = 50, .bounds = .{popup_x, popup_y, 78.0, 92.0}, .fill = menu_bg})
+        if Button.Draw(session, .{.key = 51, .bounds = .{popup_x + 2.0, popup_y + 2.0, 74.0, 20.0}, .label = "Cut"}) > 0 {
+            DoCut(true); show_popup = false
+        }
+        if Button.Draw(session, .{.key = 52, .bounds = .{popup_x + 2.0, popup_y + 24.0, 74.0, 20.0}, .label = "Paste"}) > 0 {
+            DoPaste(); show_popup = false
+        }
+        if Button.Draw(session, .{.key = 53, .bounds = .{popup_x + 2.0, popup_y + 46.0, 74.0, 20.0}, .label = "Snarf"}) > 0 {
+            DoSnarf(); show_popup = false
+        }
+        if Button.Draw(session, .{.key = 54, .bounds = .{popup_x + 2.0, popup_y + 68.0, 74.0, 20.0}, .label = "Look"}) > 0 {
+            DoLook(); show_popup = false
+        }
+        if ptr.pressed && (ptr.x < popup_x || ptr.x > popup_x + 78.0 || ptr.y < popup_y || ptr.y > popup_y + 92.0) {
+            show_popup = false
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    cmd_field.bytes = cmd_bytes[:]
+    ext_arg_field.bytes = ext_arg_bytes[:]
+    write_name_field.bytes = write_name_bytes[:]
+    SetStatus("Brutus ready")
+
+    if Args.OperandCount() >= 1 {
+        arg := Args.Operand(0)
+        if arg.count > 0 && arg[0] != cast(u8)45 {
+            LoadFile(arg)
+        }
+    }
+
+    rc := Surface.RunRetained(.{.title = "Brutus", .width = WinW, .height = WinH}, Draw, 16)
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(doc_name)
+    VecFree(doc_text)
+    VecFree(doc_styles)
+    VecFree(doc_exts)
+    VecFree(doc_ext_pool)
+    VecFree(model_spans)
+    VecFree(ta_spans)
+    VecFree(last_pat)
+    VecFree(snarf_plain)
+    VecFree(snarf_sgml)
+    VecFree(status_text)
+    return rc
+}

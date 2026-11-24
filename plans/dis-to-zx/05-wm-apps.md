@@ -1,4 +1,4 @@
-# 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 30 rows
+# 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 27 rows
 
 Owner: WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner)
 
@@ -6,7 +6,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 
 | Path | Limbo source | Interface | Boot | Notes |
 |---|---|---|---|---|
-| dis/wm/brutus.dis | appl/wm/brutus.b | module/brutus.m | - |  |
 | dis/wm/brutus/excerpt.dis | appl/wm/brutus/excerpt.b |  | - |  |
 | dis/wm/brutus/image.dis | appl/wm/brutus/image.b |  | - |  |
 | dis/wm/brutus/mod.dis | appl/wm/brutus/mod.b |  | - |  |
@@ -31,9 +30,7 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/wm/prof.dis | appl/wm/prof.b |  | - |  |
 | dis/wm/remotelogon.dis | appl/wm/remotelogon.b |  | - |  |
 | dis/wm/rmtdir.dis | appl/wm/rmtdir.b |  | - |  |
-| dis/wm/rt.dis | appl/wm/rt.b |  | - |  |
 | dis/wm/sh.dis | appl/wm/sh.b | module/sh.m | - |  |
 | dis/wm/smenu.dis | appl/wm/smenu.b |  | - |  |
 | dis/wm/task.dis | appl/wm/task.b |  | - |  |
-| dis/wm/vt.dis | appl/wm/vt.b |  | - |  |
 

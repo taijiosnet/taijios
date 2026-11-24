@@ -1,0 +1,367 @@
+// Port of Inferno's Dis Module Manager (appl/wm/rt.b), built as rt.zx.
+// See ../../NOTICE.
+// Keeps .dis binary inspection and full disassembly (pure Ziran, no Dis module),
+// MUSTCOMPILE / DONTCOMPILE / SHAREMP / DYNMOD flag toggles, Stack Extent (ss)
+// editing and lossless binary rewrite, .s disassembly export, and file loading
+// via command-line argument or /dis/wm/filename.zx.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+TextArea :: #import "kryon/text_area";
+Model :: #import "rt_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+WinW :: 660
+WinH :: 500
+MaxDisFile :: 4194304
+MaxDisText :: 4194304
+Chooser :: "/dis/wm/filename.zx"
+
+grey: Color = .{221, 221, 221, 255};
+panel_bg: Color = .{236, 236, 236, 255};
+dark: Color = .{140, 140, 140, 255};
+
+// Loaded .dis file state.
+cur_path: Vec(u8);
+raw_bytes: Vec(u8);
+dis_text: Vec(u8);
+hdr: Model.Header;
+edit_rt: s32;
+has_file: bool;
+
+// Stack extent field.
+ss_bytes: [32]u8;
+ss_field: Field.State;
+
+// Disassembly TextArea state.
+ta_cursor: s32;
+ta_anchor: s32;
+ta_scroll_y: s32;
+ta_focused: bool;
+ta_selecting: bool;
+ta_pref_x: s32;
+ta_pref_x_valid: bool;
+
+status_text: Vec(u8);
+info_line: Vec(u8);
+
+// File chooser pipe (mode 1 = load .dis, mode 2 = save .s).
+choice_fd: s32 = -1;
+choice_mode: s32;
+choice_bytes: [512]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+SetStatus :: (s: string) { SetVec(*status_text, s) }
+
+SetField :: (state: *Field.State, text: string) {
+    state.length = 0
+    for i: cast(s64)0..text.count - 1 {
+        if state.length >= cast(s32)state.bytes.count - 1 { break }
+        state.bytes[state.length] = text[i]
+        state.length += 1
+    }
+    state.cursor = state.length
+    state.anchor = state.length
+}
+
+ParseNonNeg :: (s: string) -> s32 {
+    v: s32 = 0
+    for i: cast(s64)0..s.count - 1 {
+        c := s[i]
+        if c >= cast(u8)48 && c <= cast(u8)57 {
+            v = v * 10 + cast(s32)(c - cast(u8)48)
+        }
+    }
+    return v
+}
+
+RebuildInfoLine :: () {
+    VecClear(info_line)
+    if !has_file {
+        unused BuilderAppend(info_line, "No Dis module loaded.")
+        return
+    }
+    d: [24]u8
+    unused BuilderAppend(info_line, "Module: ")
+    if hdr.name_len > 0 && hdr.name_start + hdr.name_len <= raw_bytes.count {
+        unused BuilderAppend(info_line, TextView(raw_bytes[hdr.name_start:hdr.name_start + hdr.name_len]))
+    } else {
+        unused BuilderAppend(info_line, "(unnamed)")
+    }
+    unused BuilderAppend(info_line, "  inst=")
+    unused BuilderAppend(info_line, FormatInteger(cast(s64)hdr.isize, d[:]))
+    unused BuilderAppend(info_line, "  data=")
+    unused BuilderAppend(info_line, FormatInteger(cast(s64)hdr.dsize, d[:]))
+    unused BuilderAppend(info_line, "  types=")
+    unused BuilderAppend(info_line, FormatInteger(cast(s64)hdr.tsize, d[:]))
+    unused BuilderAppend(info_line, "  links=")
+    unused BuilderAppend(info_line, FormatInteger(cast(s64)hdr.lsize, d[:]))
+    if hdr.signed { unused BuilderAppend(info_line, "  [SIGNED]") }
+    if (edit_rt & Model.HasLdt) != 0 { unused BuilderAppend(info_line, "  [LDT]") }
+    if (edit_rt & Model.HasExcept) != 0 { unused BuilderAppend(info_line, "  [EXCEPT]") }
+}
+
+LoadDisFile :: (path: string) {
+    fd := IO.Open(path, 0)
+    if fd < 0 {
+        SetStatus("Failed to open .dis file")
+        return
+    }
+    VecClear(raw_bytes)
+    buf: [8192]u8
+    while raw_bytes.count < MaxDisFile {
+        n := IO.Read(fd, buf[:])
+        if n <= 0 { break }
+        for i: cast(s32)0..n - 1 { unused VecPush(raw_bytes, buf[i]) }
+    }
+    unused IO.Close(fd)
+
+    if raw_bytes.count == 0 {
+        SetStatus("Empty file")
+        return
+    }
+    if !Model.Disassemble(raw_bytes[:], *dis_text, *hdr) {
+        has_file = false
+        RebuildInfoLine()
+        SetStatus("Not a valid Dis object file")
+        return
+    }
+    SetVec(*cur_path, path)
+    edit_rt = hdr.rt
+    has_file = true
+    d: [24]u8
+    SetField(*ss_field, FormatInteger(cast(s64)hdr.ssize, d[:]))
+    ta_cursor = 0
+    ta_anchor = 0
+    ta_scroll_y = 0
+    RebuildInfoLine()
+
+    st: Vec(u8)
+    defer VecFree(st)
+    unused BuilderAppend(st, "Loaded: ")
+    unused BuilderAppend(st, path)
+    SetStatus(TextView(st[:]))
+}
+
+SaveDisHeader :: () {
+    if !has_file || cur_path.count == 0 { SetStatus("No module loaded"); return }
+    new_ss := ParseNonNeg(TextView(ss_bytes[:ss_field.length]))
+    patched: Vec(u8)
+    defer VecFree(patched)
+    if !Model.RewriteHeader(raw_bytes[:], edit_rt, new_ss, *patched) {
+        SetStatus("Header rewrite failed")
+        return
+    }
+    fd := IO.Create(TextView(cur_path[:]), 1, 420) // 0644
+    if fd < 0 {
+        SetStatus("Failed to open .dis file for writing")
+        return
+    }
+    n := IO.Write(fd, TextView(patched[:]))
+    unused IO.Close(fd)
+    if n != cast(s32)patched.count {
+        SetStatus("Short write updating .dis header")
+        return
+    }
+    LoadDisFile(TextView(cur_path[:]))
+    SetStatus("Saved updated .dis runtime flags and stack extent")
+}
+
+SaveAsmTo :: (path: string) {
+    if !has_file || dis_text.count == 0 { SetStatus("Nothing to export"); return }
+    fd := IO.Create(path, 1, 420)
+    if fd < 0 { SetStatus("Failed to create .s file"); return }
+    n := IO.Write(fd, TextView(dis_text[:]))
+    unused IO.Close(fd)
+    if n < 0 { SetStatus("Error writing .s file"); return }
+    d: [24]u8
+    st: Vec(u8)
+    defer VecFree(st)
+    unused BuilderAppend(st, "Wrote ")
+    unused BuilderAppend(st, FormatInteger(cast(s64)n, d[:]))
+    unused BuilderAppend(st, " bytes to ")
+    unused BuilderAppend(st, path)
+    SetStatus(TextView(st[:]))
+}
+
+OpenChooser :: (mode: s32) {
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    choice_mode = mode
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 { return }
+    if mode == 1 {
+        words: [4]string = .["-t", "Load Dis Module", "*.dis (Dis modules)", "* (All files)"]
+        launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+        unused IO.Close(ends[1])
+        if launch.id == 0 { unused IO.Close(ends[0]); return }
+    } else {
+        words: [4]string = .["-t", "Save Disassembly", "*.s (Dis assembly)", "* (All files)"]
+        launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+        unused IO.Close(ends[1])
+        if launch.id == 0 { unused IO.Close(ends[0]); return }
+    }
+    choice_fd = ends[0]
+}
+
+PollChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 { unused IO.Close(choice_fd); choice_fd = -1; choice_used = 0; return }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        choice_used = 0
+        if line > 0 {
+            chosen := TextView(choice_bytes[:line])
+            if choice_mode == 1 { LoadDisFile(chosen) }
+            else if choice_mode == 2 { SaveAsmTo(chosen) }
+        }
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 520.0 { w = cast(float32)WinW }
+    if h < 320.0 { h = cast(float32)WinH }
+
+    PollChooser()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    f_in := TextFieldInputFor(key, mods, text)
+    ta_in := TextAreaInputFor(key, mods, text)
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Top command bar.
+    if Button.Draw(session, .{.key = 10, .bounds = .{6.0, 4.0, 72.0, 22.0}, .label = "Load..."}) > 0 {
+        OpenChooser(1)
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{82.0, 4.0, 88.0, 22.0}, .label = "Save Flags"}) > 0 {
+        SaveDisHeader()
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{174.0, 4.0, 84.0, 22.0}, .label = "Save .s..."}) > 0 {
+        OpenChooser(2)
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{262.0, 4.0, 64.0, 22.0}, .label = "Reload"}) > 0 {
+        if cur_path.count > 0 { LoadDisFile(TextView(cur_path[:])) }
+    }
+    Text.Draw(session, .{.key = 14, .bounds = .{334.0, 4.0, w - 340.0, 22.0},
+        .text = TextView(status_text[:]), .size = 12, .vertical_align = .TextAlignCenter})
+
+    // Runtime header flags & stack extent panel.
+    Box.Draw(session, .{.key = 20, .bounds = .{6.0, 30.0, w - 12.0, 56.0}, .fill = panel_bg})
+    Box.Draw(session, .{.key = 21, .bounds = .{6.0, 85.0, w - 12.0, 1.0}, .fill = dark})
+
+    mc_lbl := ifx (edit_rt & Model.MustCompile) != 0 then "[x] MUSTCOMPILE" else "[ ] MUSTCOMPILE"
+    if Button.Draw(session, .{.key = 22, .bounds = .{10.0, 34.0, 128.0, 22.0}, .label = mc_lbl}) > 0 {
+        edit_rt = edit_rt ^ Model.MustCompile
+    }
+    dc_lbl := ifx (edit_rt & Model.DontCompile) != 0 then "[x] DONTCOMPILE" else "[ ] DONTCOMPILE"
+    if Button.Draw(session, .{.key = 23, .bounds = .{142.0, 34.0, 128.0, 22.0}, .label = dc_lbl}) > 0 {
+        edit_rt = edit_rt ^ Model.DontCompile
+    }
+    sm_lbl := ifx (edit_rt & Model.ShareMp) != 0 then "[x] SHAREMP" else "[ ] SHAREMP"
+    if Button.Draw(session, .{.key = 24, .bounds = .{274.0, 34.0, 102.0, 22.0}, .label = sm_lbl}) > 0 {
+        edit_rt = edit_rt ^ Model.ShareMp
+    }
+    dm_lbl := ifx (edit_rt & Model.DynMod) != 0 then "[x] DYNMOD" else "[ ] DYNMOD"
+    if Button.Draw(session, .{.key = 25, .bounds = .{380.0, 34.0, 96.0, 22.0}, .label = dm_lbl}) > 0 {
+        edit_rt = edit_rt ^ Model.DynMod
+    }
+
+    Text.Draw(session, .{.key = 26, .bounds = .{484.0, 34.0, 48.0, 22.0},
+        .text = "Stack:", .size = 12, .vertical_align = .TextAlignCenter})
+    sr := Field.Draw(session, Field.StateProps(ss_field, .{.key = 27, .focus_id = 27,
+        .bounds = .{534.0, 34.0, w - 546.0, 22.0}, .max_bytes = 20, .input = f_in}))
+    unused Field.StateApplyResult(*ss_field, sr)
+    if sr.committed { SaveDisHeader() }
+
+    Text.Draw(session, .{.key = 28, .bounds = .{10.0, 60.0, w - 20.0, 20.0},
+        .text = TextView(info_line[:]), .size = 11, .vertical_align = .TextAlignCenter})
+
+    // Disassembly TextArea.
+    ta_res := TextArea.Draw(session, .{
+        .key = 40,
+        .focus_id = 40,
+        .bounds = .{6.0, 92.0, w - 12.0, h - 98.0},
+        .value = TextView(dis_text[:]),
+        .cursor = ta_cursor,
+        .anchor = ta_anchor,
+        .scroll_y = ta_scroll_y,
+        .focused = ta_focused,
+        .selecting = ta_selecting,
+        .preferred_x = ta_pref_x,
+        .preferred_x_valid = ta_pref_x_valid,
+        .max_bytes = MaxDisText,
+        .wrap = false,
+        .input = ta_in,
+    })
+    ta_cursor = ta_res.cursor
+    ta_anchor = ta_res.anchor
+    ta_scroll_y = ta_res.scroll_y
+    ta_focused = ta_res.focused
+    ta_selecting = ta_res.selecting
+    ta_pref_x = ta_res.preferred_x
+    ta_pref_x_valid = ta_res.preferred_x_valid
+}
+
+#program_export
+main :: () -> s32 {
+    ss_field.bytes = ss_bytes[:]
+    SetStatus("Select a .dis module with Load...")
+    RebuildInfoLine()
+
+    if Args.OperandCount() >= 1 {
+        arg := Args.Operand(0)
+        if arg.count > 0 && arg[0] != cast(u8)45 {
+            LoadDisFile(arg)
+        }
+    }
+
+    rc := Surface.RunRetained(.{.title = "Dis Module Manager", .width = WinW, .height = WinH}, Draw, 16)
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(cur_path)
+    VecFree(raw_bytes)
+    VecFree(dis_text)
+    VecFree(status_text)
+    VecFree(info_line)
+    return rc
+}

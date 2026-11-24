@@ -1,0 +1,540 @@
+// Pure-Ziran Dis binary parser, full 176-opcode disassembler, and header flag/stack
+// rewriter for Inferno's Dis Module Manager (appl/wm/rt.b + appl/lib/dis.b).
+// See ../../NOTICE.
+#import "std/vec"
+#import "std/number_text"
+
+XMagic :: 819248
+SMagic :: 923426
+
+MustCompile :: 1
+DontCompile :: 2
+ShareMp :: 4
+DynMod :: 8
+HasLdt0 :: 16
+HasExcept :: 32
+HasLdt :: 64
+
+Amp :: 0
+Afp :: 1
+Aimm :: 2
+Axxx :: 3
+Aind :: 4
+Amask :: 7
+
+Arm :: 0xC0
+AxNon :: 0x00
+AxImm :: 0x40
+AxInf :: 0x80
+AxInm :: 0xC0
+
+DefZ :: 0
+DefB :: 1
+DefW :: 2
+DefS :: 3
+DefF :: 4
+DefA :: 5
+DInd :: 6
+DAPop :: 7
+DefL :: 8
+DMax :: 16
+
+Header :: struct {
+    ok: bool
+    signed: bool
+    sig_len: s32
+    magic: s32
+    rt: s32
+    ssize: s32
+    isize: s32
+    dsize: s32
+    tsize: s32
+    lsize: s32
+    entry: s32
+    entryt: s32
+    rt_off: s64
+    ss_end: s64
+    inst_off: s64
+    name_start: s64
+    name_len: s64
+    src_start: s64
+    src_len: s64
+}
+
+Reader :: struct {
+    data: []u8
+    pos: s64
+}
+
+ReadByte :: (r: *Reader) -> s32 {
+    if r.pos >= r.data.count { return -1 }
+    b := cast(s32)r.data[r.pos]
+    r.pos += 1
+    return b
+}
+
+// Dis variable-length signed operand decoder (appl/lib/dis.b lines 416-451).
+ReadOperand :: (r: *Reader) -> s32 {
+    if r.pos >= r.data.count { return -1 }
+    b := cast(s32)r.data[r.pos]
+    r.pos += 1
+    tag := b & 0xC0
+    if tag == 0x00 { return b }
+    if tag == 0x40 { return b | (~0x7F) }
+    if tag == 0x80 {
+        if r.pos >= r.data.count { return -1 }
+        if (b & 0x20) != 0 { b = b | (~0x3F) } else { b = b & 0x3F }
+        b2 := cast(s32)r.data[r.pos]
+        r.pos += 1
+        return (b << 8) | b2
+    }
+    if r.pos + 2 >= r.data.count { return -1 }
+    if (b & 0x20) != 0 { b = b | (~0x3F) } else { b = b & 0x3F }
+    b1 := cast(s32)r.data[r.pos]
+    b2 := cast(s32)r.data[r.pos + 1]
+    b3 := cast(s32)r.data[r.pos + 2]
+    r.pos += 3
+    return (b << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+// Dis variable-length signed operand encoder (inverse of ReadOperand).
+EncodeOperand :: (v: s32, out: *Vec(u8)) {
+    if v >= -64 && v <= 63 {
+        unused VecPush(out.*, cast(u8)(v & 0x7F))
+        return
+    }
+    if v >= -8192 && v <= 8191 {
+        unused VecPush(out.*, cast(u8)(((v >> 8) & 0x3F) | 0x80))
+        unused VecPush(out.*, cast(u8)(v & 0xFF))
+        return
+    }
+    unused VecPush(out.*, cast(u8)(((v >> 24) & 0x3F) | 0xC0))
+    unused VecPush(out.*, cast(u8)((v >> 16) & 0xFF))
+    unused VecPush(out.*, cast(u8)((v >> 8) & 0xFF))
+    unused VecPush(out.*, cast(u8)(v & 0xFF))
+}
+
+ReadWord :: (r: *Reader) -> s32 {
+    if r.pos + 3 >= r.data.count { return -1 }
+    v := (cast(s32)r.data[r.pos] << 24) |
+         (cast(s32)r.data[r.pos + 1] << 16) |
+         (cast(s32)r.data[r.pos + 2] << 8) |
+          cast(s32)r.data[r.pos + 3]
+    r.pos += 4
+    return v
+}
+
+ReadBig :: (r: *Reader) -> s64 {
+    if r.pos + 7 >= r.data.count { return -1 }
+    v: s64 = 0
+    for i: cast(s64)0..7 {
+        v = (v << cast(s64)8) | cast(s64)r.data[r.pos + i]
+    }
+    r.pos += 8
+    return v
+}
+
+StrSpan :: struct {
+    start: s64
+    length: s64
+}
+
+ReadStringSpan :: (r: *Reader) -> StrSpan {
+    start := r.pos
+    while r.pos < r.data.count && r.data[r.pos] != 0 { r.pos += 1 }
+    length := r.pos - start
+    if r.pos < r.data.count { r.pos += 1 }
+    return .{start, length}
+}
+
+OpName :: (op: s32) -> string {
+    names: [176]string = .[
+        "nop", "alt", "nbalt", "goto", "call", "frame", "spawn", "runt",
+        "load", "mcall", "mspawn", "mframe", "ret", "jmp", "case", "exit",
+        "new", "newa", "newcb", "newcw", "newcf", "newcp", "newcm", "newcmp",
+        "send", "recv", "consb", "consw", "consp", "consf", "consm", "consmp",
+        "headb", "headw", "headp", "headf", "headm", "headmp", "tail", "lea",
+        "indx", "movp", "movm", "movmp", "movb", "movw", "movf", "cvtbw",
+        "cvtwb", "cvtfw", "cvtwf", "cvtca", "cvtac", "cvtwc", "cvtcw", "cvtfc",
+        "cvtcf", "addb", "addw", "addf", "subb", "subw", "subf", "mulb",
+        "mulw", "mulf", "divb", "divw", "divf", "modw", "modb", "andb",
+        "andw", "orb", "orw", "xorb", "xorw", "shlb", "shlw", "shrb",
+        "shrw", "insc", "indc", "addc", "lenc", "lena", "lenl", "beqb",
+        "bneb", "bltb", "bleb", "bgtb", "bgeb", "beqw", "bnew", "bltw",
+        "blew", "bgtw", "bgew", "beqf", "bnef", "bltf", "blef", "bgtf",
+        "bgef", "beqc", "bnec", "bltc", "blec", "bgtc", "bgec", "slicea",
+        "slicela", "slicec", "indw", "indf", "indb", "negf", "movl", "addl",
+        "subl", "divl", "modl", "mull", "andl", "orl", "xorl", "shll",
+        "shrl", "bnel", "bltl", "blel", "bgtl", "bgel", "beql", "cvtlf",
+        "cvtfl", "cvtlw", "cvtwl", "cvtlc", "cvtcl", "headl", "consl", "newcl",
+        "casec", "indl", "movpc", "tcmp", "mnewz", "cvtrf", "cvtfr", "cvtws",
+        "cvtsw", "lsrw", "lsrl", "eclr", "newz", "newaz", "raise", "casel",
+        "mulx", "divx", "cvtxx", "mulx0", "divx0", "cvtxx0", "mulx1", "divx1",
+        "cvtxx1", "cvtfx", "cvtxf", "expw", "expl", "expf", "self", "OP175",
+    ]
+    if op >= 0 && op < 175 { return names[op] }
+    return "OP?"
+}
+
+AppendInt :: (out: *Vec(u8), v: s64) {
+    d: [24]u8
+    unused BuilderAppend(out.*, FormatInteger(v, d[:]))
+}
+
+AppendHex32 :: (out: *Vec(u8), v: s32) {
+    hex := "0123456789abcdef"
+    u := cast(u32)v
+    shift: u32 = 28
+    for _: 0..7 {
+        nib := (u >> shift) & cast(u32)15
+        unused VecPush(out.*, hex[cast(s64)nib])
+        if shift >= 4 { shift -= 4 }
+    }
+}
+
+AppendAddr :: (out: *Vec(u8), mode: s32, val: s32) -> bool {
+    if mode == Afp {
+        AppendInt(out, cast(s64)val)
+        unused BuilderAppend(out.*, "(fp)")
+        return true
+    }
+    if mode == Amp {
+        AppendInt(out, cast(s64)val)
+        unused BuilderAppend(out.*, "(mp)")
+        return true
+    }
+    if mode == Aimm {
+        unused BuilderAppend(out.*, "$")
+        AppendInt(out, cast(s64)val)
+        return true
+    }
+    if mode == (Aind | Afp) {
+        fi := (val >> 16) & 0xFFFF
+        si := val & 0xFFFF
+        AppendInt(out, cast(s64)si)
+        unused BuilderAppend(out.*, "(")
+        AppendInt(out, cast(s64)fi)
+        unused BuilderAppend(out.*, "(fp))")
+        return true
+    }
+    if mode == (Aind | Amp) {
+        fi := (val >> 16) & 0xFFFF
+        si := val & 0xFFFF
+        AppendInt(out, cast(s64)si)
+        unused BuilderAppend(out.*, "(")
+        AppendInt(out, cast(s64)fi)
+        unused BuilderAppend(out.*, "(mp))")
+        return true
+    }
+    return false
+}
+
+// Parse header and walk entire .dis object to populate module name, srcpath, and offsets.
+ParseHeader :: (data: []u8) -> Header {
+    h: Header
+    r: Reader = .{data, 0}
+    magic := ReadOperand(*r)
+    if magic == SMagic {
+        h.signed = true
+        n := ReadOperand(*r)
+        if n < 0 || r.pos + cast(s64)n > data.count { return h }
+        h.sig_len = n
+        r.pos += cast(s64)n
+        magic = ReadOperand(*r)
+    }
+    if magic != XMagic { return h }
+    h.magic = magic
+    h.rt_off = r.pos
+    h.rt = ReadOperand(*r)
+    h.ssize = ReadOperand(*r)
+    h.ss_end = r.pos
+    h.isize = ReadOperand(*r)
+    h.dsize = ReadOperand(*r)
+    h.tsize = ReadOperand(*r)
+    h.lsize = ReadOperand(*r)
+    h.entry = ReadOperand(*r)
+    h.entryt = ReadOperand(*r)
+    if h.isize < 0 || h.tsize < 0 || h.lsize < 0 { return h }
+    h.inst_off = r.pos
+    h.ok = true
+    return h
+}
+
+// Rewrite rt flags and stack size in raw .dis bytes while preserving all other sections.
+RewriteHeader :: (raw: []u8, new_rt: s32, new_ss: s32, out: *Vec(u8)) -> bool {
+    VecClear(out.*)
+    h := ParseHeader(raw)
+    if !h.ok { return false }
+    for i: cast(s64)0..h.rt_off - 1 { unused VecPush(out.*, raw[i]) }
+    EncodeOperand(new_rt, out)
+    EncodeOperand(new_ss, out)
+    for i: h.ss_end..raw.count - 1 { unused VecPush(out.*, raw[i]) }
+    return true
+}
+
+// Disassemble a complete .dis binary into Inferno .s text matching appl/wm/rt.b.
+Disassemble :: (raw: []u8, out: *Vec(u8), out_hdr: *Header) -> bool {
+    VecClear(out.*)
+    h := ParseHeader(raw)
+    out_hdr.* = h
+    if !h.ok {
+        unused BuilderAppend(out.*, "Error: bad Dis magic number\n")
+        return false
+    }
+
+    r: Reader = .{raw, h.inst_off}
+    // Instructions.
+    for pc: 0..h.isize - 1 {
+        op := ReadByte(*r)
+        addr := ReadByte(*r)
+        if op < 0 || addr < 0 { break }
+        mid: s32 = 0
+        src: s32 = 0
+        dst: s32 = 0
+        arm := addr & Arm
+        if arm == AxImm || arm == AxInf || arm == AxInm { mid = ReadOperand(*r) }
+        sm := (addr >> 3) & 7
+        if sm == Afp || sm == Amp || sm == Aimm { src = ReadOperand(*r) }
+        else if sm == (Aind | Afp) || sm == (Aind | Amp) {
+            hi := ReadOperand(*r)
+            lo := ReadOperand(*r)
+            src = (hi << 16) | (lo & 0xFFFF)
+        }
+        dm := addr & 7
+        if dm == Afp || dm == Amp || dm == Aimm { dst = ReadOperand(*r) }
+        else if dm == (Aind | Afp) || dm == (Aind | Amp) {
+            hi := ReadOperand(*r)
+            lo := ReadOperand(*r)
+            dst = (hi << 16) | (lo & 0xFFFF)
+        }
+
+        // Format: "\t<op padded to 10><operands>\t# <pc>\n"
+        unused BuilderAppend(out.*, "\t")
+        name := OpName(op)
+        unused BuilderAppend(out.*, name)
+        pad := 10 - name.count
+        if pad < 1 { pad = 1 }
+        for _: cast(s64)0..pad - 1 { unused BuilderAppend(out.*, " ") }
+
+        has_src := AppendAddr(out, sm, src)
+        if arm == AxImm || arm == AxInf || arm == AxInm {
+            if has_src { unused BuilderAppend(out.*, ", ") }
+            if arm == AxImm { unused BuilderAppend(out.*, "$"); AppendInt(out, cast(s64)mid) }
+            else if arm == AxInf { AppendInt(out, cast(s64)mid); unused BuilderAppend(out.*, "(fp)") }
+            else { AppendInt(out, cast(s64)mid); unused BuilderAppend(out.*, "(mp)") }
+            if dm != Axxx {
+                unused BuilderAppend(out.*, ", ")
+                unused AppendAddr(out, dm, dst)
+            }
+        } else if dm != Axxx {
+            if has_src { unused BuilderAppend(out.*, ", ") }
+            unused AppendAddr(out, dm, dst)
+        }
+        unused BuilderAppend(out.*, "\t# ")
+        AppendInt(out, cast(s64)pc)
+        unused BuilderAppend(out.*, "\n")
+    }
+
+    // Entry point directive.
+    unused BuilderAppend(out.*, "\tentry\t")
+    AppendInt(out, cast(s64)h.entry)
+    unused BuilderAppend(out.*, ", ")
+    AppendInt(out, cast(s64)h.entryt)
+    unused BuilderAppend(out.*, "\n")
+
+    // Type descriptors.
+    for i: 0..h.tsize - 1 {
+        id := ReadOperand(*r)
+        sz := ReadOperand(*r)
+        np := ReadOperand(*r)
+        if np < 0 || r.pos + cast(s64)np > raw.count { break }
+        unused BuilderAppend(out.*, "\tdesc\t$")
+        AppendInt(out, cast(s64)id)
+        unused BuilderAppend(out.*, ", ")
+        AppendInt(out, cast(s64)sz)
+        unused BuilderAppend(out.*, ", \"")
+        hex := "0123456789abcdef"
+        for k: 0..np - 1 {
+            b := raw[r.pos + cast(s64)k]
+            unused VecPush(out.*, hex[cast(s64)(b >> cast(u8)4)])
+            unused VecPush(out.*, hex[cast(s64)(b & cast(u8)15)])
+        }
+        r.pos += cast(s64)np
+        unused BuilderAppend(out.*, "\"\n")
+    }
+
+    // Data section.
+    unused BuilderAppend(out.*, "\tvar\t@mp, ")
+    AppendInt(out, cast(s64)h.dsize)
+    unused BuilderAppend(out.*, "\n")
+    while r.pos < raw.count {
+        op := ReadByte(*r)
+        if op <= 0 { break }
+        n := op & (DMax - 1)
+        if n == 0 { n = ReadOperand(*r) }
+        off := ReadOperand(*r)
+        kind := op >> 4
+        if kind == DefB {
+            unused BuilderAppend(out.*, "\tbyte\t@mp+")
+            AppendInt(out, cast(s64)off)
+            for k: 0..n - 1 {
+                b := ReadByte(*r)
+                unused BuilderAppend(out.*, ",")
+                AppendInt(out, cast(s64)b)
+            }
+            unused BuilderAppend(out.*, "\n")
+        } else if kind == DefW {
+            unused BuilderAppend(out.*, "\tword\t@mp+")
+            AppendInt(out, cast(s64)off)
+            for k: 0..n - 1 {
+                w := ReadWord(*r)
+                unused BuilderAppend(out.*, ",")
+                AppendInt(out, cast(s64)w)
+            }
+            unused BuilderAppend(out.*, "\n")
+        } else if kind == DefS {
+            unused BuilderAppend(out.*, "\tstring\t@mp+")
+            AppendInt(out, cast(s64)off)
+            unused BuilderAppend(out.*, ", \"")
+            for k: 0..n - 1 {
+                b := ReadByte(*r)
+                if b == 10 { unused BuilderAppend(out.*, "\\n") }
+                else if b == 9 { unused BuilderAppend(out.*, "\\t") }
+                else if b == 34 { unused BuilderAppend(out.*, "\\\"") }
+                else if b >= 32 && b <= 126 { unused VecPush(out.*, cast(u8)b) }
+                else { unused BuilderAppend(out.*, ".") }
+            }
+            unused BuilderAppend(out.*, "\"\n")
+        } else if kind == DefF {
+            r.pos += cast(s64)n * 8
+            unused BuilderAppend(out.*, "\treal\t@mp+")
+            AppendInt(out, cast(s64)off)
+            unused BuilderAppend(out.*, "\n")
+        } else if kind == DefA {
+            tx := ReadWord(*r)
+            alen := ReadWord(*r)
+            unused BuilderAppend(out.*, "\tarray\t@mp+")
+            AppendInt(out, cast(s64)off)
+            unused BuilderAppend(out.*, ", $")
+            AppendInt(out, cast(s64)tx)
+            unused BuilderAppend(out.*, ", ")
+            AppendInt(out, cast(s64)alen)
+            unused BuilderAppend(out.*, "\n")
+        } else if kind == DInd {
+            idx := ReadWord(*r)
+            unused BuilderAppend(out.*, "\tindir\t@mp+")
+            AppendInt(out, cast(s64)off)
+            unused BuilderAppend(out.*, ", ")
+            AppendInt(out, cast(s64)idx)
+            unused BuilderAppend(out.*, "\n")
+        } else if kind == DAPop {
+            unused BuilderAppend(out.*, "\tapop\n")
+        } else if kind == DefL {
+            unused BuilderAppend(out.*, "\tlong\t@mp+")
+            AppendInt(out, cast(s64)off)
+            for k: 0..n - 1 {
+                lv := ReadBig(*r)
+                unused BuilderAppend(out.*, ",")
+                AppendInt(out, lv)
+            }
+            unused BuilderAppend(out.*, "\n")
+        }
+    }
+
+    // Module name.
+    mname := ReadStringSpan(*r)
+    h.name_start = mname.start
+    h.name_len = mname.length
+    unused BuilderAppend(out.*, "\tmodule\t")
+    if mname.length > 0 { unused BuilderAppend(out.*, TextView(raw[mname.start:mname.start + mname.length])) }
+    unused BuilderAppend(out.*, "\n")
+
+    // Links.
+    for i: 0..h.lsize - 1 {
+        pc := ReadOperand(*r)
+        desc := ReadOperand(*r)
+        sig := ReadWord(*r)
+        lname := ReadStringSpan(*r)
+        unused BuilderAppend(out.*, "\tlink\t")
+        AppendInt(out, cast(s64)desc)
+        unused BuilderAppend(out.*, ", ")
+        AppendInt(out, cast(s64)pc)
+        unused BuilderAppend(out.*, ", 0x")
+        AppendHex32(out, sig)
+        unused BuilderAppend(out.*, ", \"")
+        if lname.length > 0 { unused BuilderAppend(out.*, TextView(raw[lname.start:lname.start + lname.length])) }
+        unused BuilderAppend(out.*, "\"\n")
+    }
+
+    // Imports (HASLDT).
+    if (h.rt & HasLdt) != 0 {
+        nl := ReadOperand(*r)
+        unused BuilderAppend(out.*, "\tldts\t@ldt, ")
+        AppendInt(out, cast(s64)nl)
+        unused BuilderAppend(out.*, "\n")
+        for i: 0..nl - 1 {
+            cnt := ReadOperand(*r)
+            for j: 0..cnt - 1 {
+                sig := ReadWord(*r)
+                iname := ReadStringSpan(*r)
+                unused BuilderAppend(out.*, "\text\t@ldt, 0x")
+                AppendHex32(out, sig)
+                unused BuilderAppend(out.*, ", \"")
+                if iname.length > 0 { unused BuilderAppend(out.*, TextView(raw[iname.start:iname.start + iname.length])) }
+                unused BuilderAppend(out.*, "\"\n")
+            }
+        }
+        unused ReadByte(*r)
+    }
+
+    // Exception handlers (HASEXCEPT).
+    if (h.rt & HasExcept) != 0 {
+        nh := ReadOperand(*r)
+        for i: 0..nh - 1 {
+            eoff := ReadOperand(*r)
+            pc1 := ReadOperand(*r)
+            pc2 := ReadOperand(*r)
+            td := ReadOperand(*r)
+            nc := ReadOperand(*r)
+            ncases := nc & 0xFFFF
+            unused BuilderAppend(out.*, "\texc\t")
+            AppendInt(out, cast(s64)pc1)
+            unused BuilderAppend(out.*, ", ")
+            AppendInt(out, cast(s64)pc2)
+            unused BuilderAppend(out.*, ", ")
+            AppendInt(out, cast(s64)eoff)
+            unused BuilderAppend(out.*, ", ")
+            AppendInt(out, cast(s64)td)
+            unused BuilderAppend(out.*, "\n")
+            for j: 0..ncases - 1 {
+                pat := ReadStringSpan(*r)
+                epc := ReadOperand(*r)
+                unused BuilderAppend(out.*, "\t\t\"")
+                if pat.length > 0 { unused BuilderAppend(out.*, TextView(raw[pat.start:pat.start + pat.length])) }
+                unused BuilderAppend(out.*, "\" -> ")
+                AppendInt(out, cast(s64)epc)
+                unused BuilderAppend(out.*, "\n")
+            }
+            star_pc := ReadOperand(*r)
+            unused BuilderAppend(out.*, "\t\t* -> ")
+            AppendInt(out, cast(s64)star_pc)
+            unused BuilderAppend(out.*, "\n")
+        }
+        unused ReadByte(*r)
+    }
+
+    // Source path.
+    if r.pos < raw.count {
+        sp := ReadStringSpan(*r)
+        if sp.length > 0 {
+            h.src_start = sp.start
+            h.src_len = sp.length
+            unused BuilderAppend(out.*, "\tsource\t\"")
+            unused BuilderAppend(out.*, TextView(raw[sp.start:sp.start + sp.length]))
+            unused BuilderAppend(out.*, "\"\n")
+        }
+    }
+
+    out_hdr.* = h
+    return true
+}

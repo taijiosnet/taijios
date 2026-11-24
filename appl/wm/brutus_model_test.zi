@@ -1,0 +1,60 @@
+// Standalone verification of the Brutus SGML, tag, Hebrew remap, search, and excerpt model.
+Model :: #import "brutus_model";
+#import "std/vec"
+
+main :: () -> s32 {
+    if Model.TagName(Model.DefFontTag) != "Roman.10" { return 1 }
+    if Model.FindTag("Bold.16") != 14 { return 2 }
+    if Model.FindTag("List-elem") != Model.TagListElem { return 3 }
+
+    // SGML parse -> apply font/size -> serialize round-trip.
+    doc := "<SGML>\n<Roman.10>Hello &lt;world> <Bold.12>bold</Bold.12><Heading>Title</Heading></Roman.10>"
+    plain: Vec(u8)
+    styles: Vec(Model.Style)
+    exts: Vec(Model.ExtRecord)
+    pool: Vec(u8)
+    defer VecFree(plain)
+    defer VecFree(styles)
+    defer VecFree(exts)
+    defer VecFree(pool)
+
+    if !Model.ParseDocument(doc, *plain, *styles, *exts, *pool) { return 4 }
+    if TextView(plain[:]) != "Hello <world> boldTitle" { return 5 }
+    if styles[14].font_tag != cast(u8)13 { return 6 } // Bold.12 = 2*5+3 = 13
+    if (styles[18].extra_mask & cast(u16)(1 << (Model.TagHeading - Model.NFontTag))) == 0 { return 7 }
+
+    // Apply Italic to "Hello" (keeping size 10 -> Italic.10 = 1*5+2 = 7).
+    Model.ApplyFont(*styles, 0, 5, Model.FontItalic)
+    if styles[0].font_tag != cast(u8)7 { return 8 }
+
+    out: Vec(u8)
+    defer VecFree(out)
+    Model.SerializeSgml(TextView(plain[:]), styles[:], *out)
+    s := TextView(out[:])
+    if s[:17] != "<SGML>\n<Italic.10" { return 9 }
+
+    // Hebrew remapping (appl/wm/hebrew.m): 't' -> Alef (U+05D0 = 0xD7 0x90).
+    alef := Model.RemapHebrew(cast(u8)116)
+    if alef != 0x05D0 { return 10 }
+    utf: Vec(u8)
+    defer VecFree(utf)
+    Model.EncodeUtf8(alef, *utf)
+    if utf.count != 2 || utf[0] != cast(u8)0xD7 || utf[1] != cast(u8)0x90 { return 11 }
+
+    // Search forward/backward & line offset.
+    sample := "alpha\nbeta\ngamma\nbeta\n"
+    if Model.LineOffset(sample, 3) != 11 { return 12 }
+    if Model.SearchText(sample, "beta", 0, false) != 6 { return 13 }
+    if Model.SearchText(sample, "beta", 7, false) != 17 { return 14 }
+    if Model.SearchText(sample, "beta", 16, true) != 6 { return 15 }
+
+    // Excerpt tab stripping.
+    src := "\t\tline1\n\t\t\tline2\n\t\tline3\n"
+    ex: Vec(u8)
+    defer VecFree(ex)
+    Model.ExtractExcerpt(src, 1, 2, *ex)
+    if TextView(ex[:]) != "line1\n\tline2\n" { return 16 }
+
+    print("Brutus matched SGML round-trip, 33 tags, Hebrew remap, search and excerpt rules\n")
+    return 0
+}

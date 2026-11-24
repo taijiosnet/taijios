@@ -1,0 +1,113 @@
+// Standalone verification of the Dis binary parser, operand codec,
+// disassembler and header flag/stack rewriter.
+Model :: #import "rt_model";
+#import "std/vec"
+
+BuildSampleDis :: (out: *Vec(u8)) {
+    VecClear(out.*)
+    Model.EncodeOperand(Model.XMagic, out)       // magic
+    Model.EncodeOperand(Model.MustCompile, out)  // rt = MUSTCOMPILE
+    Model.EncodeOperand(2048, out)               // ssize = 2048
+    Model.EncodeOperand(2, out)                  // isize = 2 instructions
+    Model.EncodeOperand(16, out)                 // dsize = 16
+    Model.EncodeOperand(1, out)                  // tsize = 1 type
+    Model.EncodeOperand(1, out)                  // lsize = 1 link
+    Model.EncodeOperand(0, out)                  // entry pc = 0
+    Model.EncodeOperand(0, out)                  // entryt = 0
+
+    // Inst 0: movw $42, 32(fp)  -> op=45 (movw), addr=(Aimm<<3)|Afp = (2<<3)|1 = 17
+    unused VecPush(out.*, cast(u8)45)
+    unused VecPush(out.*, cast(u8)17)
+    Model.EncodeOperand(42, out)
+    Model.EncodeOperand(32, out)
+
+    // Inst 1: ret -> op=12 (ret), addr=(Axxx<<3)|Axxx = (3<<3)|3 = 27
+    unused VecPush(out.*, cast(u8)12)
+    unused VecPush(out.*, cast(u8)27)
+
+    // Type 0: id=0, size=32, np=1, map=[0x80]
+    Model.EncodeOperand(0, out)
+    Model.EncodeOperand(32, out)
+    Model.EncodeOperand(1, out)
+    unused VecPush(out.*, cast(u8)0x80)
+
+    // Data: DEFS len=2 at off=0 "Hi", then 0 terminator.
+    unused VecPush(out.*, cast(u8)((Model.DefS << 4) | 2))
+    Model.EncodeOperand(0, out)
+    unused BuilderAppend(out.*, "Hi")
+    unused VecPush(out.*, cast(u8)0)
+
+    // Module name: "Demo\0"
+    unused BuilderAppend(out.*, "Demo")
+    unused VecPush(out.*, cast(u8)0)
+
+    // Link 0: pc=0, desc=0, sig=0x12345678, name="init\0"
+    Model.EncodeOperand(0, out)
+    Model.EncodeOperand(0, out)
+    unused VecPush(out.*, cast(u8)0x12)
+    unused VecPush(out.*, cast(u8)0x34)
+    unused VecPush(out.*, cast(u8)0x56)
+    unused VecPush(out.*, cast(u8)0x78)
+    unused BuilderAppend(out.*, "init")
+    unused VecPush(out.*, cast(u8)0)
+
+    // Source path: "/appl/demo.b\0"
+    unused BuilderAppend(out.*, "/appl/demo.b")
+    unused VecPush(out.*, cast(u8)0)
+}
+
+Contains :: (hay: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if needle.count > hay.count { return false }
+    for i: cast(s64)0..hay.count - needle.count {
+        ok := true
+        for j: cast(s64)0..needle.count - 1 {
+            if hay[i + j] != needle[j] { ok = false; break }
+        }
+        if ok { return true }
+    }
+    return false
+}
+
+main :: () -> s32 {
+    // Operand encode/decode round-trip across 1-byte, 2-byte, and 4-byte ranges.
+    vals: [7]s32 = .[0, 63, -64, 64, -8192, 819248, -100000]
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    for i: 0..6 {
+        VecClear(tmp)
+        Model.EncodeOperand(vals[i], *tmp)
+        r: Model.Reader = .{tmp[:], 0}
+        if Model.ReadOperand(*r) != vals[i] { return 1 }
+    }
+
+    raw: Vec(u8)
+    defer VecFree(raw)
+    BuildSampleDis(*raw)
+
+    text: Vec(u8)
+    defer VecFree(text)
+    hdr: Model.Header
+    if !Model.Disassemble(raw[:], *text, *hdr) { return 2 }
+    if hdr.rt != Model.MustCompile || hdr.ssize != 2048 || hdr.isize != 2 { return 3 }
+    dis := TextView(text[:])
+    if !Contains(dis, "movw      $42, 32(fp)\t# 0\n") { return 4 }
+    if !Contains(dis, "ret       \t# 1\n") { return 5 }
+    if !Contains(dis, "\tmodule\tDemo\n") { return 6 }
+    if !Contains(dis, "0x12345678, \"init\"") { return 7 }
+    if !Contains(dis, "\tsource\t\"/appl/demo.b\"\n") { return 8 }
+
+    // Rewrite rt flags and stack size (changing encoded operand width from 2 bytes to 4 bytes!)
+    patched: Vec(u8)
+    defer VecFree(patched)
+    if !Model.RewriteHeader(raw[:], Model.DontCompile | Model.ShareMp, 16384, *patched) { return 9 }
+    text2: Vec(u8)
+    defer VecFree(text2)
+    hdr2: Model.Header
+    if !Model.Disassemble(patched[:], *text2, *hdr2) { return 10 }
+    if hdr2.rt != (Model.DontCompile | Model.ShareMp) || hdr2.ssize != 16384 { return 11 }
+    if TextView(text2[:]) != dis { return 12 }
+
+    print("RT matched Dis operand codec, disassembly and lossless header rewrite rules\n")
+    return 0
+}

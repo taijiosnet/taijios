@@ -1,0 +1,458 @@
+// SGML rich-text document model, 33 Brutus tags (20 font/size + 13 structural),
+// Hebrew keyboard remapping (appl/wm/hebrew.m), command/search/address parser,
+// and excerpt/mod/table/image extension helpers for Inferno's Brutus (appl/wm/brutus.b).
+// See ../../NOTICE.
+#import "std/vec"
+#import "std/number_text"
+
+Size6 :: 0
+Size8 :: 1
+Size10 :: 2
+Size12 :: 3
+Size16 :: 4
+NSize :: 5
+
+FontRoman :: 0
+FontItalic :: 1
+FontBold :: 2
+FontType :: 3
+NFont :: 4
+NFontTag :: 20
+
+TagExample :: 20
+TagCaption :: 21
+TagList :: 22
+TagListElem :: 23
+TagLabel :: 24
+TagLabelRef :: 25
+TagExercise :: 26
+TagHeading :: 27
+TagNoFill :: 28
+TagAuthor :: 29
+TagTitle :: 30
+TagIndex :: 31
+TagIndexTopic :: 32
+NTag :: 33
+NExtra :: 13
+
+DefFont :: FontRoman
+DefSize :: Size10
+DefFontTag :: 2 // Roman.10
+
+// Per-character style tag (font_tag 0..19, extra_mask bits 0..12 for tags 20..32).
+Style :: struct {
+    font_tag: u8
+    extra_mask: u16
+}
+
+ExtRecord :: struct {
+    offset: s64
+    mod_start: s64
+    mod_len: s64
+    arg_start: s64
+    arg_len: s64
+}
+
+StyleSpan :: struct {
+    start: s32
+    end: s32
+    rgba: u32
+}
+
+FontName :: (f: s32) -> string {
+    if f == FontRoman { return "Roman" }
+    if f == FontItalic { return "Italic" }
+    if f == FontBold { return "Bold" }
+    if f == FontType { return "Type" }
+    return "Roman"
+}
+
+SizeName :: (s: s32) -> string {
+    if s == Size6 { return "6" }
+    if s == Size8 { return "8" }
+    if s == Size10 { return "10" }
+    if s == Size12 { return "12" }
+    if s == Size16 { return "16" }
+    return "10"
+}
+
+TagName :: (t: s32) -> string {
+    names: [NTag]string = .[
+        "Roman.6", "Roman.8", "Roman.10", "Roman.12", "Roman.16",
+        "Italic.6", "Italic.8", "Italic.10", "Italic.12", "Italic.16",
+        "Bold.6", "Bold.8", "Bold.10", "Bold.12", "Bold.16",
+        "Type.6", "Type.8", "Type.10", "Type.12", "Type.16",
+        "Example", "Caption", "List", "List-elem", "Label",
+        "Label-ref", "Exercise", "Heading", "No-fill", "Author",
+        "Title", "Index", "Index-topic",
+    ]
+    if t >= 0 && t < NTag { return names[t] }
+    return "Roman.10"
+}
+
+FindTag :: (name: string) -> s32 {
+    for i: cast(s32)0..cast(s32)(NTag - 1) {
+        if TagName(i) == name { return i }
+    }
+    return -1
+}
+
+// Color encoding for Kryon TextArea ColorSpan (0xRRGGBBAA).
+StyleColor :: (st: Style) -> u32 {
+    if (st.extra_mask & cast(u16)(1 << (TagListElem - NFontTag))) != 0 { return cast(u32)0x0000A0FF }
+    if (st.extra_mask & cast(u16)(1 << (TagTitle - NFontTag))) != 0 { return cast(u32)0x003388FF }
+    if (st.extra_mask & cast(u16)(1 << (TagHeading - NFontTag))) != 0 { return cast(u32)0x880000FF }
+    if (st.extra_mask & cast(u16)(1 << (TagExample - NFontTag))) != 0 { return cast(u32)0x005522FF }
+    if st.extra_mask != 0 { return cast(u32)0x444444FF }
+    fam := cast(s32)st.font_tag / NSize
+    if fam == FontBold { return cast(u32)0x111111FF }
+    if fam == FontItalic { return cast(u32)0x442266FF }
+    if fam == FontType { return cast(u32)0x005522FF }
+    return cast(u32)0x000000FF
+}
+
+// Parse <SGML>\n or plain text into plain buffer, per-byte Style array, and Extension records.
+// Returns true if input was SGML.
+ParseDocument :: (raw: string, plain: *Vec(u8), styles: *Vec(Style), exts: *Vec(ExtRecord), ext_pool: *Vec(u8)) -> bool {
+    VecClear(plain.*)
+    VecClear(styles.*)
+    VecClear(exts.*)
+    VecClear(ext_pool.*)
+
+    is_sgml := raw.count >= 7 && raw[:7] == "<SGML>\n"
+    if !is_sgml {
+        def_st: Style = .{cast(u8)DefFontTag, 0}
+        for i: cast(s64)0..raw.count - 1 {
+            unused VecPush(plain.*, raw[i])
+            unused VecPush(styles.*, def_st)
+        }
+        return false
+    }
+
+    cur: Style = .{cast(u8)DefFontTag, 0}
+    font_stack: [32]u8
+    font_sp: s32 = 0
+    i: s64 = 7
+    while i < raw.count {
+        c := raw[i]
+        if c == cast(u8)38 { // '&'
+            if i + 4 <= raw.count && raw[i:i + 4] == "&lt;" {
+                unused VecPush(plain.*, cast(u8)60)
+                unused VecPush(styles.*, cur)
+                i += 4
+                continue
+            }
+            unused VecPush(plain.*, c)
+            unused VecPush(styles.*, cur)
+            i += 1
+            continue
+        }
+        if c == cast(u8)60 { // '<'
+            j := i + 1
+            while j < raw.count && raw[j] != cast(u8)62 { j += 1 }
+            if j < raw.count {
+                on := true
+                ts := i + 1
+                if ts < j && raw[ts] == cast(u8)47 { on = false; ts += 1 }
+                tag := raw[ts:j]
+                if on && tag.count > 10 && tag[:10] == "Extension " {
+                    rest := tag[10:]
+                    sp: s64 = 0
+                    while sp < rest.count && rest[sp] != cast(u8)32 { sp += 1 }
+                    mod_s := ext_pool.count
+                    unused BuilderAppend(ext_pool.*, rest[:sp])
+                    arg_s := ext_pool.count
+                    if sp < rest.count { unused BuilderAppend(ext_pool.*, rest[sp + 1:]) }
+                    rec: ExtRecord = .{plain.count, mod_s, sp, arg_s, ext_pool.count - arg_s}
+                    unused VecPush(exts.*, rec)
+                    // Insert visible placeholder marker in document text.
+                    marker := "["
+                    unused BuilderAppend(plain.*, marker)
+                    unused VecPush(styles.*, cur)
+                    for k: cast(s64)0..tag.count - 1 {
+                        unused VecPush(plain.*, tag[k])
+                        unused VecPush(styles.*, .{cast(u8)(FontType * NSize + Size10), cast(u16)(1 << (TagExample - NFontTag))})
+                    }
+                    unused VecPush(plain.*, cast(u8)93)
+                    unused VecPush(styles.*, cur)
+                    i = j + 1
+                    continue
+                }
+                tid := FindTag(tag)
+                if tid >= 0 {
+                    if tid < NFontTag {
+                        if on {
+                            if font_sp < 32 { font_stack[font_sp] = cur.font_tag; font_sp += 1 }
+                            cur.font_tag = cast(u8)tid
+                        } else if font_sp > 0 {
+                            font_sp -= 1
+                            cur.font_tag = font_stack[font_sp]
+                        } else {
+                            cur.font_tag = cast(u8)DefFontTag
+                        }
+                    } else {
+                        bit := cast(u16)(1 << cast(u16)(tid - NFontTag))
+                        if on { cur.extra_mask = cur.extra_mask | bit }
+                        else { cur.extra_mask = cur.extra_mask & (~bit) }
+                    }
+                    i = j + 1
+                    continue
+                }
+            }
+        }
+        unused VecPush(plain.*, c)
+        unused VecPush(styles.*, cur)
+        i += 1
+    }
+    return true
+}
+
+// Serialize plain text + styles back to Brutus <SGML>\n (matching writefile in brutus.b).
+SerializeSgml :: (plain: string, styles: []Style, out: *Vec(u8)) {
+    VecClear(out.*)
+    unused BuilderAppend(out.*, "<SGML>\n")
+    if plain.count == 0 { return }
+
+    open_font: s32 = -1
+    open_mask: u16 = 0
+    i: s64 = 0
+    while i < plain.count {
+        st: Style = ifx i < styles.count then styles[i] else .{cast(u8)DefFontTag, 0}
+        ft := cast(s32)st.font_tag
+        // Close extra tags no longer active.
+        if open_mask != st.extra_mask {
+            for b: cast(s32)0..cast(s32)(NExtra - 1) {
+                bit := cast(u16)(1 << cast(u16)b)
+                if (open_mask & bit) != 0 && (st.extra_mask & bit) == 0 {
+                    unused BuilderAppend(out.*, "</")
+                    unused BuilderAppend(out.*, TagName(NFontTag + b))
+                    unused BuilderAppend(out.*, ">")
+                }
+            }
+        }
+        // Switch font tag if changed.
+        if open_font != ft {
+            if open_font >= 0 {
+                unused BuilderAppend(out.*, "</")
+                unused BuilderAppend(out.*, TagName(open_font))
+                unused BuilderAppend(out.*, ">")
+            }
+            unused BuilderAppend(out.*, "<")
+            unused BuilderAppend(out.*, TagName(ft))
+            unused BuilderAppend(out.*, ">")
+            open_font = ft
+        }
+        // Open newly active extra tags.
+        if open_mask != st.extra_mask {
+            for b: cast(s32)0..cast(s32)(NExtra - 1) {
+                bit := cast(u16)(1 << cast(u16)b)
+                if (open_mask & bit) == 0 && (st.extra_mask & bit) != 0 {
+                    unused BuilderAppend(out.*, "<")
+                    unused BuilderAppend(out.*, TagName(NFontTag + b))
+                    unused BuilderAppend(out.*, ">")
+                }
+            }
+            open_mask = st.extra_mask
+        }
+        // Rewrite inline [Extension ...] markers back to <Extension ...>.
+        if plain[i] == cast(u8)91 && i + 11 < plain.count && plain[i + 1:i + 11] == "Extension " {
+            k := i + 1
+            while k < plain.count && plain[k] != cast(u8)93 { k += 1 }
+            if k < plain.count {
+                unused BuilderAppend(out.*, "<")
+                unused BuilderAppend(out.*, plain[i + 1:k])
+                unused BuilderAppend(out.*, ">")
+                i = k + 1
+                continue
+            }
+        }
+        c := plain[i]
+        if c == cast(u8)60 { unused BuilderAppend(out.*, "&lt;") }
+        else { unused VecPush(out.*, c) }
+        i += 1
+    }
+    for b: cast(s32)0..cast(s32)(NExtra - 1) {
+        bit := cast(u16)(1 << cast(u16)b)
+        if (open_mask & bit) != 0 {
+            unused BuilderAppend(out.*, "</")
+            unused BuilderAppend(out.*, TagName(NFontTag + b))
+            unused BuilderAppend(out.*, ">")
+        }
+    }
+    if open_font >= 0 {
+        unused BuilderAppend(out.*, "</")
+        unused BuilderAppend(out.*, TagName(open_font))
+        unused BuilderAppend(out.*, ">")
+    }
+}
+
+// Build Kryon TextArea color spans from per-byte styles.
+BuildColorSpans :: (styles: []Style, out: *Vec(StyleSpan)) {
+    VecClear(out.*)
+    if styles.count == 0 { return }
+    run_start: s64 = 0
+    run_col := StyleColor(styles[0])
+    for i: cast(s64)1..styles.count - 1 {
+        col := StyleColor(styles[i])
+        if col != run_col {
+            if run_col != cast(u32)0x000000FF {
+                unused VecPush(out.*, .{cast(s32)run_start, cast(s32)i, run_col})
+            }
+            run_start = i
+            run_col = col
+        }
+    }
+    if run_col != cast(u32)0x000000FF {
+        unused VecPush(out.*, .{cast(s32)run_start, cast(s32)styles.count, run_col})
+    }
+}
+
+// Hebrew keyboard remapping from appl/wm/hebrew.m (returns Unicode codepoint, or 0 if unchanged).
+RemapHebrew :: (ascii: u8) -> s32 {
+    keys := "tcdsvuzjyhlfkonibxg;p.mera,"
+    for i: cast(s64)0..keys.count - 1 {
+        if keys[i] == ascii { return 0x05D0 + cast(s32)i }
+    }
+    return 0
+}
+
+// Encode a BMP Hebrew codepoint (0x05D0..0x05EA) to 2-byte UTF-8.
+EncodeUtf8 :: (cp: s32, out: *Vec(u8)) {
+    if cp < 0x80 {
+        unused VecPush(out.*, cast(u8)cp)
+    } else if cp < 0x800 {
+        unused VecPush(out.*, cast(u8)(0xC0 | ((cp >> 6) & 0x1F)))
+        unused VecPush(out.*, cast(u8)(0x80 | (cp & 0x3F)))
+    }
+}
+
+// Apply font family change over [s, e) keeping each character's existing size.
+ApplyFont :: (styles: *Vec(Style), s: s64, e: s64, fam: s32) {
+    for i: s..e - 1 {
+        if i >= 0 && i < styles.count {
+            sz := cast(s32)styles.*[i].font_tag % NSize
+            styles.*[i].font_tag = cast(u8)(fam * NSize + sz)
+        }
+    }
+}
+
+// Apply size change over [s, e) keeping each character's existing font family.
+ApplySize :: (styles: *Vec(Style), s: s64, e: s64, sz: s32) {
+    for i: s..e - 1 {
+        if i >= 0 && i < styles.count {
+            fam := cast(s32)styles.*[i].font_tag / NSize
+            styles.*[i].font_tag = cast(u8)(fam * NSize + sz)
+        }
+    }
+}
+
+// Apply both font and size over [s, e).
+ApplyFontSize :: (styles: *Vec(Style), s: s64, e: s64, ftag: s32) {
+    for i: s..e - 1 {
+        if i >= 0 && i < styles.count {
+            styles.*[i].font_tag = cast(u8)ftag
+        }
+    }
+}
+
+// Find byte offset of 1-based line number (for Brutus `file:N` and command `N`).
+LineOffset :: (text: string, line_no: s32) -> s64 {
+    if line_no <= 1 { return 0 }
+    cur: s32 = 1
+    for i: cast(s64)0..text.count - 1 {
+        if text[i] == cast(u8)10 {
+            cur += 1
+            if cur == line_no { return i + 1 }
+        }
+    }
+    return text.count
+}
+
+// Forward or backward literal search (matching /pat, ?pat, and Look in brutus.b).
+SearchText :: (text: string, pat: string, from: s64, backwards: bool) -> s64 {
+    if pat.count == 0 || pat.count > text.count { return -1 }
+    if !backwards {
+        start := ifx from < 0 then cast(s64)0 else from
+        for pass: 0..1 {
+            lo := ifx pass == 0 then start else cast(s64)0
+            hi := ifx pass == 0 then text.count - pat.count else start - 1
+            if hi > text.count - pat.count { hi = text.count - pat.count }
+            for i: lo..hi {
+                ok := true
+                for j: cast(s64)0..pat.count - 1 {
+                    if text[i + j] != pat[j] { ok = false; break }
+                }
+                if ok { return i }
+            }
+        }
+        return -1
+    }
+    start := ifx from > text.count - pat.count then text.count - pat.count else from
+    for pass: 0..1 {
+        hi := ifx pass == 0 then start else text.count - pat.count
+        lo := ifx pass == 0 then cast(s64)0 else start + 1
+        i := hi
+        while i >= lo {
+            ok := true
+            for j: cast(s64)0..pat.count - 1 {
+                if text[i + j] != pat[j] { ok = false; break }
+            }
+            if ok { return i }
+            i -= 1
+        }
+    }
+    return -1
+}
+
+// Resolve extension file path relative to parent document (fullname in brutus/*.b).
+FullName :: (parent: string, file: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    if parent.count == 0 || (file.count > 0 && (file[0] == cast(u8)47 || file[0] == cast(u8)35)) {
+        unused BuilderAppend(out.*, file)
+        return
+    }
+    slash: s64 = -1
+    for i: cast(s64)0..parent.count - 1 {
+        if parent[i] == cast(u8)47 { slash = i }
+    }
+    if slash >= 0 {
+        unused BuilderAppend(out.*, parent[:slash + 1])
+    }
+    unused BuilderAppend(out.*, file)
+}
+
+// Excerpt extension helper: extract lines [start_line..end_line] (1-based, 0=unbounded)
+// and strip minimum common leading tabs (matching appl/wm/brutus/excerpt.b).
+ExtractExcerpt :: (content: string, start_line: s32, end_line: s32, out: *Vec(u8)) {
+    VecClear(out.*)
+    starts: Vec(s64)
+    ends: Vec(s64)
+    defer VecFree(starts)
+    defer VecFree(ends)
+    lineno: s32 = 0
+    i: s64 = 0
+    min_tabs: s32 = -1
+    while i < content.count {
+        ls := i
+        while i < content.count && content[i] != cast(u8)10 { i += 1 }
+        if i < content.count { i += 1 }
+        le := i
+        lineno += 1
+        if start_line > 0 && lineno < start_line { continue }
+        if end_line > 0 && lineno > end_line { break }
+        unused VecPush(starts, ls)
+        unused VecPush(ends, le)
+        if le - ls > 1 {
+            tabs: s32 = 0
+            while ls + cast(s64)tabs < le && content[ls + cast(s64)tabs] == cast(u8)9 { tabs += 1 }
+            if min_tabs < 0 || tabs < min_tabs { min_tabs = tabs }
+        }
+    }
+    if min_tabs < 0 { min_tabs = 0 }
+    for idx: cast(s64)0..starts.count - 1 {
+        ls := starts[idx]
+        le := ends[idx]
+        if le - ls > 1 && min_tabs > 0 { ls += cast(s64)min_tabs }
+        unused BuilderAppend(out.*, content[ls:le])
+    }
+}

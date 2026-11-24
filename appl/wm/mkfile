@@ -10,7 +10,6 @@ DIRS=\
 	mpeg\
 
 TARG=\
-	brutus.dis\
 	calendar.dis\
 	coffee.dis\
 	colors.dis\
@@ -31,12 +30,10 @@ TARG=\
 	prof.dis\
 	remotelogon.dis\
 	rmtdir.dis\
-	rt.dis\
 	sh.dis\
 	smenu.dis\
 	task.dis\
 	toolbar.dis\
-	vt.dis\
 	wm.dis\
 
 MODULES=\
@@ -187,7 +184,16 @@ readmail.zx: readmail.zi readmail_model.zi ../cmd/taijios_io.zi ../cmd/taijios_d
 telnet.zx: telnet.zi telnet_model.zi ../cmd/taijios_io.zi ../cmd/taijios_dial.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_dial --entry telnet:main -o $target telnet.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx $DISBIN/avi.zx $DISBIN/wmplay.zx $DISBIN/sendmail.zx $DISBIN/readmail.zx $DISBIN/telnet.zx
+vt.zx: vt.zi vt_model.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --entry vt:main -o $target vt.zi
+
+rt.zx: rt.zi rt_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_process --bind-host taijios_namespace --entry rt:main -o $target rt.zi
+
+brutus.zx: brutus.zi brutus_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_process --bind-host taijios_namespace --entry brutus:main -o $target brutus.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx $DISBIN/avi.zx $DISBIN/wmplay.zx $DISBIN/sendmail.zx $DISBIN/readmail.zx $DISBIN/telnet.zx $DISBIN/vt.zx $DISBIN/rt.zx $DISBIN/brutus.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

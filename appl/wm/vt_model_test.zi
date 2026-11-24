@@ -1,0 +1,46 @@
+// Standalone verification of the VT100 escape parser, SGR colors, scroll regions,
+// cursor addressing, and resize rules.
+Model :: #import "vt_model";
+#import "std/vec"
+
+main :: () -> s32 {
+    vt: Model.Vt
+    Model.Init(*vt, 20, 4)
+    reply: Vec(u8)
+    row: Vec(u8)
+    defer VecFree(reply)
+    defer VecFree(row)
+
+    // Basic text + SGR red fg (31) on blue bg (44) + bold (1) + cursor positioning + DSR.
+    Model.Write(*vt, "Hello\r\n\x1b[1;31;44mRed\x1b[0m\x1b[2;10HXY\x1b[6n\x1b[c", *reply)
+    Model.RowText(*vt, 0, *row)
+    if TextView(row[:]) != "Hello" { return 1 }
+    Model.RowText(*vt, 1, *row)
+    if TextView(row[:]) != "Red      XY" { return 2 }
+    // Check SGR color byte at (1, 0): bg=4<<4 | fg=1 ^ bold(8) = 0x49 = 73.
+    if vt.cc[Model.CellIdx(1, 0)] != cast(u8)73 { return 3 }
+    // Check DSR + DA replies: cursor after XY at row 2 col 12 -> "\x1b[2;12R\x1b[?61;6c".
+    if TextView(reply[:]) != "\x1b[2;12R\x1b[?61;6c" { return 4 }
+
+    // Scroll test: fill rows 2, 3, 4 -> line 0 ("Hello") scrolls off.
+    Model.Write(*vt, "\x1b[4;1HL3\nL4", *reply)
+    Model.RowText(*vt, 0, *row)
+    if TextView(row[:]) != "Red      XY" { return 5 }
+    Model.RowText(*vt, 3, *row)
+    if TextView(row[:]) != "L4" { return 6 }
+
+    // Clear line (ESC[2K) and save/restore cursor (ESC 7 / ESC 8).
+    Model.Write(*vt, "\x1b7\x1b[1;1H\x1b[2K\x1b8!", *reply)
+    Model.RowText(*vt, 0, *row)
+    if TextView(row[:]) != "" { return 7 }
+    Model.RowText(*vt, 3, *row)
+    if TextView(row[:]) != "L4!" { return 8 }
+
+    // Resize preserving bottom lines.
+    Model.Resize(*vt, 30, 6)
+    Model.RowText(*vt, 5, *row)
+    if TextView(row[:]) != "L4!" { return 9 }
+
+    print("VT matched VT100 CSI/SGR, cursor, DSR/DA, scrolling and resize rules\n")
+    return 0
+}

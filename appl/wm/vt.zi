@@ -1,0 +1,323 @@
+// Port of Inferno's WmVt (appl/wm/vt.b), built as vt.zx.
+// See ../../NOTICE.
+// Keeps the 80x24 (dynamically resizable) 16-color VT100/ANSI terminal emulator,
+// Raw/Echo/Reverse toggles, dimensions indicator, CSI/SGR/scroll-region/cursor
+// handling, and interactive shell (/dis/sh.zx -n) over guest pipes.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Model :: #import "vt_model";
+IO :: #import "taijios_io";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/paint_queue"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+BarH :: 28
+CellW :: 8
+CellH :: 16
+InitCols :: 80
+InitRows :: 24
+InitW :: InitCols * CellW + 8
+InitH :: BarH + InitRows * CellH + 8
+ShellProg :: "/dis/sh.zx"
+
+grey: Color = .{221, 221, 221, 255};
+
+vt: Model.Vt;
+raw_mode: bool;
+echo_mode: bool = true;
+reverse_mode: bool;
+
+// Shell child process and pipes.
+shell_id: s32;
+sh_in_fd: s32 = -1;
+sh_out_fd: s32 = -1;
+line_buf: Vec(u8);
+
+// 16-color VGA palette matching vt.b lines 183-195.
+PaletteColor :: (idx: s32, rev: bool) -> Color {
+    i := idx & 15
+    if rev {
+        if i == 0 { i = 7 }
+        else if i == 7 { i = 0 }
+    }
+    v: u8 = ifx (i & 8) != 0 then cast(u8)255 else cast(u8)192
+    r: u8 = ifx (i & 1) != 0 then v else cast(u8)0
+    g: u8 = ifx (i & 2) != 0 then v else cast(u8)0
+    b: u8 = ifx (i & 4) != 0 then v else cast(u8)0
+    return .{r, g, b, 255}
+}
+
+StartShell :: () {
+    in_p: [2]s32
+    out_p: [2]s32
+    if Ns.Pipe(in_p[:]) < 0 { return }
+    if Ns.Pipe(out_p[:]) < 0 {
+        unused IO.Close(in_p[0]); unused IO.Close(in_p[1])
+        return
+    }
+    words: [1]string = .["-n"]
+    launch := Process.StartWith(ShellProg, words[:], in_p[0], out_p[1], out_p[1])
+    unused IO.Close(in_p[0])
+    unused IO.Close(out_p[1])
+    if launch.id == 0 {
+        unused IO.Close(in_p[1])
+        unused IO.Close(out_p[0])
+        return
+    }
+    shell_id = launch.id
+    sh_in_fd = in_p[1]
+    sh_out_fd = out_p[0]
+}
+
+StopShell :: () {
+    if shell_id > 0 { unused Process.Kill(shell_id); shell_id = 0 }
+    if sh_in_fd >= 0 { unused IO.Close(sh_in_fd); sh_in_fd = -1 }
+    if sh_out_fd >= 0 { unused IO.Close(sh_out_fd); sh_out_fd = -1 }
+}
+
+WriteVt :: (s: string) {
+    if s.count == 0 { return }
+    reply: Vec(u8)
+    defer VecFree(reply)
+    Model.Write(*vt, s, *reply)
+    if reply.count > 0 && sh_in_fd >= 0 {
+        unused IO.Write(sh_in_fd, TextView(reply[:]))
+    }
+}
+
+PollShell :: () {
+    if sh_out_fd < 0 { return }
+    buf: [2048]u8
+    for _: 0..7 {
+        n := IO.PollRead(sh_out_fd, buf[:])
+        if n == -2 { break }
+        if n <= 0 {
+            unused IO.Close(sh_out_fd)
+            sh_out_fd = -1
+            break
+        }
+        // Erase echoed uncommitted cooked input before writing shell output (vt.b lines 281-289).
+        if echo_mode && !raw_mode && line_buf.count > 0 {
+            for _: cast(s64)0..line_buf.count - 1 { WriteVt("\x08 \x08") }
+        }
+        WriteVt(TextView(buf[:n]))
+        if echo_mode && !raw_mode && line_buf.count > 0 {
+            WriteVt(TextView(line_buf[:]))
+        }
+    }
+}
+
+SendInputBytes :: (s: string) {
+    if s.count == 0 { return }
+    if raw_mode {
+        if sh_in_fd >= 0 { unused IO.Write(sh_in_fd, s) }
+        if echo_mode { WriteVt(s) }
+        return
+    }
+    // Cooked line mode with backspace editing (matching consinp in vt.b lines 935-961).
+    for i: cast(s64)0..s.count - 1 {
+        c := s[i]
+        if c == cast(u8)8 {
+            if line_buf.count > 0 {
+                unused VecResize(line_buf, line_buf.count - 1)
+                if echo_mode { WriteVt("\x08 \x08") }
+            }
+        } else if c == cast(u8)10 {
+            unused VecPush(line_buf, c)
+            if echo_mode { WriteVt("\r\n") }
+            if sh_in_fd >= 0 {
+                unused IO.Write(sh_in_fd, TextView(line_buf[:]))
+            }
+            VecClear(line_buf)
+        } else {
+            unused VecPush(line_buf, c)
+            if echo_mode {
+                one: [1]u8 = .[c]
+                WriteVt(TextView(one[:]))
+            }
+        }
+    }
+}
+
+HandleKeys :: (key: s32, mods: s32, text: string) {
+    ctrl := (mods & KeyModifierControl) != 0
+    if ctrl {
+        if key == 67 { SendInputBytes("\x03"); return } // ^C
+        if key == 68 { SendInputBytes("\x04"); return } // ^D
+        if key == 72 { SendInputBytes("\x08"); return } // ^H
+        if key == 76 { SendInputBytes("\x0c"); return } // ^L
+    }
+    if key == KeyEnter { SendInputBytes("\n"); return }
+    if key == KeyBackspace { SendInputBytes("\x08"); return }
+    if key == KeyEscape { SendInputBytes("\x1b"); return }
+    if key == KeyUp { SendInputBytes("\x1b[A"); return }
+    if key == KeyDown { SendInputBytes("\x1b[B"); return }
+    if key == KeyRight { SendInputBytes("\x1b[C"); return }
+    if key == KeyLeft { SendInputBytes("\x1b[D"); return }
+    if text.count > 0 { SendInputBytes(text) }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 200.0 { w = cast(float32)InitW }
+    if h < 120.0 { h = cast(float32)InitH }
+
+    // Dynamic grid resize matching window size (vt.b lines 260-270).
+    avail_w := cast(s32)w - 8
+    avail_h := cast(s32)h - BarH - 8
+    cols := avail_w / CellW
+    rows := avail_h / CellH
+    if cols < 20 { cols = 20 }
+    if rows < 6 { rows = 6 }
+    if cols != vt.wid || rows != vt.hgt {
+        Model.Resize(*vt, cols, rows)
+    }
+
+    PollShell()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    HandleKeys(key, mods, text)
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Top control bar: Raw, Echo, Reverse, Clear, and W x H size label (matching vt.b titlebar).
+    raw_lbl := ifx raw_mode then "Raw: ON" else "Raw: OFF"
+    if Button.Draw(session, .{.key = 10, .bounds = .{4.0, 3.0, 76.0, 22.0}, .label = raw_lbl}) > 0 {
+        raw_mode = !raw_mode
+    }
+    echo_lbl := ifx echo_mode then "Echo: ON" else "Echo: OFF"
+    if Button.Draw(session, .{.key = 11, .bounds = .{84.0, 3.0, 82.0, 22.0}, .label = echo_lbl}) > 0 {
+        echo_mode = !echo_mode
+    }
+    rev_lbl := ifx reverse_mode then "Reverse: ON" else "Reverse: OFF"
+    if Button.Draw(session, .{.key = 12, .bounds = .{170.0, 3.0, 102.0, 22.0}, .label = rev_lbl}) > 0 {
+        reverse_mode = !reverse_mode
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{276.0, 3.0, 56.0, 22.0}, .label = "Clear"}) > 0 {
+        WriteVt("\x1b[2J\x1b[1;1H")
+    }
+
+    d1: [16]u8
+    d2: [16]u8
+    dim: Vec(u8)
+    defer VecFree(dim)
+    unused BuilderAppend(dim, FormatInteger(cast(s64)vt.wid, d1[:]))
+    unused BuilderAppend(dim, " x ")
+    unused BuilderAppend(dim, FormatInteger(cast(s64)vt.hgt, d2[:]))
+    Text.Draw(session, .{.key = 14, .bounds = .{w - 92.0, 3.0, 86.0, 22.0},
+        .text = TextView(dim[:]), .size = 12, .align = .TextAlignEnd, .vertical_align = .TextAlignCenter})
+
+    // Terminal canvas background.
+    scr_x: s32 = 4
+    scr_y: s32 = BarH + 4
+    scr_w := vt.wid * CellW
+    scr_h := vt.hgt * CellH
+    screen_node := Box.Draw(session, .{
+        .key = 40,
+        .bounds = .{cast(float32)scr_x, cast(float32)scr_y, cast(float32)scr_w, cast(float32)scr_h},
+        .fill = PaletteColor(0, reverse_mode),
+    })
+
+    // Render colored cell backgrounds and foreground text runs natively via PaintLabel.
+    bg_key: u64 = 1000
+    run_buf: [Model.MaxCols]u8
+    for row: 0..vt.hgt - 1 {
+        py := scr_y + row * CellH
+        // Non-default background runs.
+        col: s32 = 0
+        while col < vt.wid {
+            idx := Model.CellIdx(row, col)
+            bg_idx := cast(s32)(vt.cc[idx] >> cast(u8)4) & 15
+            if bg_idx != 0 {
+                end := col + 1
+                while end < vt.wid && (cast(s32)(vt.cc[Model.CellIdx(row, end)] >> cast(u8)4) & 15) == bg_idx {
+                    end += 1
+                }
+                Box.Draw(session, .{
+                    .key = bg_key,
+                    .bounds = .{cast(float32)(scr_x + col * CellW), cast(float32)py,
+                                cast(float32)((end - col) * CellW), cast(float32)CellH},
+                    .fill = PaletteColor(bg_idx, reverse_mode),
+                })
+                bg_key += 1
+                col = end
+            } else {
+                col += 1
+            }
+        }
+        // Foreground text runs (skipping spaces).
+        col = 0
+        while col < vt.wid {
+            idx := Model.CellIdx(row, col)
+            ch := vt.scr[idx]
+            if ch <= cast(u8)32 { col += 1; continue }
+            fg_idx := cast(s32)(vt.cc[idx] & cast(u8)15)
+            rlen: s32 = 0
+            start_col := col
+            while col < vt.wid {
+                cidx := Model.CellIdx(row, col)
+                c := vt.scr[cidx]
+                cf := cast(s32)(vt.cc[cidx] & cast(u8)15)
+                if cf != fg_idx { break }
+                if c <= cast(u8)32 {
+                    // Include single spaces inside words of the same color so text reads cleanly.
+                    if col + 1 >= vt.wid || vt.scr[Model.CellIdx(row, col + 1)] <= cast(u8)32 ||
+                       (cast(s32)(vt.cc[Model.CellIdx(row, col + 1)] & cast(u8)15) != fg_idx) {
+                        break
+                    }
+                }
+                run_buf[rlen] = c
+                rlen += 1
+                col += 1
+            }
+            if rlen > 0 {
+                PaintLabel(session, screen_node, TextView(run_buf[:rlen]),
+                    scr_x + start_col * CellW, py + 1, 13, PaletteColor(fg_idx, reverse_mode), "")
+            }
+        }
+    }
+
+    // Cursor cell overlay.
+    cur_idx := Model.CellIdx(vt.y, vt.x)
+    cur_cc := cast(s32)vt.cc[cur_idx] ^ 255
+    cur_x := scr_x + vt.x * CellW
+    cur_y := scr_y + vt.y * CellH
+    cur_node := Box.Draw(session, .{
+        .key = 900,
+        .bounds = .{cast(float32)cur_x, cast(float32)cur_y, cast(float32)CellW, cast(float32)CellH},
+        .fill = PaletteColor((cur_cc >> 4) & 15, reverse_mode),
+    })
+    cur_ch := vt.scr[cur_idx]
+    if cur_ch > cast(u8)32 {
+        one: [1]u8 = .[cur_ch]
+        PaintLabel(session, cur_node, TextView(one[:]), cur_x, cur_y + 1, 13,
+            PaletteColor(cur_cc & 15, reverse_mode), "")
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    Model.Init(*vt, InitCols, InitRows)
+    StartShell()
+    rc := Surface.RunRetained(.{.title = "WmVt", .width = InitW, .height = InitH}, Draw, 16)
+    StopShell()
+    VecFree(line_buf)
+    return rc
+}
