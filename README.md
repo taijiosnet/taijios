@@ -474,6 +474,8 @@ python3 -u appl/wm/unibrowse_zx_test.py
 python3 -u appl/wm/avi_zx_test.py
 python3 -u appl/wm/wmplay_zx_test.py
 python3 -u appl/wm/sendmail_zx_test.py
+python3 -u appl/wm/readmail_zx_test.py
+python3 -u appl/wm/telnet_zx_test.py
 ```
 
 ### Use the ZX Calendar

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Readmail and Telnet only as ZX and remove their Dis versions. Readmail keeps POP3 over `taijios_dial` with APOP MD5 challenge-response (`taijios_keyring`) and USER/PASS login, `STAT`/`RETR`/`DELE`/`TOP` headers browser, Prev/Next navigation, Reply/Forward launching `/dis/wm/sendmail.zx`, and Save via `/dis/wm/filename.zx`; Telnet keeps TCP dialing, RFC854 IAC option negotiation (`Binary`, `Echo`, `SGA`, `Term` `"dumb"`, `Line Mode`, `AYT`), CR/LF mapping, Hold mode, `^H`/`^W`/`^U`/`^D` editing, and Cut/Paste/Snarf/Send with `/chan/snarf`.
+
 - Ship Sendmail only as ZX and remove its Dis version. It keeps Connect/Disconnect over `taijios_dial` (SMTP `HELO`, `MAIL FROM`, `RCPT TO`, CC list, `DATA`, `Subject`, `QUIT`), No CC, New, Save via `/dis/wm/filename.zx`, reply header prefill from Readmail, and `/usr/<user>/mail/{smtpserver,domain}` defaults.
 
 - Ship AVI Player and WmPlay only as ZX and remove their Dis versions. AVI Player keeps File (via `/dis/wm/filename.zx`), Stop, Pause, Play, and 8-bit uncompressed and BI_RLE8 RIFF/AVI decoding; WmPlay keeps Inferno audio header validation (`rate` magic, `\n\n` terminator, 4-byte alignment), `/dev/audioctl` setup, `/dev/audio` streaming and file selection.

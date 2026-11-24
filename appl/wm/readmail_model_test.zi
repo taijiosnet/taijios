@@ -1,0 +1,46 @@
+// Standalone verification of the Readmail POP3 and header parsing model.
+Model :: #import "readmail_model";
+#import "std/vec"
+
+main :: () -> s32 {
+    r1 := Model.ParsePop3Line("+OK 3 1024")
+    r2 := Model.ParsePop3Line("-ERR bad password")
+    r3 := Model.ParsePop3Line("NO")
+    if !r1.ok || Model.ParseInt("+OK 3 1024"[r1.text_start:]) != 3 { return 1 }
+    if r2.ok || r2.text_len != 12 { return 2 }
+    if r3.ok { return 3 }
+
+    chal := Model.ExtractChallenge("POP3 ready <1234.5678@mail.example>")
+    if chal != "<1234.5678@mail.example>" { return 4 }
+    if Model.ExtractChallenge("POP3 ready without challenge") != "" { return 5 }
+
+    addr: Vec(u8)
+    defer VecFree(addr)
+    Model.NetMkAddr("pop.local", "", "110", *addr)
+    if TextView(addr[:]) != "net!pop.local!110" { return 6 }
+    Model.NetMkAddr("tcp!127.0.0.1!9110", "", "110", *addr)
+    if TextView(addr[:]) != "tcp!127.0.0.1!9110" { return 7 }
+
+    raw := "From: Alice <alice@example.org>\r\nSubject: A very long subject line indeed\r\nDate: Mon, 1 Jan 2026\r\n\r\nHello world!\r\nSecond line.\r\n"
+    hdr: Vec(u8)
+    body: Vec(u8)
+    defer VecFree(hdr)
+    defer VecFree(body)
+    Model.SplitMessage(raw, *hdr, *body)
+    if TextView(body[:]) != "Hello world!\nSecond line.\n" { return 8 }
+
+    line: Vec(u8)
+    defer VecFree(line)
+    Model.FormatHeaderLine(2, 128, false, TextView(hdr[:]), *line)
+    if TextView(line[:]) != "   2   128 alice@example.org \"A very long subject\" Mon, 1 Jan 2026" { return 9 }
+    Model.FormatHeaderLine(1, 0, true, "", *line)
+    if TextView(line[:]) != "   1 ...Deleted..." { return 10 }
+
+    del: [5]u8 = .[0, 0, 1, 0, 0]
+    if Model.FindNextMsg(4, del[:]) != 3 { return 11 }
+    if Model.FindNextMsg(3, del[:]) != 1 { return 12 }
+    if Model.FindPrevMsg(1, 4, del[:]) != 3 { return 13 }
+
+    print("Readmail matched POP3, APOP, header, split and navigation rules\n")
+    return 0
+}

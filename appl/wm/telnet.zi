@@ -1,0 +1,571 @@
+// Port of Inferno's Telnet (appl/wm/telnet.b), built as telnet.zx.
+// See ../../NOTICE.
+// Keeps TCP dialing over taijios_dial, RFC854 IAC option negotiation (Binary,
+// Echo, SGA, Term SB "dumb", Line Mode, AYT), CR/LF mapping, remote vs local
+// echo with outpoint, hold mode (Escape), ^H/^W/^U/^D line editing, Cut/Paste/
+// Snarf/Send synced with /chan/snarf (and button-3 popup menu), and HIWAT/LOWAT
+// transcript trimming.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+TextArea :: #import "kryon/text_area";
+Model :: #import "telnet_model";
+IO :: #import "taijios_io";
+Dial :: #import "taijios_dial";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+
+WinW :: 640
+WinH :: 440
+MaxTranscript :: 524288
+
+grey: Color = .{221, 221, 221, 255};
+panel_bg: Color = .{236, 236, 236, 255};
+menu_bg: Color = .{245, 245, 245, 255};
+dark: Color = .{140, 140, 140, 255};
+
+// Connection & protocol state.
+net_fd: s32 = -1;
+net_ctl: s32 = -1;
+sess: Model.Session;
+holding: bool;
+
+// Connect panel fields.
+show_connect: bool;
+host_bytes: [256]u8;
+host_field: Field.State;
+port_bytes: [64]u8;
+port_field: Field.State;
+
+// Right-click edit menu.
+show_popup: bool;
+popup_x: float32;
+popup_y: float32;
+
+// Transcript TextArea state + outpoint.
+transcript: Vec(u8);
+outpoint: s64;
+ta_cursor: s32;
+ta_anchor: s32;
+ta_scroll_y: s32;
+ta_focused: bool = true;
+ta_selecting: bool;
+ta_pref_x: s32;
+ta_pref_x_valid: bool;
+
+clipboard: Vec(u8);
+status_text: Vec(u8);
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+SetStatus :: (s: string) { SetVec(*status_text, s) }
+
+SetField :: (state: *Field.State, text: string) {
+    state.length = 0
+    for i: cast(s64)0..text.count - 1 {
+        if state.length >= cast(s32)state.bytes.count - 1 { break }
+        state.bytes[state.length] = text[i]
+        state.length += 1
+    }
+    state.cursor = state.length
+    state.anchor = state.length
+}
+
+SnarfPut :: (s: string) {
+    SetVec(*clipboard, s)
+    fd := IO.Open("/chan/snarf", 1)
+    if fd >= 0 {
+        unused IO.Write(fd, s)
+        unused IO.Close(fd)
+    }
+}
+
+SnarfGet :: (out: *Vec(u8)) {
+    VecClear(out.*)
+    fd := IO.Open("/chan/snarf", 0)
+    if fd >= 0 {
+        buf: [4096]u8
+        n := IO.Read(fd, buf[:])
+        unused IO.Close(fd)
+        if n > 0 {
+            unused BuilderAppend(out.*, TextView(buf[:n]))
+            return
+        }
+    }
+    unused BuilderAppend(out.*, TextView(clipboard[:]))
+}
+
+CloseConn :: () {
+    if net_fd >= 0 { unused IO.Close(net_fd); net_fd = -1 }
+    if net_ctl >= 0 { unused IO.Close(net_ctl); net_ctl = -1 }
+}
+
+DoConnect :: () {
+    host := TextView(host_bytes[:host_field.length])
+    port := TextView(port_bytes[:port_field.length])
+    if host.count == 0 { SetStatus("Enter a remote host"); return }
+    if port.count == 0 { port = "telnet" }
+
+    addr: Vec(u8)
+    defer VecFree(addr)
+    unused BuilderAppend(addr, "tcp!")
+    unused BuilderAppend(addr, host)
+    unused BuilderAppend(addr, "!")
+    unused BuilderAppend(addr, port)
+
+    handles: [2]s32
+    dir: [Dial.DirectoryBytes]u8
+    if Dial.Dial(TextView(addr[:]), "", handles[:], dir[:]) < 0 {
+        SetStatus("Connection to host failed")
+        return
+    }
+    CloseConn()
+    net_fd = handles[0]
+    net_ctl = handles[1]
+    Model.Init(*sess)
+    show_connect = false
+    ta_focused = true
+
+    st: Vec(u8)
+    defer VecFree(st)
+    unused BuilderAppend(st, "Connected: ")
+    unused BuilderAppend(st, TextView(addr[:]))
+    SetStatus(TextView(st[:]))
+}
+
+DoDisconnect :: () {
+    CloseConn()
+    holding = false
+    SetStatus("Disconnected")
+}
+
+ReplaceRange :: (start: s64, end: s64, repl: string) {
+    if start < 0 { start = 0 }
+    if end < start { end = start }
+    if end > transcript.count { end = transcript.count }
+    tail := transcript.count - end
+    new_len := start + repl.count + tail
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    unused VecResize(tmp, new_len)
+    for i: cast(s64)0..start - 1 { tmp[i] = transcript[i] }
+    for i: cast(s64)0..repl.count - 1 { tmp[start + i] = repl[i] }
+    for i: cast(s64)0..tail - 1 { tmp[start + repl.count + i] = transcript[end + i] }
+    unused VecResize(transcript, new_len)
+    for i: cast(s64)0..new_len - 1 { transcript[i] = tmp[i] }
+}
+
+InsertRemoteData :: (data: string) {
+    if data.count == 0 { return }
+    if outpoint > transcript.count { outpoint = transcript.count }
+    move_ins := cast(s64)ta_cursor == outpoint && cast(s64)ta_anchor == outpoint
+    ReplaceRange(outpoint, outpoint, data)
+    outpoint += data.count
+    if move_ins {
+        ta_cursor = cast(s32)outpoint
+        ta_anchor = cast(s32)outpoint
+    } else if cast(s64)ta_cursor >= outpoint - data.count {
+        ta_cursor += cast(s32)data.count
+        ta_anchor += cast(s32)data.count
+    }
+
+    drop := Model.TrimFrontBytes(TextView(transcript[:]))
+    if drop > 0 {
+        ReplaceRange(0, drop, "")
+        outpoint = ifx outpoint > drop then outpoint - drop else 0
+        ta_cursor = ifx cast(s64)ta_cursor > drop then ta_cursor - cast(s32)drop else 0
+        ta_anchor = ifx cast(s64)ta_anchor > drop then ta_anchor - cast(s32)drop else 0
+    }
+    ta_scroll_y = 1000000
+}
+
+SendInput :: () {
+    if holding || net_fd < 0 { return }
+    if outpoint >= transcript.count { return }
+    while outpoint < transcript.count {
+        end := outpoint
+        while end < transcript.count && transcript[end] != cast(u8)10 && transcript[end] != cast(u8)4 {
+            end += 1
+        }
+        if end >= transcript.count { return }
+        if transcript[end] == cast(u8)4 {
+            if end > outpoint {
+                unused IO.Write(net_fd, TextView(transcript[outpoint:end]))
+            }
+            outpoint = end + 1
+        } else {
+            unused IO.Write(net_fd, TextView(transcript[outpoint:end + 1]))
+            outpoint = end + 1
+        }
+    }
+}
+
+PollNet :: () {
+    if net_fd < 0 { return }
+    buf: [2048]u8
+    incoming: Vec(u8)
+    reply: Vec(u8)
+    defer VecFree(incoming)
+    defer VecFree(reply)
+
+    for _: 0..7 {
+        n := IO.PollRead(net_fd, buf[:])
+        if n == -2 { break }
+        if n <= 0 {
+            DoDisconnect()
+            break
+        }
+        VecClear(reply)
+        Model.Feed(*sess, buf[:n], *incoming, *reply)
+        if reply.count > 0 {
+            unused IO.Write(net_fd, TextView(reply[:]))
+        }
+    }
+    if incoming.count > 0 {
+        InsertRemoteData(TextView(incoming[:]))
+    }
+}
+
+DoCut :: (snarf_it: bool) {
+    a := cast(s64)ta_cursor
+    b := cast(s64)ta_anchor
+    if a == b { return }
+    if a > b { t := a; a = b; b = t }
+    if b > transcript.count { b = transcript.count }
+    if snarf_it { SnarfPut(TextView(transcript[a:b])) }
+    ReplaceRange(a, b, "")
+    if outpoint > b { outpoint -= (b - a) }
+    else if outpoint > a { outpoint = a }
+    ta_cursor = cast(s32)a
+    ta_anchor = cast(s32)a
+}
+
+DoSnarf :: () {
+    a := cast(s64)ta_cursor
+    b := cast(s64)ta_anchor
+    if a == b { return }
+    if a > b { t := a; a = b; b = t }
+    if b > transcript.count { b = transcript.count }
+    SnarfPut(TextView(transcript[a:b]))
+}
+
+DoPaste :: () {
+    s: Vec(u8)
+    defer VecFree(s)
+    SnarfGet(*s)
+    if s.count == 0 { return }
+    DoCut(false)
+    pos := cast(s64)ta_cursor
+    if pos > transcript.count { pos = transcript.count }
+    ReplaceRange(pos, pos, TextView(s[:]))
+    if pos < outpoint { outpoint += s.count }
+    ta_cursor = cast(s32)(pos + s.count)
+    ta_anchor = ta_cursor
+    SendInput()
+}
+
+DoSendSel :: () {
+    s: Vec(u8)
+    defer VecFree(s)
+    if ta_cursor != ta_anchor {
+        DoSnarf()
+    }
+    SnarfGet(*s)
+    if s.count == 0 { return }
+    last := s[s.count - 1]
+    if last != cast(u8)10 && last != cast(u8)4 { unused VecPush(s, cast(u8)10) }
+    if net_fd >= 0 && !sess.opts[Model.OptEcho].local {
+        unused IO.Write(net_fd, TextView(s[:]))
+        return
+    }
+    pos := transcript.count
+    ReplaceRange(pos, pos, TextView(s[:]))
+    ta_cursor = cast(s32)transcript.count
+    ta_anchor = ta_cursor
+    SendInput()
+}
+
+HandleTerminalKey :: (key: s32, mods: s32, text: string) -> bool {
+    if !ta_focused || show_connect { return false }
+
+    // Remote echo mode: send keystrokes directly to the TCP socket (telnet.b line 238).
+    if net_fd >= 0 && !sess.opts[Model.OptEcho].local {
+        ctrl := (mods & KeyModifierControl) != 0
+        if ctrl {
+            if key == 68 { unused IO.Write(net_fd, "\x04"); return true }
+            if key == 67 { unused IO.Write(net_fd, "\x03"); return true }
+            if key == 72 { unused IO.Write(net_fd, "\x08"); return true }
+            if key == 85 { unused IO.Write(net_fd, "\x15"); return true }
+            if key == 87 { unused IO.Write(net_fd, "\x17"); return true }
+        }
+        if key == KeyEnter {
+            unused IO.Write(net_fd, "\r\n")
+            return true
+        }
+        if key == KeyBackspace {
+            unused IO.Write(net_fd, "\x08")
+            return true
+        }
+        if key == KeyEscape {
+            unused IO.Write(net_fd, "\x1b")
+            return true
+        }
+        if text.count > 0 {
+            unused IO.Write(net_fd, text)
+            return true
+        }
+        return false
+    }
+
+    // Local echo / line-buffered editing mode (telnet.b lines 242-302).
+    ctrl := (mods & KeyModifierControl) != 0
+    if key == KeyEscape {
+        holding = !holding
+        if holding { SetStatus("Telnet (holding)") }
+        else { SetStatus("Telnet"); SendInput() }
+        return true
+    }
+    if ctrl && key == 68 {
+        DoCut(true)
+        pos := cast(s64)ta_cursor
+        if pos > transcript.count { pos = transcript.count }
+        ReplaceRange(pos, pos, "\x04")
+        ta_cursor = cast(s32)(pos + 1)
+        ta_anchor = ta_cursor
+        SendInput()
+        return true
+    }
+    if ctrl && key == 85 {
+        pos := cast(s64)ta_cursor
+        if pos > transcript.count { pos = transcript.count }
+        start := outpoint
+        if pos < outpoint {
+            start = pos
+            while start > 0 && transcript[start - 1] != cast(u8)10 { start -= 1 }
+        }
+        if pos > start {
+            ReplaceRange(start, pos, "")
+            ta_cursor = cast(s32)start
+            ta_anchor = ta_cursor
+        }
+        return true
+    }
+    if ctrl && key == 87 {
+        pos := cast(s64)ta_cursor
+        if pos > transcript.count { pos = transcript.count }
+        start := Model.WordEraseStart(TextView(transcript[:]), pos, outpoint)
+        if pos > start {
+            ReplaceRange(start, pos, "")
+            ta_cursor = cast(s32)start
+            ta_anchor = ta_cursor
+        }
+        return true
+    }
+    if key == KeyBackspace || (ctrl && key == 72) {
+        if ta_cursor != ta_anchor { DoCut(true); return true }
+        pos := cast(s64)ta_cursor
+        if pos > outpoint && pos <= transcript.count {
+            ReplaceRange(pos - 1, pos, "")
+            ta_cursor = cast(s32)(pos - 1)
+            ta_anchor = ta_cursor
+        }
+        return true
+    }
+    if key == KeyEnter {
+        DoCut(true)
+        pos := cast(s64)ta_cursor
+        if pos > transcript.count { pos = transcript.count }
+        ReplaceRange(pos, pos, "\n")
+        ta_cursor = cast(s32)(pos + 1)
+        ta_anchor = ta_cursor
+        SendInput()
+        return true
+    }
+    if text.count > 0 {
+        DoCut(true)
+        pos := cast(s64)ta_cursor
+        if pos > transcript.count { pos = transcript.count }
+        ReplaceRange(pos, pos, text)
+        ta_cursor = cast(s32)(pos + text.count)
+        ta_anchor = ta_cursor
+        return true
+    }
+    return false
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 440.0 { w = cast(float32)WinW }
+    if h < 280.0 { h = cast(float32)WinH }
+
+    PollNet()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    f_in := TextFieldInputFor(key, mods, text)
+
+    consumed := HandleTerminalKey(key, mods, text)
+    ta_in := ifx consumed then TextAreaInputFor(0, 0, "") else TextAreaInputFor(key, mods, text)
+
+    ptr := PointerSample(session)
+    sec := SecondaryPointerSample(session)
+    if sec.pressed && ptr.y > 48.0 {
+        show_popup = true
+        popup_x = ptr.x
+        popup_y = ptr.y
+        if popup_x + 84.0 > w { popup_x = w - 84.0 }
+        if popup_y + 96.0 > h { popup_y = h - 96.0 }
+    }
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Top bar: Connect/Disconnect, Line Mode, CR->LF, Hold, Cut, Paste, Snarf, Send, Exit.
+    conn_lbl := ifx net_fd >= 0 then "Disconnect" else "Connect"
+    if Button.Draw(session, .{.key = 10, .bounds = .{6.0, 4.0, 82.0, 22.0}, .label = conn_lbl}) > 0 {
+        if net_fd >= 0 { DoDisconnect() } else { show_connect = !show_connect }
+    }
+    lm_lbl := ifx sess.opts[Model.OptLine].local then "Line*" else "Line"
+    if Button.Draw(session, .{.key = 11, .bounds = .{92.0, 4.0, 56.0, 22.0}, .label = lm_lbl}) > 0 {
+        if net_fd >= 0 {
+            reply: Vec(u8)
+            defer VecFree(reply)
+            Model.BuildLineModeToggle(*sess, *reply)
+            unused IO.Write(net_fd, TextView(reply[:]))
+        }
+    }
+    cr_lbl := ifx sess.mcrlf then "CR->LF*" else "CR->LF"
+    if Button.Draw(session, .{.key = 12, .bounds = .{152.0, 4.0, 68.0, 22.0}, .label = cr_lbl}) > 0 {
+        sess.mcrlf = !sess.mcrlf
+    }
+    hold_lbl := ifx holding then "Hold*" else "Hold"
+    if Button.Draw(session, .{.key = 13, .bounds = .{224.0, 4.0, 56.0, 22.0}, .label = hold_lbl}) > 0 {
+        holding = !holding
+        if !holding { SendInput() }
+    }
+    if Button.Draw(session, .{.key = 14, .bounds = .{286.0, 4.0, 46.0, 22.0}, .label = "Cut"}) > 0 {
+        DoCut(true)
+    }
+    if Button.Draw(session, .{.key = 15, .bounds = .{336.0, 4.0, 54.0, 22.0}, .label = "Paste"}) > 0 {
+        DoPaste()
+    }
+    if Button.Draw(session, .{.key = 16, .bounds = .{394.0, 4.0, 54.0, 22.0}, .label = "Snarf"}) > 0 {
+        DoSnarf()
+    }
+    if Button.Draw(session, .{.key = 17, .bounds = .{452.0, 4.0, 52.0, 22.0}, .label = "Send"}) > 0 {
+        DoSendSel()
+    }
+    if Button.Draw(session, .{.key = 18, .bounds = .{w - 56.0, 4.0, 50.0, 22.0}, .label = "Exit"}) > 0 {
+        DoDisconnect()
+        Surface.Close()
+        return
+    }
+
+    Text.Draw(session, .{.key = 19, .bounds = .{6.0, 28.0, w - 12.0, 18.0},
+        .text = TextView(status_text[:]), .size = 12})
+
+    y: float32 = 48.0
+
+    // Inline Connect panel (Host + Port, default "telnet").
+    if show_connect {
+        Box.Draw(session, .{.key = 20, .bounds = .{6.0, y, w - 12.0, 62.0}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 21, .bounds = .{6.0, y + 61.0, w - 12.0, 1.0}, .fill = dark})
+        Text.Draw(session, .{.key = 22, .bounds = .{12.0, y + 6.0, 52.0, 22.0},
+            .text = "Host:", .size = 12, .vertical_align = .TextAlignCenter})
+        hres := Field.Draw(session, Field.StateProps(host_field, .{.key = 23, .focus_id = 23,
+            .bounds = .{68.0, y + 6.0, w - 178.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*host_field, hres)
+        if hres.committed { DoConnect() }
+
+        Text.Draw(session, .{.key = 24, .bounds = .{12.0, y + 32.0, 52.0, 22.0},
+            .text = "Port:", .size = 12, .vertical_align = .TextAlignCenter})
+        pres := Field.Draw(session, Field.StateProps(port_field, .{.key = 25, .focus_id = 25,
+            .bounds = .{68.0, y + 32.0, w - 178.0, 22.0}, .max_bytes = 60, .input = f_in}))
+        unused Field.StateApplyResult(*port_field, pres)
+        if pres.committed { DoConnect() }
+
+        if Button.Draw(session, .{.key = 26, .bounds = .{w - 102.0, y + 6.0, 88.0, 22.0}, .label = "Dial"}) > 0 {
+            DoConnect()
+        }
+        if Button.Draw(session, .{.key = 27, .bounds = .{w - 102.0, y + 32.0, 88.0, 22.0}, .label = "Cancel"}) > 0 {
+            show_connect = false
+        }
+        y += 66.0
+    }
+
+    // Transcript pane.
+    ta_res := TextArea.Draw(session, .{
+        .key = 40,
+        .focus_id = 40,
+        .bounds = .{6.0, y, w - 12.0, h - y - 6.0},
+        .value = TextView(transcript[:]),
+        .cursor = ta_cursor,
+        .anchor = ta_anchor,
+        .scroll_y = ta_scroll_y,
+        .focused = ta_focused,
+        .selecting = ta_selecting,
+        .preferred_x = ta_pref_x,
+        .preferred_x_valid = ta_pref_x_valid,
+        .max_bytes = MaxTranscript,
+        .wrap = true,
+        .input = ta_in,
+    })
+    ta_cursor = ta_res.cursor
+    ta_anchor = ta_res.anchor
+    ta_scroll_y = ta_res.scroll_y
+    ta_focused = ta_res.focused
+    ta_selecting = ta_res.selecting
+    ta_pref_x = ta_res.preferred_x
+    ta_pref_x_valid = ta_res.preferred_x_valid
+
+    // Button-3 popup menu (Cut, Paste, Snarf, Send).
+    if show_popup {
+        Box.Draw(session, .{.key = 50, .bounds = .{popup_x, popup_y, 78.0, 92.0}, .fill = menu_bg})
+        if Button.Draw(session, .{.key = 51, .bounds = .{popup_x + 2.0, popup_y + 2.0, 74.0, 20.0}, .label = "Cut"}) > 0 {
+            DoCut(true); show_popup = false
+        }
+        if Button.Draw(session, .{.key = 52, .bounds = .{popup_x + 2.0, popup_y + 24.0, 74.0, 20.0}, .label = "Paste"}) > 0 {
+            DoPaste(); show_popup = false
+        }
+        if Button.Draw(session, .{.key = 53, .bounds = .{popup_x + 2.0, popup_y + 46.0, 74.0, 20.0}, .label = "Snarf"}) > 0 {
+            DoSnarf(); show_popup = false
+        }
+        if Button.Draw(session, .{.key = 54, .bounds = .{popup_x + 2.0, popup_y + 68.0, 74.0, 20.0}, .label = "Send"}) > 0 {
+            DoSendSel(); show_popup = false
+        }
+        if ptr.pressed && (ptr.x < popup_x || ptr.x > popup_x + 78.0 || ptr.y < popup_y || ptr.y > popup_y + 92.0) {
+            show_popup = false
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    Model.Init(*sess)
+    host_field.bytes = host_bytes[:]
+    port_field.bytes = port_bytes[:]
+    SetField(*port_field, "telnet")
+    SetStatus("Not connected")
+
+    rc := Surface.RunRetained(.{.title = "Telnet", .width = WinW, .height = WinH}, Draw, 16)
+    CloseConn()
+    VecFree(transcript)
+    VecFree(clipboard)
+    VecFree(status_text)
+    return rc
+}

@@ -1,0 +1,274 @@
+// Telnet RFC854 protocol state machine, option negotiation, CR/LF mapping,
+// and transcript line-editing rules of Inferno's Telnet (appl/wm/telnet.b).
+// See ../../NOTICE.
+#import "std/vec"
+
+Se :: cast(u8)240
+Nop :: cast(u8)241
+Mark :: cast(u8)242
+Break :: cast(u8)243
+Interrupt :: cast(u8)244
+Abort :: cast(u8)245
+AreYouThere :: cast(u8)246
+Erasechar :: cast(u8)247
+Eraseline :: cast(u8)248
+GoAhead :: cast(u8)249
+Sb :: cast(u8)250
+Will :: cast(u8)251
+Wont :: cast(u8)252
+Do :: cast(u8)253
+Dont :: cast(u8)254
+Iac :: cast(u8)255
+
+OptBinary :: 0
+OptEcho :: 1
+OptSga :: 2
+OptTerm :: 6
+OptLine :: 16
+OptCount :: 19
+
+HiWat :: 2000
+LoWat :: 1500
+
+Opt :: struct {
+    code: u8
+    noway: bool
+    remote: bool
+    local: bool
+}
+
+ParseState :: enum {
+    Data
+    Iac
+    Will
+    Wont
+    Do
+    Dont
+    Sb
+    SbIac
+}
+
+Session :: struct {
+    opts: [OptCount]Opt
+    state: ParseState
+    mcrlf: bool
+    crnls: s32
+    freenl: bool
+    subneg: [128]u8
+    sub_len: s32
+}
+
+Init :: (s: *Session) {
+    codes: [OptCount]u8 = .[0, 1, 3, 5, 6, 20, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 255]
+    noways: [OptCount]bool = .[
+        false, false, false, true, true, true, false, true, true, true,
+        true, true, true, true, true, true, false, true, true,
+    ]
+    for i: cast(s64)0..cast(s64)(OptCount - 1) {
+        s.opts[i] = .{codes[i], noways[i], false, false}
+    }
+    s.state = .Data
+    s.mcrlf = false
+    s.crnls = 0
+    s.freenl = false
+    s.sub_len = 0
+}
+
+FindOpt :: (s: *Session, code: u8) -> s32 {
+    for i: cast(s32)0..cast(s32)(OptCount - 1) {
+        if s.opts[i].code == code { return i }
+    }
+    return -1
+}
+
+Push3 :: (reply: *Vec(u8), a: u8, b: u8, c: u8) {
+    unused VecPush(reply.*, a)
+    unused VecPush(reply.*, b)
+    unused VecPush(reply.*, c)
+}
+
+PushSbTerm :: (reply: *Vec(u8)) {
+    unused VecPush(reply.*, Iac)
+    unused VecPush(reply.*, Sb)
+    unused VecPush(reply.*, cast(u8)24)
+    unused VecPush(reply.*, cast(u8)0)
+    unused BuilderAppend(reply.*, "dumb")
+    unused VecPush(reply.*, Iac)
+    unused VecPush(reply.*, Se)
+}
+
+HandleWill :: (s: *Session, c: u8, reply: *Vec(u8)) {
+    idx := FindOpt(s, c)
+    if idx < 0 { Push3(reply, Iac, Dont, c); return }
+    if s.opts[idx].noway {
+        Push3(reply, Iac, Dont, c)
+    } else if !s.opts[idx].remote {
+        Push3(reply, Iac, Do, c)
+    }
+    s.opts[idx].remote = true
+}
+
+HandleWont :: (s: *Session, c: u8, reply: *Vec(u8)) {
+    idx := FindOpt(s, c)
+    if idx < 0 { return }
+    if s.opts[idx].remote { Push3(reply, Iac, Dont, c) }
+    s.opts[idx].remote = false
+}
+
+HandleDo :: (s: *Session, c: u8, reply: *Vec(u8)) {
+    idx := FindOpt(s, c)
+    if idx < 0 || s.opts[idx].noway { Push3(reply, Iac, Wont, c); return }
+    if !s.opts[idx].local { Push3(reply, Iac, Will, c) }
+    s.opts[idx].local = true
+}
+
+HandleDont :: (s: *Session, c: u8, reply: *Vec(u8)) {
+    idx := FindOpt(s, c)
+    if idx < 0 || s.opts[idx].noway { return }
+    if s.opts[idx].local {
+        s.opts[idx].local = false
+        Push3(reply, Iac, Wont, c)
+    }
+    s.opts[idx].local = false
+}
+
+// Feed raw bytes received from the TCP connection.
+// Appends displayable bytes to `text_out` and protocol replies to `reply_out`.
+Feed :: (s: *Session, data: []u8, text_out: *Vec(u8), reply_out: *Vec(u8)) {
+    for i: cast(s64)0..data.count - 1 {
+        c := data[i]
+        if s.state == {
+        case .Data;
+            if c == Iac {
+                s.state = .Iac
+            } else if c == cast(u8)10 { // '\n'
+                if !s.opts[OptBinary].local && !s.mcrlf {
+                    s.crnls += 1
+                    if s.freenl {
+                        s.freenl = false
+                        continue
+                    }
+                }
+                unused VecPush(text_out.*, c)
+            } else if c == cast(u8)13 { // '\r'
+                if !s.opts[OptBinary].local && !s.mcrlf {
+                    if s.crnls == 0 {
+                        s.crnls += 1
+                        s.freenl = true
+                        unused VecPush(text_out.*, cast(u8)10)
+                        continue
+                    }
+                    s.crnls += 1
+                    continue
+                }
+                unused VecPush(text_out.*, c)
+            } else {
+                s.crnls = 0
+                s.freenl = false
+                if c != 0 { unused VecPush(text_out.*, c) }
+            }
+        case .Iac;
+            if c == Iac {
+                unused VecPush(text_out.*, Iac)
+                s.state = .Data
+            } else if c == AreYouThere {
+                unused BuilderAppend(reply_out.*, "Inferno telnet V1.0\r\n")
+                s.state = .Data
+            } else if c == Will {
+                s.state = .Will
+            } else if c == Wont {
+                s.state = .Wont
+            } else if c == Do {
+                s.state = .Do
+            } else if c == Dont {
+                s.state = .Dont
+            } else if c == Sb {
+                s.sub_len = 0
+                s.state = .Sb
+            } else {
+                s.state = .Data
+            }
+        case .Will;
+            HandleWill(s, c, reply_out)
+            s.state = .Data
+        case .Wont;
+            HandleWont(s, c, reply_out)
+            s.state = .Data
+        case .Do;
+            HandleDo(s, c, reply_out)
+            s.state = .Data
+        case .Dont;
+            HandleDont(s, c, reply_out)
+            s.state = .Data
+        case .Sb;
+            if c == Iac {
+                s.state = .SbIac
+            } else if s.sub_len < 128 {
+                s.subneg[s.sub_len] = c
+                s.sub_len += 1
+            }
+        case .SbIac;
+            if c == Se {
+                if s.sub_len > 0 && s.subneg[0] == cast(u8)24 {
+                    PushSbTerm(reply_out)
+                }
+                s.state = .Data
+            } else {
+                if s.sub_len < 128 {
+                    s.subneg[s.sub_len] = Iac
+                    s.sub_len += 1
+                }
+                if s.sub_len < 128 {
+                    s.subneg[s.sub_len] = c
+                    s.sub_len += 1
+                }
+                s.state = .Sb
+            }
+        }
+    }
+}
+
+// Toggle Line Mode option (telnet.b lines 330-335).
+BuildLineModeToggle :: (s: *Session, reply_out: *Vec(u8)) {
+    if !s.opts[OptLine].local {
+        Push3(reply_out, Iac, Will, s.opts[OptLine].code)
+    } else {
+        Push3(reply_out, Iac, Wont, s.opts[OptLine].code)
+    }
+}
+
+IsAlnum :: (c: u8) -> bool {
+    if c >= cast(u8)97 && c <= cast(u8)122 { return true }
+    if c >= cast(u8)65 && c <= cast(u8)90 { return true }
+    if c >= cast(u8)48 && c <= cast(u8)57 { return true }
+    if c == cast(u8)95 || c > cast(u8)160 { return true }
+    return false
+}
+
+// Compute ^W word erase start offset (never crossing outpoint or newline).
+WordEraseStart :: (text: string, pos: s64, outpoint: s64) -> s64 {
+    if pos <= outpoint { return pos }
+    p := pos
+    while p > outpoint && text[p - 1] != cast(u8)10 && !IsAlnum(text[p - 1]) { p -= 1 }
+    while p > outpoint && text[p - 1] != cast(u8)10 && IsAlnum(text[p - 1]) { p -= 1 }
+    return p
+}
+
+// Trim transcript from top when lines exceed HiWat, keeping LoWat lines.
+// Returns number of bytes removed from the front.
+TrimFrontBytes :: (text: string) -> s64 {
+    lines: s32 = 1
+    for i: cast(s64)0..text.count - 1 {
+        if text[i] == cast(u8)10 { lines += 1 }
+    }
+    if lines <= HiWat { return 0 }
+    drop := lines - LoWat
+    seen: s32 = 0
+    for i: cast(s64)0..text.count - 1 {
+        if text[i] == cast(u8)10 {
+            seen += 1
+            if seen >= drop { return i + 1 }
+        }
+    }
+    return 0
+}

@@ -1,0 +1,766 @@
+// Port of Inferno's Readmail (appl/wm/readmail.b), built as readmail.zx.
+// See ../../NOTICE.
+// Keeps POP3 Connect/Disconnect (APOP MD5 challenge-response via taijios_keyring
+// or USER/PASS over taijios_dial), STAT, RETR, DELE, TOP headers browser,
+// Prev/Next navigation, Reply/Forward launching /dis/wm/sendmail.zx, Save via
+// /dis/wm/filename.zx, and /usr/<user>/mail/popserver default.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+TextArea :: #import "kryon/text_area";
+Model :: #import "readmail_model";
+IO :: #import "taijios_io";
+Dial :: #import "taijios_dial";
+Keyring :: #import "taijios_keyring";
+WM :: #import "taijios_wm";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+WinW :: 620
+WinH :: 480
+MaxText :: 1048576
+Chooser :: "/dis/wm/filename.zx"
+SendmailProg :: "/dis/wm/sendmail.zx"
+
+grey: Color = .{221, 221, 221, 255};
+panel_bg: Color = .{236, 236, 236, 255};
+white: Color = .{255, 255, 255, 255};
+sel_bg: Color = .{210, 228, 248, 255};
+dark: Color = .{150, 150, 150, 255};
+
+// POP3 connection state.
+srv_fd: s32 = -1;
+srv_ctl: s32 = -1;
+pop_rbuf: [1024]u8;
+pop_rpos: s32;
+pop_rlen: s32;
+
+// Mailbox state.
+nmesg: s32;
+cmesg: s32;
+del_map: Vec(u8);
+
+// Connect panel fields.
+show_connect: bool;
+host_bytes: [256]u8;
+host_field: Field.State;
+user_bytes: [256]u8;
+user_field: Field.State;
+pass_bytes: [256]u8;
+pass_field: Field.State;
+
+// Headers list panel.
+show_headers: bool;
+hdr_list_buf: Vec(u8);
+hdr_row_starts: Vec(s64);
+hdr_row_ends: Vec(s64);
+hdr_row_msgs: Vec(s32);
+hdr_scroll: s32;
+
+// Message header & body TextAreas.
+hdr_text: Vec(u8);
+hdr_cursor: s32;
+hdr_anchor: s32;
+hdr_scroll_y: s32;
+hdr_focused: bool;
+hdr_selecting: bool;
+hdr_pref_x: s32;
+hdr_pref_x_valid: bool;
+
+body_text: Vec(u8);
+body_cursor: s32;
+body_anchor: s32;
+body_scroll_y: s32;
+body_focused: bool;
+body_selecting: bool;
+body_pref_x: s32;
+body_pref_x_valid: bool;
+
+status_text: Vec(u8);
+username_buf: Vec(u8);
+
+// Save file chooser pipe.
+choice_fd: s32 = -1;
+choice_bytes: [512]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+SetStatus :: (s: string) { SetVec(*status_text, s) }
+
+SetField :: (state: *Field.State, text: string) {
+    state.length = 0
+    for i: cast(s64)0..text.count - 1 {
+        if state.length >= cast(s32)state.bytes.count - 1 { break }
+        state.bytes[state.length] = text[i]
+        state.length += 1
+    }
+    state.cursor = state.length
+    state.anchor = state.length
+}
+
+ReadShortFile :: (path: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    fd := IO.Open(path, 0)
+    if fd < 0 { return }
+    buf: [128]u8
+    n := IO.Read(fd, buf[:])
+    unused IO.Close(fd)
+    if n <= 0 { return }
+    end: s64 = cast(s64)n
+    while end > 0 && (buf[end - 1] == cast(u8)10 || buf[end - 1] == cast(u8)13) { end -= 1 }
+    unused BuilderAppend(out.*, TextView(buf[:end]))
+}
+
+CloseConn :: () {
+    if srv_fd >= 0 { unused IO.Close(srv_fd); srv_fd = -1 }
+    if srv_ctl >= 0 { unused IO.Close(srv_ctl); srv_ctl = -1 }
+    pop_rpos = 0
+    pop_rlen = 0
+}
+
+PopGetByte :: () -> s32 {
+    if srv_fd < 0 { return -1 }
+    if pop_rpos < pop_rlen {
+        b := cast(s32)pop_rbuf[pop_rpos]
+        pop_rpos += 1
+        return b
+    }
+    n := IO.Read(srv_fd, pop_rbuf[:])
+    if n <= 0 { return -1 }
+    pop_rlen = n
+    pop_rpos = 1
+    return cast(s32)pop_rbuf[0]
+}
+
+PopReadResp :: (out_msg: *Vec(u8)) -> bool {
+    VecClear(out_msg.*)
+    line: Vec(u8)
+    defer VecFree(line)
+    lastc: s32 = 0
+    while true {
+        c := PopGetByte()
+        if c < 0 {
+            SetVec(out_msg, "read from server failed")
+            return false
+        }
+        if lastc == 13 && c == 10 { break }
+        if line.count < 1024 { unused VecPush(line, cast(u8)c) }
+        lastc = c
+    }
+    if line.count > 0 && line[line.count - 1] == cast(u8)13 {
+        unused VecResize(line, line.count - 1)
+    }
+    resp := Model.ParsePop3Line(TextView(line[:]))
+    if resp.text_len > 0 {
+        SetVec(out_msg, TextView(line[resp.text_start:resp.text_start + resp.text_len]))
+    } else if !resp.ok {
+        SetVec(out_msg, resp.error)
+    }
+    return resp.ok
+}
+
+PopCmd :: (cmd: string, out_msg: *Vec(u8)) -> bool {
+    if srv_fd < 0 {
+        SetVec(out_msg, "not connected")
+        return false
+    }
+    wire: Vec(u8)
+    defer VecFree(wire)
+    unused BuilderAppend(wire, cmd)
+    unused BuilderAppend(wire, "\r\n")
+    s := TextView(wire[:])
+    if IO.Write(srv_fd, s) != cast(s32)s.count {
+        SetVec(out_msg, "send to server failed")
+        return false
+    }
+    return PopReadResp(out_msg)
+}
+
+EndsWithTerm :: (buf: *Vec(u8)) -> s64 {
+    n := buf.count
+    if n >= 5 && buf.*[n - 5] == cast(u8)13 && buf.*[n - 4] == cast(u8)10 &&
+       buf.*[n - 3] == cast(u8)46 && buf.*[n - 2] == cast(u8)13 && buf.*[n - 1] == cast(u8)10 {
+        return n - 5
+    }
+    if n == 3 && buf.*[0] == cast(u8)46 && buf.*[1] == cast(u8)13 && buf.*[2] == cast(u8)10 {
+        return 0
+    }
+    return -1
+}
+
+PopReadBody :: (out: *Vec(u8)) -> bool {
+    VecClear(out.*)
+    while pop_rpos < pop_rlen {
+        unused VecPush(out.*, pop_rbuf[pop_rpos])
+        pop_rpos += 1
+        cut := EndsWithTerm(out)
+        if cut >= 0 {
+            unused VecResize(out.*, cut)
+            return true
+        }
+    }
+    while true {
+        n := IO.Read(srv_fd, pop_rbuf[:])
+        if n <= 0 { return false }
+        pop_rpos = 0
+        pop_rlen = n
+        while pop_rpos < pop_rlen {
+            unused VecPush(out.*, pop_rbuf[pop_rpos])
+            pop_rpos += 1
+            cut := EndsWithTerm(out)
+            if cut >= 0 {
+                unused VecResize(out.*, cut)
+                return true
+            }
+        }
+    }
+    return false
+}
+
+LoadMesg :: () {
+    if srv_fd < 0 {
+        SetStatus("You must be connected to read messages")
+        return
+    }
+    if cmesg < 1 || cmesg > nmesg { return }
+    digits: [24]u8
+    cmd: Vec(u8)
+    defer VecFree(cmd)
+    unused BuilderAppend(cmd, "RETR ")
+    unused BuilderAppend(cmd, FormatInteger(cast(s64)cmesg, digits[:]))
+    resp: Vec(u8)
+    defer VecFree(resp)
+    if !PopCmd(TextView(cmd[:]), *resp) {
+        SetStatus(TextView(resp[:]))
+        return
+    }
+    raw: Vec(u8)
+    defer VecFree(raw)
+    if !PopReadBody(*raw) {
+        SetStatus("Error retrieving message")
+        return
+    }
+    Model.SplitMessage(TextView(raw[:]), *hdr_text, *body_text)
+    hdr_cursor = 0; hdr_anchor = 0; hdr_scroll_y = 0
+    body_cursor = 0; body_anchor = 0; body_scroll_y = 0
+
+    st: Vec(u8)
+    defer VecFree(st)
+    unused BuilderAppend(st, "read message ")
+    unused BuilderAppend(st, FormatInteger(cast(s64)cmesg, digits[:]))
+    unused BuilderAppend(st, " of ")
+    unused BuilderAppend(st, FormatInteger(cast(s64)nmesg, digits[:]))
+    unused BuilderAppend(st, " , ready...")
+    SetStatus(TextView(st[:]))
+}
+
+InitializeMailbox :: () {
+    resp: Vec(u8)
+    defer VecFree(resp)
+    if !PopCmd("STAT", *resp) {
+        SetStatus(TextView(resp[:]))
+        CloseConn()
+        return
+    }
+    nmesg = Model.ParseInt(TextView(resp[:]))
+    if nmesg <= 0 {
+        nmesg = 0
+        cmesg = 0
+        VecClear(del_map)
+        SetStatus("There are no messages.")
+        return
+    }
+    unused VecResize(del_map, cast(s64)(nmesg + 1))
+    for i: cast(s64)0..cast(s64)nmesg { del_map[i] = 0 }
+    cmesg = nmesg
+    LoadMesg()
+}
+
+DoConnect :: () -> bool {
+    server := TextView(host_bytes[:host_field.length])
+    user := TextView(user_bytes[:user_field.length])
+    pass := TextView(pass_bytes[:pass_field.length])
+    if server.count == 0 { SetStatus("You must supply a server address"); return false }
+    if user.count == 0 { SetStatus("You must supply a user name"); return false }
+    if pass.count == 0 { SetStatus("You must give a secret or password"); return false }
+
+    SetStatus("dialing server...")
+    addr: Vec(u8)
+    defer VecFree(addr)
+    Model.NetMkAddr(server, "", "110", *addr)
+
+    handles: [2]s32
+    dir: [Dial.DirectoryBytes]u8
+    if Dial.Dial(TextView(addr[:]), "", handles[:], dir[:]) < 0 {
+        SetStatus("dial failed")
+        return false
+    }
+    srv_fd = handles[0]
+    srv_ctl = handles[1]
+    pop_rpos = 0
+    pop_rlen = 0
+
+    resp: Vec(u8)
+    defer VecFree(resp)
+    if !PopReadResp(*resp) {
+        SetStatus(TextView(resp[:]))
+        CloseConn()
+        return false
+    }
+
+    greeting := TextView(resp[:])
+    chal := Model.ExtractChallenge(greeting)
+    cmd: Vec(u8)
+    defer VecFree(cmd)
+    if chal.count > 0 {
+        // APOP challenge/response using MD5(chal + pass).
+        in_buf: Vec(u8)
+        defer VecFree(in_buf)
+        unused BuilderAppend(in_buf, chal)
+        unused BuilderAppend(in_buf, pass)
+        digest: [16]u8
+        if Keyring.Digest(Keyring.MD5, TextView(in_buf[:]), digest[:]) < 0 {
+            SetStatus("MD5 digest failed")
+            CloseConn()
+            return false
+        }
+        hex: Vec(u8)
+        defer VecFree(hex)
+        Model.HexDigest(digest[:], *hex)
+        unused BuilderAppend(cmd, "APOP ")
+        unused BuilderAppend(cmd, user)
+        unused BuilderAppend(cmd, " ")
+        unused BuilderAppend(cmd, TextView(hex[:]))
+        if !PopCmd(TextView(cmd[:]), *resp) {
+            SetStatus(TextView(resp[:]))
+            CloseConn()
+            return false
+        }
+    } else {
+        unused BuilderAppend(cmd, "USER ")
+        unused BuilderAppend(cmd, user)
+        if !PopCmd(TextView(cmd[:]), *resp) {
+            SetStatus(TextView(resp[:]))
+            CloseConn()
+            return false
+        }
+        VecClear(cmd)
+        unused BuilderAppend(cmd, "PASS ")
+        unused BuilderAppend(cmd, pass)
+        if !PopCmd(TextView(cmd[:]), *resp) {
+            SetStatus(TextView(resp[:]))
+            CloseConn()
+            return false
+        }
+    }
+
+    show_connect = false
+    InitializeMailbox()
+    return true
+}
+
+DoDisconnect :: () {
+    if srv_fd < 0 { return }
+    resp: Vec(u8)
+    defer VecFree(resp)
+    ok := PopCmd("QUIT", *resp)
+    CloseConn()
+    nmesg = 0
+    cmesg = 0
+    show_headers = false
+    if ok && resp.count > 0 { SetStatus(TextView(resp[:])) }
+    else { SetStatus("not connected ...") }
+}
+
+DoDelete :: () {
+    if srv_fd < 0 { SetStatus("You must be connected to delete messages"); return }
+    if cmesg < 1 || cmesg > nmesg { return }
+    digits: [24]u8
+    cmd: Vec(u8)
+    defer VecFree(cmd)
+    unused BuilderAppend(cmd, "DELE ")
+    unused BuilderAppend(cmd, FormatInteger(cast(s64)cmesg, digits[:]))
+    resp: Vec(u8)
+    defer VecFree(resp)
+    if !PopCmd(TextView(cmd[:]), *resp) {
+        SetStatus(TextView(resp[:]))
+        return
+    }
+    if cast(s64)cmesg < del_map.count { del_map[cmesg] = 1 }
+    SetStatus(TextView(resp[:]))
+    nxt := Model.FindNextMsg(cmesg, del_map[:])
+    if nxt == 0 { nxt = Model.FindPrevMsg(cmesg, nmesg, del_map[:]) }
+    if nxt > 0 {
+        cmesg = nxt
+        LoadMesg()
+    } else {
+        cmesg = 0
+        VecClear(hdr_text)
+        VecClear(body_text)
+    }
+}
+
+FetchHeaders :: () {
+    if srv_fd < 0 { SetStatus("You must be connected to fetch headers"); return }
+    if show_headers { show_headers = false; return }
+    VecClear(hdr_list_buf)
+    VecClear(hdr_row_starts)
+    VecClear(hdr_row_ends)
+    VecClear(hdr_row_msgs)
+    hdr_scroll = 0
+    if nmesg <= 0 { show_headers = true; return }
+
+    digits: [24]u8
+    cmd: Vec(u8)
+    defer VecFree(cmd)
+    resp: Vec(u8)
+    defer VecFree(resp)
+    raw: Vec(u8)
+    defer VecFree(raw)
+    line: Vec(u8)
+    defer VecFree(line)
+
+    // Newest first (matching `.f.l insert 0` in readmail.b).
+    m := nmesg
+    while m >= 1 {
+        is_del := cast(s64)m < del_map.count && del_map[m] != 0
+        if is_del {
+            Model.FormatHeaderLine(m, 0, true, "", *line)
+        } else {
+            VecClear(cmd)
+            unused BuilderAppend(cmd, "TOP ")
+            unused BuilderAppend(cmd, FormatInteger(cast(s64)m, digits[:]))
+            unused BuilderAppend(cmd, " 0")
+            if !PopCmd(TextView(cmd[:]), *resp) {
+                SetStatus(TextView(resp[:]))
+                break
+            }
+            size := Model.ParseInt(TextView(resp[:]))
+            if !PopReadBody(*raw) { break }
+            Model.FormatHeaderLine(m, size, false, TextView(raw[:]), *line)
+        }
+        s := hdr_list_buf.count
+        unused BuilderAppend(hdr_list_buf, TextView(line[:]))
+        e := hdr_list_buf.count
+        unused VecPush(hdr_row_starts, s)
+        unused VecPush(hdr_row_ends, e)
+        unused VecPush(hdr_row_msgs, m)
+        m -= 1
+    }
+    show_headers = true
+}
+
+DoReply :: () {
+    if cmesg == 0 || hdr_text.count == 0 {
+        SetStatus("No message header to reply to")
+        return
+    }
+    argv: Vec(u8)
+    defer VecFree(argv)
+    unused BuilderAppend(argv, "sendmail")
+    unused VecPush(argv, 0)
+    unused BuilderAppend(argv, TextView(hdr_text[:]))
+    unused VecPush(argv, 0)
+    if WM.Launch(SendmailProg, TextView(argv[:])) < 0 {
+        SetStatus("Failed to launch sendmail.zx")
+    } else {
+        SetStatus("Launched Sendmail for reply")
+    }
+}
+
+DoForward :: () {
+    if cmesg == 0 || hdr_text.count == 0 {
+        SetStatus("No message to forward")
+        return
+    }
+    subj := Model.GetField("subject", TextView(hdr_text[:]))
+    fwd_hdr: Vec(u8)
+    defer VecFree(fwd_hdr)
+    if subj.count > 0 {
+        unused BuilderAppend(fwd_hdr, "Subject: Fwd: ")
+        unused BuilderAppend(fwd_hdr, subj)
+        unused BuilderAppend(fwd_hdr, "\n")
+    }
+    argv: Vec(u8)
+    defer VecFree(argv)
+    unused BuilderAppend(argv, "sendmail")
+    unused VecPush(argv, 0)
+    unused BuilderAppend(argv, TextView(fwd_hdr[:]))
+    unused VecPush(argv, 0)
+    if WM.Launch(SendmailProg, TextView(argv[:])) < 0 {
+        SetStatus("Failed to launch sendmail.zx")
+    } else {
+        SetStatus("Launched Sendmail for forward")
+    }
+}
+
+SaveMessageTo :: (path: string) {
+    fd := IO.Create(path, 1, 432) // 0660
+    if fd < 0 { SetStatus("Failed to create file"); return }
+    out: Vec(u8)
+    defer VecFree(out)
+    unused BuilderAppend(out, TextView(hdr_text[:]))
+    unused BuilderAppend(out, TextView(body_text[:]))
+    s := TextView(out[:])
+    n := IO.Write(fd, s)
+    unused IO.Close(fd)
+    if n < 0 { SetStatus("Error writing file"); return }
+    digits: [24]u8
+    msg: Vec(u8)
+    defer VecFree(msg)
+    unused BuilderAppend(msg, "wrote ")
+    unused BuilderAppend(msg, FormatInteger(cast(s64)n, digits[:]))
+    unused BuilderAppend(msg, " bytes.")
+    SetStatus(TextView(msg[:]))
+}
+
+OpenSaveChooser :: () {
+    if cmesg == 0 { SetStatus("No current message"); return }
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 { return }
+    words: [4]string = .["-t", "Save in Mailbox", "*.let (Saved mail)", "* (All files)"]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 { unused IO.Close(ends[0]); return }
+    choice_fd = ends[0]
+}
+
+PollChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 { unused IO.Close(choice_fd); choice_fd = -1; choice_used = 0; return }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        choice_used = 0
+        if line > 0 { SaveMessageTo(TextView(choice_bytes[:line])) }
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 480.0 { w = cast(float32)WinW }
+    if h < 320.0 { h = cast(float32)WinH }
+
+    PollChooser()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    f_in := TextFieldInputFor(key, mods, text)
+    ta_in := TextAreaInputFor(key, mods, text)
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Top toolbar buttons matching readmail.b order.
+    conn_lbl := ifx srv_fd >= 0 then "Disconnect" else "Connect"
+    if Button.Draw(session, .{.key = 10, .bounds = .{6.0, 4.0, 82.0, 22.0}, .label = conn_lbl}) > 0 {
+        if srv_fd >= 0 { DoDisconnect() } else { show_connect = !show_connect }
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{92.0, 4.0, 48.0, 22.0}, .label = "Prev"}) > 0 {
+        nxt := Model.FindPrevMsg(cmesg, nmesg, del_map[:])
+        if nxt > 0 { cmesg = nxt; LoadMesg() } else { SetStatus("no more messages.") }
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{144.0, 4.0, 48.0, 22.0}, .label = "Next"}) > 0 {
+        nxt := Model.FindNextMsg(cmesg, del_map[:])
+        if nxt > 0 { cmesg = nxt; LoadMesg() } else { SetStatus("no more messages.") }
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{196.0, 4.0, 56.0, 22.0}, .label = "Delete"}) > 0 {
+        DoDelete()
+    }
+    if Button.Draw(session, .{.key = 14, .bounds = .{256.0, 4.0, 54.0, 22.0}, .label = "Reply"}) > 0 {
+        DoReply()
+    }
+    if Button.Draw(session, .{.key = 15, .bounds = .{314.0, 4.0, 68.0, 22.0}, .label = "Forward"}) > 0 {
+        DoForward()
+    }
+    if Button.Draw(session, .{.key = 16, .bounds = .{386.0, 4.0, 68.0, 22.0}, .label = "Headers"}) > 0 {
+        FetchHeaders()
+    }
+    if Button.Draw(session, .{.key = 17, .bounds = .{458.0, 4.0, 52.0, 22.0}, .label = "Save"}) > 0 {
+        OpenSaveChooser()
+    }
+
+    Text.Draw(session, .{.key = 18, .bounds = .{6.0, 28.0, w - 12.0, 18.0},
+        .text = TextView(status_text[:]), .size = 12})
+
+    y: float32 = 48.0
+
+    // Inline Connection Parameters panel.
+    if show_connect {
+        Box.Draw(session, .{.key = 20, .bounds = .{6.0, y, w - 12.0, 88.0}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 21, .bounds = .{6.0, y + 87.0, w - 12.0, 1.0}, .fill = dark})
+
+        Text.Draw(session, .{.key = 22, .bounds = .{12.0, y + 6.0, 86.0, 22.0},
+            .text = "Mail Server:", .size = 12, .vertical_align = .TextAlignCenter})
+        hres := Field.Draw(session, Field.StateProps(host_field, .{.key = 23, .focus_id = 23,
+            .bounds = .{100.0, y + 6.0, w - 210.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*host_field, hres)
+        if hres.committed { unused DoConnect() }
+
+        Text.Draw(session, .{.key = 24, .bounds = .{12.0, y + 32.0, 86.0, 22.0},
+            .text = "User Name:", .size = 12, .vertical_align = .TextAlignCenter})
+        ures := Field.Draw(session, Field.StateProps(user_field, .{.key = 25, .focus_id = 25,
+            .bounds = .{100.0, y + 32.0, w - 210.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*user_field, ures)
+        if ures.committed { unused DoConnect() }
+
+        Text.Draw(session, .{.key = 26, .bounds = .{12.0, y + 58.0, 86.0, 22.0},
+            .text = "Secret:", .size = 12, .vertical_align = .TextAlignCenter})
+        pres := Field.Draw(session, Field.StateProps(pass_field, .{.key = 27, .focus_id = 27,
+            .bounds = .{100.0, y + 58.0, w - 210.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*pass_field, pres)
+        if pres.committed { unused DoConnect() }
+
+        if Button.Draw(session, .{.key = 28, .bounds = .{w - 102.0, y + 6.0, 88.0, 22.0}, .label = "Dial"}) > 0 {
+            unused DoConnect()
+        }
+        if Button.Draw(session, .{.key = 29, .bounds = .{w - 102.0, y + 32.0, 88.0, 22.0}, .label = "Cancel"}) > 0 {
+            show_connect = false
+        }
+        y += 92.0
+    }
+
+    // Inline Headers list panel.
+    if show_headers {
+        list_h: float32 = 116.0
+        Box.Draw(session, .{.key = 30, .bounds = .{6.0, y, w - 12.0, list_h}, .fill = white})
+        Box.Draw(session, .{.key = 31, .bounds = .{6.0, y + list_h - 1.0, w - 12.0, 1.0}, .fill = dark})
+        row_h: float32 = 18.0
+        vis: s32 = 6
+        ptr := PointerSample(session)
+        for row: cast(s32)0..vis - 1 {
+            idx := cast(s64)(hdr_scroll + row)
+            if idx >= hdr_row_msgs.count { break }
+            ry := y + 4.0 + cast(float32)row * row_h
+            m := hdr_row_msgs[idx]
+            if m == cmesg {
+                Box.Draw(session, .{.key = cast(u64)(300 + row), .bounds = .{8.0, ry, w - 16.0, row_h}, .fill = sel_bg})
+            }
+            s := hdr_row_starts[idx]
+            e := hdr_row_ends[idx]
+            Text.Draw(session, .{.key = cast(u64)(400 + row), .bounds = .{10.0, ry, w - 20.0, row_h},
+                .text = TextView(hdr_list_buf[s:e]), .size = 11, .vertical_align = .TextAlignCenter})
+            if ptr.pressed && ptr.x >= 8.0 && ptr.x <= w - 8.0 && ptr.y >= ry && ptr.y < ry + row_h {
+                if cast(s64)m < del_map.count && del_map[m] == 0 {
+                    cmesg = m
+                    LoadMesg()
+                }
+            }
+        }
+        y += list_h + 4.0
+    }
+
+    // Header viewer pane.
+    hdr_h: float32 = 96.0
+    hr := TextArea.Draw(session, .{
+        .key = 40,
+        .focus_id = 40,
+        .bounds = .{6.0, y, w - 12.0, hdr_h},
+        .value = TextView(hdr_text[:]),
+        .cursor = hdr_cursor,
+        .anchor = hdr_anchor,
+        .scroll_y = hdr_scroll_y,
+        .focused = hdr_focused,
+        .selecting = hdr_selecting,
+        .preferred_x = hdr_pref_x,
+        .preferred_x_valid = hdr_pref_x_valid,
+        .max_bytes = MaxText,
+        .wrap = true,
+        .input = ta_in,
+    })
+    hdr_cursor = hr.cursor; hdr_anchor = hr.anchor; hdr_scroll_y = hr.scroll_y
+    hdr_focused = hr.focused; hdr_selecting = hr.selecting
+    hdr_pref_x = hr.preferred_x; hdr_pref_x_valid = hr.preferred_x_valid
+    y += hdr_h + 6.0
+
+    // Body viewer pane.
+    br := TextArea.Draw(session, .{
+        .key = 41,
+        .focus_id = 41,
+        .bounds = .{6.0, y, w - 12.0, h - y - 6.0},
+        .value = TextView(body_text[:]),
+        .cursor = body_cursor,
+        .anchor = body_anchor,
+        .scroll_y = body_scroll_y,
+        .focused = body_focused,
+        .selecting = body_selecting,
+        .preferred_x = body_pref_x,
+        .preferred_x_valid = body_pref_x_valid,
+        .max_bytes = MaxText,
+        .wrap = true,
+        .input = ta_in,
+    })
+    body_cursor = br.cursor; body_anchor = br.anchor; body_scroll_y = br.scroll_y
+    body_focused = br.focused; body_selecting = br.selecting
+    body_pref_x = br.preferred_x; body_pref_x_valid = br.preferred_x_valid
+}
+
+#program_export
+main :: () -> s32 {
+    host_field.bytes = host_bytes[:]
+    user_field.bytes = user_bytes[:]
+    pass_field.bytes = pass_bytes[:]
+    SetStatus("not connected ...")
+
+    ReadShortFile("/dev/user", *username_buf)
+    if username_buf.count > 0 {
+        SetField(*user_field, TextView(username_buf[:]))
+        p: Vec(u8)
+        defer VecFree(p)
+        tmp: Vec(u8)
+        defer VecFree(tmp)
+        unused BuilderAppend(p, "/usr/")
+        unused BuilderAppend(p, TextView(username_buf[:]))
+        unused BuilderAppend(p, "/mail/popserver")
+        ReadShortFile(TextView(p[:]), *tmp)
+        if tmp.count > 0 { SetField(*host_field, TextView(tmp[:])) }
+    }
+
+    rc := Surface.RunRetained(.{.title = "Readmail: Reader", .width = WinW, .height = WinH}, Draw, 16)
+    if srv_fd >= 0 { DoDisconnect() }
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(del_map)
+    VecFree(hdr_list_buf)
+    VecFree(hdr_row_starts)
+    VecFree(hdr_row_ends)
+    VecFree(hdr_row_msgs)
+    VecFree(hdr_text)
+    VecFree(body_text)
+    VecFree(status_text)
+    VecFree(username_buf)
+    return rc
+}

@@ -1,0 +1,218 @@
+// POP3 protocol, header parsing, message splitting, APOP challenge extraction,
+// and mailbox navigation rules of Inferno's Readmail (appl/wm/readmail.b).
+// See ../../NOTICE.
+#import "std/vec"
+#import "std/number_text"
+
+Pop3Resp :: struct {
+    ok: bool
+    text_start: s64
+    text_len: s64
+    error: string
+}
+
+SplitPos :: struct {
+    body_start: s64
+}
+
+// Parse one POP3 response line (without trailing \r\n), matching readmail.b lines 781-797.
+ParsePop3Line :: (line: string) -> Pop3Resp {
+    if line.count < 3 {
+        return .{false, 0, 0, "short read from server"}
+    }
+    if line[0] == cast(u8)43 && line[1] == cast(u8)79 && line[2] == cast(u8)75 { // "+OK"
+        pos: s64 = 3
+        while pos < line.count && line[pos] == cast(u8)32 { pos += 1 }
+        return .{true, pos, line.count - pos, ""}
+    }
+    if line.count >= 4 && line[0] == cast(u8)45 && line[1] == cast(u8)69 &&
+       line[2] == cast(u8)82 && line[3] == cast(u8)82 { // "-ERR"
+        pos: s64 = 4
+        while pos < line.count && line[pos] == cast(u8)32 { pos += 1 }
+        return .{false, pos, line.count - pos, "server error"}
+    }
+    return .{false, 0, 0, "invalid server response"}
+}
+
+// Parse leading non-negative decimal integer (as Limbo `int s`), skipping leading spaces.
+ParseInt :: (s: string) -> s32 {
+    i: s64 = 0
+    while i < s.count && (s[i] == cast(u8)32 || s[i] == cast(u8)9) { i += 1 }
+    v: s32 = 0
+    while i < s.count && s[i] >= cast(u8)48 && s[i] <= cast(u8)57 {
+        v = v * 10 + cast(s32)(s[i] - cast(u8)48)
+        i += 1
+    }
+    return v
+}
+
+// Extract APOP challenge `<...>` from server greeting (readmail.b lines 687-689).
+ExtractChallenge :: (greeting: string) -> string {
+    start: s64 = -1
+    for i: cast(s64)0..greeting.count - 1 {
+        if greeting[i] == cast(u8)60 { start = i; break } // '<'
+    }
+    if start < 0 { return "" }
+    for j: start + 1..greeting.count - 1 {
+        if greeting[j] == cast(u8)62 { return greeting[start:j + 1] } // '>'
+    }
+    return ""
+}
+
+// Format 16-byte digest as 32 lowercase hex characters.
+HexDigest :: (digest: []u8, out: *Vec(u8)) {
+    VecClear(out.*)
+    hex := "0123456789abcdef"
+    for i: cast(s64)0..digest.count - 1 {
+        b := digest[i]
+        unused VecPush(out.*, hex[cast(s64)(b >> cast(u8)4)])
+        unused VecPush(out.*, hex[cast(s64)(b & cast(u8)15)])
+    }
+}
+
+ToLower :: (c: u8) -> u8 {
+    if c >= cast(u8)65 && c <= cast(u8)90 { return c + cast(u8)32 }
+    return c
+}
+
+// trunc from readmail.b lines 277-289: extract text inside <...> if present.
+TruncAddr :: (name: string) -> string {
+    i: s64 = 0
+    while i < name.count && name[i] != cast(u8)60 { i += 1 }
+    i += 1
+    if i >= name.count { return name }
+    j := i
+    while j < name.count && name[j] != cast(u8)62 { j += 1 }
+    return name[i:j]
+}
+
+// getfield from readmail.b lines 335-361: case-insensitive header lookup before blank line.
+GetField :: (key: string, text: string) -> string {
+    lk := key.count + 1
+    if text.count <= lk { return "" }
+    cl := ToLower(key[0])
+    cu := ifx cl >= cast(u8)97 && cl <= cast(u8)122 then cl - cast(u8)32 else cl
+    lc: u8 = 0
+    for i: cast(s64)0..text.count - lk - 1 {
+        t := text[i]
+        if t == cast(u8)10 && lc == cast(u8)10 { break }
+        lc = t
+        if t != cu && t != cl { continue }
+        // Only match at start of text or after newline.
+        if i > 0 && text[i - 1] != cast(u8)10 && text[i - 1] != cast(u8)13 { continue }
+        matched := true
+        for k: cast(s64)0..key.count - 1 {
+            if ToLower(text[i + k]) != ToLower(key[k]) { matched = false; break }
+        }
+        if matched && text[i + key.count] == cast(u8)58 { // ':'
+            start := i + lk
+            if start < text.count && text[start] == cast(u8)32 { start += 1 }
+            j := start
+            while j < text.count && text[j] != cast(u8)13 && text[j] != cast(u8)10 { j += 1 }
+            return text[start:j]
+        }
+    }
+    return ""
+}
+
+// split from readmail.b lines 633-655: strip \r and separate header from body at \n\n.
+SplitMessage :: (raw: string, hdr_out: *Vec(u8), body_out: *Vec(u8)) {
+    VecClear(hdr_out.*)
+    VecClear(body_out.*)
+    lc: u8 = 0
+    i: s64 = 0
+    while i < raw.count {
+        c := raw[i]
+        i += 1
+        if c == cast(u8)13 { continue }
+        unused VecPush(hdr_out.*, c)
+        if lc == cast(u8)10 && c == cast(u8)10 { break }
+        lc = c
+    }
+    while i < raw.count {
+        c := raw[i]
+        i += 1
+        if c != cast(u8)13 { unused VecPush(body_out.*, c) }
+    }
+}
+
+AppendPadInt :: (out: *Vec(u8), v: s32, width: s64) {
+    digits: [24]u8
+    s := FormatInteger(cast(s64)v, digits[:])
+    for _: s.count..width - 1 { unused BuilderAppend(out.*, " ") }
+    unused BuilderAppend(out.*, s)
+}
+
+// Format one header list row matching readmail.b lines 253 and 306-318.
+FormatHeaderLine :: (msg: s32, size: s32, deleted: bool, raw_hdr: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    if deleted {
+        AppendPadInt(out, msg, 4)
+        unused BuilderAppend(out.*, " ...Deleted...")
+        return
+    }
+    from := TruncAddr(GetField("from", raw_hdr))
+    date := GetField("date", raw_hdr)
+    subj := GetField("subject", raw_hdr)
+    if subj.count > 20 { subj = subj[:19] }
+    AppendPadInt(out, msg, 4)
+    unused BuilderAppend(out.*, " ")
+    AppendPadInt(out, size, 5)
+    unused BuilderAppend(out.*, " ")
+    unused BuilderAppend(out.*, from)
+    if subj.count > 0 {
+        unused BuilderAppend(out.*, " \"")
+        unused BuilderAppend(out.*, subj)
+        unused BuilderAppend(out.*, "\"")
+    }
+    if date.count > 0 {
+        unused BuilderAppend(out.*, " ")
+        unused BuilderAppend(out.*, date)
+    }
+}
+
+// netmkaddr from readmail.b lines 872-885: default net="net", svc="110".
+NetMkAddr :: (addr: string, net_in: string, svc: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    net := ifx net_in.count == 0 then "net" else net_in
+    bangs: s32 = 0
+    for i: cast(s64)0..addr.count - 1 {
+        if addr[i] == cast(u8)33 { bangs += 1 }
+    }
+    if bangs == 0 {
+        unused BuilderAppend(out.*, net)
+        unused BuilderAppend(out.*, "!")
+        unused BuilderAppend(out.*, addr)
+        if svc.count > 0 {
+            unused BuilderAppend(out.*, "!")
+            unused BuilderAppend(out.*, svc)
+        }
+        return
+    }
+    if svc.count == 0 || bangs >= 2 {
+        unused BuilderAppend(out.*, addr)
+        return
+    }
+    unused BuilderAppend(out.*, addr)
+    unused BuilderAppend(out.*, "!")
+    unused BuilderAppend(out.*, svc)
+}
+
+// Next/Prev navigation matching readmail.b lines 199-218:
+// prev walks upward (cmesg+1..nmesg), next walks downward (cmesg-1..1).
+FindPrevMsg :: (cmesg: s32, nmesg: s32, deleted: []u8) -> s32 {
+    if cmesg >= nmesg { return 0 }
+    for m: cmesg + 1..nmesg {
+        if cast(s64)m < deleted.count && deleted[m] == 0 { return m }
+    }
+    return 0
+}
+
+FindNextMsg :: (cmesg: s32, deleted: []u8) -> s32 {
+    m := cmesg - 1
+    while m >= 1 {
+        if cast(s64)m < deleted.count && deleted[m] == 0 { return m }
+        m -= 1
+    }
+    return 0
+}

@@ -1,0 +1,40 @@
+// Standalone verification of the Telnet IAC negotiation and CR/LF model.
+Model :: #import "telnet_model";
+#import "std/vec"
+
+main :: () -> s32 {
+    s: Model.Session
+    Model.Init(*s)
+    text: Vec(u8)
+    reply: Vec(u8)
+    defer VecFree(text)
+    defer VecFree(reply)
+
+    wire: [25]u8 = .[
+        255, 251, 1,       // IAC WILL ECHO
+        255, 251, 31,      // IAC WILL WINDOW (noway)
+        255, 253, 24,      // IAC DO TERM
+        255, 250, 24, 1, 255, 240, // IAC SB TERM SEND IAC SE
+        255, 246,          // IAC AYT
+        72, 105, 13, 10,   // "Hi\r\n"
+        66, 121, 101, 10,  // "Bye\n"
+    ]
+    Model.Feed(*s, wire[:], *text, *reply)
+
+    if TextView(text[:]) != "Hi\nBye\n" { return 1 }
+    if !s.opts[Model.OptEcho].remote || !s.opts[Model.OptTerm].local { return 2 }
+
+    if reply.count != 3 + 3 + 3 + 10 + 21 { return 3 }
+    if reply[0] != 255 || reply[1] != 253 || reply[2] != 1 { return 4 }
+    if reply[3] != 255 || reply[4] != 254 || reply[5] != 31 { return 5 }
+    if reply[6] != 255 || reply[7] != 251 || reply[8] != 24 { return 6 }
+    if TextView(reply[13:17]) != "dumb" { return 7 }
+    if TextView(reply[19:]) != "Inferno telnet V1.0\r\n" { return 8 }
+
+    sample := "prompt> hello world"
+    if Model.WordEraseStart(sample, sample.count, 8) != 14 { return 9 }
+    if Model.WordEraseStart(sample, 10, 8) != 8 { return 10 }
+
+    print("Telnet matched IAC negotiation, SB TERM, AYT, CRLF and word-erase rules\n")
+    return 0
+}
