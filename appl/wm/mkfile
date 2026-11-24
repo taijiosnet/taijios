@@ -11,7 +11,6 @@ DIRS=\
 
 TARG=\
 	avi.dis\
-	bounce.dis\
 	brutus.dis\
 	c4.dis\
 	calendar.dis\
@@ -163,7 +162,10 @@ polyhedra.zx: polyhedra_app.zi polyhedra_render.zi ../math/polyhedra.zi ../math/
 calendar.zx: calendar_app.zi calendar_model.zi ../cmd/taijios_time.zi ../cmd/taijios_io.zi ../cmd/taijios_stat.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_time --bind-host taijios_io --bind-host taijios_stat --bind-host taijios_args --entry calendar_app:main -o $target calendar_app.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx
+bounce.zx: bounce.zi bounce_model.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry bounce:main -o $target bounce.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

@@ -1,0 +1,95 @@
+// Replays the bounces recorded from the Dis Bounce's rules (bounce_bounces.expected)
+// through the Ziran model and compares every hit and reflection.
+Board :: #import "bounce_model";
+Fixture :: #import "bounce_bounces_fixture";
+Rand :: #import "inferno_rand";
+#import "std/vec"
+
+Field :: (line: string, index: s32) -> string {
+    at: s64 = 0
+    for field: 0..index {
+        start := at
+        while at < line.count && line[at] != cast(u8)32 { at += 1 }
+        if field == index { return line[start:at] }
+        at += 1
+    }
+    return ""
+}
+
+// A fixed-point decimal with six digits, as the fixture records it.
+Number :: (text: string) -> float64 {
+    value: float64 = 0.0
+    at: s64 = 0
+    negative := false
+    if text.count > 0 && text[0] == cast(u8)45 { negative = true; at += 1 }
+    while at < text.count && text[at] != cast(u8)46 {
+        value = value * 10.0 + cast(float64)(text[at] - cast(u8)48)
+        at += 1
+    }
+    if at < text.count && text[at] == cast(u8)46 {
+        at += 1
+        scale := 0.1
+        while at < text.count {
+            value += cast(float64)(text[at] - cast(u8)48) * scale
+            scale /= 10.0
+            at += 1
+        }
+    }
+    if negative { return -value }
+    return value
+}
+
+Close :: (a: float64, b: float64) -> bool {
+    d := a - b
+    if d < 0.0 { d = -d }
+    return d < 0.0005
+}
+
+main :: () -> s32 {
+    board: Board.Board
+    Board.Edges(*board)
+    Board.AddLine(*board, .{150.0, 300.0, 350.0, 300.0})
+    Board.AddLine(*board, .{100.0, 50.0, 100.0, 350.0})
+    ball: Board.Ball = .{200.0, 200.0, 0.6, 0.8, 0.1, 0, -1, -1, 0}
+    hops: s32 = 0
+    text := Fixture.Games
+    start: s64 = 0
+    joined: Vec(u8)
+    defer VecFree(joined)
+    for at: cast(s64)0..text.count-1 {
+        if text[at] != cast(u8)10 { continue }
+        piece := text[start:at]
+        start = at + 1
+        // The generated fixture continues a long line after a trailing backslash.
+        if piece.count > 0 && piece[piece.count-1] == cast(u8)92 {
+            unused BuilderAppend(joined, piece[:piece.count-1])
+            continue
+        }
+        unused BuilderAppend(joined, piece)
+        defer VecClear(joined)
+        line := TextView(joined[:])
+        if line.count == 0 || line[0] == cast(u8)35 { continue }
+        result := Board.Hop(*ball, *board)
+        if !result.moved { print("bounce % found no line\n", hops + 1); return 1 }
+        if !Close(ball.x, Number(Field(line, 0))) || !Close(ball.y, Number(Field(line, 1))) ||
+           !Close(result.distance, Number(Field(line, 2))) ||
+           !Close(ball.vx, Number(Field(line, 3))) || !Close(ball.vy, Number(Field(line, 4))) {
+            print("bounce % differs: % % % % %\n", hops + 1, ball.x, ball.y, result.distance, ball.vx, ball.vy)
+            return 2
+        }
+        hops += 1
+    }
+    if hops != 10 { return 3 }
+    // A drag's line joins the table in order, and the stack drops the newest ball.
+    before := board.line_count
+    Board.AddLine(*board, .{10.0, 10.0, 20.0, 20.0})
+    if board.line_count != before + 1 || board.ids[before] != 7 { return 4 }
+    random: Rand.Random
+    Rand.Seed(*random, 12)
+    Board.NewBall(*board, *random)
+    if board.ball_count != 1 || board.balls[0].x < 1.0 || board.balls[0].x >= 399.0 { return 5 }
+    Board.RemoveBall(*board)
+    if board.ball_count != 0 { return 6 }
+    print("Bounce followed % recorded Dis bounces to the same hits and directions\n", hops)
+    return 0
+}

@@ -1,0 +1,202 @@
+// The rules of Inferno's Bounce (appl/wm/bounce.b): a unit-length direction,
+// the nearest wall or drawn line ahead of the ball, and the reflection that
+// keeps the angle between the incoming path and the line. See ../../NOTICE.
+Math :: #import "std/math";
+Rand :: #import "inferno_rand";
+
+// The canvas is 400 by 400, as the Dis version configured it.
+Width :: 400
+Height :: 400
+// A ball is an oval BallSize pixels either side of its centre.
+BallSize :: 4
+MaxLines :: 256
+MaxBalls :: 64
+// Beyond this distance the Dis version reports no intersection and drops the ball.
+LostDistance :: 10000.0
+Epsilon :: 0.000001
+
+Line :: struct {
+    x1: float64
+    y1: float64
+    x2: float64
+    y2: float64
+}
+
+Ball :: struct {
+    x: float64
+    y: float64
+    vx: float64
+    vy: float64
+    speed: float64
+    color: u32
+    hit_id: s32
+    hit_index: s32
+    small: s32
+}
+
+Board :: struct {
+    lines: [MaxLines]Line
+    ids: [MaxLines]s32
+    line_count: s32
+    next_id: s32
+    balls: [MaxBalls]Ball
+    ball_count: s32
+}
+
+// What a search for the next hit found.
+Hit :: struct {
+    found: bool
+    distance: float64
+    x: float64
+    y: float64
+}
+
+// The four window edges, added as the Dis version added them.
+Edges :: (board: *Board) {
+    AddLine(board, .{-1.0, -1.0, cast(float64)Width, -1.0})
+    AddLine(board, .{cast(float64)Width, -1.0, cast(float64)Width, cast(float64)Height})
+    AddLine(board, .{cast(float64)Width, cast(float64)Height, -1.0, cast(float64)Height})
+    AddLine(board, .{-1.0, cast(float64)Height, -1.0, -1.0})
+}
+
+AddLine :: (board: *Board, line: Line) {
+    if board.line_count >= MaxLines { return }
+    board.lines[board.line_count] = line
+    board.next_id += 1
+    board.ids[board.line_count] = board.next_id
+    board.line_count += 1
+}
+
+// The intersection of the ray from (px, py) along (vx, vy) with the line, as
+// bounce.b's intersect. The line's endpoints are sorted in place, as the Dis
+// version sorted the record it passed; boing reads that sorted direction.
+Intersect :: (px: float64, py: float64, vx: float64, vy: float64, line: *Line) -> Hit {
+    miss: Hit = .{false, 0.0, 0.0, 0.0}
+    wx := line.x2 - line.x1
+    wy := line.y2 - line.y1
+    det := wx * vy - vx * wy
+    if det > -Epsilon && det < Epsilon { return miss }
+    y21 := line.y1 - py
+    x21 := line.x1 - px
+    s := (wx * y21 - wy * x21) / det
+    if s < 0.0 { return miss }
+    hx := px + vx * s
+    hy := py + vy * s
+    if line.x1 > line.x2 { swap := line.x1; line.x1 = line.x2; line.x2 = swap }
+    if line.y1 > line.y2 { swap := line.y1; line.y1 = line.y2; line.y2 = swap }
+    ok := cast(s32)hx >= cast(s32)line.x1 && cast(s32)hx <= cast(s32)line.x2 &&
+        cast(s32)hy >= cast(s32)line.y1 && cast(s32)hy <= cast(s32)line.y2
+    return .{ok, s, hx, hy}
+}
+
+// Bounce a path travelling along (vx, vy) off the line: twice the line's
+// angle less the incoming angle.
+Direction :: struct {
+    x: float64
+    y: float64
+}
+
+Boing :: (vx: float64, vy: float64, line: *Line) -> Direction {
+    fx := line.x2 - line.x1
+    fy := line.y2 - line.y1
+    d := Math.Atan2(fy, fx) * 2.0 - Math.Atan2(vy, vx)
+    return .{Math.Cos(d), Math.Sin(d)}
+}
+
+// The nearest line ahead of the ball, as the Dis loop chose it: the newest
+// line wins ties, and the line the ball sits on is skipped unless the ball
+// has been crawling along it for fewer than ten hops or the hop is long.
+NextHit :: (ball: *Ball, board: *Board) -> Hit {
+    best: Hit = .{false, 1000000.0, 0.0, 0.0}
+    old := ball.hit_id
+    ball.hit_index = -1
+    for index: 0..board.line_count - 1 {
+        at := board.line_count - 1 - index
+        line := *board.lines[at]
+        hit := Intersect(ball.x, ball.y, ball.vx, ball.vy, line)
+        if hit.found && hit.distance < best.distance && board.ids[at] != old &&
+            (ball.small < 10 || hit.distance > 1.5) {
+            best = hit
+            ball.hit_index = at
+            ball.hit_id = board.ids[at]
+        }
+    }
+    if best.distance > LostDistance { return .{false, best.distance, 0.0, 0.0} }
+    return .{true, best.distance, best.x, best.y}
+}
+
+// Turn the ball at the line NextHit found.
+Reflect :: (ball: *Ball, board: *Board) {
+    if ball.hit_index < 0 { return }
+    line := *board.lines[ball.hit_index]
+    turned := Boing(ball.vx, ball.vy, line)
+    ball.vx = turned.x
+    ball.vy = turned.y
+}
+
+// One step of the Dis animation: move to the next hit and bounce there.
+// Returns false when the ball leaves the table.
+HopResult :: struct {
+    moved: bool
+    distance: float64
+}
+
+Hop :: (ball: *Ball, board: *Board) -> HopResult {
+    hit := NextHit(ball, board)
+    if !hit.found { return .{false, 0.0} }
+    if hit.distance < 0.0001 { ball.small += 1 } else { ball.small = 0 }
+    ball.x = hit.x
+    ball.y = hit.y
+    Reflect(ball, board)
+    return .{true, hit.distance}
+}
+
+// Move the ball distance pixels, bouncing at every line it meets.
+Step :: (ball: *Ball, board: *Board, distance: float64) -> bool {
+    for hop: 0..63 {
+        hit := NextHit(ball, board)
+        if !hit.found { return false }
+        if hit.distance >= distance {
+            ball.x += ball.vx * distance
+            ball.y += ball.vy * distance
+            return true
+        }
+        if hit.distance < 0.0001 { ball.small += 1 } else { ball.small = 0 }
+        ball.x = hit.x
+        ball.y = hit.y
+        Reflect(ball, board)
+        distance -= hit.distance
+    }
+    return true
+}
+
+// randreal of bounce.b: a value from 1.0 to size - 1.0.
+RandomReal :: (random: *Rand.Random, size: s32) -> float64 {
+    return cast(float64)Rand.Next(random, (size - 1) * 100) / 100.0 + 1.0
+}
+
+// makeunit: the direction is a random canvas point, scaled to unit length.
+NewBall :: (board: *Board, random: *Rand.Random) {
+    if board.ball_count >= MaxBalls { return }
+    ball := *board.balls[board.ball_count]
+    board.ball_count += 1
+    ball.x = RandomReal(random, Width)
+    ball.y = RandomReal(random, Height)
+    vx := RandomReal(random, Width)
+    vy := RandomReal(random, Height)
+    length := Math.Sqrt(vx * vx + vy * vy)
+    ball.vx = vx / length
+    ball.vy = vy / length
+    ball.speed = 0.1 + cast(float64)Rand.Next(random, 40) / 100.0
+    ball.color = cast(u32)Rand.Next(random, 16777215)
+    ball.hit_id = -1
+    ball.hit_index = -1
+    ball.small = 0
+}
+
+// The top of the stack goes first, as the monitor removed it.
+RemoveBall :: (board: *Board) -> bool {
+    if board.ball_count <= 0 { return false }
+    board.ball_count -= 1
+    return true
+}

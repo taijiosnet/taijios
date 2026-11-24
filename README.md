@@ -425,14 +425,18 @@ label and high score table in `/lib/scores/tetris`, and seeds its pieces from
 `/dev/random`. Polyhedra keeps prev and next through `/lib/polyhedra.all`, dual,
 edges, faces, clear, slow, fast, axis and the solid menu, draws the original
 thirteen greys lit from above with z-buffered concave faces, and turns at about
-1 to 2 frames a second under the ZX engine. Each test compares the rules and the
-window with games recorded from the Dis version.
+1 to 2 frames a second under the ZX engine. Bounce keeps the toolbar's ball
+buttons and its count label, draws a line from either pointer button's press to
+its release, and seeds its balls from the same generator state as the Dis
+version; its model replays ten bounces recorded from the Dis rules. Each test
+compares the rules and the window with games recorded from the Dis version.
 
 ```sh
 python3 -u appl/wm/snake_zx_test.py
 python3 -u appl/wm/sweeper_zx_test.py
 python3 -u appl/wm/tetris_zx_test.py
 python3 -u appl/wm/polyhedra_zx_test.py
+python3 -u appl/wm/bounce_zx_test.py
 ```
 
 ### Use the ZX Calendar

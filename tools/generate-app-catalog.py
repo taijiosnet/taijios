@@ -166,7 +166,7 @@ def generate_catalog(output):
     for source in sorted((ROOT / 'appl/wm').glob('*.b')):
         if source.stem not in exclude:
             apps['wm/' + source.stem] = False
-    for name in ('about', 'coffee', 'clock', 'counter', 'dir', 'explorer', 'logwindow', 'man', 'memory', 'calendar', 'polyhedra', 'snake', 'stopwatch', 'sweeper', 'taskmgr', 'tetris', 'view', 'wish'):
+    for name in ('about', 'coffee', 'clock', 'counter', 'dir', 'explorer', 'logwindow', 'man', 'memory', 'calendar', 'polyhedra', 'snake', 'stopwatch', 'sweeper', 'taskmgr', 'tetris', 'view', 'wish', 'bounce'):
         apps['wm/' + name] = False
     for source in sorted((ROOT / 'appl/cmd').rglob('*.b')):
         relative = source.relative_to(ROOT / 'appl/cmd').with_suffix('').as_posix()
