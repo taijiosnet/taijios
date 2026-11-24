@@ -447,7 +447,11 @@ version's evaluations and leaf counts. Edit keeps the File (New, Open..., Save,
 Save As..., Exit with dirty confirmation), Edit (Cut, Copy, Paste and button-2
 popup), Search (Find..., Replace with..., Find Again, Find and Replace, Find and
 Replace All) and Options (Limbo keyword/comment highlighting and auto-indent,
-Indent) menus.
+Indent) menus. Unibrowse keeps By Category (`/lib/unidata/blocks.txt`), By
+number (hex lookup), Symbol wordsearch (`/lib/unidata/index2.txt`), Font
+information (with `/dis/wm/filename.zx` font chooser), the 3 by 8 glyph table
+with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`,
+category descriptions, Snarf and Paste).
 Each test
 compares the rules and the window with games recorded from the Dis version.
 
@@ -462,6 +466,7 @@ python3 -u appl/wm/collide_zx_test.py
 python3 -u appl/wm/mand_zx_test.py
 python3 -u appl/wm/reversi_zx_test.py
 python3 -u appl/wm/edit_zx_test.py
+python3 -u appl/wm/unibrowse_zx_test.py
 ```
 
 ### Use the ZX Calendar

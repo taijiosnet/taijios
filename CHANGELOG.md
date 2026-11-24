@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Unibrowse (Unicode Browser) only as ZX and remove its Dis version. It keeps By Category (`/lib/unidata/blocks.txt`), By number (hex lookup), Symbol wordsearch (`/lib/unidata/index2.txt`), Font information (with font chooser), the 3 by 8 glyph table with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`, 22 category names, Snarf and Paste).
+
 - Ship Edit only as ZX and remove its Dis version. It keeps File (New, Open... via the ZX File Chooser, Save, Save As..., Exit with dirty-discard confirmation), Edit (Cut, Copy, Paste synced with `/chan/snarf` and button-2 popup), Search (Find..., Replace with..., Find Again, Find and Replace, Find and Replace All), and Options (Limbo keyword/comment syntax highlighting with auto-indent, and configurable Indent).
 
 - Ship Reversi only as ZX and remove its Dis version. It keeps the 8 by 8 board, ring-weight and corner-line alpha-beta minimax at full default level 6, Black and White Human/Machine menus, level entries, last move replay, and `-a`, `-p` and `-s` flags; the model replays a complete 63-1 game recorded from the Dis version and matches its minimax evaluations and leaf counts.

@@ -1,0 +1,75 @@
+// Rule checks for the Unibrowse model: unidata2 lookup, blocks.txt parsing,
+// font subrange parsing, index2.txt wordsearch, UTF-8 round-trip and categories.
+Model :: #import "unibrowse_model";
+#import "std/vec"
+
+Fail :: (code: s32) -> s32 { return code }
+
+main :: () -> s32 {
+    // Hex & C-number parsing and 4-digit hex formatting.
+    if Model.ParseHex("0041") != 0x41 || Model.ParseHex("0x2200") != 0x2200 { return Fail(1) }
+    if Model.ParseCNum("0x017E") != 0x17E || Model.ParseCNum("010") != 8 || Model.ParseCNum("42") != 42 {
+        return Fail(2)
+    }
+    h4: [4]u8
+    unused Model.FormatHex4(0x03B1, h4[:])
+    if TextView(h4[:]) != "03B1" { return Fail(3) }
+
+    // UTF-8 encode & decode across 1-, 2-, and 3-byte BMP runes.
+    u: [4]u8
+    n1 := Model.EncodeUtf8(0x41, u[:])
+    if n1 != 1 || Model.DecodeFirstUtf8(TextView(u[:n1])) != 0x41 { return Fail(4) }
+    n2 := Model.EncodeUtf8(0x03B1, u[:])
+    if n2 != 2 || Model.DecodeFirstUtf8(TextView(u[:n2])) != 0x03B1 { return Fail(5) }
+    n3 := Model.EncodeUtf8(0x2190, u[:])
+    if n3 != 3 || Model.DecodeFirstUtf8(TextView(u[:n3])) != 0x2190 { return Fail(6) }
+
+    // Table alignment & clamping.
+    if Model.TableStart(-5) != 0 || Model.TableStart(0x43) != 0x40 { return Fail(7) }
+    if Model.TableStart(0xFFFF) != 0xFFE0 { return Fail(8) }
+
+    // Category names.
+    if Model.CategName("Lu") != "Letter, Uppercase" || Model.CategName("Sm") != "Symbol, Math" {
+        return Fail(9)
+    }
+
+    // Binary search on sorted unidata2.txt excerpt.
+    unidata := "0041;LATIN CAPITAL LETTER A;Lu;0;L;;;;;N;;;;0061;\n0042;LATIN CAPITAL LETTER B;Lu;0;L;;;;;N;;;;0062;\n03B1;GREEK SMALL LETTER ALPHA;Ll;0;L;;;;;N;GREEK SMALL LETTER ALPHA;;0391;;0391\n"
+    ci := Model.LookupChar(unidata, 0x03B1)
+    if !ci.found { return Fail(10) }
+    if unidata[ci.name_start:ci.name_start + ci.name_len] != "GREEK SMALL LETTER ALPHA" { return Fail(11) }
+    if unidata[ci.cat_start:ci.cat_start + ci.cat_len] != "Ll" { return Fail(12) }
+    miss := Model.LookupChar(unidata, 0x0043)
+    if miss.found { return Fail(13) }
+
+    // Blocks.txt parsing (Unicode 4.1 '..' syntax).
+    blocks := "# comment\n0000..007F; Basic Latin\n0370..03FF; Greek and Coptic\n"
+    entries: Vec(Model.RangeEntry)
+    pool: Vec(u8)
+    defer VecFree(entries)
+    defer VecFree(pool)
+    Model.ParseBlocks(blocks, *entries, *pool)
+    if entries.count != 2 || entries[1].start != 0x0370 || entries[1].end != 0x03FF { return Fail(14) }
+    if TextView(pool[entries[1].label_start:entries[1].label_start + entries[1].label_len]) != "0370-03FF: Greek and Coptic" {
+        return Fail(15)
+    }
+
+    // Font file parsing.
+    font := "17\t14\n0x0000\t0x00FF\tlatin1.9\n0x2190\t0x21EA\t../misc/arrows\n"
+    Model.ParseFont(font, *entries, *pool)
+    if entries.count != 2 || entries[1].start != 0x2190 || entries[1].end != 0x21EA { return Fail(16) }
+    if TextView(pool[entries[1].label_start:entries[1].label_start + entries[1].label_len]) != "2190-21EA: ../misc/arrows" {
+        return Fail(17)
+    }
+
+    // Index wordsearch (case-insensitive prefix).
+    idx := "Alpha, Greek Small\t03B1\nArrow, Leftwards\t2190\nBeta, Greek\t03B2\n"
+    Model.SearchIndex(idx, "arr", *entries, *pool)
+    if entries.count != 1 || entries[0].start != 0x2190 { return Fail(18) }
+    if TextView(pool[entries[0].label_start:entries[0].label_start + entries[0].label_len]) != "2190: Arrow, Leftwards" {
+        return Fail(19)
+    }
+
+    print("Unibrowse matched unidata lookup, blocks, font ranges, wordsearch and UTF-8 rules\n")
+    return 0
+}

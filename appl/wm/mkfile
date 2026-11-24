@@ -40,7 +40,6 @@ TARG=\
 	task.dis\
 	telnet.dis\
 	toolbar.dis\
-	unibrowse.dis\
 	vt.dis\
 	wm.dis\
 	wmplay.dis\
@@ -175,7 +174,10 @@ reversi.zx: reversi.zi reversi_model.zi inferno_rand.zi ../cmd/taijios_io.zi ../
 edit.zx: edit.zi edit_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_process --bind-host taijios_namespace --entry edit:main -o $target edit.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx
+unibrowse.zx: unibrowse.zi unibrowse_model.zi ../cmd/taijios_io.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --entry unibrowse:main -o $target unibrowse.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

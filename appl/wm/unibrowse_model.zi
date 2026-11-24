@@ -1,0 +1,379 @@
+// The data model of Inferno's Unibrowse (appl/wm/unibrowse.b): Unicode data
+// binary/line lookup, blocks.txt and font-file parsing, index2.txt prefix
+// wordsearch, UTF-8 encoding/decoding and 22 Unicode category descriptions.
+// See ../../NOTICE.
+#import "std/vec"
+
+Tablerows :: 3
+Tablecols :: 8
+PageSize :: Tablerows * Tablecols
+MaxCodepoint :: 0xFFFF
+
+RangeEntry :: struct {
+    start: s32
+    end: s32
+    label_start: s64
+    label_len: s64
+}
+
+CharInfo :: struct {
+    found: bool
+    code: s32
+    name_start: s64
+    name_len: s64
+    cat_start: s64
+    cat_len: s64
+    old_start: s64
+    old_len: s64
+}
+
+HexDigit :: (c: u8) -> s32 {
+    if c >= cast(u8)48 && c <= cast(u8)57 { return cast(s32)(c - cast(u8)48) }
+    if c >= cast(u8)65 && c <= cast(u8)70 { return cast(s32)(c - cast(u8)55) }
+    if c >= cast(u8)97 && c <= cast(u8)102 { return cast(s32)(c - cast(u8)87) }
+    return -1
+}
+
+ParseHex :: (s: string) -> s32 {
+    i: s64 = 0
+    while i < s.count && (s[i] == cast(u8)32 || s[i] == cast(u8)9) { i += 1 }
+    if i + 1 < s.count && s[i] == cast(u8)48 && (s[i + 1] == cast(u8)120 || s[i + 1] == cast(u8)88) {
+        i += 2
+    }
+    val: s32 = 0
+    while i < s.count {
+        d := HexDigit(s[i])
+        if d < 0 { break }
+        val = val * 16 + d
+        i += 1
+    }
+    return val
+}
+
+// cnumtoint from unibrowse.b lines 597-612: 0x hex, 0 octal, or decimal.
+ParseCNum :: (s: string) -> s32 {
+    if s.count == 0 { return 0 }
+    if s[0] == cast(u8)48 && s.count > 1 {
+        if s[1] == cast(u8)120 || s[1] == cast(u8)88 {
+            return ParseHex(s[2:])
+        }
+        val: s32 = 0
+        for i: cast(s64)1..s.count - 1 {
+            if s[i] < cast(u8)48 || s[i] > cast(u8)55 { break }
+            val = val * 8 + cast(s32)(s[i] - cast(u8)48)
+        }
+        return val
+    }
+    val: s32 = 0
+    for i: cast(s64)0..s.count - 1 {
+        if s[i] < cast(u8)48 || s[i] > cast(u8)57 { break }
+        val = val * 10 + cast(s32)(s[i] - cast(u8)48)
+    }
+    return val
+}
+
+HexChar :: (n: s32) -> u8 {
+    if n < 10 { return cast(u8)(48 + n) }
+    return cast(u8)(55 + n)
+}
+
+FormatHex4 :: (code: s32, out: []u8) -> s64 {
+    v := code
+    if v < 0 { v = 0 }
+    if v > 0xFFFF { v = 0xFFFF }
+    out[0] = HexChar((v >> 12) & 15)
+    out[1] = HexChar((v >> 8) & 15)
+    out[2] = HexChar((v >> 4) & 15)
+    out[3] = HexChar(v & 15)
+    return 4
+}
+
+// Encode a BMP rune (0..0xFFFF) as UTF-8 into out[0..3], returning byte length.
+EncodeUtf8 :: (code: s32, out: []u8) -> s64 {
+    c := code
+    if c < 0 || c > 0xFFFF { c = 0xFFFD }
+    if c < 0x80 {
+        out[0] = cast(u8)c
+        return 1
+    }
+    if c < 0x800 {
+        out[0] = cast(u8)(0xC0 | ((c >> 6) & 0x1F))
+        out[1] = cast(u8)(0x80 | (c & 0x3F))
+        return 2
+    }
+    out[0] = cast(u8)(0xE0 | ((c >> 12) & 0x0F))
+    out[1] = cast(u8)(0x80 | ((c >> 6) & 0x3F))
+    out[2] = cast(u8)(0x80 | (c & 0x3F))
+    return 3
+}
+
+// Decode first UTF-8 rune from text, returning codepoint or -1 on empty.
+DecodeFirstUtf8 :: (s: string) -> s32 {
+    if s.count == 0 { return -1 }
+    b0 := cast(s32)s[0]
+    if b0 < 0x80 { return b0 }
+    if (b0 & 0xE0) == 0xC0 && s.count >= 2 {
+        return ((b0 & 0x1F) << 6) | (cast(s32)s[1] & 0x3F)
+    }
+    if (b0 & 0xF0) == 0xE0 && s.count >= 3 {
+        return ((b0 & 0x0F) << 12) | ((cast(s32)s[1] & 0x3F) << 6) | (cast(s32)s[2] & 0x3F)
+    }
+    return b0
+}
+
+// Clamp and align table start address matching unibrowse.b filltable().
+TableStart :: (n_in: s32) -> s32 {
+    n := n_in
+    if n < 0 { n = 0 }
+    if n + PageSize > MaxCodepoint { n = MaxCodepoint - PageSize }
+    n -= n % Tablecols
+    return n
+}
+
+// categname from unibrowse.b lines 703-731.
+CategName :: (code: string) -> string {
+    if code == "Mn" { return "Mark, Non-Spacing" }
+    if code == "Mc" { return "Mark, Combining" }
+    if code == "Nd" { return "Number, Decimal Digit" }
+    if code == "No" { return "Number, Other" }
+    if code == "Zs" { return "Separator, Space" }
+    if code == "Zl" { return "Separator, Line" }
+    if code == "Zp" { return "Separator, Paragraph" }
+    if code == "Cc" { return "Other, Control or Format" }
+    if code == "Co" { return "Other, Private Use" }
+    if code == "Cn" { return "Other, Not Assigned" }
+    if code == "Lu" { return "Letter, Uppercase" }
+    if code == "Ll" { return "Letter, Lowercase" }
+    if code == "Lt" { return "Letter, Titlecase" }
+    if code == "Lm" { return "Letter, Modifier" }
+    if code == "Lo" { return "Letter, Other" }
+    if code == "Pd" { return "Punctuation, Dash" }
+    if code == "Ps" { return "Punctuation, Open" }
+    if code == "Pe" { return "Punctuation, Close" }
+    if code == "Po" { return "Punctuation, Other" }
+    if code == "Sm" { return "Symbol, Math" }
+    if code == "Sc" { return "Symbol, Currency" }
+    if code == "So" { return "Symbol, Other" }
+    return "Unknown category"
+}
+
+ToLowerAscii :: (c: u8) -> u8 {
+    if c >= cast(u8)65 && c <= cast(u8)90 { return c + cast(u8)32 }
+    return c
+}
+
+HasPrefixLower :: (line: string, key_lower: string) -> bool {
+    if key_lower.count == 0 || key_lower.count > line.count { return false }
+    for i: cast(s64)0..key_lower.count - 1 {
+        if ToLowerAscii(line[i]) != ToLowerAscii(key_lower[i]) { return false }
+    }
+    return true
+}
+
+// Binary search in sorted /lib/unidata/unidata2.txt (lines start with 4-hex codepoint + ';').
+LookupChar :: (data: string, code: s32) -> CharInfo {
+    info: CharInfo
+    info.code = code
+    if data.count == 0 || code < 0 || code > 0xFFFF { return info }
+
+    lo: s64 = 0
+    hi: s64 = data.count
+    found_start: s64 = -1
+    found_end: s64 = -1
+
+    while lo < hi {
+        mid := (lo + hi) / 2
+        // Advance to start of line containing or following mid.
+        ls := mid
+        while ls > lo && data[ls - 1] != cast(u8)10 { ls -= 1 }
+        le := ls
+        while le < data.count && data[le] != cast(u8)10 { le += 1 }
+        if ls >= data.count { break }
+        line_code := ParseHex(data[ls:le])
+        if line_code == code {
+            found_start = ls
+            found_end = le
+            break
+        }
+        if line_code < code {
+            next := le + 1
+            if next <= lo { break }
+            lo = next
+        } else {
+            if ls >= hi { break }
+            hi = ls
+        }
+    }
+
+    if found_start < 0 { return info }
+    if found_end > found_start && data[found_end - 1] == cast(u8)13 { found_end -= 1 }
+
+    // Parse semicolon-separated fields: 0=VAL, 1=CHARNAME, 2=CATEG, ..., 10=OLDNAME.
+    field_idx: s32 = 0
+    fstart := found_start
+    for i: found_start..found_end {
+        if i < found_end && data[i] != cast(u8)59 { continue }
+        flen := i - fstart
+        if field_idx == 1 { info.name_start = fstart; info.name_len = flen }
+        else if field_idx == 2 { info.cat_start = fstart; info.cat_len = flen }
+        else if field_idx == 10 { info.old_start = fstart; info.old_len = flen }
+        field_idx += 1
+        fstart = i + 1
+    }
+    info.found = true
+    return info
+}
+
+// Parse /lib/unidata/blocks.txt supporting both "START..END; Name" (Unicode 4.1)
+// and "START; END; Name" (older Inferno format).
+ParseBlocks :: (data: string, entries: *Vec(RangeEntry), pool: *Vec(u8)) {
+    VecClear(entries.*)
+    VecClear(pool.*)
+    i: s64 = 0
+    n := data.count
+    while i < n {
+        ls := i
+        while i < n && data[i] != cast(u8)10 { i += 1 }
+        le := i
+        if i < n && data[i] == cast(u8)10 { i += 1 }
+        if le > ls && data[le - 1] == cast(u8)13 { le -= 1 }
+        if le <= ls || data[ls] == cast(u8)35 { continue } // blank or '#'
+
+        line := data[ls:le]
+        // Find first ';'
+        semi: s64 = -1
+        for k: cast(s64)0..line.count - 1 {
+            if line[k] == cast(u8)59 { semi = k; break }
+        }
+        if semi < 0 { continue }
+
+        start_val: s32 = 0
+        end_val: s32 = 0
+        name_pos: s64 = semi + 1
+
+        // Check for ".." before semi.
+        dots: s64 = -1
+        for k: cast(s64)0..semi - 2 {
+            if line[k] == cast(u8)46 && line[k + 1] == cast(u8)46 { dots = k; break }
+        }
+        if dots >= 0 {
+            start_val = ParseHex(line[:dots])
+            end_val = ParseHex(line[dots + 2:semi])
+        } else {
+            start_val = ParseHex(line[:semi])
+            // Second semicolon separates end and name.
+            semi2: s64 = -1
+            for k: semi + 1..line.count - 1 {
+                if line[k] == cast(u8)59 { semi2 = k; break }
+            }
+            if semi2 < 0 { continue }
+            end_val = ParseHex(line[semi + 1:semi2])
+            name_pos = semi2 + 1
+        }
+        while name_pos < line.count && (line[name_pos] == cast(u8)32 || line[name_pos] == cast(u8)9) {
+            name_pos += 1
+        }
+        name := line[name_pos:]
+        if name.count == 0 { continue }
+
+        // Format "XXXX-YYYY: Name" into pool.
+        pstart := pool.count
+        h1: [4]u8
+        h2: [4]u8
+        unused FormatHex4(start_val, h1[:])
+        unused FormatHex4(end_val, h2[:])
+        unused BuilderAppend(pool.*, TextView(h1[:]))
+        unused BuilderAppend(pool.*, "-")
+        unused BuilderAppend(pool.*, TextView(h2[:]))
+        unused BuilderAppend(pool.*, ": ")
+        unused BuilderAppend(pool.*, name)
+        unused VecPush(entries.*, .{start_val, end_val, pstart, pool.count - pstart})
+    }
+}
+
+// Parse an Inferno .font file (header line skipped, then "first last [off] subfont").
+ParseFont :: (data: string, entries: *Vec(RangeEntry), pool: *Vec(u8)) {
+    VecClear(entries.*)
+    VecClear(pool.*)
+    i: s64 = 0
+    n := data.count
+    // Skip header line.
+    while i < n && data[i] != cast(u8)10 { i += 1 }
+    if i < n { i += 1 }
+
+    while i < n {
+        ls := i
+        while i < n && data[i] != cast(u8)10 { i += 1 }
+        le := i
+        if i < n && data[i] == cast(u8)10 { i += 1 }
+        if le > ls && data[le - 1] == cast(u8)13 { le -= 1 }
+        if le <= ls { continue }
+
+        // Tokenize whitespace-separated words (expect 3 or 4).
+        w_start: [4]s64
+        w_end: [4]s64
+        w_count: s32 = 0
+        j := ls
+        while j < le && w_count < 4 {
+            while j < le && (data[j] == cast(u8)32 || data[j] == cast(u8)9) { j += 1 }
+            if j >= le { break }
+            ws := j
+            while j < le && data[j] != cast(u8)32 && data[j] != cast(u8)9 { j += 1 }
+            w_start[w_count] = ws
+            w_end[w_count] = j
+            w_count += 1
+        }
+        if w_count < 3 { continue }
+        first := ParseCNum(data[w_start[0]:w_end[0]])
+        last := ParseCNum(data[w_start[1]:w_end[1]])
+        name_idx := ifx w_count == 4 then cast(s32)3 else cast(s32)2
+        name := data[w_start[name_idx]:w_end[name_idx]]
+
+        pstart := pool.count
+        h1: [4]u8
+        h2: [4]u8
+        unused FormatHex4(first, h1[:])
+        unused FormatHex4(last, h2[:])
+        unused BuilderAppend(pool.*, TextView(h1[:]))
+        unused BuilderAppend(pool.*, "-")
+        unused BuilderAppend(pool.*, TextView(h2[:]))
+        unused BuilderAppend(pool.*, ": ")
+        unused BuilderAppend(pool.*, name)
+        unused VecPush(entries.*, .{first, last, pstart, pool.count - pstart})
+    }
+}
+
+// Search /lib/unidata/index2.txt for lines whose prefix matches key (case-insensitive).
+// Emits "CODE: description" entries into entries/pool (matching unibrowse.b lines 403-416).
+SearchIndex :: (data: string, key: string, entries: *Vec(RangeEntry), pool: *Vec(u8)) {
+    VecClear(entries.*)
+    VecClear(pool.*)
+    if key.count == 0 { return }
+    i: s64 = 0
+    n := data.count
+    while i < n {
+        ls := i
+        while i < n && data[i] != cast(u8)10 { i += 1 }
+        le := i
+        if i < n && data[i] == cast(u8)10 { i += 1 }
+        if le > ls && data[le - 1] == cast(u8)13 { le -= 1 }
+        if le <= ls { continue }
+
+        line := data[ls:le]
+        if !HasPrefixLower(line, key) { continue }
+        tab: s64 = -1
+        for k: cast(s64)0..line.count - 1 {
+            if line[k] == cast(u8)9 { tab = k; break }
+        }
+        if tab < 0 { continue }
+        desc := line[:tab]
+        code_str := line[tab + 1:]
+        code := ParseHex(code_str)
+
+        pstart := pool.count
+        unused BuilderAppend(pool.*, code_str)
+        unused BuilderAppend(pool.*, ": ")
+        unused BuilderAppend(pool.*, desc)
+        unused VecPush(entries.*, .{code, code, pstart, pool.count - pstart})
+    }
+}

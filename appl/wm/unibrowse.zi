@@ -1,0 +1,443 @@
+// Port of Inferno's Unibrowse (appl/wm/unibrowse.b), built as unibrowse.zx.
+// See ../../NOTICE.
+// Keeps the four navigation modes (By Category, By number, Symbol wordsearch,
+// Font information), 3x8 glyph table with Next/Prev paging, Font chooser, and
+// Character Inspector with Glyph, Hex, Name, Category, Comment, Snarf and Paste.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+Model :: #import "unibrowse_model";
+IO :: #import "taijios_io";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+
+WinW :: 620
+WinH :: 340
+LeftW :: 156
+RowH :: 20
+ListRows :: 8
+InspectorY :: 214
+Chooser :: "/dis/wm/filename.zx"
+
+UnidataPath :: "/lib/unidata/unidata2.txt"
+UniindexPath :: "/lib/unidata/index2.txt"
+UniblocksPath :: "/lib/unidata/blocks.txt"
+DefaultFontPath :: "/fonts/lucm/unicode.9.font"
+
+ViewCategory :: 0
+ViewNumber :: 1
+ViewSearch :: 2
+ViewFont :: 3
+ViewTable :: 4
+
+grey: Color = .{221, 221, 221, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{140, 140, 140, 255};
+sel_bg: Color = .{200, 220, 245, 255};
+panel_bg: Color = .{232, 232, 232, 255};
+
+unidata: Vec(u8);
+uniindex: Vec(u8);
+blocks_raw: Vec(u8);
+font_raw: Vec(u8);
+curr_font: Vec(u8);
+snarf: Vec(u8);
+notice_msg: Vec(u8);
+
+list_entries: Vec(Model.RangeEntry);
+list_pool: Vec(u8);
+list_scroll: s32;
+
+active_view: s32 = ViewCategory;
+table_base: s32 = 0;
+currc: s32 = 0x41; // 'A'
+cur_info: Model.CharInfo;
+show_inspector: bool = true;
+
+num_bytes: [32]u8;
+num_field: Field.State;
+srch_bytes: [128]u8;
+srch_field: Field.State;
+
+choice_fd: s32 = -1;
+choice_bytes: [512]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+ReadFileAll :: (path: string, out: *Vec(u8)) -> bool {
+    VecClear(out.*)
+    fd := IO.Open(path, 0)
+    if fd < 0 { return false }
+    buf: [8192]u8
+    while true {
+        n := IO.Read(fd, buf[:])
+        if n <= 0 { break }
+        unused BuilderAppend(out.*, TextView(buf[:n]))
+    }
+    unused IO.Close(fd)
+    return true
+}
+
+SelectChar :: (code: s32) {
+    c := code
+    if c < 0 { c = 0 }
+    if c > Model.MaxCodepoint { c = Model.MaxCodepoint }
+    currc = c
+    cur_info = Model.LookupChar(TextView(unidata[:]), currc)
+}
+
+OpenTableAt :: (code: s32) {
+    table_base = Model.TableStart(code)
+    SelectChar(code)
+    active_view = ViewTable
+    VecClear(notice_msg)
+}
+
+LoadCategories :: () {
+    VecClear(notice_msg)
+    if blocks_raw.count == 0 {
+        if !ReadFileAll(UniblocksPath, *blocks_raw) {
+            SetVec(*notice_msg, "No categories found")
+            VecClear(list_entries)
+            return
+        }
+    }
+    Model.ParseBlocks(TextView(blocks_raw[:]), *list_entries, *list_pool)
+    list_scroll = 0
+}
+
+LoadFontInfo :: () {
+    VecClear(notice_msg)
+    if !ReadFileAll(TextView(curr_font[:]), *font_raw) {
+        SetVec(*notice_msg, "Can't find font information file")
+        VecClear(list_entries)
+        return
+    }
+    Model.ParseFont(TextView(font_raw[:]), *list_entries, *list_pool)
+    list_scroll = 0
+}
+
+RunWordSearch :: (key: string) {
+    VecClear(notice_msg)
+    if uniindex.count == 0 {
+        if !ReadFileAll(UniindexPath, *uniindex) {
+            SetVec(*notice_msg, "Can't open unicode index file")
+            VecClear(list_entries)
+            return
+        }
+    }
+    Model.SearchIndex(TextView(uniindex[:]), key, *list_entries, *list_pool)
+    list_scroll = 0
+    if list_entries.count == 0 {
+        SetVec(*notice_msg, "No match")
+    }
+}
+
+SnarfPutChar :: (code: s32) {
+    u: [4]u8
+    n := Model.EncodeUtf8(code, u[:])
+    s := TextView(u[:n])
+    SetVec(*snarf, s)
+    fd := IO.Open("/chan/snarf", 1)
+    if fd >= 0 {
+        unused IO.Write(fd, s)
+        unused IO.Close(fd)
+    }
+}
+
+SnarfPasteChar :: () {
+    fd := IO.Open("/chan/snarf", 0)
+    if fd >= 0 {
+        buf: [64]u8
+        n := IO.Read(fd, buf[:])
+        unused IO.Close(fd)
+        if n > 0 { SetVec(*snarf, TextView(buf[:n])) }
+    }
+    if snarf.count > 0 {
+        code := Model.DecodeFirstUtf8(TextView(snarf[:]))
+        if code >= 0 { SelectChar(code) }
+    }
+}
+
+OpenFontChooser :: () {
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 { return }
+    words: [5]string = .["-t", "Select a font", "-d", "/fonts", "*.font"]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 { unused IO.Close(ends[0]); return }
+    choice_fd = ends[0]
+}
+
+PollFontChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        choice_used = 0
+        return
+    }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        if line > 0 {
+            SetVec(*curr_font, TextView(choice_bytes[:line]))
+            if active_view == ViewFont { LoadFontInfo() }
+        }
+        choice_used = 0
+    }
+}
+
+DrawScrollableList :: (session: Session, rx: float32, ry: float32, rw: float32, rows: s32) {
+    max_scroll := cast(s32)list_entries.count - rows
+    if max_scroll < 0 { max_scroll = 0 }
+    if list_scroll > max_scroll { list_scroll = max_scroll }
+    if list_scroll < 0 { list_scroll = 0 }
+
+    list_w := rw - 46.0
+    list_h := cast(float32)(rows * RowH)
+    Box.Draw(session, .{.key = 200, .bounds = .{rx, ry, list_w, list_h}, .fill = light})
+
+    if Button.Draw(session, .{.key = 201, .bounds = .{rx + list_w + 4.0, ry, 42.0, 22.0}, .label = "Up"}) > 0 {
+        list_scroll -= rows
+        if list_scroll < 0 { list_scroll = 0 }
+    }
+    if Button.Draw(session, .{.key = 202, .bounds = .{rx + list_w + 4.0, ry + list_h - 22.0, 42.0, 22.0}, .label = "Down"}) > 0 {
+        list_scroll += rows
+        if list_scroll > max_scroll { list_scroll = max_scroll }
+    }
+
+    for r: 0..rows - 1 {
+        idx := cast(s64)(list_scroll + cast(s32)r)
+        if idx >= list_entries.count { break }
+        e := list_entries[idx]
+        lbl := TextView(list_pool[e.label_start:e.label_start + e.label_len])
+        if Button.Draw(session, .{.key = cast(u64)(210 + r),
+                .bounds = .{rx + 1.0, ry + cast(float32)(r * RowH), list_w - 2.0, cast(float32)RowH},
+                .label = lbl}) > 0 {
+            OpenTableAt(e.start)
+            return
+        }
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 420.0 { w = cast(float32)WinW }
+    if h < 260.0 { h = cast(float32)WinH }
+
+    PollFontChooser()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    input := TextFieldInputFor(key, mods, text)
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Left panel: main mode list + Inspector & Font buttons.
+    Box.Draw(session, .{.key = 2, .bounds = .{4.0, 4.0, cast(float32)LeftW, 198.0}, .fill = panel_bg})
+    if Button.Draw(session, .{.key = 10, .bounds = .{8.0, 8.0, 148.0, 24.0}, .label = "By Category"}) > 0 {
+        active_view = ViewCategory
+        LoadCategories()
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{8.0, 36.0, 148.0, 24.0}, .label = "By number"}) > 0 {
+        active_view = ViewNumber
+        num_field.focused = true
+        VecClear(notice_msg)
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{8.0, 64.0, 148.0, 24.0}, .label = "Symbol wordsearch"}) > 0 {
+        active_view = ViewSearch
+        srch_field.focused = true
+        VecClear(notice_msg)
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{8.0, 92.0, 148.0, 24.0}, .label = "Font information"}) > 0 {
+        active_view = ViewFont
+        LoadFontInfo()
+    }
+    if Button.Draw(session, .{.key = 14, .bounds = .{8.0, 168.0, 72.0, 24.0}, .label = "Inspector"}) > 0 {
+        show_inspector = !show_inspector
+    }
+    if Button.Draw(session, .{.key = 15, .bounds = .{84.0, 168.0, 72.0, 24.0}, .label = "Font"}) > 0 {
+        OpenFontChooser()
+    }
+
+    // Right panel: active view (Category list, Hex number, Wordsearch, Font ranges, or 3x8 Table).
+    rx: float32 = cast(float32)LeftW + 10.0
+    rw: float32 = w - rx - 6.0
+    Box.Draw(session, .{.key = 3, .bounds = .{rx, 4.0, rw, 198.0}, .fill = panel_bg})
+
+    if active_view == ViewCategory {
+        Text.Draw(session, .{.key = 30, .bounds = .{rx + 6.0, 8.0, rw - 12.0, 18.0},
+            .text = "Unicode Blocks (By Category)", .size = 12})
+        DrawScrollableList(session, rx + 6.0, 30.0, rw - 12.0, ListRows)
+    } else if active_view == ViewNumber {
+        Text.Draw(session, .{.key = 30, .bounds = .{rx + 8.0, 16.0, 140.0, 22.0},
+            .text = "Hex unicode value", .size = 12, .vertical_align = .TextAlignCenter})
+        nres := Field.Draw(session, Field.StateProps(num_field, .{.key = 31, .focus_id = 31,
+            .bounds = .{rx + 152.0, 16.0, 100.0, 22.0}, .max_bytes = 16, .input = input}))
+        unused Field.StateApplyResult(*num_field, nres)
+        if nres.committed {
+            OpenTableAt(Model.ParseHex(TextView(num_bytes[:num_field.length])))
+        }
+        if Button.Draw(session, .{.key = 32, .bounds = .{rx + 260.0, 16.0, 60.0, 22.0}, .label = "Go"}) > 0 {
+            OpenTableAt(Model.ParseHex(TextView(num_bytes[:num_field.length])))
+        }
+    } else if active_view == ViewSearch {
+        Text.Draw(session, .{.key = 30, .bounds = .{rx + 6.0, 8.0, 60.0, 22.0},
+            .text = "Search:", .size = 12, .vertical_align = .TextAlignCenter})
+        sres := Field.Draw(session, Field.StateProps(srch_field, .{.key = 33, .focus_id = 33,
+            .bounds = .{rx + 66.0, 8.0, rw - 144.0, 22.0}, .max_bytes = 120, .input = input}))
+        unused Field.StateApplyResult(*srch_field, sres)
+        if sres.committed {
+            RunWordSearch(TextView(srch_bytes[:srch_field.length]))
+        }
+        if Button.Draw(session, .{.key = 34, .bounds = .{rx + rw - 72.0, 8.0, 66.0, 22.0}, .label = "Find"}) > 0 {
+            RunWordSearch(TextView(srch_bytes[:srch_field.length]))
+        }
+        if notice_msg.count > 0 {
+            Text.Draw(session, .{.key = 35, .bounds = .{rx + 6.0, 36.0, rw - 12.0, 20.0},
+                .text = TextView(notice_msg[:]), .size = 12})
+        } else {
+            DrawScrollableList(session, rx + 6.0, 34.0, rw - 12.0, 7)
+        }
+    } else if active_view == ViewFont {
+        Text.Draw(session, .{.key = 30, .bounds = .{rx + 6.0, 8.0, rw - 12.0, 18.0},
+            .text = TextView(curr_font[:]), .size = 12})
+        DrawScrollableList(session, rx + 6.0, 30.0, rw - 12.0, ListRows)
+    } else if active_view == ViewTable {
+        // 3 rows x 8 cols glyph table matching unibrowse.b inittable/filltable.
+        for r: 0..Model.Tablerows - 1 {
+            row_code := table_base + cast(s32)r * Model.Tablecols
+            hbuf: [4]u8
+            unused Model.FormatHex4(row_code, hbuf[:])
+            ry := 14.0 + cast(float32)(r * 44)
+            Text.Draw(session, .{.key = cast(u64)(300 + r), .bounds = .{rx + 6.0, ry, 46.0, 38.0},
+                .text = TextView(hbuf[:]), .size = 12, .vertical_align = .TextAlignCenter})
+            for c: 0..Model.Tablecols - 1 {
+                code := row_code + cast(s32)c
+                ubuf: [4]u8
+                ulen := Model.EncodeUtf8(code, ubuf[:])
+                cx := rx + 56.0 + cast(float32)(c * 46)
+                if code == currc {
+                    Box.Draw(session, .{.key = cast(u64)(310 + r * 8 + c),
+                        .bounds = .{cx - 1.0, ry - 1.0, 44.0, 40.0}, .fill = sel_bg})
+                }
+                if Button.Draw(session, .{.key = cast(u64)(340 + r * 8 + c),
+                        .bounds = .{cx, ry, 42.0, 38.0}, .label = TextView(ubuf[:ulen])}) > 0 {
+                    SelectChar(code)
+                    show_inspector = true
+                }
+            }
+        }
+        if Button.Draw(session, .{.key = 390, .bounds = .{rx + 56.0, 160.0, 68.0, 26.0}, .label = "Next"}) > 0 {
+            table_base = Model.TableStart(table_base + Model.PageSize)
+        }
+        if Button.Draw(session, .{.key = 391, .bounds = .{rx + 130.0, 160.0, 68.0, 26.0}, .label = "Prev"}) > 0 {
+            table_base = Model.TableStart(table_base - Model.PageSize)
+        }
+    }
+
+    // Bottom Character Inspector panel.
+    if show_inspector {
+        iy := cast(float32)InspectorY
+        ih := h - iy - 4.0
+        Box.Draw(session, .{.key = 400, .bounds = .{4.0, iy, w - 8.0, ih}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 401, .bounds = .{4.0, iy, w - 8.0, 1.0}, .fill = dark})
+
+        gbuf: [4]u8
+        glen := Model.EncodeUtf8(currc, gbuf[:])
+        hbuf: [4]u8
+        unused Model.FormatHex4(currc, hbuf[:])
+
+        Text.Draw(session, .{.key = 402, .bounds = .{10.0, iy + 8.0, 48.0, 24.0},
+            .text = "Glyph:", .size = 12, .vertical_align = .TextAlignCenter})
+        Box.Draw(session, .{.key = 403, .bounds = .{60.0, iy + 6.0, 32.0, 28.0}, .fill = light})
+        Text.Draw(session, .{.key = 404, .bounds = .{60.0, iy + 6.0, 32.0, 28.0},
+            .text = TextView(gbuf[:glen]), .size = 16,
+            .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+
+        Text.Draw(session, .{.key = 405, .bounds = .{w - 90.0, iy + 8.0, 76.0, 24.0},
+            .text = TextView(hbuf[:]), .size = 13, .align = .TextAlignEnd,
+            .vertical_align = .TextAlignCenter})
+
+        if cur_info.found {
+            ud := TextView(unidata[:])
+            Text.Draw(session, .{.key = 406, .bounds = .{10.0, iy + 40.0, w - 20.0, 18.0},
+                .text = ud[cur_info.name_start:cur_info.name_start + cur_info.name_len], .size = 12})
+            Text.Draw(session, .{.key = 407, .bounds = .{10.0, iy + 60.0, w - 20.0, 18.0},
+                .text = Model.CategName(ud[cur_info.cat_start:cur_info.cat_start + cur_info.cat_len]), .size = 12})
+            if cur_info.old_len > 0 {
+                Text.Draw(session, .{.key = 408, .bounds = .{10.0, iy + 78.0, w - 160.0, 18.0},
+                    .text = ud[cur_info.old_start:cur_info.old_start + cur_info.old_len], .size = 12})
+            }
+        } else {
+            Text.Draw(session, .{.key = 406, .bounds = .{10.0, iy + 40.0, w - 20.0, 18.0},
+                .text = "No entry found in unicode table", .size = 12})
+        }
+
+        if Button.Draw(session, .{.key = 410, .bounds = .{w - 144.0, iy + ih - 28.0, 64.0, 22.0}, .label = "Snarf"}) > 0 {
+            SnarfPutChar(currc)
+        }
+        if Button.Draw(session, .{.key = 411, .bounds = .{w - 74.0, iy + ih - 28.0, 64.0, 22.0}, .label = "Paste"}) > 0 {
+            SnarfPasteChar()
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    SetVec(*curr_font, DefaultFontPath)
+    num_field.bytes = num_bytes[:]
+    srch_field.bytes = srch_bytes[:]
+
+    unused ReadFileAll(UnidataPath, *unidata)
+    SelectChar(0x41)
+    LoadCategories()
+
+    rc := Surface.RunRetained(.{.title = "Unicode browser", .width = WinW, .height = WinH}, Draw, 50)
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(unidata)
+    VecFree(uniindex)
+    VecFree(blocks_raw)
+    VecFree(font_raw)
+    VecFree(curr_font)
+    VecFree(snarf)
+    VecFree(notice_msg)
+    VecFree(list_entries)
+    VecFree(list_pool)
+    return rc
+}
