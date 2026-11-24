@@ -1,0 +1,35 @@
+// The Inferno audio header parser for WmPlay (appl/wm/wmplay.b): validates the
+// "rate" magic, locates the "\n\n" header terminator, and enforces 4-byte
+// header alignment matching wmplay.b lines 66-93. See ../../NOTICE.
+
+HeaderResult :: struct {
+    ok: bool
+    header_end: s64
+    error: string
+}
+
+// Parse Inferno audio header from initial buffer read (at most ATOMICIO bytes).
+// On success: ctl_bytes = buf[:header_end - 1], initial_pcm = buf[header_end:].
+ParseAudioHeader :: (buf: []u8) -> HeaderResult {
+    n := buf.count
+    if n < 10 || buf[0] != cast(u8)114 || buf[1] != cast(u8)97 ||
+       buf[2] != cast(u8)116 || buf[3] != cast(u8)101 {
+        return .{false, 0, "not an audio file"}
+    }
+    i: s64 = 0
+    while true {
+        if i == n { return .{false, 0, "bad header"} }
+        if buf[i] == cast(u8)10 {
+            i += 1
+            if i == n { return .{false, 0, "bad header"} }
+            if buf[i] == cast(u8)10 {
+                i += 1
+                if (i % 4) != 0 { return .{false, 0, "unpadded header"} }
+                return .{true, i, ""}
+            }
+        } else {
+            i += 1
+        }
+    }
+    return .{false, 0, "bad header"}
+}

@@ -1,0 +1,212 @@
+
+
+#import "std/vec"
+
+
+RIFFCode :: 0x46464952
+AVICode :: 0x20495641
+LISTCode :: 0x5453494C
+HdrlCode :: 0x6C726468
+StrlCode :: 0x6C727473
+AvihCode :: 0x68697661
+StrhCode :: 0x68727473
+StrfCode :: 0x66727473
+VidsCode :: 0x73646976
+MoviCode :: 0x69766F6D
+Idx1Code :: 0x31786469
+DibCode :: 0x62643030
+DibcCode :: 0x63643030
+
+BI_RGB :: 0
+BI_RLE8 :: 1
+
+Frame :: struct {
+    offset: s64
+    length: s64
+}
+
+Movie :: struct {
+    width: s32
+    height: s32
+    usec_per_frame: s32
+    compression: s32
+    bitcount: s32
+
+    palette: [768]u8
+    frames: Vec(Frame)
+}
+
+Word :: (data: []u8, at: s64) -> s32 {
+    return cast(s32)data[at] | cast(s32)data[at+1] << 8 |
+        cast(s32)data[at+2] << 16 | cast(s32)data[at+3] << 24
+}
+
+Short :: (data: []u8, at: s64) -> s32 {
+    return cast(s32)data[at] | cast(s32)data[at+1] << 8
+}
+
+
+
+Header :: (data: []u8, at: *s64) -> (code: s32, length: s64) {
+    if at.* + 8 > data.count { return 0, -1 }
+    code := Word(data, at.*)
+    length := cast(s64)Word(data, at.*+4)
+    at.* += 8
+    return code, length
+}
+
+
+
+Open :: (data: []u8, movie: *Movie) -> string {
+    movie.width = 0
+    movie.height = 0
+    movie.usec_per_frame = 0
+    movie.compression = -1
+    movie.bitcount = 0
+    VecClear(movie.frames)
+    if data.count < 12 { return "file is too short" }
+    if Word(data, 0) != RIFFCode { return "not a RIFF file" }
+    if Word(data, 8) != AVICode { return "bad four code header information" }
+    at: s64 = 12
+    code, size := Header(data, *at)
+    if code != LISTCode { return "no list under AVI section header" }
+    if at+4 > data.count || Word(data, at) != HdrlCode { return "no hdrl list" }
+    at += 4
+    code, size = Header(data, *at)
+    if code != AvihCode { return "missing/malformed avih" }
+    if size < 56 || at+56 > data.count { return "short read in avih" }
+    movie.usec_per_frame = Word(data, at)
+    streams := Word(data, at+24)
+    movie.width = Word(data, at+32)
+    movie.height = Word(data, at+36)
+    at += size
+    video := false
+    for stream: cast(s32)0..streams-1 {
+        code, size = Header(data, *at)
+        if code != LISTCode { return "streaminfo expected LIST" }
+        if at+4 > data.count || Word(data, at) != StrlCode { return "streaminfo expected strl" }
+        at += 4
+        code, size = Header(data, *at)
+        if code != StrhCode { return "streaminfo expected strh" }
+        if size < 48 || at+size > data.count { return "streaminfo strl short read" }
+        stype := Word(data, at)
+        at += size
+        code, size = Header(data, *at)
+        if code != StrfCode { return "streaminfo expected strf" }
+        if at+size > data.count { return "streaminfo strf short read" }
+        if stype == VidsCode {
+            if size < 40 { return "format is wrong size for BITMAPINFO" }
+            movie.width = Word(data, at+4)
+            movie.height = Word(data, at+8)
+            movie.bitcount = Short(data, at+14)
+            movie.compression = Word(data, at+16)
+            colours := (size-40) / 4
+            if colours > 256 { colours = 256 }
+            for c: cast(s64)0..colours-1 {
+                movie.palette[c*3] = data[at+40+c*4+2]
+                movie.palette[c*3+1] = data[at+40+c*4+1]
+                movie.palette[c*3+2] = data[at+40+c*4]
+            }
+            video = true
+        }
+        at += size
+    }
+    if !video { return "no video stream" }
+    if movie.bitcount != 8 { return "only 8 bits per pixel is supported" }
+    if movie.compression != BI_RGB && movie.compression != BI_RLE8 {
+        return "unknown compression/encoding method"
+    }
+    if movie.width < 1 || movie.height < 1 || movie.width > 4096 || movie.height > 4096 {
+        return "bad frame size"
+    }
+
+    found := false
+    while true {
+        code, size = Header(data, *at)
+        if size < 0 { break }
+        if code == LISTCode {
+            if at+4 <= data.count && Word(data, at) == MoviCode { at += 4; found = true; break }
+        }
+        at += size + (size & 1)
+    }
+    if !found { return "no movi chunk" }
+
+    while true {
+        code, size = Header(data, *at)
+        if size < 0 { break }
+        if code == Idx1Code { break }
+        if code == DibCode || code == DibcCode {
+            if at+size > data.count { return "truncated frame" }
+            unused VecPush(movie.frames, Frame.{.offset = at, .length = size})
+        }
+        at += size + (size & 1)
+    }
+    if movie.frames.count < 1 { return "no frames" }
+    return ""
+}
+
+PutPixel :: (rgba: []u8, x: s64, y: s64, width: s64, height: s64, palette: []u8, index: s32) {
+    if x < 0 || y < 0 || x >= width || y >= height || index < 0 || index > 255 { return }
+    at := (y*width + x) * 4
+    rgba[at] = palette[index*3]
+    rgba[at+1] = palette[index*3+1]
+    rgba[at+2] = palette[index*3+2]
+    rgba[at+3] = 255
+}
+
+
+
+Decode :: (movie: *Movie, data: []u8, index: s32, rgba: []u8) -> string {
+    if index < 0 || index >= movie.frames.count { return "no such frame" }
+    frame := movie.frames[index]
+    if frame.offset+frame.length > data.count { return "truncated frame" }
+    body := data[frame.offset:frame.offset+frame.length]
+    width := cast(s64)movie.width
+    height := cast(s64)movie.height
+    if rgba.count < width*height*4 { return "pixel buffer is too small" }
+    if movie.compression == BI_RGB {
+        if body.count < width*height { return "short frame" }
+        for i: cast(s64)0..width*height-1 {
+            PutPixel(rgba, i % width, i / width, width, height, movie.palette[:], cast(s32)body[i])
+        }
+        return ""
+    }
+
+
+    p: s64 = 0
+    x: s64 = 0
+    y: s64 = height-1
+    while p < body.count {
+        n := cast(s32)body[p]
+        p += 1
+        if n == 0 {
+            if p >= body.count { break }
+            escape := cast(s32)body[p]
+            p += 1
+            if escape == 0 { x = 0; y -= 1; continue }
+            if escape == 1 { break }
+            if escape == 2 {
+                if p+1 >= body.count { break }
+                x += cast(s64)body[p]; p += 1
+                y -= cast(s64)body[p]; p += 1
+                continue
+            }
+            for k: cast(s32)0..escape-1 {
+                if p >= body.count { break }
+                PutPixel(rgba, x, y, width, height, movie.palette[:], cast(s32)body[p])
+                p += 1
+                x += 1
+            }
+            if (p & 1) != 0 { p += 1 }
+            continue
+        }
+        if p >= body.count { break }
+        colour := cast(s32)body[p]
+        p += 1
+        for k: cast(s32)0..n-1 {
+            PutPixel(rgba, x, y, width, height, movie.palette[:], colour)
+            x += 1
+        }
+    }
+    return ""
+}

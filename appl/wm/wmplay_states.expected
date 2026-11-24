@@ -1,0 +1,2 @@
+# Deterministic audio header validation checks matching appl/wm/wmplay.b:
+# "rate" magic, "\n\n" header terminator, and 4-byte padding check.

@@ -1,0 +1,41 @@
+// Rule checks for the WmPlay audio header parser matching appl/wm/wmplay.b.
+Model :: #import "wmplay_model";
+
+Fail :: (code: s32) -> s32 { return code }
+
+CopyStr :: (s: string, out: []u8) -> s64 {
+    for i: cast(s64)0..s.count - 1 { out[i] = s[i] }
+    return s.count
+}
+
+main :: () -> s32 {
+    buf: [128]u8
+
+    // Valid 4-byte-aligned Inferno audio header: "rate 44100\nchans 2\n\n" (20 bytes).
+    n1 := CopyStr("rate 44100\nchans 2\n\nABCD", buf[:])
+    r1 := Model.ParseAudioHeader(buf[:n1])
+    if !r1.ok || r1.header_end != 20 { return Fail(1) }
+
+    // Missing "rate" magic.
+    n2 := CopyStr("RIFF12345678\n\n", buf[:])
+    r2 := Model.ParseAudioHeader(buf[:n2])
+    if r2.ok || r2.error != "not an audio file" { return Fail(2) }
+
+    // Too short (< 10 bytes).
+    n3 := CopyStr("rate\n\n", buf[:])
+    r3 := Model.ParseAudioHeader(buf[:n3])
+    if r3.ok || r3.error != "not an audio file" { return Fail(3) }
+
+    // Missing double newline terminator.
+    n4 := CopyStr("rate 44100\nchans 2\n", buf[:])
+    r4 := Model.ParseAudioHeader(buf[:n4])
+    if r4.ok || r4.error != "bad header" { return Fail(4) }
+
+    // Unpadded header (length 19 not divisible by 4).
+    n5 := CopyStr("rate 44100\nchans1\n\nDATA", buf[:])
+    r5 := Model.ParseAudioHeader(buf[:n5])
+    if r5.ok || r5.error != "unpadded header" { return Fail(5) }
+
+    print("WmPlay validated aligned Inferno audio headers and rejected malformed inputs\n")
+    return 0
+}

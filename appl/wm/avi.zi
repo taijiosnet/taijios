@@ -1,0 +1,338 @@
+// AVI Player, ported from Inferno's appl/wm/avi.b. See ../../NOTICE.
+// Plays the Dis player's formats: 8-bit uncompressed and BI_RLE8 AVI files.
+// usage: avi [file.avi]
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Text :: #import "kryon/text";
+ImageWidget :: #import "kryon/image";
+Model :: #import "avi_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Clock :: #import "taijios_clock";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/bitmap_image"
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+
+// Layout, matching the Dis window's client area: a 14-pixel name row, an
+// 18-pixel button band and a 360x270 canvas below them.
+WinW :: 360;
+WinH :: 302;
+CanvasY :: 32;
+CanvasH :: 270;
+BandY :: 14;
+BandH :: 18;
+MaxBytes :: 67108864;
+Chooser :: "/dis/wm/filename.zx";
+
+Stopped :: 0;
+Playing :: 1;
+Paused :: 2;
+
+face: Color = .{221, 221, 221, 255};
+active: Color = .{238, 238, 238, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{173, 173, 173, 255};
+
+data: Vec(u8);
+movie: Model.Movie;
+pixels: Vec(u8);
+texture: Texture2D;
+path_bytes: [1024]u8;
+path_length: s64;
+state: s32 = 0;
+frame_index: s64;
+next_frame: s64;
+choice: s32 = -1;
+choice_bytes: [1024]u8;
+choice_used: s64;
+pressed: s32 = -1;
+notice: Vec(u8);
+
+SetNotice :: (text: string) {
+    VecClear(notice)
+    unused BuilderAppend(notice, text)
+}
+
+FrameMillis :: () -> s32 {
+    if movie.usec_per_frame <= 0 { return 20 }
+    ms := movie.usec_per_frame / 1000
+    if ms < 20 { return 20 }
+    if ms > 1000 { return 1000 }
+    return ms
+}
+
+Inside :: (x: float32, y: float32, left: s32, top: s32, width: s32, height: s32) -> bool {
+    return x >= cast(float32)left && y >= cast(float32)top &&
+        x < cast(float32)(left + width) && y < cast(float32)(top + height)
+}
+
+Bevel :: (session: Session, key: u64, left: s32, top: s32, width: s32, height: s32, sunken: bool) {
+    upper := ifx sunken then dark else light
+    lower := ifx sunken then light else dark
+    x := cast(float32)left
+    y := cast(float32)top
+    w := cast(float32)width
+    h := cast(float32)height
+    Box.Draw(session, .{.key = key, .bounds = .{x, y, w, 1.0}, .fill = upper})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x, y, 1.0, h}, .fill = upper})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x + 1.0, y + h - 1.0, w - 1.0, 1.0}, .fill = lower})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x + w - 1.0, y + 1.0, 1.0, h - 1.0}, .fill = lower})
+}
+
+DrawButton :: (session: Session, key: u64, btn: s32, left: s32, top: s32, width: s32, height: s32,
+               label: string, px: float32, py: float32) {
+    hovered := Inside(px, py, left, top, width, height)
+    sunken := pressed == btn && hovered
+    fill := ifx hovered then active else face
+    Box.Draw(session, .{.key = key, .bounds = .{cast(float32)left, cast(float32)top,
+        cast(float32)width, cast(float32)height}, .fill = fill})
+    Bevel(session, key + 1, left, top, width, height, sunken)
+    Text.Draw(session, .{.key = key + 5, .bounds = .{cast(float32)left, cast(float32)top,
+        cast(float32)width, cast(float32)height}, .text = label, .size = 12,
+        .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+}
+
+ShowFrame :: (session: Session, index: s64) {
+    problem := Model.Decode(*movie, data[:], cast(s32)index, pixels[:])
+    if problem != "" {
+        SetNotice(problem)
+        state = Stopped
+        return
+    }
+    if texture.id != cast(u32)0 {
+        if !BitmapImageUpdate(session, texture, pixels[:]) {
+            BitmapImageRelease(session, texture)
+            texture = .{}
+        }
+    }
+    if texture.id == cast(u32)0 {
+        texture = BitmapImageCreate(session, movie.width, movie.height, pixels[:])
+        if texture.id == cast(u32)0 {
+            SetNotice("Not enough memory to display this AVI file")
+            state = Stopped
+        }
+    }
+}
+
+Load :: (path: string) {
+    state = Stopped
+    frame_index = -1
+    VecClear(notice)
+    n := path.count
+    if n > path_bytes.count { n = path_bytes.count }
+    for i: cast(s64)0..n-1 { path_bytes[i] = path[i] }
+    path_length = n
+    if path.count == 0 { return }
+    metadata: [12]u8
+    if IO.Stat(path, metadata[:]) != 0 {
+        SetNotice("Cannot read this file")
+        return
+    }
+    length: s64 = 0
+    for i: cast(s32)0..7 { length |= cast(s64)metadata[i] << cast(s64)(i*8) }
+    if length < 0 || length > MaxBytes {
+        SetNotice("The AVI file exceeds the 64 MiB limit")
+        return
+    }
+    if (metadata[11] & cast(u8)128) != cast(u8)0 {
+        SetNotice("Choose an AVI file, not a folder")
+        return
+    }
+    if !VecResizeBounded(data, length, MaxBytes) {
+        SetNotice("Not enough memory to open this AVI file")
+        return
+    }
+    fd := IO.Open(path, 0)
+    if fd < 0 {
+        SetNotice("Cannot open this AVI file")
+        return
+    }
+    used: s64 = 0
+    while used < length {
+        count := IO.Read(fd, data[used:])
+        if count <= 0 || cast(s64)count > length - used {
+            unused IO.Close(fd)
+            SetNotice("The AVI file was truncated while reading")
+            return
+        }
+        used += cast(s64)count
+    }
+    unused IO.Close(fd)
+    problem := Model.Open(data[:], *movie)
+    if problem != "" {
+        SetNotice(problem)
+        return
+    }
+    layer := cast(s64)movie.width * cast(s64)movie.height * 4
+    if !VecResizeBounded(pixels, layer, MaxBytes) {
+        SetNotice("Not enough memory to decode this AVI file")
+        return
+    }
+    for i: cast(s64)0..layer-1 { pixels[i] = 0 }
+    for i: cast(s64)0..layer/4-1 { pixels[i*4+3] = 255 }
+}
+
+PollChoice :: (session: Session) {
+    if choice < 0 { return }
+    buffer: [256]u8
+    n := IO.PollRead(choice, buffer[:])
+    if n == -2 { return }
+    if n < 0 {
+        unused IO.Close(choice)
+        choice = -1
+        choice_used = 0
+        return
+    }
+    for i: cast(s32)0..n-1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buffer[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice)
+        choice = -1
+        line: s64 = choice_used
+        for i: cast(s64)0..choice_used-1 {
+            if choice_bytes[i] == 10 { line = i; break }
+        }
+        if line > 0 { Load(TextView(choice_bytes[:line])) }
+        choice_used = 0
+    }
+}
+
+OpenChooser :: () {
+    state = Stopped
+    if choice >= 0 { unused IO.Close(choice); choice = -1 }
+    choice_used = 0
+    VecClear(notice)
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 {
+        SetNotice("Cannot make a pipe for the file chooser")
+        return
+    }
+    words: [4]string = .["-t", "Locate AVI files", "*.avi (Microsoft movie files)", "* (All Files)"]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 {
+        unused IO.Close(ends[0])
+        VecClear(notice)
+        unused BuilderAppend(notice, "Cannot run the file chooser: ")
+        unused BuilderAppend(notice, launch.error)
+        return
+    }
+    choice = ends[0]
+}
+
+PressPlay :: (session: Session) {
+    if state == Playing { return }
+    if state == Paused {
+        state = Playing
+        next_frame = Clock.MonotonicMillis() + FrameMillis()
+        return
+    }
+    if movie.frames.count == 0 { return }
+    frame_index = 0
+    state = Playing
+    next_frame = Clock.MonotonicMillis() + FrameMillis()
+    ShowFrame(session, 0)
+}
+
+Advance :: (session: Session) {
+    if state != Playing { return }
+    if frame_index < 0 {
+        frame_index = 0
+        ShowFrame(session, 0)
+        next_frame = Clock.MonotonicMillis() + FrameMillis()
+        return
+    }
+    now := Clock.MonotonicMillis()
+    if now < next_frame { return }
+    if frame_index + 1 >= movie.frames.count {
+        state = Stopped
+        return
+    }
+    frame_index += 1
+    ShowFrame(session, frame_index)
+    next_frame += FrameMillis()
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    pointer := PointerSample(session)
+    px := pointer.x
+    py := pointer.y
+    PollChoice(session)
+    if texture.id != cast(u32)0 && frame_index < 0 {
+        BitmapImageRelease(session, texture)
+        texture = .{}
+    }
+
+    if pointer.pressed {
+        pressed = -1
+        if Inside(px, py, 0, BandY, 42, BandH) { pressed = 0 }
+        else if Inside(px, py, 42, BandY, 42, BandH) { pressed = 1 }
+        else if Inside(px, py, 84, BandY, 50, BandH) { pressed = 2 }
+        else if Inside(px, py, 134, BandY, 42, BandH) { pressed = 3 }
+    }
+    if pointer.released {
+        if pressed == 0 && Inside(px, py, 0, BandY, 42, BandH) { OpenChooser() }
+        else if pressed == 1 && Inside(px, py, 42, BandY, 42, BandH) { state = Stopped }
+        else if pressed == 2 && Inside(px, py, 84, BandY, 50, BandH) {
+            if state == Playing { state = Paused }
+        }
+        else if pressed == 3 && Inside(px, py, 134, BandY, 42, BandH) { PressPlay(session) }
+        pressed = -1
+    }
+    Advance(session)
+
+    Box.Draw(session, .{.key = 1, .bounds = bounds, .fill = face})
+    Text.Draw(session, .{.key = 2, .bounds = .{4.0, 0.0, 40.0, 12.0}, .text = "File:", .size = 13})
+    if notice.count > 0 {
+        Text.Draw(session, .{.key = 3, .bounds = .{41.0, 0.0, bounds.width - 42.0, 12.0},
+            .text = TextView(notice[:]), .size = 13})
+    } else {
+        Text.Draw(session, .{.key = 4, .bounds = .{41.0, 0.0, bounds.width - 42.0, 12.0},
+            .text = TextView(path_bytes[:path_length]), .size = 13})
+    }
+
+    DrawButton(session, 10, 0, 0, BandY, 42, BandH, "File", px, py)
+    DrawButton(session, 20, 1, 42, BandY, 42, BandH, "Stop", px, py)
+    DrawButton(session, 30, 2, 84, BandY, 50, BandH, "Pause", px, py)
+    DrawButton(session, 40, 3, 134, BandY, 42, BandH, "Play", px, py)
+
+    Box.Draw(session, .{.key = 50, .bounds = .{0.0, cast(float32)CanvasY,
+        cast(float32)WinW, cast(float32)CanvasH}, .fill = face})
+    if frame_index >= 0 && texture.id != cast(u32)0 {
+        left: s32 = 0
+        top: s32 = 0
+        if movie.width < WinW { left = (WinW - movie.width) / 2 }
+        if movie.height < CanvasH { top = (CanvasH - movie.height) / 2 }
+        ImageWidget.Draw(session, .{.key = 60, .texture = texture,
+            .bounds = .{cast(float32)left, cast(float32)(CanvasY + top),
+                cast(float32)movie.width, cast(float32)movie.height},
+            .alt_text = "AVI frame", .tint = cast(u32)4294967295, .smooth = false})
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() > 0 {
+        argument := Args.Operand(0)
+        if argument.count > 0 { Load(argument) }
+    }
+    rc := Surface.RunRetained(.{.title = "AVI Player", .width = WinW, .height = WinH}, Draw, 20)
+    VecFree(data)
+    VecFree(movie.frames)
+    VecFree(pixels)
+    VecFree(notice)
+    return rc
+}

@@ -1,0 +1,252 @@
+// Port of Inferno's WmPlay (appl/wm/wmplay.b), built as wmplay.zx. See ../../NOTICE.
+// usage: wm/wmplay [audiofile]
+// Without an argument, opens /dis/wm/filename.zx to choose *.iaf or *.wav.
+// Parses the Inferno audio header ("rate" magic, "\n\n" terminator, 4-byte
+// alignment), configures /dev/audioctl, and streams audio data to /dev/audio.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Model :: #import "wmplay_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "std/vec"
+
+WinW :: 360
+WinH :: 96
+AtomIO :: 8192
+Chooser :: "/dis/wm/filename.zx"
+AudioData :: "/dev/audio"
+AudioCtl :: "/dev/audioctl"
+
+StateChoose :: 0
+StatePlay :: 1
+StateError :: 2
+
+grey: Color = .{221, 221, 221, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{150, 150, 150, 255};
+
+state: s32 = StateChoose;
+file_path: Vec(u8);
+err_msg: Vec(u8);
+
+inf_fd: s32 = -1;
+audio_fd: s32 = -1;
+chunk_buf: [AtomIO]u8;
+
+choice_fd: s32 = -1;
+choice_bytes: [1024]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+CloseStreams :: () {
+    if inf_fd >= 0 { unused IO.Close(inf_fd); inf_fd = -1 }
+    if audio_fd >= 0 { unused IO.Close(audio_fd); audio_fd = -1 }
+}
+
+FailPlay :: (prefix: string, detail: string) {
+    CloseStreams()
+    VecClear(err_msg)
+    unused BuilderAppend(err_msg, prefix)
+    if detail.count > 0 {
+        unused BuilderAppend(err_msg, ": ")
+        unused BuilderAppend(err_msg, detail)
+    }
+    state = StateError
+}
+
+BeginPlay :: (path: string) {
+    CloseStreams()
+    SetVec(*file_path, path)
+    if path.count == 0 {
+        Surface.Close()
+        return
+    }
+    fd := IO.Open(path, 0)
+    if fd < 0 {
+        FailPlay("could not open file", path)
+        return
+    }
+    n := IO.Read(fd, chunk_buf[:])
+    if n < 0 {
+        unused IO.Close(fd)
+        FailPlay("could not read file", path)
+        return
+    }
+    hdr := Model.ParseAudioHeader(chunk_buf[:n])
+    if !hdr.ok {
+        unused IO.Close(fd)
+        FailPlay(path, hdr.error)
+        return
+    }
+    df := IO.Open(AudioData, 1)
+    if df < 0 {
+        unused IO.Close(fd)
+        FailPlay("could not open /dev/audio", IO.Error())
+        return
+    }
+    cf := IO.Open(AudioCtl, 1)
+    if cf < 0 {
+        unused IO.Close(fd)
+        unused IO.Close(df)
+        FailPlay("could not open /dev/audioctl", IO.Error())
+        return
+    }
+    if IO.Write(cf, TextView(chunk_buf[:hdr.header_end - 1])) < 0 {
+        unused IO.Close(cf)
+        unused IO.Close(fd)
+        unused IO.Close(df)
+        FailPlay("could not write /dev/audioctl", IO.Error())
+        return
+    }
+    unused IO.Close(cf)
+    if cast(s64)n > hdr.header_end {
+        if IO.Write(df, TextView(chunk_buf[hdr.header_end:n])) < 0 {
+            unused IO.Close(fd)
+            unused IO.Close(df)
+            FailPlay("could not write /dev/audio", IO.Error())
+            return
+        }
+    }
+    inf_fd = fd
+    audio_fd = df
+    state = StatePlay
+}
+
+OpenChooser :: () {
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 {
+        FailPlay("could not open file chooser", "pipe failed")
+        return
+    }
+    words: [4]string = .["-t", "Locate Audio File", "*.iaf", "*.wav"]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 {
+        unused IO.Close(ends[0])
+        FailPlay("could not open file chooser", launch.error)
+        return
+    }
+    choice_fd = ends[0]
+    state = StateChoose
+}
+
+PollChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        choice_used = 0
+        return
+    }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        choice_used = 0
+        if line > 0 {
+            BeginPlay(TextView(choice_bytes[:line]))
+        } else {
+            Surface.Close()
+        }
+    }
+}
+
+StepStream :: () {
+    if state != StatePlay || inf_fd < 0 || audio_fd < 0 { return }
+    n := IO.Read(inf_fd, chunk_buf[:])
+    if n < 0 {
+        FailPlay("could not stream audio", IO.Error())
+        return
+    }
+    if n == 0 {
+        CloseStreams()
+        Surface.Close()
+        return
+    }
+    if IO.Write(audio_fd, TextView(chunk_buf[:n])) < 0 {
+        FailPlay("could not write /dev/audio", IO.Error())
+        return
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 200.0 { w = cast(float32)WinW }
+    if h < 64.0 { h = cast(float32)WinH }
+
+    PollChooser()
+    StepStream()
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+    Box.Draw(session, .{.key = 2, .bounds = .{0.0, 0.0, w, 2.0}, .fill = light})
+    Box.Draw(session, .{.key = 3, .bounds = .{0.0, 0.0, 2.0, h}, .fill = light})
+    Box.Draw(session, .{.key = 4, .bounds = .{0.0, h - 2.0, w, 2.0}, .fill = dark})
+    Box.Draw(session, .{.key = 5, .bounds = .{w - 2.0, 0.0, 2.0, h}, .fill = dark})
+
+    if state == StateError {
+        Text.Draw(session, .{.key = 10, .bounds = .{10.0, 10.0, w - 20.0, 42.0},
+            .text = TextView(err_msg[:]), .size = 12})
+        if Button.Draw(session, .{.key = 11, .bounds = .{w / 2.0 - 40.0, h - 32.0, 80.0, 22.0}, .label = "OK"}) > 0 {
+            Surface.Close()
+        }
+    } else if state == StatePlay {
+        Text.Draw(session, .{.key = 12, .bounds = .{10.0, 12.0, w - 20.0, 28.0},
+            .text = TextView(file_path[:]), .size = 12,
+            .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+        if Button.Draw(session, .{.key = 13, .bounds = .{w / 2.0 - 40.0, h - 32.0, 80.0, 22.0}, .label = "Stop"}) > 0 {
+            CloseStreams()
+            Surface.Close()
+        }
+    } else {
+        Text.Draw(session, .{.key = 14, .bounds = .{10.0, 12.0, w - 20.0, 28.0},
+            .text = "Select an audio file (*.iaf, *.wav)", .size = 12,
+            .align = .TextAlignCenter, .vertical_align = .TextAlignCenter})
+        if Button.Draw(session, .{.key = 15, .bounds = .{w / 2.0 - 46.0, h - 32.0, 92.0, 22.0}, .label = "Choose..."}) > 0 {
+            OpenChooser()
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    if Args.OperandCount() > 0 {
+        arg := Args.Operand(0)
+        if arg.count > 0 { BeginPlay(arg) }
+    }
+    rc := Surface.RunRetained(.{.title = "Play", .width = WinW, .height = WinH}, Draw, 25)
+    CloseStreams()
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(file_path)
+    VecFree(err_msg)
+    return rc
+}

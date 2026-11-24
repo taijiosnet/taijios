@@ -451,7 +451,11 @@ Indent) menus. Unibrowse keeps By Category (`/lib/unidata/blocks.txt`), By
 number (hex lookup), Symbol wordsearch (`/lib/unidata/index2.txt`), Font
 information (with `/dis/wm/filename.zx` font chooser), the 3 by 8 glyph table
 with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`,
-category descriptions, Snarf and Paste).
+category descriptions, Snarf and Paste). AVI Player keeps File, Stop, Pause,
+Play, the `/dis/wm/filename.zx` chooser, and 8-bit uncompressed and BI_RLE8
+RIFF/AVI playback. WmPlay keeps Inferno audio header validation (`rate` magic,
+`\n\n` terminator, 4-byte alignment), `/dev/audioctl` configuration, `/dev/audio`
+streaming and the file chooser.
 Each test
 compares the rules and the window with games recorded from the Dis version.
 
@@ -467,6 +471,8 @@ python3 -u appl/wm/mand_zx_test.py
 python3 -u appl/wm/reversi_zx_test.py
 python3 -u appl/wm/edit_zx_test.py
 python3 -u appl/wm/unibrowse_zx_test.py
+python3 -u appl/wm/avi_zx_test.py
+python3 -u appl/wm/wmplay_zx_test.py
 ```
 
 ### Use the ZX Calendar

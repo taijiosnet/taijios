@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship AVI Player and WmPlay only as ZX and remove their Dis versions. AVI Player keeps File (via `/dis/wm/filename.zx`), Stop, Pause, Play, and 8-bit uncompressed and BI_RLE8 RIFF/AVI decoding; WmPlay keeps Inferno audio header validation (`rate` magic, `\n\n` terminator, 4-byte alignment), `/dev/audioctl` setup, `/dev/audio` streaming and file selection.
+
 - Ship Unibrowse (Unicode Browser) only as ZX and remove its Dis version. It keeps By Category (`/lib/unidata/blocks.txt`), By number (hex lookup), Symbol wordsearch (`/lib/unidata/index2.txt`), Font information (with font chooser), the 3 by 8 glyph table with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`, 22 category names, Snarf and Paste).
 
 - Ship Edit only as ZX and remove its Dis version. It keeps File (New, Open... via the ZX File Chooser, Save, Save As..., Exit with dirty-discard confirmation), Edit (Cut, Copy, Paste synced with `/chan/snarf` and button-2 popup), Search (Find..., Replace with..., Find Again, Find and Replace, Find and Replace All), and Options (Limbo keyword/comment syntax highlighting with auto-indent, and configurable Indent).

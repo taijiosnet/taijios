@@ -1,0 +1,99 @@
+
+Model :: #import "avi_model";
+Fixture :: #import "avi_sample_fixture";
+
+Width :: 32
+Height :: 24
+
+HexDigit :: (c: u8) -> s32 {
+    if c >= 48 && c <= 57 { return cast(s32)c - 48 }
+    if c >= 97 && c <= 102 { return cast(s32)c - 87 }
+    if c >= 65 && c <= 70 { return cast(s32)c - 55 }
+    return -1
+}
+
+
+HexBytes :: (text: string, out: []u8) -> s64 {
+    used: s64 = 0
+    high: s32 = -1
+    for i: cast(s64)0..text.count-1 {
+        value := HexDigit(text[i])
+        if value < 0 { continue }
+        if high < 0 { high = value; continue }
+        if used < out.count { out[used] = cast(u8)(high*16+value); used += 1 }
+        high = -1
+    }
+    return used
+}
+
+
+Expected :: (frame: s32, x: s64, y: s64) -> s32 {
+    if frame == 0 { if ((x/2 + y/2) & 1) == 0 { return 1 }; return 0 }
+    if frame == 1 { if x < 16 { return 1 }; return 2 }
+    if ((x/4 + y/4) & 1) == 0 { return 3 }
+    return 2
+}
+
+
+CheckFrame :: (movie: *Model.Movie, data: []u8, index: s32, rgba: []u8) -> s32 {
+    for i: cast(s64)0..Width*Height-1 {
+        rgba[i*4] = 0; rgba[i*4+1] = 0; rgba[i*4+2] = 0; rgba[i*4+3] = 255
+    }
+    problem := Model.Decode(movie, data, index, rgba)
+    if problem != "" { print("frame %: %\n", index, problem); return 1 }
+    for y: cast(s64)0..Height-1 {
+        for x: cast(s64)0..Width-1 {
+            at := (y*Width+x)*4
+            want := Expected(index, x, y)
+            r := cast(s32)rgba[at]; g := cast(s32)rgba[at+1]; b := cast(s32)rgba[at+2]
+            got := -1
+            if r == 255 && g == 0 && b == 0 { got = 1 }
+            else if r == 0 && g == 255 && b == 0 { got = 2 }
+            else if r == 0 && g == 0 && b == 255 { got = 3 }
+            else if r == 0 && g == 0 && b == 0 { got = 0 }
+            if got != want {
+                print("frame % at %,% got index % want %\n", index, x, y, got, want)
+                return 1
+            }
+            if rgba[at+3] != 255 {
+                print("frame % at %,% is transparent\n", index, x, y)
+                return 1
+            }
+        }
+    }
+    return 0
+}
+
+#program_export
+main :: () -> s32 {
+    bytes: [4096]u8
+    count := HexBytes(Fixture.Games, bytes[:])
+    if count != 1718 { print("fixture is % bytes, want 1718\n", count); return 1 }
+    movie: Model.Movie
+    problem := Model.Open(bytes[:count], *movie)
+    if problem != "" { print("open: %\n", problem); return 1 }
+    if movie.width != Width || movie.height != Height {
+        print("size %x%, want %x%\n", movie.width, movie.height, Width, Height)
+        return 1
+    }
+    if movie.usec_per_frame != 100000 {
+        print("usec per frame %\n", movie.usec_per_frame)
+        return 1
+    }
+    if movie.compression != Model.BI_RLE8 || movie.bitcount != 8 {
+        print("compression % bits %\n", movie.compression, movie.bitcount)
+        return 1
+    }
+    if movie.frames.count != 3 { print("frames %\n", movie.frames.count); return 1 }
+
+    if movie.palette[0] != 0 || movie.palette[3] != 255 || movie.palette[7] != 255 || movie.palette[11] != 255 {
+        print("palette % % % %\n", movie.palette[0], movie.palette[3], movie.palette[7], movie.palette[11])
+        return 1
+    }
+    pixels: [Width*Height*4]u8
+    for frame: cast(s32)0..2 {
+        if CheckFrame(*movie, bytes[:count], frame, pixels[:]) != 0 { return 1 }
+    }
+    print("AVI model matched 3 RLE8 frames of 32x24\n")
+    return 0
+}
