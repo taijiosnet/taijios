@@ -1,4 +1,4 @@
-# 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 39 rows
+# 5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 38 rows
 
 Owner: WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner)
 
@@ -27,7 +27,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | dis/wm/getauthinfo.dis | appl/wm/getauthinfo.b |  | - |  |
 | dis/wm/keyboard.dis | appl/wm/keyboard.b | module/keyboard.m | - |  |
 | dis/wm/logon.dis | appl/wm/logon.b |  | - |  |
-| dis/wm/mand.dis | appl/wm/mand.b |  | - |  |
 | dis/wm/mash.dis | appl/wm/mash.b |  | - |  |
 | dis/wm/mprof.dis | appl/wm/mprof.b |  | - |  |
 | dis/wm/pen.dis | appl/wm/pen.b |  | - |  |

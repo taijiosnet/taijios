@@ -1,0 +1,308 @@
+// Port of Inferno's Mand (appl/wm/mand.b), built as mand.zx. See ../../NOTICE.
+// usage: wm/mand [R [G [B]]]
+// Mandelbrot/Julia fractal browser:
+// button 1 - drag a rectangle to zoom into
+// button 2 - (from mandel only) show julia at point
+// button 3 - zoom out
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+ImageWidget :: #import "kryon/image";
+Model :: #import "mand_model";
+Args :: #import "taijios_args";
+#import "kryon/bitmap_image"
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+BarH :: 28
+Border :: 3
+CanvasW :: Model.DefaultWidth
+CanvasH :: Model.DefaultHeight
+CanvasX :: Border
+CanvasY :: BarH + Border
+Width :: CanvasW + Border * 2
+Height :: BarH + CanvasH + Border * 2
+ColsPerFrame :: 16
+MaxStack :: 64
+
+grey: Color = .{221, 221, 221, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{136, 136, 136, 255};
+black: Color = .{0, 0, 0, 255};
+check_fill: Color = .{68, 68, 68, 255};
+
+StackItem :: struct {
+    specr: Model.FracRect
+    params: Model.Params
+}
+
+palette: [256]Model.RGB;
+pixels: Vec(u8);
+texture: Texture2D;
+texture_dirty: bool;
+
+specr: Model.FracRect;
+params: Model.Params;
+calc: Model.Calc;
+stack: [MaxStack]StackItem;
+stack_len: s32;
+
+depth_bytes: [16]u8;
+depth_field: Field.State;
+
+dragging: bool;
+drag_x0: s32;
+drag_y0: s32;
+drag_x1: s32;
+drag_y1: s32;
+
+Number :: (text: string) -> s32 {
+    value: s32 = 0
+    negative := text.count > 0 && text[0] == cast(u8)45
+    for i: cast(s64)(ifx negative then 1 else 0)..text.count - 1 {
+        if text[i] < cast(u8)48 || text[i] > cast(u8)57 { break }
+        value = value * 10 + cast(s32)(text[i] - cast(u8)48)
+    }
+    return ifx negative then -value else value
+}
+
+SetDepthField :: (value: s32) {
+    digits: [24]u8
+    text := FormatInteger(cast(s64)value, digits[:])
+    depth_field.length = 0
+    for i: cast(s64)0..text.count - 1 {
+        if depth_field.length >= 15 { break }
+        depth_field.bytes[depth_field.length] = text[i]
+        depth_field.length += 1
+    }
+    depth_field.cursor = depth_field.length
+    depth_field.anchor = depth_field.length
+}
+
+ClearPixelsWhite :: () {
+    total := cast(s64)CanvasW * cast(s64)CanvasH * 4
+    if pixels.count != total {
+        unused VecResize(pixels, total)
+    }
+    for i: 0..total - 1 {
+        pixels[i] = cast(u8)255
+    }
+}
+
+RestartCalc :: () {
+    params.r = Model.CorrectRatio(specr, CanvasW, CanvasH)
+    ClearPixelsWhite()
+    Model.CalcInit(*calc, params, CanvasW, CanvasH)
+    texture_dirty = true
+}
+
+Inside :: (x: float32, y: float32, left: s32, top: s32, width: s32, height: s32) -> bool {
+    return x >= cast(float32)left && y >= cast(float32)top &&
+        x < cast(float32)(left + width) && y < cast(float32)(top + height)
+}
+
+Clamp :: (v: s32, low: s32, high: s32) -> s32 {
+    if v < low { return low }
+    if v > high { return high }
+    return v
+}
+
+PushState :: () {
+    if stack_len < MaxStack {
+        stack[stack_len] = .{specr, params}
+        stack_len += 1
+    }
+}
+
+PopState :: () {
+    if stack_len <= 0 { return }
+    stack_len -= 1
+    specr = stack[stack_len].specr
+    params = stack[stack_len].params
+    SetDepthField(params.kdivisor)
+    RestartCalc()
+}
+
+HandleInput :: (session: Session) {
+    p1 := PointerSample(session)
+    p2 := TertiaryPointerSample(session)
+    p3 := SecondaryPointerSample(session)
+
+    // Fill checkbutton on top-right.
+    if p1.released && !dragging && Inside(p1.x, p1.y, 342, 3, 60, 22) {
+        params.fill = !params.fill
+        RestartCalc()
+        return
+    }
+
+    // Button 1: drag rectangle to zoom into.
+    if p1.pressed && Inside(p1.x, p1.y, CanvasX, CanvasY, CanvasW, CanvasH) {
+        dragging = true
+        drag_x0 = Clamp(cast(s32)p1.x - CanvasX, 0, CanvasW)
+        drag_y0 = Clamp(cast(s32)p1.y - CanvasY, 0, CanvasH)
+        drag_x1 = drag_x0
+        drag_y1 = drag_y0
+    }
+    if dragging {
+        drag_x1 = Clamp(cast(s32)p1.x - CanvasX, 0, CanvasW)
+        drag_y1 = Clamp(cast(s32)p1.y - CanvasY, 0, CanvasH)
+        if p1.released {
+            dragging = false
+            x0 := ifx drag_x0 < drag_x1 then drag_x0 else drag_x1
+            x1 := ifx drag_x0 < drag_x1 then drag_x1 else drag_x0
+            y0 := ifx drag_y0 < drag_y1 then drag_y0 else drag_y1
+            y1 := ifx drag_y0 < drag_y1 then drag_y1 else drag_y0
+            if x1 > x0 && y1 > y0 {
+                PushState()
+                pmin := Model.PtToReal(x0, y0, CanvasW, CanvasH, params.r)
+                pmax := Model.PtToReal(x1, y1, CanvasW, CanvasH, params.r)
+                // Swap y to canonicalise (screen y grows downward, imag y upward).
+                specr = .{.{pmin.x, pmax.y}, .{pmax.x, pmin.y}}
+                RestartCalc()
+            }
+        }
+    }
+
+    // Button 2 (middle click): switch from Mandelbrot to Julia at clicked point.
+    if p2.released && Inside(p1.x, p1.y, CanvasX, CanvasY, CanvasW, CanvasH) {
+        if params.m {
+            PushState()
+            cx := Clamp(cast(s32)p1.x - CanvasX, 0, CanvasW)
+            cy := Clamp(cast(s32)p1.y - CanvasY, 0, CanvasH)
+            params.p = Model.PtToReal(cx, cy, CanvasW, CanvasH, params.r)
+            specr = .{.{-2.0, -1.5}, .{1.0, 1.5}}
+            params.m = false
+            RestartCalc()
+        }
+    }
+
+    // Button 3 (right click): zoom out (pop view stack).
+    if p3.released && Inside(p1.x, p1.y, CanvasX, CanvasY, CanvasW, CanvasH) {
+        PopState()
+    }
+}
+
+DrawSunkenBorder :: (session: Session, key: u64, x: float32, y: float32, w: float32, h: float32) {
+    // 3-pixel sunken relief frame matching Tk's -bd 3 -relief sunken.
+    Box.Draw(session, .{.key = key, .bounds = .{x, y, w, 3.0}, .fill = dark})
+    Box.Draw(session, .{.key = key + 1, .bounds = .{x, y, 3.0, h}, .fill = dark})
+    Box.Draw(session, .{.key = key + 2, .bounds = .{x, y + h - 3.0, w, 3.0}, .fill = light})
+    Box.Draw(session, .{.key = key + 3, .bounds = .{x + w - 3.0, y, 3.0, h}, .fill = light})
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    input := TextFieldInputFor(key, mods, text)
+
+    HandleInput(session)
+
+    // Advance fractal calculation slice and upload bitmap when changed.
+    if !calc.done {
+        unused Model.StepColumns(*calc, ColsPerFrame, palette[:], pixels[:])
+        texture_dirty = true
+    }
+    if texture.id == cast(u32)0 {
+        texture = BitmapImageCreate(session, CanvasW, CanvasH, pixels[:])
+        texture_dirty = false
+    } else if texture_dirty {
+        if !BitmapImageUpdate(session, texture, pixels[:]) {
+            BitmapImageRelease(session, texture)
+            texture = BitmapImageCreate(session, CanvasW, CanvasH, pixels[:])
+        }
+        texture_dirty = false
+    }
+
+    // Top bar: Depth label, entry, and Fill checkbutton.
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, cast(float32)Width, cast(float32)Height}, .fill = grey})
+    Text.Draw(session, .{.key = 2, .bounds = .{4.0, 4.0, 44.0, 20.0}, .text = "Depth",
+        .size = 12, .vertical_align = .TextAlignCenter})
+    edit := Field.Draw(session, Field.StateProps(depth_field, .{.key = 10, .focus_id = 10,
+        .bounds = .{50.0, 3.0, 286.0, 22.0}, .max_bytes = 15, .input = input}))
+    unused Field.StateApplyResult(*depth_field, edit)
+    if edit.committed {
+        div := Number(TextView(depth_bytes[:depth_field.length]))
+        if div < 1 { div = 1 }
+        params.kdivisor = div
+        RestartCalc()
+    }
+
+    // Fill checkbutton indicator and label.
+    Box.Draw(session, .{.key = 20, .bounds = .{346.0, 8.0, 12.0, 12.0}, .fill = light})
+    Box.Draw(session, .{.key = 21, .bounds = .{346.0, 8.0, 12.0, 1.0}, .fill = dark})
+    Box.Draw(session, .{.key = 22, .bounds = .{346.0, 8.0, 1.0, 12.0}, .fill = dark})
+    Box.Draw(session, .{.key = 23, .bounds = .{346.0, 19.0, 12.0, 1.0}, .fill = black})
+    Box.Draw(session, .{.key = 24, .bounds = .{357.0, 8.0, 1.0, 12.0}, .fill = black})
+    if params.fill {
+        Box.Draw(session, .{.key = 25, .bounds = .{349.0, 11.0, 6.0, 6.0}, .fill = check_fill})
+    }
+    Text.Draw(session, .{.key = 26, .bounds = .{362.0, 4.0, 40.0, 20.0}, .text = "Fill",
+        .size = 12, .vertical_align = .TextAlignCenter})
+
+    // Sunken canvas frame and fractal bitmap.
+    DrawSunkenBorder(session, 30, 0.0, cast(float32)BarH,
+        cast(float32)(CanvasW + Border * 2), cast(float32)(CanvasH + Border * 2))
+    if texture.id != cast(u32)0 {
+        ImageWidget.Draw(session, .{.key = 40, .texture = texture,
+            .bounds = .{cast(float32)CanvasX, cast(float32)CanvasY,
+                cast(float32)CanvasW, cast(float32)CanvasH},
+            .alt_text = "Fractal", .tint = cast(u32)4294967295, .smooth = false})
+    }
+
+    // White drag selection border while button 1 is held.
+    if dragging {
+        x0 := ifx drag_x0 < drag_x1 then drag_x0 else drag_x1
+        x1 := ifx drag_x0 < drag_x1 then drag_x1 else drag_x0
+        y0 := ifx drag_y0 < drag_y1 then drag_y0 else drag_y1
+        y1 := ifx drag_y0 < drag_y1 then drag_y1 else drag_y0
+        rx := cast(float32)(CanvasX + x0)
+        ry := cast(float32)(CanvasY + y0)
+        rw := cast(float32)(x1 - x0 + 1)
+        rh := cast(float32)(y1 - y0 + 1)
+        Box.Draw(session, .{.key = 50, .bounds = .{rx, ry, rw, 1.0}, .fill = light})
+        Box.Draw(session, .{.key = 51, .bounds = .{rx, ry + rh - 1.0, rw, 1.0}, .fill = light})
+        Box.Draw(session, .{.key = 52, .bounds = .{rx, ry, 1.0, rh}, .fill = light})
+        Box.Draw(session, .{.key = 53, .bounds = .{rx + rw - 1.0, ry, 1.0, rh}, .fill = light})
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    r_steps: s32 = 6
+    g_steps: s32 = 6
+    b_steps: s32 = 6
+    n := Args.OperandCount()
+    if n >= 1 { r_steps = Number(Args.Operand(0)); if r_steps <= 0 { r_steps = 1 } }
+    if n >= 2 { g_steps = Number(Args.Operand(1)); if g_steps <= 0 { g_steps = 1 } }
+    if n >= 3 { b_steps = Number(Args.Operand(2)); if b_steps <= 0 { b_steps = 1 } }
+    Model.InitPalette(palette[:], r_steps, g_steps, b_steps)
+
+    specr = .{.{-2.0, -1.5}, .{1.0, 1.5}}
+    params = .{
+        .r = specr,
+        .p = .{0.0, 0.0},
+        .m = true,
+        .kdivisor = 1,
+        .fill = true,
+    }
+    depth_field.bytes = depth_bytes[:]
+    SetDepthField(1)
+    RestartCalc()
+
+    rc := Surface.RunRetained(.{.title = "Fractals", .width = Width, .height = Height}, Draw, 20)
+    Model.CalcFree(*calc)
+    VecFree(pixels)
+    return rc
+}

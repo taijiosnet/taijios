@@ -1,0 +1,432 @@
+// The rules of Inferno's Mand (appl/wm/mand.b): fixed-point Mandelbrot and
+// Julia escape counts, Green's-theorem contour crawling and horizontal fill,
+// aspect-ratio correction and 256-entry RGB colour cube. See ../../NOTICE.
+#import "std/vec"
+
+BASE :: 60
+HBASE :: 30
+SCALE :: 1152921504606846976
+TWO :: 2305843009213693952
+FOUR :: 4611686018427387904
+
+BLANK :: 0
+BORDER :: 255
+LIMIT :: 4
+MAXCOUNT :: 253
+
+DefaultWidth :: 400
+DefaultHeight :: 400
+
+FracPoint :: struct {
+    x: float64
+    y: float64
+}
+
+FracRect :: struct {
+    min: FracPoint
+    max: FracPoint
+}
+
+Params :: struct {
+    r: FracRect
+    p: FracPoint
+    m: bool
+    kdivisor: s32
+    fill: bool
+}
+
+RGB :: struct {
+    r: u8
+    g: u8
+    b: u8
+}
+
+// col(i, r) from mand.b: quantize i mod r into 0..255.
+ColorChannel :: (i: s32, steps: s32) -> u8 {
+    if steps <= 1 { return cast(u8)0 }
+    return cast(u8)((255 * (i % steps)) / (steps - 1))
+}
+
+InitPalette :: (out: []RGB, r_steps: s32, g_steps: s32, b_steps: s32) {
+    rs := ifx r_steps <= 0 then cast(s32)1 else r_steps
+    gs := ifx g_steps <= 0 then cast(s32)1 else g_steps
+    bs := ifx b_steps <= 0 then cast(s32)1 else b_steps
+    gb := gs * bs
+    for i: 0..255 {
+        idx := cast(s32)i
+        out[i] = .{
+            ColorChannel(idx / gb, rs),
+            ColorChannel(idx / bs, gs),
+            ColorChannel(idx, bs),
+        }
+    }
+}
+
+RectDx :: (r: FracRect) -> float64 { return r.max.x - r.min.x }
+RectDy :: (r: FracRect) -> float64 { return r.max.y - r.min.y }
+
+// correctratio from mand.b: expand r so its aspect ratio matches the bitmap
+// while always enclosing the requested region.
+CorrectRatio :: (rect: FracRect, width: s32, height: s32) -> FracRect {
+    if width <= 0 || height <= 0 {
+        return .{.{0.0, 0.0}, .{0.0, 0.0}}
+    }
+    r := rect
+    btall := cast(float64)height / cast(float64)width
+    atall := RectDy(r) / RectDx(r)
+    if btall > atall {
+        excess := RectDx(r) * btall - RectDy(r)
+        r.min.y -= excess / 2.0
+        r.max.y += excess / 2.0
+    } else {
+        excess := RectDy(r) / btall - RectDx(r)
+        r.min.x -= excess / 2.0
+        r.max.x += excess / 2.0
+    }
+    return r
+}
+
+// pt2real from mand.b: map bitmap pixel (px, py) into complex plane coordinates.
+PtToReal :: (px: s32, py: s32, width: s32, height: s32, r: FracRect) -> FracPoint {
+    x := cast(float64)px / cast(float64)width * (r.max.x - r.min.x) + r.min.x
+    y := cast(float64)(height - py) / cast(float64)height * (r.max.y - r.min.y) + r.min.y
+    return .{x, y}
+}
+
+RealToFix :: (x: float64) -> s64 {
+    return cast(s64)(x * cast(float64)SCALE)
+}
+
+// Arithmetic right shift by HBASE (30) bits for signed 64-bit fixed-point values,
+// matching Limbo's signed big >> HBASE.
+ShiftHalf :: (v: s64) -> s64 {
+    return v >> cast(s64)HBASE
+}
+
+Calc :: struct {
+    maxx: s32
+    maxy: s32
+    supx: s32
+    supy: s32
+    disp: s32
+    morj: bool
+    fill: bool
+    kdivisor: s32
+    parx: s64
+    pary: s64
+    xr: Vec(s64)
+    yr: Vec(s64)
+    // Column-major auxiliary grid with 1-pixel BORDER frame: size supx * supy.
+    dispbase: Vec(u8)
+    // Current column for incremental slicing.
+    col_x: s32
+    done: bool
+    points_eval: s64
+}
+
+CalcFree :: (calc: *Calc) {
+    VecFree(calc.xr)
+    VecFree(calc.yr)
+    VecFree(calc.dispbase)
+}
+
+CalcInit :: (calc: *Calc, p: Params, width: s32, height: s32) {
+    calc.maxx = width
+    calc.maxy = height
+    calc.supx = width + 2
+    calc.supy = height + 2
+    calc.disp = height + 3
+    calc.morj = p.m
+    calc.fill = p.fill
+    calc.kdivisor = ifx p.kdivisor < 1 then cast(s32)1 else p.kdivisor
+    calc.col_x = 0
+    calc.done = false
+    calc.points_eval = 0
+
+    unused VecResize(calc.xr, cast(s64)width)
+    unused VecResize(calc.yr, cast(s64)height)
+
+    r := p.r
+    dp := RealToFix((r.max.x - r.min.x) / cast(float64)width)
+    dq := RealToFix((r.max.y - r.min.y) / cast(float64)height)
+    calc.xr[0] = RealToFix(r.min.x) - (cast(s64)width * dp - (RealToFix(r.max.x) - RealToFix(r.min.x))) / 2
+    for x: 1..width - 1 {
+        calc.xr[x] = calc.xr[x - 1] + dp
+    }
+    calc.yr[0] = RealToFix(r.max.y) + (cast(s64)height * dq - (RealToFix(r.max.y) - RealToFix(r.min.y))) / 2
+    for y: 1..height - 1 {
+        calc.yr[y] = calc.yr[y - 1] - dq
+    }
+    calc.parx = RealToFix(p.p.x)
+    calc.pary = RealToFix(p.p.y)
+
+    total := cast(s64)calc.supx * cast(s64)calc.supy
+    unused VecResize(calc.dispbase, total)
+    for i: 0..total - 1 {
+        calc.dispbase[i] = BLANK
+    }
+    if calc.fill {
+        // 1-pixel BORDER around all four sides, matching mand.b setdisp().
+        d: s32 = 0
+        for i: 0..calc.supx - 1 {
+            calc.dispbase[d] = BORDER
+            d += calc.supy
+        }
+        for i: 0..calc.supy - 1 {
+            calc.dispbase[i] = BORDER
+        }
+        d = calc.supx * calc.supy - 1
+        for i: 0..calc.supx - 1 {
+            calc.dispbase[d] = BORDER
+            d -= calc.supy
+        }
+        d = calc.supx * calc.supy - 1
+        for i: 0..calc.supy - 1 {
+            calc.dispbase[d] = BORDER
+            d -= 1
+        }
+    }
+}
+
+MCount :: (calc: *Calc, x_coord: s32, y_coord: s32) -> s32 {
+    p := calc.xr[x_coord]
+    q := calc.yr[y_coord]
+    x := calc.parx
+    y := calc.pary
+    k: s32 = 0
+    maxcount := MAXCOUNT * calc.kdivisor
+    while k < maxcount {
+        if x >= TWO || y >= TWO || x <= -TWO || y <= -TWO { break }
+        x = ShiftHalf(x)
+        y = ShiftHalf(y)
+        t := y * y
+        y = 2 * x * y + q
+        x *= x
+        if x + t >= FOUR { break }
+        x -= t - p
+        k += 1
+    }
+    return k / calc.kdivisor
+}
+
+JCount :: (calc: *Calc, x_coord: s32, y_coord: s32) -> s32 {
+    x := calc.xr[x_coord]
+    y := calc.yr[y_coord]
+    p := calc.parx
+    q := calc.pary
+    k: s32 = 0
+    maxcount := MAXCOUNT * calc.kdivisor
+    while k < maxcount {
+        if x >= TWO || y >= TWO || x <= -TWO || y <= -TWO { break }
+        x = ShiftHalf(x)
+        y = ShiftHalf(y)
+        t := y * y
+        y = 2 * x * y + q
+        x *= x
+        if x + t >= FOUR { break }
+        x -= t - p
+        k += 1
+    }
+    return k / calc.kdivisor
+}
+
+PointColour :: (calc: *Calc, x: s32, y: s32) -> u8 {
+    calc.points_eval += 1
+    if calc.morj {
+        return cast(u8)(MCount(calc, x, y) + 1)
+    }
+    return cast(u8)(JCount(calc, x, y) + 1)
+}
+
+WritePixel :: (pixels: []u8, width: s32, x: s32, y: s32, rgb: RGB) {
+    if pixels.count == 0 { return }
+    off := (cast(s64)y * cast(s64)width + cast(s64)x) * 4
+    if off < 0 || off + 3 >= pixels.count { return }
+    pixels[off] = rgb.r
+    pixels[off + 1] = rgb.g
+    pixels[off + 2] = rgb.b
+    pixels[off + 3] = cast(u8)255
+}
+
+HorizLine :: (pixels: []u8, width: s32, x0: s32, x1: s32, y: s32, rgb: RGB) {
+    if pixels.count == 0 { return }
+    start: s32
+    end: s32
+    if x0 < x1 {
+        start = x0
+        end = x1
+    } else {
+        start = x1 + 1
+        end = x0 + 1
+    }
+    if start < 0 { start = 0 }
+    if end > width { end = width }
+    for x: start..end - 1 {
+        WritePixel(pixels, width, cast(s32)x, y, rgb)
+    }
+}
+
+GetColour :: (calc: *Calc, x: s32, y: s32, d: s32, palette: []RGB, pixels: []u8) -> u8 {
+    if calc.dispbase[d] == BLANK {
+        c := PointColour(calc, x, y)
+        calc.dispbase[d] = c
+        WritePixel(pixels, calc.maxx, x, y, palette[c])
+    }
+    return calc.dispbase[d]
+}
+
+FillLine :: (calc: *Calc, x_in: s32, y: s32, d_in: s32, dir: s32, dird: s32, col: u8,
+             palette: []RGB, pixels: []u8) {
+    x0 := x_in
+    x := x_in
+    d := d_in
+    while calc.dispbase[d] == BLANK {
+        calc.dispbase[d] = col
+        x -= dir
+        d -= dird
+    }
+    HorizLine(pixels, calc.maxx, x0, x, y, palette[col])
+}
+
+CrawlT :: (calc: *Calc, x_in: s32, y_in: s32, d_in: s32, col: u8, palette: []RGB, pixels: []u8) {
+    x := x_in
+    y := y_in
+    d := d_in
+    firstd := d
+    xinc: s32 = 1
+    dxinc := calc.supy
+    yinc: s32 = 0
+    dyinc: s32 = 0
+
+    while true {
+        if GetColour(calc, x + xinc, y, d + dxinc, palette, pixels) == col {
+            x += xinc
+            d += dxinc
+            yinc = -xinc
+            dyinc = -dxinc
+            if calc.dispbase[d + dxinc] == BLANK {
+                FillLine(calc, x + xinc, y, d + dxinc, yinc, dyinc, col, palette, pixels)
+            }
+            if d == firstd { break }
+        } else {
+            yinc = xinc
+            dyinc = dxinc
+        }
+        if GetColour(calc, x, y + yinc, d + yinc, palette, pixels) == col {
+            y += yinc
+            d += yinc
+            xinc = yinc
+            dxinc = dyinc
+            if calc.dispbase[d - dxinc] == BLANK {
+                FillLine(calc, x - xinc, y, d - dxinc, yinc, dyinc, col, palette, pixels)
+            }
+            if d == firstd { break }
+        } else {
+            xinc = -yinc
+            dxinc = -dyinc
+        }
+    }
+}
+
+CrawlF :: (calc: *Calc, x_in: s32, y_in: s32, d_in: s32, col: u8, palette: []RGB, pixels: []u8) {
+    firstx := x_in
+    firsty := y_in
+    firstd := d_in
+    x := x_in
+    y := y_in
+    d := d_in
+    area: s32 = 0
+    count: s32 = 0
+    xinc: s32 = 1
+    dxinc := calc.supy
+    yinc: s32 = 0
+    dyinc: s32 = 0
+
+    while true {
+        if GetColour(calc, x + xinc, y, d + dxinc, palette, pixels) == col {
+            x += xinc
+            d += dxinc
+            yinc = -xinc
+            dyinc = -dxinc
+            area += xinc * count
+            if d == firstd { break }
+        } else {
+            yinc = xinc
+            dyinc = dxinc
+        }
+        if GetColour(calc, x, y + yinc, d + yinc, palette, pixels) == col {
+            y += yinc
+            d += yinc
+            xinc = yinc
+            dxinc = dyinc
+            count -= yinc
+            if d == firstd { break }
+        } else {
+            xinc = -yinc
+            dxinc = -dyinc
+        }
+    }
+    if area > 0 {
+        CrawlT(calc, firstx, firsty, firstd, col, palette, pixels)
+    }
+}
+
+// Compute up to max_cols columns of the fractal into dispbase and pixels.
+// Returns true once all columns have been rendered.
+StepColumns :: (calc: *Calc, max_cols: s32, palette: []RGB, pixels: []u8) -> bool {
+    if calc.done { return true }
+    end_x := calc.col_x + max_cols
+    if end_x > calc.maxx { end_x = calc.maxx }
+
+    if calc.fill {
+        for x: calc.col_x..end_x - 1 {
+            d := calc.disp + cast(s32)x * calc.supy
+            last: u8 = cast(u8)BLANK
+            edge: s32 = 0
+            for y: 0..calc.maxy - 1 {
+                col := calc.dispbase[d]
+                if col == cast(u8)BLANK {
+                    col = PointColour(calc, cast(s32)x, cast(s32)y)
+                    calc.dispbase[d] = col
+                    WritePixel(pixels, calc.maxx, cast(s32)x, cast(s32)y, palette[col])
+                    if col == last {
+                        edge += 1
+                    } else {
+                        last = col
+                        edge = 0
+                    }
+                    if edge >= LIMIT {
+                        CrawlF(calc, cast(s32)x, cast(s32)y - edge, d - edge, last, palette, pixels)
+                        last = cast(u8)BLANK
+                    }
+                } else {
+                    if col == last {
+                        edge += 1
+                    } else {
+                        last = col
+                        edge = 0
+                    }
+                }
+                d += 1
+            }
+        }
+    } else {
+        for x: calc.col_x..end_x - 1 {
+            d := calc.disp + cast(s32)x * calc.supy
+            for y: 0..calc.maxy - 1 {
+                col := PointColour(calc, cast(s32)x, cast(s32)y)
+                calc.dispbase[d] = col
+                WritePixel(pixels, calc.maxx, cast(s32)x, cast(s32)y, palette[col])
+                d += 1
+            }
+        }
+    }
+
+    calc.col_x = end_x
+    if calc.col_x >= calc.maxx { calc.done = true }
+    return calc.done
+}
+
+PixelIndex :: (calc: *Calc, x: s32, y: s32) -> u8 {
+    return calc.dispbase[calc.disp + x * calc.supy + y]
+}

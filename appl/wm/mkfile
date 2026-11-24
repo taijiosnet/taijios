@@ -25,7 +25,6 @@ TARG=\
 	keyboard.dis\
 	logon.dis\
 	man.dis\
-	mand.dis\
 	mash.dis\
 ##	mpeg.dis\
 	mprof.dis\
@@ -169,7 +168,10 @@ c4.zx: c4.zi c4_model.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_arg
 collide.zx: collide.zi collide_model.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --entry collide:main -o $target collide.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx
+mand.zx: mand.zi mand_model.zi ../cmd/taijios_args.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_args --entry mand:main -o $target mand.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:

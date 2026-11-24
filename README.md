@@ -437,7 +437,10 @@ host runs the search about seventy times slower than the Dis interpreter.
 Collide keeps the cube, sphere and ellipsoid surrounds (`-c`, `-s`, `-e`), flat
 mode (`-f`), orthographic and perspective projection (`-o`, `-p`), object and
 moving counts (`-b`, `-v`), and the zoomin, stop, zoomout, slow, objects and
-fast buttons.
+fast buttons. Mand keeps the fixed-point Mandelbrot and Julia escape counts,
+Green's-theorem contour-crawl Fill toggle, Depth divisor entry, RGB colour-cube
+arguments, button-1 rectangle zoom, button-2 Julia switch and button-3 zoom-out
+stack.
 Each test
 compares the rules and the window with games recorded from the Dis version.
 
@@ -449,6 +452,7 @@ python3 -u appl/wm/polyhedra_zx_test.py
 python3 -u appl/wm/bounce_zx_test.py
 python3 -u appl/wm/c4_zx_test.py
 python3 -u appl/wm/collide_zx_test.py
+python3 -u appl/wm/mand_zx_test.py
 ```
 
 ### Use the ZX Calendar

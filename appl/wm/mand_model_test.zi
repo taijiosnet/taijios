@@ -1,0 +1,87 @@
+// Rule checks for the Mand model: exact fixed-point Mandelbrot and Julia
+// escape counts, 6x6x6 colour cube, contour-crawl fill speedup and aspect ratio.
+Model :: #import "mand_model";
+
+Fail :: (code: s32) -> s32 { return code }
+
+Near :: (a: float64, b: float64, eps: float64) -> bool {
+    d := a - b
+    if d < 0.0 { d = -d }
+    return d <= eps
+}
+
+main :: () -> s32 {
+    // Verify signed arithmetic right shift on negative fixed-point values.
+    if Model.ShiftHalf(-Model.SCALE) != -1073741824 { return Fail(1) }
+
+    // Verify 6x6x6 RGB colour cube against mand.b's col(i, r).
+    palette: [256]Model.RGB
+    Model.InitPalette(palette[:], 6, 6, 6)
+    if palette[1].r != 0 || palette[1].g != 0 || palette[1].b != 51 { return Fail(2) }
+    if palette[10].r != 0 || palette[10].g != 51 || palette[10].b != 204 { return Fail(3) }
+    if palette[50].r != 51 || palette[50].g != 102 || palette[50].b != 102 { return Fail(4) }
+    if palette[200].r != 255 || palette[200].g != 153 || palette[200].b != 102 { return Fail(5) }
+    if palette[254].r != 51 || palette[254].g != 0 || palette[254].b != 102 { return Fail(6) }
+
+    // Verify exact Mandelbrot fixed-point escape counts on 400x400 grid.
+    specr: Model.FracRect = .{.{-2.0, -1.5}, .{1.0, 1.5}}
+    pm: Model.Params = .{.r = specr, .p = .{0.0, 0.0}, .m = true, .kdivisor = 1, .fill = false}
+    cm: Model.Calc
+    defer Model.CalcFree(*cm)
+    Model.CalcInit(*cm, pm, 400, 400)
+    if Model.PointColour(*cm, 0, 0) != cast(u8)2 { return Fail(7) }
+    if Model.PointColour(*cm, 100, 100) != cast(u8)4 { return Fail(8) }
+    if Model.PointColour(*cm, 150, 200) != cast(u8)254 { return Fail(9) }
+    if Model.PointColour(*cm, 200, 200) != cast(u8)254 { return Fail(10) }
+    if Model.PointColour(*cm, 250, 200) != cast(u8)254 { return Fail(11) }
+    if Model.PointColour(*cm, 266, 200) != cast(u8)254 { return Fail(12) }
+    if Model.PointColour(*cm, 180, 120) != cast(u8)8 { return Fail(13) }
+    if Model.PointColour(*cm, 300, 150) != cast(u8)254 { return Fail(14) }
+    if Model.PointColour(*cm, 350, 350) != cast(u8)3 { return Fail(15) }
+
+    // Verify exact Julia (-0.75, 0.1) fixed-point escape counts on 400x400 grid.
+    pj: Model.Params = .{.r = specr, .p = .{-0.75, 0.1}, .m = false, .kdivisor = 1, .fill = false}
+    cj: Model.Calc
+    defer Model.CalcFree(*cj)
+    Model.CalcInit(*cj, pj, 400, 400)
+    if Model.PointColour(*cj, 0, 0) != cast(u8)1 { return Fail(16) }
+    if Model.PointColour(*cj, 100, 100) != cast(u8)3 { return Fail(17) }
+    if Model.PointColour(*cj, 150, 200) != cast(u8)34 { return Fail(18) }
+    if Model.PointColour(*cj, 200, 200) != cast(u8)254 { return Fail(19) }
+    if Model.PointColour(*cj, 180, 120) != cast(u8)5 { return Fail(20) }
+    if Model.PointColour(*cj, 300, 150) != cast(u8)37 { return Fail(21) }
+    if Model.PointColour(*cj, 350, 350) != cast(u8)2 { return Fail(22) }
+
+    // Verify Fill mode contour-crawling fills cardioid & exterior with far fewer evals.
+    pfill: Model.Params = .{.r = specr, .p = .{0.0, 0.0}, .m = true, .kdivisor = 1, .fill = true}
+    pscan: Model.Params = .{.r = specr, .p = .{0.0, 0.0}, .m = true, .kdivisor = 1, .fill = false}
+    cf: Model.Calc
+    cs: Model.Calc
+    defer Model.CalcFree(*cf)
+    defer Model.CalcFree(*cs)
+    Model.CalcInit(*cf, pfill, 128, 128)
+    Model.CalcInit(*cs, pscan, 128, 128)
+    empty_px: [0]u8
+    while !Model.StepColumns(*cf, 32, palette[:], empty_px[:]) { }
+    while !Model.StepColumns(*cs, 32, palette[:], empty_px[:]) { }
+    if cf.points_eval >= cs.points_eval / 2 { return Fail(23) }
+    // Every pixel must be filled (non-BLANK) and key interior/exterior pixels match.
+    for x: 0..127 {
+        for y: 0..127 {
+            if Model.PixelIndex(*cf, cast(s32)x, cast(s32)y) == cast(u8)Model.BLANK {
+                return Fail(24)
+            }
+        }
+    }
+    if Model.PixelIndex(*cf, 0, 0) != Model.PixelIndex(*cs, 0, 0) { return Fail(25) }
+    if Model.PixelIndex(*cf, 64, 64) != Model.PixelIndex(*cs, 64, 64) { return Fail(26) }
+    if Model.PixelIndex(*cf, 80, 64) != Model.PixelIndex(*cs, 80, 64) { return Fail(27) }
+
+    // Verify CorrectRatio preserves requested rect and matches bitmap aspect ratio.
+    tall := Model.CorrectRatio(.{.{0.0, 0.0}, .{2.0, 1.0}}, 100, 200)
+    if !Near(tall.min.x, 0.0, 1e-9) || !Near(tall.max.x, 2.0, 1e-9) { return Fail(28) }
+    if !Near(tall.max.y - tall.min.y, 4.0, 1e-9) { return Fail(29) }
+
+    print("Mand matched fixed-point Mandelbrot, Julia, palette and contour-crawl fill rules\n")
+    return 0
+}

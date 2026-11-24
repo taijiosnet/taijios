@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Mand (Fractals) only as ZX and remove its Dis version. It keeps the 60-bit fixed-point Mandelbrot and Julia sets, the 256-entry RGB colour cube (`[R [G [B]]]`), the Green's-theorem contour-crawl Fill toggle, the Depth divisor entry, button-1 drag-rectangle zoom, button-2 Julia selection, and button-3 view-stack zoom-out.
+
 - Ship Collide only as ZX and remove its Dis version. It keeps the cube, sphere and ellipsoid surrounds (`-c`, `-s`, `-e`), flat mode (`-f`), orthographic and perspective projections (`-o`, `-p`), object counts (`-b`, `-v`), pairwise equal-mass elastic collisions, depth-sorted rendering, and the zoomin, stop, zoomout, slow, objects and fast buttons.
 
 - Ship Connect only as ZX and remove its Dis version. It keeps the 7 by 6 board with its incremental line values, the machine's minimax with its alpha-beta and tie-breaks, the Human and Machine menus, the level entries and a click's column. The model replays a game the Dis printed move by move with the same values, and the search runs in slices between frames where the Dis's process thought through one turn. Black's default level is 3, not the Dis's 8, because the ZX host runs the search about seventy times slower than the Dis interpreter; the entry still takes 0 to 10.
