@@ -1,0 +1,571 @@
+// Port of Inferno's Sendmail (appl/wm/sendmail.b), built as sendmail.zx.
+// See ../../NOTICE.
+// Keeps Connect/Disconnect (SMTP over taijios_dial), Send (MAIL FROM, RCPT TO,
+// CC list, DATA, Subject), No CC, New, Save (via /dis/wm/filename.zx), reply
+// header prefill from readmail, and /usr/<user>/mail/{smtpserver,domain}.
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+TextArea :: #import "kryon/text_area";
+Model :: #import "sendmail_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Dial :: #import "taijios_dial";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+#import "std/number_text"
+
+WinW :: 560
+WinH :: 440
+MaxBody :: 1048576
+Chooser :: "/dis/wm/filename.zx"
+
+grey: Color = .{221, 221, 221, 255};
+panel_bg: Color = .{234, 234, 234, 255};
+dark: Color = .{150, 150, 150, 255};
+
+// SMTP connection state.
+srv_fd: s32 = -1;
+srv_ctl: s32 = -1;
+smtp_rbuf: [512]u8;
+smtp_rpos: s32;
+smtp_rlen: s32;
+
+// Message header fields.
+to_bytes: [256]u8;
+to_field: Field.State;
+cc_bytes: [256]u8;
+cc_field: Field.State;
+subj_bytes: [256]u8;
+subj_field: Field.State;
+
+// Connect dialog fields.
+show_connect: bool;
+host_bytes: [256]u8;
+host_field: Field.State;
+user_bytes: [256]u8;
+user_field: Field.State;
+
+// Body TextArea state.
+body: Vec(u8);
+ta_cursor: s32;
+ta_anchor: s32;
+ta_scroll_y: s32;
+ta_focused: bool;
+ta_selecting: bool;
+ta_pref_x: s32;
+ta_pref_x_valid: bool;
+
+status_text: Vec(u8);
+username_buf: Vec(u8);
+
+// Save file chooser pipe.
+choice_fd: s32 = -1;
+choice_bytes: [512]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+SetStatus :: (s: string) { SetVec(*status_text, s) }
+
+SetField :: (state: *Field.State, text: string) {
+    state.length = 0
+    for i: cast(s64)0..text.count - 1 {
+        if state.length >= cast(s32)state.bytes.count - 1 { break }
+        state.bytes[state.length] = text[i]
+        state.length += 1
+    }
+    state.cursor = state.length
+    state.anchor = state.length
+}
+
+ReadShortFile :: (path: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    fd := IO.Open(path, 0)
+    if fd < 0 { return }
+    buf: [128]u8
+    n := IO.Read(fd, buf[:])
+    unused IO.Close(fd)
+    if n <= 0 { return }
+    end: s64 = cast(s64)n
+    while end > 0 && (buf[end - 1] == cast(u8)10 || buf[end - 1] == cast(u8)13) { end -= 1 }
+    unused BuilderAppend(out.*, TextView(buf[:end]))
+}
+
+CloseConn :: () {
+    if srv_fd >= 0 { unused IO.Close(srv_fd); srv_fd = -1 }
+    if srv_ctl >= 0 { unused IO.Close(srv_ctl); srv_ctl = -1 }
+    smtp_rpos = 0
+    smtp_rlen = 0
+}
+
+SmtpGetByte :: () -> s32 {
+    if srv_fd < 0 { return -1 }
+    if smtp_rpos < smtp_rlen {
+        b := cast(s32)smtp_rbuf[smtp_rpos]
+        smtp_rpos += 1
+        return b
+    }
+    n := IO.Read(srv_fd, smtp_rbuf[:])
+    if n <= 0 { return -1 }
+    smtp_rlen = n
+    smtp_rpos = 1
+    return cast(s32)smtp_rbuf[0]
+}
+
+SmtpReadResp :: (out_msg: *Vec(u8)) -> bool {
+    VecClear(out_msg.*)
+    line: Vec(u8)
+    defer VecFree(line)
+    lastc: s32 = 0
+    while true {
+        c := SmtpGetByte()
+        if c < 0 {
+            SetVec(out_msg, "read from server failed")
+            return false
+        }
+        if lastc == 13 && c == 10 { break }
+        if line.count < 512 { unused VecPush(line, cast(u8)c) }
+        lastc = c
+    }
+    // Strip trailing '\r'
+    if line.count > 0 && line[line.count - 1] == cast(u8)13 {
+        unused VecResize(line, line.count - 1)
+    }
+    resp := Model.ParseSmtpLine(TextView(line[:]))
+    if resp.text_len > 0 {
+        SetVec(out_msg, TextView(line[resp.text_start:resp.text_start + resp.text_len]))
+    } else if !resp.ok {
+        SetVec(out_msg, resp.error)
+    }
+    return resp.ok
+}
+
+SmtpCmd :: (cmd: string, out_msg: *Vec(u8)) -> bool {
+    if srv_fd < 0 {
+        SetVec(out_msg, "not connected")
+        return false
+    }
+    wire: Vec(u8)
+    defer VecFree(wire)
+    unused BuilderAppend(wire, cmd)
+    unused BuilderAppend(wire, "\r\n")
+    s := TextView(wire[:])
+    if IO.Write(srv_fd, s) != cast(s32)s.count {
+        SetVec(out_msg, "send to server failed")
+        return false
+    }
+    return SmtpReadResp(out_msg)
+}
+
+DoDial :: () -> bool {
+    server := TextView(host_bytes[:host_field.length])
+    user := TextView(user_bytes[:user_field.length])
+    if server.count == 0 {
+        SetStatus("You must supply a server address")
+        return false
+    }
+    if user.count == 0 {
+        SetStatus("You must supply a user name")
+        return false
+    }
+    dom := Model.Domain(user)
+    if dom.count == 0 {
+        SetStatus("The user name must contain an '@'")
+        return false
+    }
+
+    SetStatus("dialing server...")
+    addr: Vec(u8)
+    defer VecFree(addr)
+    Model.NetMkAddr(server, "", "25", *addr)
+
+    handles: [2]s32
+    dir: [Dial.DirectoryBytes]u8
+    if Dial.Dial(TextView(addr[:]), "", handles[:], dir[:]) < 0 {
+        SetStatus("dial failed")
+        return false
+    }
+    srv_fd = handles[0]
+    srv_ctl = handles[1]
+    smtp_rpos = 0
+    smtp_rlen = 0
+    SetVec(*username_buf, user)
+
+    resp: Vec(u8)
+    defer VecFree(resp)
+    if !SmtpReadResp(*resp) {
+        SetStatus(TextView(resp[:]))
+        CloseConn()
+        return false
+    }
+    helo: Vec(u8)
+    defer VecFree(helo)
+    unused BuilderAppend(helo, "HELO ")
+    unused BuilderAppend(helo, dom)
+    if !SmtpCmd(TextView(helo[:]), *resp) {
+        SetStatus(TextView(resp[:]))
+        CloseConn()
+        return false
+    }
+    SetStatus("ready to send...")
+    show_connect = false
+    return true
+}
+
+DoDisconnect :: () {
+    if srv_fd < 0 { return }
+    resp: Vec(u8)
+    defer VecFree(resp)
+    ok := SmtpCmd("QUIT", *resp)
+    CloseConn()
+    if ok && resp.count > 0 { SetStatus(TextView(resp[:])) }
+    else { SetStatus("not connected ...") }
+}
+
+DoSend :: () {
+    if srv_fd < 0 {
+        SetStatus("You must be connected to deliver mail")
+        return
+    }
+    mto := TextView(to_bytes[:to_field.length])
+    if mto.count == 0 {
+        SetStatus("You must fill in the Mail To entry")
+        return
+    }
+    resp: Vec(u8)
+    defer VecFree(resp)
+    cmd: Vec(u8)
+    defer VecFree(cmd)
+
+    unused BuilderAppend(cmd, "MAIL FROM:<")
+    unused BuilderAppend(cmd, TextView(username_buf[:]))
+    unused BuilderAppend(cmd, ">")
+    if !SmtpCmd(TextView(cmd[:]), *resp) { SetStatus(TextView(resp[:])); return }
+
+    VecClear(cmd)
+    unused BuilderAppend(cmd, "RCPT TO:<")
+    unused BuilderAppend(cmd, mto)
+    unused BuilderAppend(cmd, ">")
+    if !SmtpCmd(TextView(cmd[:]), *resp) { SetStatus(TextView(resp[:])); return }
+
+    // Carbon-copy recipients separated by space, tab, or comma.
+    cc := TextView(cc_bytes[:cc_field.length])
+    i: s64 = 0
+    while i < cc.count {
+        while i < cc.count && (cc[i] == cast(u8)32 || cc[i] == cast(u8)9 || cc[i] == cast(u8)44) { i += 1 }
+        if i >= cc.count { break }
+        start := i
+        while i < cc.count && cc[i] != cast(u8)32 && cc[i] != cast(u8)9 && cc[i] != cast(u8)44 { i += 1 }
+        VecClear(cmd)
+        unused BuilderAppend(cmd, "RCPT TO:<")
+        unused BuilderAppend(cmd, cc[start:i])
+        unused BuilderAppend(cmd, ">")
+        if !SmtpCmd(TextView(cmd[:]), *resp) { SetStatus(TextView(resp[:])); return }
+    }
+
+    if !SmtpCmd("DATA", *resp) { SetStatus(TextView(resp[:])); return }
+
+    payload: Vec(u8)
+    defer VecFree(payload)
+    sub := TextView(subj_bytes[:subj_field.length])
+    if sub.count > 0 {
+        unused BuilderAppend(payload, "Subject: ")
+        unused BuilderAppend(payload, sub)
+        unused BuilderAppend(payload, "\r\n\r\n")
+    }
+    unused BuilderAppend(payload, TextView(body[:]))
+    ps := TextView(payload[:])
+    if ps.count > 0 && IO.Write(srv_fd, ps) != cast(s32)ps.count {
+        SetStatus("Error writing server")
+        return
+    }
+    if !SmtpCmd("\r\n.", *resp) { SetStatus(TextView(resp[:])); return }
+    SetStatus(TextView(resp[:]))
+}
+
+DoNew :: () {
+    SetField(*to_field, "")
+    SetField(*cc_field, "")
+    SetField(*subj_field, "")
+    VecClear(body)
+    ta_cursor = 0
+    ta_anchor = 0
+    ta_scroll_y = 0
+}
+
+SaveMessageTo :: (path: string) {
+    fd := IO.Create(path, 1, 432) // 0660
+    if fd < 0 { SetStatus("Failed to create file"); return }
+    out: Vec(u8)
+    defer VecFree(out)
+    unused BuilderAppend(out, "Mail To: ")
+    unused BuilderAppend(out, TextView(to_bytes[:to_field.length]))
+    unused BuilderAppend(out, "\n")
+    if cc_field.length > 0 {
+        unused BuilderAppend(out, "Mail CC: ")
+        unused BuilderAppend(out, TextView(cc_bytes[:cc_field.length]))
+        unused BuilderAppend(out, "\n")
+    }
+    if subj_field.length > 0 {
+        unused BuilderAppend(out, "Subject: ")
+        unused BuilderAppend(out, TextView(subj_bytes[:subj_field.length]))
+        unused BuilderAppend(out, "\n\n")
+    }
+    unused BuilderAppend(out, TextView(body[:]))
+    s := TextView(out[:])
+    n := IO.Write(fd, s)
+    unused IO.Close(fd)
+    if n < 0 { SetStatus("Error writing file"); return }
+    digits: [24]u8
+    msg: Vec(u8)
+    defer VecFree(msg)
+    unused BuilderAppend(msg, "wrote ")
+    unused BuilderAppend(msg, FormatInteger(cast(s64)n, digits[:]))
+    unused BuilderAppend(msg, " bytes.")
+    SetStatus(TextView(msg[:]))
+}
+
+OpenSaveChooser :: () {
+    if to_field.length == 0 {
+        SetStatus("No message to save")
+        return
+    }
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 { return }
+    words: [4]string = .["-t", "Save in Mailbox", "*.letter (Saved mail)", "* (All files)"]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 { unused IO.Close(ends[0]); return }
+    choice_fd = ends[0]
+}
+
+PollChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 { unused IO.Close(choice_fd); choice_fd = -1; choice_used = 0; return }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        choice_used = 0
+        if line > 0 { SaveMessageTo(TextView(choice_bytes[:line])) }
+    }
+}
+
+ApplyBodyEdit :: (start: s64, end: s64, repl: string) {
+    tail := body.count - end
+    new_len := start + repl.count + tail
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    unused VecResize(tmp, new_len)
+    for i: cast(s64)0..start - 1 { tmp[i] = body[i] }
+    for i: cast(s64)0..repl.count - 1 { tmp[start + i] = repl[i] }
+    for i: cast(s64)0..tail - 1 { tmp[start + repl.count + i] = body[end + i] }
+    unused VecResize(body, new_len)
+    for i: cast(s64)0..new_len - 1 { body[i] = tmp[i] }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 380.0 { w = cast(float32)WinW }
+    if h < 260.0 { h = cast(float32)WinH }
+
+    PollChooser()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    f_in := TextFieldInputFor(key, mods, text)
+    ta_in := TextAreaInputFor(key, mods, text)
+
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+
+    // Top toolbar buttons + status line.
+    conn_lbl := ifx srv_fd >= 0 then "Disconnect" else "Connect"
+    if Button.Draw(session, .{.key = 10, .bounds = .{6.0, 4.0, 82.0, 22.0}, .label = conn_lbl}) > 0 {
+        if srv_fd >= 0 { DoDisconnect() } else { show_connect = !show_connect }
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{92.0, 4.0, 56.0, 22.0}, .label = "Send"}) > 0 {
+        DoSend()
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{152.0, 4.0, 56.0, 22.0}, .label = "No CC"}) > 0 {
+        SetField(*cc_field, "")
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{212.0, 4.0, 52.0, 22.0}, .label = "New"}) > 0 {
+        DoNew()
+    }
+    if Button.Draw(session, .{.key = 14, .bounds = .{268.0, 4.0, 56.0, 22.0}, .label = "Save"}) > 0 {
+        OpenSaveChooser()
+    }
+    Text.Draw(session, .{.key = 15, .bounds = .{6.0, 28.0, w - 12.0, 18.0},
+        .text = TextView(status_text[:]), .size = 12})
+
+    y: float32 = 48.0
+
+    // Inline Connection Parameters panel when Connect is open.
+    if show_connect {
+        Box.Draw(session, .{.key = 20, .bounds = .{6.0, y, w - 12.0, 62.0}, .fill = panel_bg})
+        Box.Draw(session, .{.key = 21, .bounds = .{6.0, y + 61.0, w - 12.0, 1.0}, .fill = dark})
+        Text.Draw(session, .{.key = 22, .bounds = .{12.0, y + 6.0, 86.0, 22.0},
+            .text = "Mail Server:", .size = 12, .vertical_align = .TextAlignCenter})
+        hres := Field.Draw(session, Field.StateProps(host_field, .{.key = 23, .focus_id = 23,
+            .bounds = .{100.0, y + 6.0, w - 210.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*host_field, hres)
+        if hres.committed { unused DoDial() }
+
+        Text.Draw(session, .{.key = 24, .bounds = .{12.0, y + 32.0, 86.0, 22.0},
+            .text = "User Name:", .size = 12, .vertical_align = .TextAlignCenter})
+        ures := Field.Draw(session, Field.StateProps(user_field, .{.key = 25, .focus_id = 25,
+            .bounds = .{100.0, y + 32.0, w - 210.0, 22.0}, .max_bytes = 250, .input = f_in}))
+        unused Field.StateApplyResult(*user_field, ures)
+        if ures.committed { unused DoDial() }
+
+        if Button.Draw(session, .{.key = 26, .bounds = .{w - 102.0, y + 6.0, 88.0, 22.0}, .label = "Dial"}) > 0 {
+            unused DoDial()
+        }
+        if Button.Draw(session, .{.key = 27, .bounds = .{w - 102.0, y + 32.0, 88.0, 22.0}, .label = "Cancel"}) > 0 {
+            show_connect = false
+        }
+        y += 66.0
+    }
+
+    // Header entries: Mail To, Mail CC, Subject.
+    Text.Draw(session, .{.key = 30, .bounds = .{6.0, y, 70.0, 22.0},
+        .text = "Mail To:", .size = 12, .vertical_align = .TextAlignCenter})
+    tr := Field.Draw(session, Field.StateProps(to_field, .{.key = 31, .focus_id = 31,
+        .bounds = .{78.0, y, w - 84.0, 22.0}, .max_bytes = 250, .input = f_in}))
+    unused Field.StateApplyResult(*to_field, tr)
+    y += 26.0
+
+    Text.Draw(session, .{.key = 32, .bounds = .{6.0, y, 70.0, 22.0},
+        .text = "Mail CC:", .size = 12, .vertical_align = .TextAlignCenter})
+    cr := Field.Draw(session, Field.StateProps(cc_field, .{.key = 33, .focus_id = 33,
+        .bounds = .{78.0, y, w - 84.0, 22.0}, .max_bytes = 250, .input = f_in}))
+    unused Field.StateApplyResult(*cc_field, cr)
+    y += 26.0
+
+    Text.Draw(session, .{.key = 34, .bounds = .{6.0, y, 70.0, 22.0},
+        .text = "Subject:", .size = 12, .vertical_align = .TextAlignCenter})
+    sr := Field.Draw(session, Field.StateProps(subj_field, .{.key = 35, .focus_id = 35,
+        .bounds = .{78.0, y, w - 84.0, 22.0}, .max_bytes = 250, .input = f_in}))
+    unused Field.StateApplyResult(*subj_field, sr)
+    y += 28.0
+
+    // Message body TextArea.
+    ta_res := TextArea.Draw(session, .{
+        .key = 40,
+        .focus_id = 40,
+        .bounds = .{6.0, y, w - 12.0, h - y - 6.0},
+        .value = TextView(body[:]),
+        .cursor = ta_cursor,
+        .anchor = ta_anchor,
+        .scroll_y = ta_scroll_y,
+        .focused = ta_focused,
+        .selecting = ta_selecting,
+        .preferred_x = ta_pref_x,
+        .preferred_x_valid = ta_pref_x_valid,
+        .max_bytes = MaxBody,
+        .wrap = true,
+        .input = ta_in,
+    })
+    ta_cursor = ta_res.cursor
+    ta_anchor = ta_res.anchor
+    ta_scroll_y = ta_res.scroll_y
+    ta_focused = ta_res.focused
+    ta_selecting = ta_res.selecting
+    ta_pref_x = ta_res.preferred_x
+    ta_pref_x_valid = ta_res.preferred_x_valid
+    if ta_res.edit.changed {
+        ApplyBodyEdit(cast(s64)ta_res.edit.start, cast(s64)ta_res.edit.end, ta_res.edit.replacement)
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    to_field.bytes = to_bytes[:]
+    cc_field.bytes = cc_bytes[:]
+    subj_field.bytes = subj_bytes[:]
+    host_field.bytes = host_bytes[:]
+    user_field.bytes = user_bytes[:]
+    SetStatus("not connected ...")
+
+    // Pre-populate server and user from /dev/user and /usr/<user>/mail/*.
+    u: Vec(u8)
+    defer VecFree(u)
+    ReadShortFile("/dev/user", *u)
+    if u.count > 0 {
+        p: Vec(u8)
+        defer VecFree(p)
+        tmp: Vec(u8)
+        defer VecFree(tmp)
+
+        unused BuilderAppend(p, "/usr/")
+        unused BuilderAppend(p, TextView(u[:]))
+        unused BuilderAppend(p, "/mail/smtpserver")
+        ReadShortFile(TextView(p[:]), *tmp)
+        if tmp.count > 0 { SetField(*host_field, TextView(tmp[:])) }
+
+        VecClear(p)
+        unused BuilderAppend(p, "/usr/")
+        unused BuilderAppend(p, TextView(u[:]))
+        unused BuilderAppend(p, "/mail/domain")
+        ReadShortFile(TextView(p[:]), *tmp)
+        if tmp.count > 0 {
+            unused BuilderAppend(u, "@")
+            unused BuilderAppend(u, TextView(tmp[:]))
+        }
+        SetField(*user_field, TextView(u[:]))
+    }
+
+    // Optional reply headers from readmail (2nd arg in sendmail.b, or 1st non-flag arg).
+    n := Args.OperandCount()
+    if n >= 1 {
+        hdr_arg := ifx n >= 2 then Args.Operand(1) else Args.Operand(0)
+        if hdr_arg.count > 0 && hdr_arg[0] != cast(u8)45 {
+            rh := Model.ParseReplyHeaders(hdr_arg)
+            if rh.to_len > 0 { SetField(*to_field, hdr_arg[rh.to_start:rh.to_start + rh.to_len]) }
+            if rh.cc_len > 0 { SetField(*cc_field, hdr_arg[rh.cc_start:rh.cc_start + rh.cc_len]) }
+            if rh.subj_len > 0 { SetField(*subj_field, hdr_arg[rh.subj_start:rh.subj_start + rh.subj_len]) }
+            if host_field.length > 0 && user_field.length > 0 { unused DoDial() }
+        }
+    }
+
+    rc := Surface.RunRetained(.{.title = "MailStop: Sender", .width = WinW, .height = WinH}, Draw, 16)
+    if srv_fd >= 0 { DoDisconnect() }
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(body)
+    VecFree(status_text)
+    VecFree(username_buf)
+    return rc
+}

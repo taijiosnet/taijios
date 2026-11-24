@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ship Sendmail only as ZX and remove its Dis version. It keeps Connect/Disconnect over `taijios_dial` (SMTP `HELO`, `MAIL FROM`, `RCPT TO`, CC list, `DATA`, `Subject`, `QUIT`), No CC, New, Save via `/dis/wm/filename.zx`, reply header prefill from Readmail, and `/usr/<user>/mail/{smtpserver,domain}` defaults.
+
 - Ship AVI Player and WmPlay only as ZX and remove their Dis versions. AVI Player keeps File (via `/dis/wm/filename.zx`), Stop, Pause, Play, and 8-bit uncompressed and BI_RLE8 RIFF/AVI decoding; WmPlay keeps Inferno audio header validation (`rate` magic, `\n\n` terminator, 4-byte alignment), `/dev/audioctl` setup, `/dev/audio` streaming and file selection.
 
 - Ship Unibrowse (Unicode Browser) only as ZX and remove its Dis version. It keeps By Category (`/lib/unidata/blocks.txt`), By number (hex lookup), Symbol wordsearch (`/lib/unidata/index2.txt`), Font information (with font chooser), the 3 by 8 glyph table with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`, 22 category names, Snarf and Paste).

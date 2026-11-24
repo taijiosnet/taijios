@@ -1,0 +1,39 @@
+// Rule checks for the Sendmail model: netmkaddr, user@domain parsing,
+// From/CC/Subject reply extraction and SMTP response parsing.
+Model :: #import "sendmail_model";
+#import "std/vec"
+
+Fail :: (code: s32) -> s32 { return code }
+
+main :: () -> s32 {
+    if Model.Domain("alice@example.org") != "example.org" { return Fail(1) }
+    if Model.Domain("localonly") != "" { return Fail(2) }
+
+    if Model.ExtractAddress("Alice Smith <alice@example.org>") != "alice@example.org" { return Fail(3) }
+    if Model.ExtractAddress("bob@host.local (Bob)") != "bob@host.local" { return Fail(4) }
+
+    addr: Vec(u8)
+    defer VecFree(addr)
+    Model.NetMkAddr("mail.example.org", "", "25", *addr)
+    if TextView(addr[:]) != "net!mail.example.org!25" { return Fail(5) }
+    Model.NetMkAddr("tcp!127.0.0.1!2525", "", "25", *addr)
+    if TextView(addr[:]) != "tcp!127.0.0.1!2525" { return Fail(6) }
+    Model.NetMkAddr("tcp!127.0.0.1", "", "25", *addr)
+    if TextView(addr[:]) != "tcp!127.0.0.1!25" { return Fail(7) }
+
+    ok := Model.ParseSmtpLine("220 mail.example.org ESMTP ready")
+    if !ok.ok || ok.code != 220 { return Fail(8) }
+    bad := Model.ParseSmtpLine("550 User unknown")
+    if bad.ok || bad.code != 550 { return Fail(9) }
+    short := Model.ParseSmtpLine("22")
+    if short.ok { return Fail(10) }
+
+    hdr := "From: Alice <alice@example.org>\nCc: bob@example.org\nSubject: Re: Hello\n"
+    rh := Model.ParseReplyHeaders(hdr)
+    if hdr[rh.to_start:rh.to_start + rh.to_len] != "alice@example.org" { return Fail(11) }
+    if hdr[rh.cc_start:rh.cc_start + rh.cc_len] != "bob@example.org" { return Fail(12) }
+    if hdr[rh.subj_start:rh.subj_start + rh.subj_len] != "Re: Hello" { return Fail(13) }
+
+    print("Sendmail matched SMTP response, address, netmkaddr and reply-header rules\n")
+    return 0
+}

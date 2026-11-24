@@ -1,0 +1,154 @@
+// The SMTP protocol and header rules of Inferno's Sendmail (appl/wm/sendmail.b):
+// network address formatting (netmkaddr), user@domain parsing, From/CC/Subject
+// reply header extraction, and SMTP response line classification. See ../../NOTICE.
+#import "std/vec"
+
+SmtpResp :: struct {
+    ok: bool
+    code: s32
+    text_start: s64
+    text_len: s64
+    error: string
+}
+
+// dom from sendmail.b lines 496-502: return substring after '@', or "".
+Domain :: (name: string) -> string {
+    for i: cast(s64)0..name.count - 1 {
+        if name[i] == cast(u8)64 { return name[i + 1:] }
+    }
+    return ""
+}
+
+// extract from sendmail.b lines 529-543: extract <addr> or first whitespace token.
+ExtractAddress :: (name: string) -> string {
+    for i: cast(s64)0..name.count - 1 {
+        if name[i] == cast(u8)60 { // '<'
+            j := i + 1
+            while j < name.count && name[j] != cast(u8)62 { j += 1 }
+            return name[i + 1:j]
+        }
+    }
+    i: s64 = 0
+    while i < name.count && name[i] != cast(u8)32 && name[i] != cast(u8)9 { i += 1 }
+    return name[:i]
+}
+
+ToLower :: (c: u8) -> u8 {
+    if c >= cast(u8)65 && c <= cast(u8)90 { return c + cast(u8)32 }
+    return c
+}
+
+// match from sendmail.b lines 552-561: case-insensitive prefix match, returns remainder or "".
+MatchPrefix :: (text: string, pat: string) -> string {
+    if pat.count > text.count { return "" }
+    for i: cast(s64)0..pat.count - 1 {
+        if text[i] != pat[i] && ToLower(text[i]) != pat[i] { return "" }
+    }
+    return text[pat.count:]
+}
+
+// netmkaddr from sendmail.b lines 639-652: ensure net!addr!svc form.
+NetMkAddr :: (addr: string, net_in: string, svc: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    net := ifx net_in.count == 0 then "net" else net_in
+    bangs: s32 = 0
+    for i: cast(s64)0..addr.count - 1 {
+        if addr[i] == cast(u8)33 { bangs += 1 }
+    }
+    if bangs == 0 {
+        unused BuilderAppend(out.*, net)
+        unused BuilderAppend(out.*, "!")
+        unused BuilderAppend(out.*, addr)
+        if svc.count > 0 {
+            unused BuilderAppend(out.*, "!")
+            unused BuilderAppend(out.*, svc)
+        }
+        return
+    }
+    if svc.count == 0 || bangs >= 2 {
+        unused BuilderAppend(out.*, addr)
+        return
+    }
+    unused BuilderAppend(out.*, addr)
+    unused BuilderAppend(out.*, "!")
+    unused BuilderAppend(out.*, svc)
+}
+
+// Parse one SMTP response line (without trailing \r\n), matching sendmail.b lines 594-610.
+ParseSmtpLine :: (line: string) -> SmtpResp {
+    if line.count < 3 {
+        return .{false, 0, 0, 0, "short read from server"}
+    }
+    c0 := line[0]
+    code: s32 = 0
+    for i: cast(s64)0..2 {
+        if line[i] >= cast(u8)48 && line[i] <= cast(u8)57 {
+            code = code * 10 + cast(s32)(line[i] - cast(u8)48)
+        }
+    }
+    pos: s64 = 3
+    while pos < line.count && (line[pos] == cast(u8)32 || line[pos] == cast(u8)45) { pos += 1 }
+    if c0 == cast(u8)49 || c0 == cast(u8)50 || c0 == cast(u8)51 {
+        return .{true, code, pos, line.count - pos, ""}
+    }
+    if c0 == cast(u8)52 || c0 == cast(u8)53 {
+        return .{false, code, pos, line.count - pos, "server rejected command"}
+    }
+    return .{false, 0, 0, 0, "invalid server response"}
+}
+
+ReplyHeaders :: struct {
+    to_start: s64
+    to_len: s64
+    cc_start: s64
+    cc_len: s64
+    subj_start: s64
+    subj_len: s64
+}
+
+// Parse reply header block passed from readmail (Subject:, Cc:, From:).
+ParseReplyHeaders :: (hdr: string) -> ReplyHeaders {
+    res: ReplyHeaders
+    i: s64 = 0
+    n := hdr.count
+    while i < n {
+        ls := i
+        while i < n && hdr[i] != cast(u8)10 { i += 1 }
+        le := i
+        if i < n { i += 1 }
+        if le > ls && hdr[le - 1] == cast(u8)13 { le -= 1 }
+        line := hdr[ls:le]
+
+        rem := MatchPrefix(line, "subject: ")
+        if rem.count > 0 {
+            res.subj_start = ls + 9
+            res.subj_len = le - (ls + 9)
+            continue
+        }
+        rem = MatchPrefix(line, "cc: ")
+        if rem.count > 0 {
+            res.cc_start = ls + 4
+            res.cc_len = le - (ls + 4)
+            continue
+        }
+        rem = MatchPrefix(line, "from: ")
+        if rem.count > 0 {
+            // Find exact slice of ExtractAddress inside hdr.
+            addr := ExtractAddress(rem)
+            // Compute start offset relative to ls + 6.
+            base := ls + 6
+            for k: base..le - addr.count {
+                matched := true
+                for m: cast(s64)0..addr.count - 1 {
+                    if hdr[k + m] != addr[m] { matched = false; break }
+                }
+                if matched {
+                    res.to_start = k
+                    res.to_len = addr.count
+                    break
+                }
+            }
+        }
+    }
+    return res
+}

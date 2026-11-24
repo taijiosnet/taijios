@@ -33,7 +33,6 @@ TARG=\
 	remotelogon.dis\
 	rmtdir.dis\
 	rt.dis\
-	sendmail.dis\
 	sh.dis\
 	smenu.dis\
 	task.dis\
@@ -181,7 +180,10 @@ avi.zx: avi.zi avi_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/t
 wmplay.zx: wmplay.zi wmplay_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_process --bind-host taijios_namespace --entry wmplay:main -o $target wmplay.zi
 
-install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx $DISBIN/avi.zx $DISBIN/wmplay.zx
+sendmail.zx: sendmail.zi sendmail_model.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_dial.zi ../cmd/taijios_process.zi ../cmd/taijios_namespace.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_dial --bind-host taijios_process --bind-host taijios_namespace --entry sendmail:main -o $target sendmail.zi
+
+install-kryon-zx:V: $DISBIN/snake.zx $DISBIN/sweeper.zx $DISBIN/tetris.zx $DISBIN/polyhedra.zx $DISBIN/calendar.zx $DISBIN/bounce.zx $DISBIN/c4.zx $DISBIN/collide.zx $DISBIN/mand.zx $DISBIN/reversi.zx $DISBIN/edit.zx $DISBIN/unibrowse.zx $DISBIN/avi.zx $DISBIN/wmplay.zx $DISBIN/sendmail.zx
 
 TASKMGR_ZX=
 install-taskmgr-zx:V:
