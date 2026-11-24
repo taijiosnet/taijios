@@ -1,0 +1,315 @@
+// Port of Inferno's Collide (appl/wm/collide.b). See ../../NOTICE.
+// usage: wm/collide [-cse] [-f] [-op] [-b num] [-v num]
+// Objects fly inside a cube, sphere or ellipsoid surround, reflecting off its
+// shell and colliding pairwise with equal masses and full restitution.
+// Top buttons control camera zoom (zoomin, stop, zoomout), speed (slow, fast)
+// and adding more objects (objects).
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Shape :: #import "kryon/shape";
+Collide :: #import "collide_model";
+Rand :: #import "inferno_rand";
+Math :: #import "std/math";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/session"
+#import "kryon/tree"
+
+PanelW :: 512
+PanelH :: 512
+BarH :: 48
+Width :: PanelW
+Height :: PanelH + BarH
+
+grey: Color = .{221, 221, 221, 255};
+black: Color = .{0, 0, 0, 255};
+white: Color = .{255, 255, 255, 255};
+
+// Camera and projection state matching collide.b.
+Frac :: 0.5
+InitObjD :: 500.0
+Near :: 4.0
+CircleSegs :: 72
+
+random: Rand.Random;
+game: Collide.Game;
+objd: float64 = InitObjD;
+fov: float64 = -1.0;
+sf: float64 = 1.6;
+zoom_delta: float64 = 0.0;
+speed_step: s32 = 8;
+add_batch: s32 = 16;
+
+// Circle unit points for smooth ellipsoid wireframe outline.
+cos_tab: [CircleSegs]float64;
+sin_tab: [CircleSegs]float64;
+
+Now :: () -> s32 {
+    bytes: [64]u8
+    fd := IO.Open("/dev/time", 0)
+    if fd < 0 { return 0 }
+    count := IO.Read(fd, bytes[:])
+    unused IO.Close(fd)
+    value: s64 = 0
+    for i: 0..count - 1 {
+        if bytes[i] < cast(u8)48 || bytes[i] > cast(u8)57 { break }
+        value = value * 10 + cast(s64)(bytes[i] - cast(u8)48)
+    }
+    return cast(s32)(value / 1000000)
+}
+
+Number :: (text: string) -> s32 {
+    value: s32 = 0
+    negative := text.count > 0 && text[0] == cast(u8)45
+    for i: cast(s64)(ifx negative then 1 else 0)..text.count - 1 {
+        if text[i] < cast(u8)48 || text[i] > cast(u8)57 { break }
+        value = value * 10 + cast(s32)(text[i] - cast(u8)48)
+    }
+    return ifx negative then -value else value
+}
+
+Projected :: struct {
+    ok: bool
+    x: float32
+    y: float32
+}
+
+// Project a 3D world point (centered on the surround, shifted by -objd along z)
+// into panel pixel coordinates, matching collide.b's m_frustum / m_ortho / m_vertex.
+Project :: (x: float64, y: float64, z: float64) -> Projected {
+    zc := z - objd
+    if zc >= 0.0 { return .{false, 0.0, 0.0} }
+    nx: float64
+    ny: float64
+    if fov != 0.0 {
+        r := Near / sf
+        nx = (r * x) / zc
+        ny = (r * y) / zc
+    } else {
+        r := 1.0 / sf
+        nx = r * x
+        ny = r * y
+    }
+    mx := cast(float64)PanelW / 2.0
+    my := cast(float64)PanelH / 2.0
+    px := cast(float32)(mx * nx + mx)
+    py := cast(float32)(my * ny + my + cast(float64)BarH)
+    return .{true, px, py}
+}
+
+ProjectRadius :: (x: float64, y: float64, z: float64, radius: float64) -> float32 {
+    zc := z - objd
+    if zc >= 0.0 { return 0.0 }
+    d: float64
+    if fov != 0.0 {
+        r := Near / sf
+        d = (r * radius) / (-zc)
+    } else {
+        d = radius / sf
+    }
+    px := d * (cast(float64)PanelW / 2.0)
+    if px < 1.0 { return 1.0 }
+    return cast(float32)px
+}
+
+DrawEdge :: (session: Session, key: u64, x1: float64, y1: float64, z1: float64,
+        x2: float64, y2: float64, z2: float64) {
+    a := Project(x1, y1, z1)
+    b := Project(x2, y2, z2)
+    if !a.ok || !b.ok { return }
+    Shape.Draw(session, .{.key = key, .start = .{a.x, a.y}, .end = .{b.x, b.y},
+        .thickness = 1.0, .color = white})
+}
+
+DrawSurround :: (session: Session) {
+    h := Collide.CubeHalf
+    if game.surround == Collide.Sphere {
+        center := Project(0.0, 0.0, 0.0)
+        if !center.ok { return }
+        radius := ProjectRadius(0.0, 0.0, 0.0, h)
+        inner := radius - 1.0
+        if inner < 0.0 { inner = 0.0 }
+        Shape.Ring(session, .{.key = 100, .center = .{center.x, center.y},
+            .inner_radius = inner, .outer_radius = radius,
+            .start_angle = 0.0, .end_angle = 360.0, .color = white})
+        return
+    }
+    if game.surround == Collide.Ellipsoid {
+        rx := h * game.ef.x
+        ry := h * game.ef.y
+        for i: 0..CircleSegs - 1 {
+            j := (i + 1) % CircleSegs
+            DrawEdge(session, cast(u64)(100 + i),
+                rx * cos_tab[i], ry * sin_tab[i], 0.0,
+                rx * cos_tab[j], ry * sin_tab[j], 0.0)
+        }
+        return
+    }
+    if game.flat {
+        DrawEdge(session, 100, -h, -h, 0.0, -h,  h, 0.0)
+        DrawEdge(session, 101, -h,  h, 0.0,  h,  h, 0.0)
+        DrawEdge(session, 102,  h,  h, 0.0,  h, -h, 0.0)
+        DrawEdge(session, 103,  h, -h, 0.0, -h, -h, 0.0)
+        return
+    }
+    // 12 edges of the wireframe hexahedron (cube [-h, h]^3).
+    // Back face (z = -h).
+    DrawEdge(session, 100, -h, -h, -h,  h, -h, -h)
+    DrawEdge(session, 101,  h, -h, -h,  h,  h, -h)
+    DrawEdge(session, 102,  h,  h, -h, -h,  h, -h)
+    DrawEdge(session, 103, -h,  h, -h, -h, -h, -h)
+    // Front face (z = +h).
+    DrawEdge(session, 104, -h, -h,  h,  h, -h,  h)
+    DrawEdge(session, 105,  h, -h,  h,  h,  h,  h)
+    DrawEdge(session, 106,  h,  h,  h, -h,  h,  h)
+    DrawEdge(session, 107, -h,  h,  h, -h, -h,  h)
+    // Connecting edges along z.
+    DrawEdge(session, 108, -h, -h, -h, -h, -h,  h)
+    DrawEdge(session, 109,  h, -h, -h,  h, -h,  h)
+    DrawEdge(session, 110,  h,  h, -h,  h,  h,  h)
+    DrawEdge(session, 111, -h,  h, -h, -h,  h,  h)
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+
+    // Advance one frame of simulation and any active zoom.
+    Collide.Step(*game, 1.0)
+    if zoom_delta != 0.0 {
+        next_d := objd - zoom_delta
+        if next_d > 10.0 && next_d < 5000.0 {
+            objd = next_d
+        }
+    }
+
+    // Draw the black viewport panel and 3D scene first, then the top toolbar
+    // over y in [0, BarH) so zoomed-in geometry never overlaps the controls.
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, cast(float32)BarH,
+        cast(float32)PanelW, cast(float32)PanelH}, .fill = black})
+    DrawSurround(session)
+
+    radius_world := game.track * 0.5
+    for order_at: 0..game.obj_count - 1 {
+        idx := game.draw_order[order_at]
+        obj := *game.objs[idx]
+        pt := Project(obj.p.x, obj.p.y, obj.p.z)
+        if !pt.ok { continue }
+        rad := ProjectRadius(obj.p.x, obj.p.y, obj.p.z, radius_world)
+        if pt.y + rad < cast(float32)BarH { continue }
+        Shape.Circle(session, .{.key = cast(u64)(300 + order_at),
+            .center = .{pt.x, pt.y}, .radius = rad,
+            .fill = .{obj.r, obj.g, obj.b, 255}})
+    }
+
+    // Toolbar background and two rows of buttons matching collide.b's winconfig.
+    Box.Draw(session, .{.key = 2, .bounds = .{0.0, 0.0,
+        cast(float32)Width, cast(float32)BarH}, .fill = grey})
+    if Button.Draw(session, .{.key = 10, .bounds = .{4.0, 2.0, 80.0, 20.0}, .label = "zoomin"}) > 0 {
+        zoom_delta = InitObjD / 250.0
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{216.0, 2.0, 80.0, 20.0}, .label = "stop"}) > 0 {
+        zoom_delta = 0.0
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{428.0, 2.0, 80.0, 20.0}, .label = "zoomout"}) > 0 {
+        zoom_delta = -(InitObjD / 250.0)
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{4.0, 26.0, 80.0, 20.0}, .label = "slow"}) > 0 {
+        if speed_step > 0 {
+            speed_step -= 1
+            game.vf *= 0.8
+            Collide.Retime(*game, 0.8)
+        }
+    }
+    if Button.Draw(session, .{.key = 14, .bounds = .{216.0, 26.0, 80.0, 20.0}, .label = "objects"}) > 0 {
+        add_batch = add_batch >> 1
+        if add_batch <= 0 { add_batch = 1 }
+        unused Collide.ObjInit(*game, *random, add_batch, add_batch)
+    }
+    if Button.Draw(session, .{.key = 15, .bounds = .{428.0, 26.0, 80.0, 20.0}, .label = "fast"}) > 0 {
+        if speed_step < 16 {
+            speed_step += 1
+            game.vf *= 1.25
+            Collide.Retime(*game, 1.25)
+        }
+    }
+}
+
+Usage :: () -> s32 {
+    unused IO.Write(2, "usage: collide [-cse] [-f] [-op] [-b num] [-v num]\n")
+    return 1
+}
+
+#program_export
+main :: () -> s32 {
+    Rand.Seed(*random, Now())
+    b := Collide.RandomInt(*random, 16, 32)
+    v := b
+    game.surround = Collide.Cube
+    game.flat = false
+    fov = -1.0
+
+    count := Args.OperandCount()
+    at: s32 = 0
+    while at < count {
+        word := Args.Operand(at)
+        at += 1
+        if word.count < 2 || word[0] != cast(u8)45 { return Usage() }
+        i: s64 = 1
+        while i < word.count {
+            ch := word[i]
+            i += 1
+            if ch == cast(u8)99 { game.surround = Collide.Cube }
+            else if ch == cast(u8)115 { game.surround = Collide.Sphere }
+            else if ch == cast(u8)101 { game.surround = Collide.Ellipsoid }
+            else if ch == cast(u8)102 { game.flat = true }
+            else if ch == cast(u8)111 { fov = 0.0 }
+            else if ch == cast(u8)112 { fov = -1.0 }
+            else if ch == cast(u8)98 || ch == cast(u8)118 {
+                val_text: string
+                if i < word.count {
+                    val_text = word[i:]
+                    i = word.count
+                } else if at < count {
+                    val_text = Args.Operand(at)
+                    at += 1
+                } else {
+                    return Usage()
+                }
+                parsed := Number(val_text)
+                if ch == cast(u8)98 {
+                    b = parsed
+                    v = parsed
+                } else {
+                    v = parsed
+                }
+            } else {
+                return Usage()
+            }
+        }
+    }
+
+    if b <= 0 { b = Collide.MinObjects }
+    if b > Collide.MaxInitObjects { b = Collide.MaxInitObjects }
+    if v <= 0 { v = Collide.MinObjects }
+    if v > b { v = b }
+    add_batch = b
+
+    for i: 0..CircleSegs - 1 {
+        angle := (2.0 * Collide.Pi * cast(float64)i) / cast(float64)CircleSegs
+        cos_tab[i] = Math.Cos(angle)
+        sin_tab[i] = Math.Sin(angle)
+    }
+
+    if fov != 0.0 {
+        sf = 4.0 * Collide.CubeHalf / (objd * Frac)
+    } else {
+        sf = Collide.CubeHalf / Frac
+    }
+
+    Collide.GrInit(*game, Collide.DefaultTrack)
+    unused Collide.ObjInit(*game, *random, b, v)
+    return Surface.Run(.{.title = "Collide", .width = Width, .height = Height}, Draw, 25)
+}

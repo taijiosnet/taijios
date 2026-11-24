@@ -434,6 +434,10 @@ entries and the Human and Machine menus, replays a game the Dis printed with
 the same values after every move, and runs the machine's search in slices
 between frames; Black's default level is 3, not the Dis's 8, because the ZX
 host runs the search about seventy times slower than the Dis interpreter.
+Collide keeps the cube, sphere and ellipsoid surrounds (`-c`, `-s`, `-e`), flat
+mode (`-f`), orthographic and perspective projection (`-o`, `-p`), object and
+moving counts (`-b`, `-v`), and the zoomin, stop, zoomout, slow, objects and
+fast buttons.
 Each test
 compares the rules and the window with games recorded from the Dis version.
 
@@ -444,6 +448,7 @@ python3 -u appl/wm/tetris_zx_test.py
 python3 -u appl/wm/polyhedra_zx_test.py
 python3 -u appl/wm/bounce_zx_test.py
 python3 -u appl/wm/c4_zx_test.py
+python3 -u appl/wm/collide_zx_test.py
 ```
 
 ### Use the ZX Calendar

@@ -1,0 +1,4 @@
+# The deterministic rule states checked by collide_model_test.zi: the Dis
+# version seeds its Rand from the clock, so the fixtures are the rules' own
+# fixed-state outcomes (cube/sphere/ellipsoid reflections, head-on momentum
+# transfer, retime scaling and depth sort order).

@@ -1,0 +1,150 @@
+// Rule checks for the Collide model: the Dis's reflection, ellipsoid, impact,
+// momentum transfer and multi-step frame rules at fixed states.
+Collide :: #import "collide_model";
+Rand :: #import "inferno_rand";
+Math :: #import "std/math";
+
+Fail :: (code: s32) -> s32 { return code }
+
+Near :: (a: float64, b: float64, eps: float64) -> bool {
+    d := a - b
+    if d < 0.0 { d = -d }
+    return d <= eps
+}
+
+main :: () -> s32 {
+    // simeq and impact: [1 1; -1 1][v2 v1] = [u -u] gives v2 = u, v1 = 0.
+    solve := Collide.Simeq(1.0, 1.0, -1.0, 1.0, 10.0, -10.0)
+    if !solve.ok || solve.first != 10.0 || solve.second != 0.0 { return Fail(1) }
+    impact := Collide.Impact(10.0)
+    if !impact.ok || impact.first != 10.0 || impact.second != 0.0 { return Fail(2) }
+
+    game: Collide.Game
+    game.surround = Collide.Cube
+    Collide.GrInit(*game, 10.0)
+    if game.icubd != 95.0 || game.track2 != 100.0 { return Fail(3) }
+    if game.plane_count != 6 || game.planes[1].d != game.icubd { return Fail(4) }
+
+    // A ball at the centre flying along +x meets the right wall at icubd,
+    // then reverses.
+    ball := *game.objs[0]
+    ball.p = .{0.0, 0.0, 0.0}
+    ball.l = .{.{0.0, 0.0, 0.0}, .{1.0, 0.0, 0.0}}
+    ball.v = 1.0
+    ball.rt = Collide.Infinity
+    ball.ct = Collide.Infinity
+    ball.plane = -1
+    ball.obj = -1
+    game.draw_order[0] = 0
+    game.obj_count = 1
+    Collide.Reflection(*game, ball)
+    if ball.rt != 95.0 || ball.plane != 1 || ball.rp.x != 95.0 { return Fail(5) }
+    // Reflection must not overwrite l.a before Reflect runs.
+    if ball.l.a.x != 0.0 { return Fail(6) }
+    Collide.Reflect(*game, ball)
+    if ball.l.d.x != -1.0 || ball.l.d.y != 0.0 || ball.l.a.x != 95.0 { return Fail(7) }
+
+    // Step through a wall reflection: starts at x=90 moving +x at v=1.
+    // Over 20 frames (t=20): hits x=95 at t=5, reflects to -x, ends at x=80, rt=175.
+    bounce: Collide.Game
+    bounce.surround = Collide.Cube
+    Collide.GrInit(*bounce, 10.0)
+    b0 := *bounce.objs[0]
+    b0.p = .{90.0, 0.0, 0.0}
+    b0.l = .{b0.p, .{1.0, 0.0, 0.0}}
+    b0.v = 1.0
+    b0.rt = Collide.Infinity
+    b0.ct = Collide.Infinity
+    b0.plane = -1
+    b0.obj = -1
+    bounce.draw_order[0] = 0
+    bounce.obj_count = 1
+    Collide.Reflection(*bounce, b0)
+    if !Near(b0.rt, 5.0, 1e-9) { return Fail(8) }
+    for frame: 0..19 { Collide.Step(*bounce, 1.0) }
+    if !Near(b0.p.x, 80.0, 1e-9) || !Near(b0.l.d.x, -1.0, 1e-9) || !Near(b0.rt, 175.0, 1e-9) {
+        return Fail(9)
+    }
+
+    // A sphere surround's exit point is the far shell at icubd, with the same reversal.
+    sphere: Collide.Game
+    sphere.surround = Collide.Sphere
+    Collide.GrInit(*sphere, 10.0)
+    other := *sphere.objs[0]
+    other.p = .{0.0, 0.0, 0.0}
+    other.l = .{.{0.0, 0.0, 0.0}, .{1.0, 0.0, 0.0}}
+    other.v = 1.0
+    other.rt = Collide.Infinity
+    other.ct = Collide.Infinity
+    sphere.draw_order[0] = 0
+    sphere.obj_count = 1
+    Collide.Reflection(*sphere, other)
+    if !Near(other.rt, 95.0, 1e-9) || !Near(other.rp.x, 95.0, 1e-9) { return Fail(10) }
+    Collide.Reflect(*sphere, other)
+    if !Near(other.l.d.x, -1.0, 1e-9) { return Fail(11) }
+
+    // An ellipsoid surround (ef = 1.0, 0.8, 1.0) hits y = 0.8 * icubd = 76.0 along +y.
+    ell: Collide.Game
+    ell.surround = Collide.Ellipsoid
+    Collide.GrInit(*ell, 10.0)
+    e0 := *ell.objs[0]
+    e0.p = .{0.0, 0.0, 0.0}
+    e0.l = .{.{0.0, 0.0, 0.0}, .{0.0, 1.0, 0.0}}
+    e0.v = 1.0
+    e0.rt = Collide.Infinity
+    e0.ct = Collide.Infinity
+    ell.draw_order[0] = 0
+    ell.obj_count = 1
+    Collide.Reflection(*ell, e0)
+    if !Near(e0.rt, 76.0, 1e-9) || !Near(e0.rp.y, 76.0, 1e-9) { return Fail(12) }
+    Collide.Reflect(*ell, e0)
+    if !Near(e0.l.d.y, -1.0, 1e-9) { return Fail(13) }
+
+    // Head-on collision between equal-mass objects: moving ball stops, struck ball
+    // takes its full velocity (v1=0, v2=2.0).
+    head: Collide.Game
+    head.surround = Collide.Cube
+    Collide.GrInit(*head, 10.0)
+    h1 := *head.objs[0]
+    h2 := *head.objs[1]
+    h1.p = .{-20.0, 0.0, 0.0}
+    h1.l = .{h1.p, .{1.0, 0.0, 0.0}}
+    h1.v = 2.0
+    h1.rt = Collide.Infinity
+    h1.ct = Collide.Infinity
+    h1.plane = -1
+    h1.obj = -1
+    h2.p = .{20.0, 0.0, 0.0}
+    h2.l = .{h2.p, .{1.0, 0.0, 0.0}}
+    h2.v = 0.0
+    h2.rt = Collide.Infinity
+    h2.ct = Collide.Infinity
+    h2.plane = -1
+    h2.obj = -1
+    head.draw_order[0] = 0
+    head.draw_order[1] = 1
+    head.obj_count = 2
+    Collide.Reflection(*head, h1)
+    Collide.Reflection(*head, h2)
+    Collide.Collisions(*head, 0)
+    // Contact at distance 40 - 10 = 30, time = 30 / 2 = 15, cp1 = (10,0,0), cp2 = (20,0,0).
+    if h1.obj != 1 || h2.obj != 0 || !Near(h1.ct, 15.0, 1e-9) { return Fail(14) }
+    for frame: 0..19 { Collide.Step(*head, 1.0) }
+    // After t=20: h1 stopped at x=10 (v=0), h2 took v=2 for 5s to x=30.
+    if !Near(h1.v, 0.0, 1e-9) || !Near(h1.p.x, 10.0, 1e-9) { return Fail(15) }
+    if !Near(h2.v, 2.0, 1e-9) || !Near(h2.p.x, 30.0, 1e-9) { return Fail(16) }
+
+    // Retime halves speeds and doubles remaining event times.
+    rt_before := h2.rt
+    Collide.Retime(*head, 0.5)
+    if !Near(h2.v, 1.0, 1e-9) || !Near(h2.rt, rt_before * 2.0, 1e-9) { return Fail(17) }
+
+    // Depth sort reorders draw_order without corrupting partner obj indices.
+    h1.p.z = 10.0
+    h2.p.z = -10.0
+    Collide.SortOrder(*head)
+    if head.draw_order[0] != 1 || head.draw_order[1] != 0 { return Fail(18) }
+
+    print("Collide reflected at cube, sphere and ellipsoid shells and transferred momentum on impact\n")
+    return 0
+}

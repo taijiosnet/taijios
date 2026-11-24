@@ -1,0 +1,713 @@
+// The rules of Inferno's Collide (appl/wm/collide.b): objects flying inside a
+// surround, reflecting off its planes or curved shell and colliding pairwise
+// with equal masses and full restitution. See ../../NOTICE.
+Math :: #import "std/math";
+Rand :: #import "inferno_rand";
+
+// collide.b's -b and -v clamps (objects button can grow past 100).
+MinObjects :: 1
+MaxInitObjects :: 100
+MaxObjects :: 256
+// The surrounds: a cube of six planes, a sphere or an ellipsoid shell.
+Cube :: 0
+Sphere :: 1
+Ellipsoid :: 2
+// The coefficient of restitution, collide.b's E, and equal masses M1, M2.
+Restitution :: 1.0
+Mass :: 1.0
+DefaultTrack :: 5.0
+CubeHalf :: 100.0
+
+Vector :: struct {
+    x: float64
+    y: float64
+    z: float64
+}
+
+Line :: struct {
+    a: Vector
+    d: Vector
+}
+
+Plane :: struct {
+    id: s32
+    n: Vector
+    d: float64
+    min: Vector
+    max: Vector
+    far: Vector
+    v: [8]Vector
+    v_count: s32
+}
+
+// An object in flight, collide.b's Object adt.
+Object :: struct {
+    id: s32
+    r: u8
+    g: u8
+    b: u8
+    l: Line
+    p: Vector
+    rp: Vector
+    cp: Vector
+    rt: float64
+    ct: float64
+    plane: s32
+    pmask: s32
+    obj: s32
+    v: float64
+    omega: float64
+    roll: float64
+    pitch: float64
+    yaw: float64
+    todo: s32
+}
+
+Game :: struct {
+    surround: s32
+    flat: bool
+    vf: float64
+    track: float64
+    // The inner cube half side and its square.
+    icubd: float64
+    icubd2: float64
+    // The square of the collision track diameter, trkd2.
+    track2: float64
+    // The cube extents cmin and cmax.
+    cmin: Vector
+    cmax: Vector
+    // The ellipsoid's axis factors ef and squared axes e2.
+    ef: Vector
+    e2: Vector
+    planes: [16]Plane
+    plane_count: s32
+    objs: [MaxObjects]Object
+    draw_order: [MaxObjects]s32
+    obj_count: s32
+}
+
+Infinity :: 1073741824.0
+// Limbo's Math->Pi.
+Pi :: 3.14159265358979323846
+
+V0 :: () -> Vector { return .{0.0, 0.0, 0.0} }
+VZ :: () -> Vector { return .{0.0, 0.0, 1.0} }
+
+Det :: (a: float64, b: float64, c: float64, d: float64) -> float64 {
+    return a * d - b * c
+}
+
+SimeqResult :: struct {
+    first: float64
+    second: float64
+    ok: bool
+}
+
+// simeq: the simultaneous solve collide.b's impact uses.
+Simeq :: (a: float64, b: float64, c: float64, d: float64, e: float64, f: float64) -> SimeqResult {
+    det := Det(a, b, c, d)
+    if det == 0.0 { return .{0.0, 0.0, false} }
+    return .{Det(e, b, f, d) / det, Det(a, e, c, f) / det, true}
+}
+
+CkSimeq :: (a: float64, b: float64, c: float64, d: float64, e: float64, f: float64) -> SimeqResult {
+    det := Det(a, b, c, d)
+    ade := ifx det < 0.0 then -det else det
+    if ade < 0.001 { return .{0.0, 0.0, false} }
+    return .{Det(e, b, f, d) / det, Det(a, e, c, f) / det, true}
+}
+
+VAdd :: (v1: Vector, v2: Vector) -> Vector {
+    return .{v1.x + v2.x, v1.y + v2.y, v1.z + v2.z}
+}
+
+VSub :: (v1: Vector, v2: Vector) -> Vector {
+    return .{v1.x - v2.x, v1.y - v2.y, v1.z - v2.z}
+}
+
+VMul :: (v: Vector, s: float64) -> Vector {
+    return .{v.x * s, v.y * s, v.z * s}
+}
+
+VDiv :: (v: Vector, s: float64) -> Vector {
+    return .{v.x / s, v.y / s, v.z / s}
+}
+
+VDot :: (v1: Vector, v2: Vector) -> float64 {
+    return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z
+}
+
+VCross :: (v1: Vector, v2: Vector) -> Vector {
+    return .{v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x}
+}
+
+VLen :: (v: Vector) -> float64 {
+    return Math.Sqrt(VDot(v, v))
+}
+
+VNorm :: (v: Vector) -> Vector {
+    length := VLen(v)
+    if length == 0.0 { return v }
+    return VMul(v, 1.0 / length)
+}
+
+// vnorm2: the length and the normalized vector.
+VNormResult :: struct {
+    magnitude: float64
+    vector: Vector
+}
+
+VNorm2 :: (v: Vector) -> VNormResult {
+    length := VLen(v)
+    if length == 0.0 { return .{0.0, VZ()} }
+    return .{length, VMul(v, 1.0 / length)}
+}
+
+VMin :: (v: Vector) -> float64 {
+    m := v.x
+    if v.y < m { m = v.y }
+    if v.z < m { m = v.z }
+    return m
+}
+
+// vvmul and vvdiv: component-wise products and quotients.
+VVMul :: (v1: Vector, v2: Vector) -> Vector {
+    return .{v1.x * v2.x, v1.y * v2.y, v1.z * v2.z}
+}
+
+VVDiv :: (v1: Vector, v2: Vector) -> Vector {
+    return .{v1.x / v2.x, v1.y / v2.y, v1.z / v2.z}
+}
+
+// vmuldiv: vdot(vvdiv(v1, v3), v2), used for the ellipsoid's quadratic and test.
+VMulDiv :: (v1: Vector, v2: Vector, v3: Vector) -> float64 {
+    return VDot(VVDiv(v1, v3), v2)
+}
+
+VOut :: (v1: Vector, v2: Vector) -> bool {
+    v := VSub(v2, v1)
+    return v.x < 0.0 || v.y < 0.0 || v.z < 0.0
+}
+
+Inside :: (v: Vector, vmin: Vector, vmax: Vector) -> bool {
+    return !VOut(vmin, v) && !VOut(v, vmax)
+}
+
+Outside3 :: (v: Vector, vmin: Vector, vmax: Vector) -> bool {
+    return VOut(vmin, v) || VOut(v, vmax)
+}
+
+// outside2: collide.b's plane test for a cube plane, with min and max grown by eps.
+Outside2 :: (v: Vector, p: *Plane) -> bool {
+    return VOut(p.min, v) || VOut(v, p.max)
+}
+
+QuadraticResult :: struct {
+    ok: bool
+    root: float64
+}
+
+// quadratic: collide.b's larger root of a t^2 + b t + c, the exit point of a
+// ray starting inside the surround.
+Quadratic :: (a: float64, b: float64, c: float64) -> QuadraticResult {
+    disc := b * b - 4.0 * a * c
+    if disc < 0.0 { return .{false, 0.0} }
+    root := (Math.Sqrt(disc) - b) / (2.0 * a)
+    return .{true, root}
+}
+
+IntersectResult :: struct {
+    ok: bool
+    lambda: float64
+    point: Vector
+}
+
+// intersect: where the line crosses the plane, inside its bounds.
+Intersect :: (l: Line, p: *Plane) -> IntersectResult {
+    m := VDot(p.n, l.d)
+    if m == 0.0 { return .{false, 0.0, V0()} }
+    c := VDot(p.n, l.a)
+    lambda := (p.d - c) / m
+    if lambda < 0.0 { return .{false, lambda, V0()} }
+    point := VAdd(l.a, VMul(l.d, lambda))
+    if Outside2(point, p) { return .{false, lambda, point} }
+    return .{true, lambda, point}
+}
+
+// reflection: the next wall hit along the object's line, and its time at the
+// object's speed.
+Reflection :: (game: *Game, tr: *Object) {
+    l := tr.l
+    lambda: float64
+    if game.surround == Sphere {
+        found := Quadratic(1.0, 2.0 * VDot(l.a, l.d), VDot(l.a, l.a) - game.icubd2)
+        if !found.ok || found.root < 0.0 {
+            tr.rt = Infinity
+            return
+        }
+        lambda = found.root
+        tr.rp = VAdd(l.a, VMul(l.d, lambda))
+        tr.plane = 0
+    } else if game.surround == Ellipsoid {
+        found := Quadratic(VMulDiv(l.d, l.d, game.e2), 2.0 * VMulDiv(l.a, l.d, game.e2),
+            VMulDiv(l.a, l.a, game.e2) - 1.0)
+        if !found.ok || found.root < 0.0 {
+            tr.rt = Infinity
+            return
+        }
+        lambda = found.root
+        tr.rp = VAdd(l.a, VMul(l.d, lambda))
+        tr.plane = 0
+    } else {
+        best: IntersectResult = .{false, Infinity, V0()}
+        chosen: s32 = -1
+        for at: 0..game.plane_count - 1 {
+            p := *game.planes[at]
+            mask := cast(u32)1 << cast(u32)p.id
+            if cast(s32)(mask & cast(u32)tr.pmask) != 0 { continue }
+            hit := Intersect(l, p)
+            if hit.ok && hit.lambda < best.lambda {
+                best = hit
+                chosen = p.id
+            }
+        }
+        if chosen < 0 {
+            tr.rt = Infinity
+            return
+        }
+        lambda = best.lambda
+        tr.rp = best.point
+        tr.plane = chosen
+    }
+    if tr.v == 0.0 {
+        tr.rt = Infinity
+    } else {
+        tr.rt = lambda / tr.v
+    }
+}
+
+// reflect: the bounce off the found surface, mirroring the direction through
+// the surface's normal.
+Reflect :: (game: *Game, tr: *Object) {
+    n: Vector
+    if game.surround == Sphere {
+        n = VDiv(tr.rp, -game.icubd)
+    } else if game.surround == Ellipsoid {
+        n = VNorm(VDiv(VVDiv(tr.rp, game.e2), -1.0))
+    } else {
+        n = game.planes[tr.plane].n
+    }
+    tr.l.a = tr.rp
+    tr.l.d = VNorm(VSub(tr.l.d, VMul(n, 2.0 * VDot(n, tr.l.d))))
+}
+
+// impact: returns (v2, v1) along the line of centres after a collision with
+// u1 == 0, matching collide.b's (v2, v1) := impact(alpha*v3).
+Impact :: (u2: float64) -> SimeqResult {
+    return Simeq(Mass, Mass, -1.0, 1.0, Mass * u2, -Restitution * u2)
+}
+
+CollisionResult :: struct {
+    hit: bool
+    time: float64
+    cp1: Vector
+    cp2: Vector
+}
+
+// outside3: collide.b's surround-aware extent test.
+OutsideGame :: (game: *Game, v: Vector) -> bool {
+    if VOut(game.cmin, v) || VOut(v, game.cmax) { return true }
+    if game.surround == Sphere { return VDot(v, v) > game.icubd2 }
+    if game.surround == Ellipsoid { return VMulDiv(v, v, game.e2) > 1.0 }
+    return false
+}
+
+// collision: whether two objects meet while the second is stopped, and when
+// and where. The track of each object is trkd across.
+Collision :: (game: *Game, t1: *Object, t2: *Object) -> CollisionResult {
+    relative := VNorm2(VSub(VMul(t1.l.d, t1.v), VMul(t2.l.d, t2.v)))
+    if relative.magnitude == 0.0 { return .{false, 0.0, V0(), V0()} }
+    ab := VSub(t2.p, t1.p)
+    length2 := VDot(ab, ab)
+    if length2 == 0.0 { return .{false, 0.0, V0(), V0()} }
+    length := Math.Sqrt(length2)
+    cosine := VDot(relative.vector, ab) / length
+    cos2 := cosine * cosine
+    disc := game.track2 - length2 * (1.0 - cos2)
+    if cosine < 0.0 || disc < 0.0 { return .{false, 0.0, V0(), V0()} }
+    distance := length * cosine - Math.Sqrt(disc)
+    time := distance / relative.magnitude
+    cp1 := VAdd(t1.p, VMul(t1.l.d, t1.v * time))
+    if OutsideGame(game, cp1) { return .{false, 0.0, V0(), V0()} }
+    cp2 := VAdd(t2.p, VMul(t2.l.d, t2.v * time))
+    if OutsideGame(game, cp2) { return .{false, 0.0, V0(), V0()} }
+    return .{true, time, cp1, cp2}
+}
+
+// collide: resume both objects along the impact's new velocities.
+Collide :: (game: *Game, t1: *Object, t2: *Object) {
+    ov := VMul(t2.l.d, t2.v)
+    relative := VNorm2(VSub(VMul(t1.l.d, t1.v), ov))
+    ab := VSub(t2.cp, t1.cp)
+    ab2 := VDot(ab, ab)
+    if ab2 == 0.0 { return }
+    alpha := VDot(relative.vector, ab) / ab2
+    abr := VSub(relative.vector, VMul(ab, alpha))
+    impact := Impact(alpha * relative.magnitude)
+    // impact.first is v2 (struck t2), impact.second is v1 (striking t1).
+    t1.l.a = t1.cp
+    t2.l.a = t2.cp
+    dir1 := VAdd(VMul(ab, impact.second), VMul(abr, relative.magnitude))
+    dir2 := VMul(ab, impact.first)
+    v1 := VNorm2(VAdd(dir1, ov))
+    v2 := VNorm2(VAdd(dir2, ov))
+    t1.v = v1.magnitude
+    t1.l.d = v1.vector
+    t2.v = v2.magnitude
+    t2.l.d = v2.vector
+}
+
+Deg2Rad :: (degrees: float64) -> float64 {
+    return Pi * degrees / 180.0
+}
+
+Rad2Deg :: (radians: float64) -> float64 {
+    return 180.0 * radians / Pi
+}
+
+Rp2d :: (roll: float64, pitch: float64) -> Vector {
+    r := Deg2Rad(roll)
+    p := Deg2Rad(pitch)
+    return .{Math.Cos(r) * Math.Cos(p), Math.Sin(r) * Math.Cos(p), Math.Sin(p)}
+}
+
+Direction :: struct {
+    roll: float64
+    pitch: float64
+}
+
+D2rpResult :: (v: Vector) -> Direction {
+    r := Math.Atan2(v.y, v.x)
+    p := Math.Asin(v.z)
+    return .{Rad2Deg(r), Rad2Deg(p)}
+}
+
+CollideSpin :: (t1: *Object, t2: *Object) {
+    d1 := Rp2d(t1.roll, t1.pitch)
+    d2 := Rp2d(t2.roll, t2.pitch)
+    oomega := VMul(d2, t2.omega)
+    relative := VNorm2(VSub(VMul(d1, t1.omega), oomega))
+    ab := VSub(t2.cp, t1.cp)
+    ab2 := VDot(ab, ab)
+    if ab2 == 0.0 { return }
+    alpha := VDot(relative.vector, ab) / ab2
+    abr := VSub(relative.vector, VMul(ab, alpha))
+    impact := Impact(alpha * relative.magnitude)
+    dir1 := VAdd(VMul(ab, impact.second), VMul(abr, relative.magnitude))
+    dir2 := VMul(ab, impact.first)
+    v1 := VNorm2(VAdd(dir1, oomega))
+    v2 := VNorm2(VAdd(dir2, oomega))
+    t1.omega = v1.magnitude
+    t2.omega = v2.magnitude
+    first := D2rpResult(v1.vector)
+    second := D2rpResult(v2.vector)
+    t1.roll = first.roll
+    t1.pitch = first.pitch
+    t2.roll = second.roll
+    t2.pitch = second.pitch
+}
+
+// Event flags: an object's next reflection and collision.
+REFLECT :: 1
+COLLIDE :: 2
+
+Clip :: (x: float64, d: float64) -> float64 {
+    if x > d { return d }
+    if x < -d { return -d }
+    return x
+}
+
+VClip :: (v: Vector, d: float64) -> Vector {
+    return .{Clip(v.x, d), Clip(v.y, d), Clip(v.z, d)}
+}
+
+// zerot: clear an event's time and partner, noting work for the next pass.
+ZeroTime :: (game: *Game, index: s32, zero: s32, note: s32) {
+    if index < 0 || index >= game.obj_count { return }
+    tr := *game.objs[index]
+    flag := cast(u32)zero
+    if cast(s32)(flag & cast(u32)REFLECT) != 0 { tr.rt = Infinity; tr.plane = -1 }
+    if cast(s32)(flag & cast(u32)COLLIDE) != 0 { tr.ct = Infinity; tr.obj = -1 }
+    if note != 0 { tr.todo = zero }
+}
+
+NewPlane :: (id: s32, a: float64, b: float64, c: float64, d: float64, m: float64) -> Plane {
+    reach := m + 0.001
+    return .{id, .{a, b, c}, d, .{-reach, -reach, -reach}, .{reach, reach, reach},
+        .{Infinity, Infinity, Infinity}, .{V0(), V0(), V0(), V0(), V0(), V0(), V0(), V0()}, 0}
+}
+
+// pinit: the six cube planes, or the curved surround's single placeholder.
+InitPlanes :: (game: *Game) {
+    if game.surround == Cube {
+        game.planes[0] = NewPlane(0, 1.0, 0.0, 0.0, -game.icubd, game.icubd)
+        game.planes[1] = NewPlane(1, 1.0, 0.0, 0.0, game.icubd, game.icubd)
+        game.planes[2] = NewPlane(2, 0.0, 1.0, 0.0, -game.icubd, game.icubd)
+        game.planes[3] = NewPlane(3, 0.0, 1.0, 0.0, game.icubd, game.icubd)
+        game.planes[4] = NewPlane(4, 0.0, 0.0, 1.0, -game.icubd, game.icubd)
+        game.planes[5] = NewPlane(5, 0.0, 0.0, 1.0, game.icubd, game.icubd)
+        game.plane_count = 6
+    } else {
+        game.planes[0] = NewPlane(0, 0.0, 0.0, 1.0, Infinity, Infinity)
+        game.plane_count = 1
+    }
+}
+
+// collisions: pair this object with the soonest compatible partner, then
+// reschedule the partners it had before, as collide.b did.
+Collisions :: (game: *Game, index: s32) {
+    tr := *game.objs[index]
+    tr0 := tr.obj
+    mint := tr.ct
+    chosen: s32 = -1
+    cp1 := V0()
+    cp2 := V0()
+    for at: 0..game.obj_count - 1 {
+        if at == index || at == tr0 { continue }
+        hit := Collision(game, tr, *game.objs[at])
+        if hit.hit && hit.time < mint && hit.time < game.objs[at].ct {
+            mint = hit.time
+            chosen = at
+            cp1 = hit.cp1
+            cp2 = hit.cp2
+        }
+    }
+    if chosen >= 0 {
+        tr.ct = mint
+        game.objs[chosen].ct = mint
+        tr.obj = chosen
+        tr2 := game.objs[chosen].obj
+        game.objs[chosen].obj = index
+        tr.cp = cp1
+        game.objs[chosen].cp = cp2
+        ZeroTime(game, tr0, COLLIDE, 0)
+        ZeroTime(game, tr2, COLLIDE, 0)
+        if tr0 >= 0 && tr0 != tr2 { Collisions(game, tr0) }
+        if tr2 >= 0 { Collisions(game, tr2) }
+    }
+}
+
+RandomInt :: (random: *Rand.Random, low: s32, high: s32) -> s32 {
+    return low + Rand.Next(random, high - low + 1)
+}
+
+URand :: (random: *Rand.Random) -> float64 {
+    return cast(float64)RandomInt(random, 0, 1000) / 1000.0
+}
+
+RandomReal :: (random: *Rand.Random, low: float64, high: float64) -> float64 {
+    return low + URand(random) * (high - low)
+}
+
+RandomVec :: (random: *Rand.Random, flat: bool, low: float64, high: float64) -> Vector {
+    x := RandomReal(random, low, high)
+    y := RandomReal(random, low, high)
+    if flat { return .{x, y, (low + high) / 2.0} }
+    return .{x, y, RandomReal(random, low, high)}
+}
+
+RandomDir :: (random: *Rand.Random, flat: bool) -> Vector {
+    v := RandomVec(random, flat, -1000.0, 1000.0)
+    while VLen(v) == 0.0 {
+        v = RandomVec(random, flat, -1000.0, 1000.0)
+    }
+    return VNorm(v)
+}
+
+RandomPoint :: (game: *Game, random: *Rand.Random, low: float64, high: float64) -> Vector {
+    if game.surround == Sphere {
+        return VMul(RandomDir(random, game.flat), high * Math.Sqrt(URand(random)))
+    }
+    if game.surround == Ellipsoid {
+        return VMul(RandomDir(random, game.flat), high * VMin(game.ef) * Math.Sqrt(URand(random)))
+    }
+    return RandomVec(random, game.flat, low, high)
+}
+
+// newobj: place a new object clear of the others, then schedule its first
+// reflection. Returns false when 1024 placements all overlap.
+NewObject :: (game: *Game, random: *Rand.Random, moving: bool, speed_factor: float64) -> bool {
+    if game.obj_count >= MaxObjects { return false }
+    reach := game.icubd - 1.0
+    position := V0()
+    again := false
+    tries: s32 = 1024
+    while tries > 0 {
+        again = false
+        position = RandomPoint(game, random, -reach, reach)
+        for at: 0..game.obj_count - 1 {
+            delta := VSub(game.objs[at].p, position)
+            if VDot(delta, delta) <= game.track2 { again = true; break }
+        }
+        tries -= 1
+        if !again { break }
+    }
+    if again { return false }
+    direction := RandomDir(random, game.flat)
+    r: s32 = 0
+    g: s32 = 0
+    b: s32 = 0
+    while r + g + b < 384 {
+        r = RandomInt(random, 0, 255)
+        g = RandomInt(random, 0, 255)
+        b = RandomInt(random, 0, 255)
+    }
+    index := game.obj_count
+    tr := *game.objs[index]
+    tr.id = index
+    tr.r = cast(u8)r
+    tr.g = cast(u8)g
+    tr.b = cast(u8)b
+    tr.p = position
+    tr.l = .{position, VNorm(direction)}
+    tr.v = ifx moving then game.vf * speed_factor * RandomReal(random, 0.5, 2.0) else 0.0
+    tr.omega = game.vf * RandomReal(random, 1.0, 10.0)
+    tr.roll = RandomReal(random, 0.0, 360.0)
+    tr.pitch = RandomReal(random, 0.0, 360.0)
+    tr.yaw = RandomReal(random, 0.0, 360.0)
+    tr.todo = 0
+    tr.pmask = 0
+    tr.rt = Infinity
+    tr.ct = Infinity
+    tr.plane = -1
+    tr.obj = -1
+    game.draw_order[index] = index
+    game.obj_count += 1
+    Reflection(game, tr)
+    return true
+}
+
+// objinit: add m objects with the first v moving, then schedule pairwise collisions.
+ObjInit :: (game: *Game, random: *Rand.Random, count: s32, moving: s32) -> s32 {
+    if count <= 0 { return 0 }
+    mv := moving
+    if mv <= 0 { mv = 1 }
+    if mv > count { mv = count }
+    velf := cast(float64)count / cast(float64)mv
+    start := game.obj_count
+    added: s32 = 0
+    for i: 0..count - 1 {
+        if !NewObject(game, random, i < mv, velf) { break }
+        added += 1
+    }
+    SortOrder(game)
+    for at: start..game.obj_count - 1 {
+        Collisions(game, at)
+    }
+    return added
+}
+
+// retime: scale every speed by factor and remaining event times by 1/factor.
+Retime :: (game: *Game, factor: float64) {
+    if factor == 0.0 { return }
+    inv := 1.0 / factor
+    for at: 0..game.obj_count - 1 {
+        tr := *game.objs[at]
+        tr.v *= factor
+        tr.omega *= factor
+        if tr.rt < Infinity { tr.rt *= inv }
+        if tr.ct < Infinity { tr.ct *= inv }
+    }
+}
+
+// GrInit: collide.b's derived extents, with track the object diameter (5.0 default).
+GrInit :: (game: *Game, track: float64) {
+    game.vf = 1.0
+    game.track = track
+    track_half := track / 2.0
+    game.icubd = CubeHalf - track_half
+    game.icubd2 = game.icubd * game.icubd
+    game.track2 = track * track
+    game.cmin = .{-game.icubd, -game.icubd, -game.icubd}
+    game.cmax = .{game.icubd, game.icubd, game.icubd}
+    game.ef = .{1.0, 0.8, 1.0}
+    game.e2 = VMul(VVMul(game.ef, game.ef), game.icubd2)
+    InitPlanes(game)
+}
+
+// Step: one frame, advancing every object through its next reflection or
+// collision until the frame's time is spent, as drawobjs did.
+Step :: (game: *Game, frame_time: float64) {
+    for at: 0..game.obj_count - 1 {
+        game.objs[at].pmask = 0
+    }
+    remaining := frame_time
+    guard: s32 = 0
+    while remaining > 0.0 && guard < 256 {
+        guard += 1
+        soonest := Infinity
+        for at: 0..game.obj_count - 1 {
+            tr := *game.objs[at]
+            if tr.rt < soonest { soonest = tr.rt }
+            if tr.ct < soonest { soonest = tr.ct }
+        }
+        delta := soonest
+        if delta > remaining { delta = remaining }
+        if delta < 0.0 { delta = 0.0 }
+        for at: 0..game.obj_count - 1 {
+            tr := *game.objs[at]
+            if tr.rt == delta {
+                partner := tr.obj
+                Reflect(game, tr)
+                tr.p = tr.rp
+                plane_bit := cast(s32)(cast(u32)1 << cast(u32)tr.plane)
+                if delta > 0.0 { tr.pmask = plane_bit } else { tr.pmask |= plane_bit }
+                ZeroTime(game, at, REFLECT | COLLIDE, 1)
+                ZeroTime(game, partner, COLLIDE, 1)
+            } else if tr.ct == delta {
+                partner := tr.obj
+                if partner >= 0 { Collide(game, tr, *game.objs[partner]) }
+                tr.p = tr.cp
+                if partner >= 0 { game.objs[partner].p = game.objs[partner].cp }
+                tr.pmask = 0
+                if partner >= 0 { game.objs[partner].pmask = 0 }
+                ZeroTime(game, at, REFLECT | COLLIDE, 1)
+                ZeroTime(game, partner, REFLECT | COLLIDE, 1)
+            } else if tr.todo != cast(s32)(REFLECT | COLLIDE) {
+                tr.p = VClip(VAdd(tr.p, VMul(tr.l.d, tr.v * delta)), game.icubd)
+                if tr.rt < Infinity { tr.rt -= delta }
+                if tr.ct < Infinity { tr.ct -= delta }
+            }
+        }
+        for at: 0..game.obj_count - 1 {
+            tr := *game.objs[at]
+            if tr.todo != 0 {
+                if (cast(u32)tr.todo & cast(u32)REFLECT) != 0 { Reflection(game, tr) }
+                if (cast(u32)tr.todo & cast(u32)COLLIDE) != 0 { Collisions(game, at) }
+                tr.todo = 0
+            }
+        }
+        remaining -= delta
+    }
+    SortOrder(game)
+}
+
+// SortOrder: collide.b's near-sorted bubble pass by depth (z ascending),
+// reordering draw_order so objs[] indices referenced by tr.obj stay valid.
+SortOrder :: (game: *Game) {
+    q := game.obj_count
+    while q > 1 {
+        done := true
+        q -= 1
+        for p: 0..q - 1 {
+            a := game.draw_order[p]
+            b := game.draw_order[p + 1]
+            if game.objs[a].p.z > game.objs[b].p.z {
+                game.draw_order[p] = b
+                game.draw_order[p + 1] = a
+                done = false
+            }
+        }
+        if done { break }
+    }
+}
