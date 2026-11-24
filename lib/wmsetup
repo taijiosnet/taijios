@@ -36,7 +36,7 @@ if {ftest -f /dis/wm/explorer.zx} {
 menu 'Web Browser'          {wmrun charon}
 menu ''                     ''
 menu Development Acme       {wmrun acme}
-menu Development Edit       {wmrun wm/edit}
+menu Development Edit       {wmrun zxrun -w /dis/wm/edit.zx}
 menu Development Debugger   {wmrun wm/deb}
 menu System Shell           {wmrun wm/sh}
 menu System 'Module Manager' {wmrun wm/rt}

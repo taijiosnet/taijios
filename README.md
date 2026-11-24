@@ -443,7 +443,11 @@ arguments, button-1 rectangle zoom, button-2 Julia switch and button-3 zoom-out
 stack. Reversi keeps the 8 by 8 green board, Black and White Human/Machine
 menus, level entries (default 6 and 0), last move replay, `-a`, `-p` and `-s`
 flags, and the ring-weight and corner-line minimax engine matching the Dis
-version's evaluations and leaf counts.
+version's evaluations and leaf counts. Edit keeps the File (New, Open..., Save,
+Save As..., Exit with dirty confirmation), Edit (Cut, Copy, Paste and button-2
+popup), Search (Find..., Replace with..., Find Again, Find and Replace, Find and
+Replace All) and Options (Limbo keyword/comment highlighting and auto-indent,
+Indent) menus.
 Each test
 compares the rules and the window with games recorded from the Dis version.
 
@@ -457,6 +461,7 @@ python3 -u appl/wm/c4_zx_test.py
 python3 -u appl/wm/collide_zx_test.py
 python3 -u appl/wm/mand_zx_test.py
 python3 -u appl/wm/reversi_zx_test.py
+python3 -u appl/wm/edit_zx_test.py
 ```
 
 ### Use the ZX Calendar

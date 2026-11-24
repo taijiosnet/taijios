@@ -1,0 +1,59 @@
+// Rule checks for the Edit model: Limbo keyword/comment span scanning,
+// search/wrap, replace, replace-all and 8-space-to-tab indent collapsing.
+Model :: #import "edit_model";
+#import "std/vec"
+
+Fail :: (code: s32) -> s32 { return code }
+
+main :: () -> s32 {
+    // Keyword & block-keyword recognition.
+    if !Model.IsLimboKeyword("implement") || !Model.IsLimboKeyword("while") || !Model.IsLimboKeyword("nil") {
+        return Fail(1)
+    }
+    if Model.IsLimboKeyword("Implement") || Model.IsLimboKeyword("foo") { return Fail(2) }
+    if !Model.IsBlockKeyword("if") || !Model.IsBlockKeyword("while") || Model.IsBlockKeyword("nil") {
+        return Fail(3)
+    }
+
+    // Limbo syntax highlighting: keywords in blue, '#' comments in green, strings ignored.
+    sample := "if (x == \"for # not comment\") # real comment\nreturn nil;\n"
+    spans: Vec(Model.Span)
+    defer VecFree(spans)
+    Model.ScanLimboSpans(sample, *spans)
+    // Expect 4 spans: "if" (0..2), "# real comment" (30..44), "return" (45..51), "nil" (52..55).
+    if spans.count != 4 { return Fail(4) }
+    if spans[0].start != 0 || spans[0].end != 2 || spans[0].color != Model.BlueKeyword { return Fail(5) }
+    if spans[1].start != 30 || spans[1].end != 44 || spans[1].color != Model.GreenComment { return Fail(6) }
+    if spans[2].start != 45 || spans[2].end != 51 || spans[2].color != Model.BlueKeyword { return Fail(7) }
+    if spans[3].start != 52 || spans[3].end != 55 || spans[3].color != Model.BlueKeyword { return Fail(8) }
+
+    // Search with wrap-around.
+    hay := "alpha beta alpha gamma"
+    if Model.FindNext(hay, "alpha", 0, true) != 0 { return Fail(9) }
+    if Model.FindNext(hay, "alpha", 1, true) != 11 { return Fail(10) }
+    if Model.FindNext(hay, "alpha", 12, true) != 0 { return Fail(11) }
+    if Model.FindNext(hay, "alpha", 12, false) != -1 { return Fail(12) }
+
+    // ReplaceRange and ReplaceAll.
+    buf: Vec(u8)
+    defer VecFree(buf)
+    unused BuilderAppend(buf, hay)
+    Model.ReplaceRange(*buf, 6, 10, "BETA")
+    if TextView(buf[:]) != "alpha BETA alpha gamma" { return Fail(13) }
+    hits := Model.ReplaceAll(*buf, "alpha", "ONE")
+    if hits != 2 || TextView(buf[:]) != "ONE BETA ONE gamma" { return Fail(14) }
+
+    // 8-space-to-tab collapse matching edit.b collapse().
+    ind: Vec(u8)
+    defer VecFree(ind)
+    Model.CollapseIndent("                x", *ind)
+    if TextView(ind[:]) != "\t\tx" { return Fail(15) }
+    Model.CollapseIndent("          ", *ind)
+    if TextView(ind[:]) != "\t  " { return Fail(16) }
+
+    // BasePath helper.
+    if Model.BasePath("/usr/inferno/foo.b") != "/usr/inferno" { return Fail(17) }
+
+    print("Edit matched Limbo highlighting, search, replace-all and indent rules\n")
+    return 0
+}

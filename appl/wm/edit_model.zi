@@ -1,0 +1,215 @@
+// The rules of Inferno's Edit (appl/wm/edit.b): text buffer edits, search and
+// replace, all 41 Limbo keywords with blue/green comment syntax highlighting,
+// and 8-space-to-tab indent collapsing. See ../../NOTICE.
+#import "std/vec"
+
+// RGBA packed as 0xRRGGBBAA (matching Kryon Color / u32).
+BlueKeyword :: cast(u32)0x0000FFFF
+GreenComment :: cast(u32)0x008800FF
+
+Span :: struct {
+    start: s32
+    end: s32
+    color: u32
+}
+
+// Exact 41 Limbo keywords from appl/wm/edit.b lines 260-270.
+IsLimboKeyword :: (word: string) -> bool {
+    if word == "adt" || word == "alt" || word == "array" || word == "big" || word == "break" { return true }
+    if word == "byte" || word == "case" || word == "chan" || word == "con" || word == "continue" { return true }
+    if word == "cyclic" || word == "do" || word == "else" || word == "exit" || word == "fn" { return true }
+    if word == "for" || word == "hd" || word == "if" || word == "implement" || word == "import" { return true }
+    if word == "include" || word == "int" || word == "len" || word == "list" || word == "load" { return true }
+    if word == "module" || word == "nil" || word == "of" || word == "or" || word == "pick" { return true }
+    if word == "real" || word == "ref" || word == "return" || word == "self" || word == "spawn" { return true }
+    if word == "string" || word == "tagof" || word == "tl" || word == "to" || word == "type" { return true }
+    if word == "while" { return true }
+    return false
+}
+
+// Block keywords from edit.b line 271: do(11), else(12), for(15), if(17), while(40).
+IsBlockKeyword :: (word: string) -> bool {
+    return word == "do" || word == "else" || word == "for" || word == "if" || word == "while"
+}
+
+// mark_keyw_comm from edit.b lines 614-662: emit sorted, disjoint byte spans
+// for Limbo keywords (blue) and '#' comments (green), ignoring strings.
+ScanLimboSpans :: (text: string, out: *Vec(Span)) {
+    VecClear(out.*)
+    n := text.count
+    i: s64 = 0
+    while i < n {
+        // Scan one line [i .. line_end).
+        line_start := i
+        while i < n && text[i] != cast(u8)10 { i += 1 }
+        line_end := i
+        if i < n && text[i] == cast(u8)10 { i += 1 }
+
+        quote: u8 = 0
+        word_start: s64 = -1
+        notkey := false
+        j := line_start
+        while j < line_end {
+            c := text[j]
+            if quote != 0 {
+                if c == cast(u8)92 && j + 1 < line_end {
+                    j += 2
+                    continue
+                }
+                if c == quote { quote = 0 }
+                j += 1
+                continue
+            }
+            if c == cast(u8)35 { // '#'
+                if !notkey && word_start >= 0 && IsLimboKeyword(text[word_start:j]) {
+                    unused VecPush(out.*, .{cast(s32)word_start, cast(s32)j, BlueKeyword})
+                }
+                unused VecPush(out.*, .{cast(s32)j, cast(s32)line_end, GreenComment})
+                word_start = -1
+                notkey = false
+                break
+            }
+            if c == cast(u8)39 || c == cast(u8)34 { // '\'' or '"'
+                if !notkey && word_start >= 0 && IsLimboKeyword(text[word_start:j]) {
+                    unused VecPush(out.*, .{cast(s32)word_start, cast(s32)j, BlueKeyword})
+                }
+                quote = c
+                word_start = -1
+                notkey = false
+                j += 1
+                continue
+            }
+            if c >= cast(u8)97 && c <= cast(u8)122 { // 'a'..'z'
+                if word_start < 0 { word_start = j }
+            } else if (c >= cast(u8)65 && c <= cast(u8)90) || c == cast(u8)95 ||
+                      (c >= cast(u8)48 && c <= cast(u8)57) {
+                notkey = true
+            } else {
+                if !notkey && word_start >= 0 && IsLimboKeyword(text[word_start:j]) {
+                    unused VecPush(out.*, .{cast(s32)word_start, cast(s32)j, BlueKeyword})
+                }
+                word_start = -1
+                notkey = false
+            }
+            j += 1
+        }
+        if !notkey && word_start >= 0 && IsLimboKeyword(text[word_start:line_end]) {
+            unused VecPush(out.*, .{cast(s32)word_start, cast(s32)line_end, BlueKeyword})
+        }
+    }
+}
+
+// Find needle in text starting at byte offset from; wraps around to 0..from if
+// wrap is true (matching Tk .b.t search --). Returns byte offset or -1.
+FindNext :: (text: string, needle: string, from_in: s64, wrap: bool) -> s64 {
+    if needle.count == 0 || needle.count > text.count { return -1 }
+    from := from_in
+    if from < 0 { from = 0 }
+    if from > text.count { from = text.count }
+    limit := text.count - needle.count
+    for pos: from..limit {
+        matched := true
+        for k: cast(s64)0..needle.count - 1 {
+            if text[pos + k] != needle[k] { matched = false; break }
+        }
+        if matched { return pos }
+    }
+    if wrap && from > 0 {
+        end_wrap := from - 1
+        if end_wrap > limit { end_wrap = limit }
+        for pos: cast(s64)0..end_wrap {
+            matched := true
+            for k: cast(s64)0..needle.count - 1 {
+                if text[pos + k] != needle[k] { matched = false; break }
+            }
+            if matched { return pos }
+        }
+    }
+    return -1
+}
+
+// Replace byte range [start:end) in buf with replacement.
+ReplaceRange :: (buf: *Vec(u8), start_in: s64, end_in: s64, replacement: string) {
+    start := start_in
+    end := end_in
+    if start < 0 { start = 0 }
+    if end < start { end = start }
+    if start > buf.count { start = buf.count }
+    if end > buf.count { end = buf.count }
+
+    tail_len := buf.count - end
+    new_len := start + replacement.count + tail_len
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    unused VecResize(tmp, new_len)
+    for i: cast(s64)0..start - 1 { tmp[i] = buf.*[i] }
+    for i: cast(s64)0..replacement.count - 1 { tmp[start + i] = replacement[i] }
+    for i: cast(s64)0..tail_len - 1 { tmp[start + replacement.count + i] = buf.*[end + i] }
+
+    unused VecResize(buf.*, new_len)
+    for i: cast(s64)0..new_len - 1 { buf.*[i] = tmp[i] }
+}
+
+// Replace all non-overlapping occurrences of needle in buf with replacement.
+// Returns number of replacements made.
+ReplaceAll :: (buf: *Vec(u8), needle: string, replacement: string) -> s32 {
+    if needle.count == 0 { return 0 }
+    count: s32 = 0
+    out: Vec(u8)
+    defer VecFree(out)
+    pos: s64 = 0
+    n := buf.count
+    while pos < n {
+        if pos + needle.count <= n {
+            matched := true
+            for k: cast(s64)0..needle.count - 1 {
+                if buf.*[pos + k] != needle[k] { matched = false; break }
+            }
+            if matched {
+                unused BuilderAppend(out, replacement)
+                pos += needle.count
+                count += 1
+                continue
+            }
+        }
+        unused VecPush(out, buf.*[pos])
+        pos += 1
+    }
+    if count > 0 {
+        unused VecResize(buf.*, out.count)
+        for i: cast(s64)0..out.count - 1 { buf.*[i] = out[i] }
+    }
+    return count
+}
+
+// collapse from edit.b lines 678-683: turn each leading run of 8 spaces into '\t'.
+CollapseIndent :: (src: string, out: *Vec(u8)) {
+    VecClear(out.*)
+    i: s64 = 0
+    while i + 8 <= src.count {
+        eight := true
+        for k: cast(s64)0..7 {
+            if src[i + k] != cast(u8)32 { eight = false; break }
+        }
+        if eight {
+            unused VecPush(out.*, cast(u8)9)
+            i += 8
+        } else {
+            break
+        }
+    }
+    while i < src.count {
+        unused VecPush(out.*, src[i])
+        i += 1
+    }
+}
+
+// Compute the parent directory of a path, matching edit.b basepath().
+BasePath :: (file: string) -> string {
+    i := file.count - 1
+    while i >= 0 {
+        if file[i] == cast(u8)47 { return file[:i] }
+        i -= 1
+    }
+    return ""
+}

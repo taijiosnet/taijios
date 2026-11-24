@@ -1,0 +1,690 @@
+// Port of Inferno's Edit (appl/wm/edit.b), built as edit.zx. See ../../NOTICE.
+// usage: wm/edit [file]
+// Keeps File (New, Open..., Save, Save As..., Exit), Edit (Cut, Copy, Paste,
+// plus button-2 popup), Search (Find..., Replace with..., Find Again, Find and
+// Replace, Find and Replace All), and Options (Limbo keyword/comment
+// highlighting + auto-indent, Indent).
+Surface :: #import "kryon/host/surface";
+Box :: #import "kryon/box";
+Button :: #import "kryon/button";
+Text :: #import "kryon/text";
+Field :: #import "kryon/text_field";
+TextArea :: #import "kryon/text_area";
+Model :: #import "edit_model";
+IO :: #import "taijios_io";
+Args :: #import "taijios_args";
+Process :: #import "taijios_process";
+Ns :: #import "taijios_namespace";
+#import "kryon/geometry"
+#import "kryon/drawing_props"
+#import "kryon/input_protocol"
+#import "kryon/key_input"
+#import "kryon/session"
+#import "kryon/text_align"
+#import "kryon/tree"
+#import "kryon/tree_input"
+#import "std/vec"
+
+WinW :: 560
+WinH :: 440
+BarH :: 24
+PromptH :: 28
+MaxDocBytes :: 4194304
+Chooser :: "/dis/wm/filename.zx"
+
+MenuNone :: 0
+MenuFile :: 1
+MenuEdit :: 2
+MenuSearch :: 3
+MenuOptions :: 4
+MenuPopup :: 5
+
+DialogNone :: 0
+DialogConfirmNew :: 1
+DialogConfirmOpen :: 2
+DialogConfirmExit :: 3
+DialogSaveAs :: 4
+DialogFind :: 5
+DialogReplace :: 6
+DialogIndent :: 7
+
+grey: Color = .{221, 221, 221, 255};
+light: Color = .{255, 255, 255, 255};
+dark: Color = .{150, 150, 150, 255};
+prompt_bg: Color = .{236, 236, 236, 255};
+menu_bg: Color = .{228, 228, 228, 255};
+err_color: Color = .{180, 20, 20, 255};
+
+doc: Vec(u8);
+curfile: Vec(u8);
+base_dir: Vec(u8);
+snarf: Vec(u8);
+searchfor: Vec(u8);
+replacewith: Vec(u8);
+tab_str: Vec(u8);
+status_msg: Vec(u8);
+status_is_err: bool;
+
+dirty: bool;
+is_limbo: bool;
+spans_dirty: bool = true;
+model_spans: Vec(Model.Span);
+ta_spans: Vec(TextArea.ColorSpan);
+
+// TextArea state.
+ta_cursor: s32;
+ta_anchor: s32;
+ta_scroll_y: s32;
+ta_focused: bool = true;
+ta_selecting: bool;
+ta_pref_x: s32;
+ta_pref_x_valid: bool;
+
+// Menu & inline dialog state.
+menu_open: s32 = MenuNone;
+popup_x: float32;
+popup_y: float32;
+dialog_mode: s32 = DialogNone;
+dialog_bytes: [512]u8;
+dialog_field: Field.State;
+
+// Async file chooser pipe state (same pattern as avi.zi).
+choice_fd: s32 = -1;
+choice_bytes: [1024]u8;
+choice_used: s64;
+
+SetVec :: (dst: *Vec(u8), s: string) {
+    VecClear(dst.*)
+    unused BuilderAppend(dst.*, s)
+}
+
+SetStatus :: (msg: string, is_err: bool) {
+    SetVec(*status_msg, msg)
+    status_is_err = is_err
+}
+
+SetDialogText :: (s: string) {
+    dialog_field.length = 0
+    for i: cast(s64)0..s.count - 1 {
+        if dialog_field.length >= 510 { break }
+        dialog_field.bytes[dialog_field.length] = s[i]
+        dialog_field.length += 1
+    }
+    dialog_field.cursor = dialog_field.length
+    dialog_field.anchor = dialog_field.length
+    dialog_field.focused = true
+}
+
+OpenDialog :: (mode: s32, initial: string) {
+    menu_open = MenuNone
+    dialog_mode = mode
+    SetDialogText(initial)
+}
+
+// Read /chan/snarf into snarf buffer when available; keep existing snarf otherwise.
+SnarfGet :: () {
+    fd := IO.Open("/chan/snarf", 0)
+    if fd < 0 { return }
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    buf: [4096]u8
+    while true {
+        n := IO.Read(fd, buf[:])
+        if n <= 0 { break }
+        unused BuilderAppend(tmp, TextView(buf[:n]))
+    }
+    unused IO.Close(fd)
+    if tmp.count > 0 {
+        SetVec(*snarf, TextView(tmp[:]))
+    }
+}
+
+SnarfPut :: (text: string) {
+    SetVec(*snarf, text)
+    fd := IO.Open("/chan/snarf", 1)
+    if fd >= 0 {
+        unused IO.Write(fd, text)
+        unused IO.Close(fd)
+    }
+}
+
+RebuildSpans :: () {
+    VecClear(ta_spans)
+    if !is_limbo {
+        spans_dirty = false
+        return
+    }
+    Model.ScanLimboSpans(TextView(doc[:]), *model_spans)
+    for i: cast(s64)0..model_spans.count - 1 {
+        s := model_spans[i]
+        unused VecPush(ta_spans, TextArea.ColorSpan.{.start = s.start, .end = s.end, .color = s.color})
+    }
+    spans_dirty = false
+}
+
+LoadFile :: (path: string) -> bool {
+    if path.count == 0 { return false }
+    meta: [12]u8
+    if IO.Stat(path, meta[:]) != 0 {
+        SetStatus("Can't stat file", true)
+        return false
+    }
+    if (meta[11] & cast(u8)128) != cast(u8)0 {
+        SetStatus("Path is a directory", true)
+        return false
+    }
+    fd := IO.Open(path, 0)
+    if fd < 0 {
+        SetStatus("Can't open file", true)
+        return false
+    }
+    tmp: Vec(u8)
+    defer VecFree(tmp)
+    buf: [8192]u8
+    while true {
+        n := IO.Read(fd, buf[:])
+        if n <= 0 { break }
+        if tmp.count + cast(s64)n > MaxDocBytes { break }
+        unused BuilderAppend(tmp, TextView(buf[:n]))
+    }
+    unused IO.Close(fd)
+
+    SetVec(*doc, TextView(tmp[:]))
+    SetVec(*curfile, path)
+    bp := Model.BasePath(path)
+    if bp.count > 0 { SetVec(*base_dir, bp) }
+    dirty = false
+    ta_cursor = 0
+    ta_anchor = 0
+    ta_scroll_y = 0
+    spans_dirty = true
+    SetStatus("", false)
+    return true
+}
+
+SaveToPath :: (path: string) -> bool {
+    if path.count == 0 {
+        SetStatus("No file name", true)
+        return false
+    }
+    // 1 = OWRITE, 436 = 0664.
+    fd := IO.Create(path, 1, 436)
+    if fd < 0 {
+        SetStatus("Can't write file", true)
+        return false
+    }
+    text := TextView(doc[:])
+    written := IO.Write(fd, text)
+    unused IO.Close(fd)
+    if written < 0 || cast(s64)written != text.count {
+        SetStatus("Write failed", true)
+        return false
+    }
+    SetVec(*curfile, path)
+    bp := Model.BasePath(path)
+    if bp.count > 0 { SetVec(*base_dir, bp) }
+    dirty = false
+    SetStatus("Saved", false)
+    return true
+}
+
+DoNew :: () {
+    VecClear(doc)
+    SetVec(*curfile, "(New)")
+    dirty = false
+    ta_cursor = 0
+    ta_anchor = 0
+    ta_scroll_y = 0
+    spans_dirty = true
+    SetStatus("", false)
+}
+
+OpenChooser :: () {
+    if choice_fd >= 0 { unused IO.Close(choice_fd); choice_fd = -1 }
+    choice_used = 0
+    ends: [2]s32
+    if Ns.Pipe(ends[:]) < 0 {
+        SetStatus("Cannot open file chooser pipe", true)
+        return
+    }
+    dir := TextView(base_dir[:])
+    if dir.count == 0 { dir = "." }
+    words: [2]string = .["-d", dir]
+    launch := Process.StartWith(Chooser, words[:], -1, ends[1], -1)
+    unused IO.Close(ends[1])
+    if launch.id == 0 {
+        unused IO.Close(ends[0])
+        SetStatus("Cannot launch file chooser", true)
+        return
+    }
+    choice_fd = ends[0]
+}
+
+PollChooser :: () {
+    if choice_fd < 0 { return }
+    buf: [256]u8
+    n := IO.PollRead(choice_fd, buf[:])
+    if n == -2 { return }
+    if n < 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        choice_used = 0
+        return
+    }
+    for i: cast(s32)0..n - 1 {
+        if choice_used < choice_bytes.count {
+            choice_bytes[choice_used] = buf[i]
+            choice_used += 1
+        }
+    }
+    if n == 0 {
+        unused IO.Close(choice_fd)
+        choice_fd = -1
+        line := choice_used
+        for i: cast(s64)0..choice_used - 1 {
+            if choice_bytes[i] == cast(u8)10 { line = i; break }
+        }
+        if line > 0 {
+            unused LoadFile(TextView(choice_bytes[:line]))
+        }
+        choice_used = 0
+    }
+}
+
+DoSave :: (force_prompt: bool) {
+    cur := TextView(curfile[:])
+    if force_prompt || cur.count == 0 || cur == "(New)" {
+        initial := ifx cur == "(New)" then "" else cur
+        OpenDialog(DialogSaveAs, initial)
+        return
+    }
+    unused SaveToPath(cur)
+}
+
+DoSearch :: () -> bool {
+    needle := TextView(searchfor[:])
+    if needle.count == 0 { return false }
+    from := cast(s64)ta_cursor + 1
+    if from > doc.count { from = 0 }
+    found := Model.FindNext(TextView(doc[:]), needle, from, true)
+    if found < 0 {
+        SetStatus("Not found", false)
+        return false
+    }
+    ta_anchor = cast(s32)found
+    ta_cursor = cast(s32)(found + needle.count)
+    SetStatus("", false)
+    return true
+}
+
+SelectionRange :: () -> (start: s32, end: s32) {
+    if ta_anchor < ta_cursor { return ta_anchor, ta_cursor }
+    return ta_cursor, ta_anchor
+}
+
+DoReplaceCurrent :: () {
+    s, e := SelectionRange()
+    if e <= s {
+        if searchfor.count == 0 {
+            OpenDialog(DialogFind, "")
+            return
+        }
+        if !DoSearch() { return }
+        s, e = SelectionRange()
+    }
+    repl := TextView(replacewith[:])
+    Model.ReplaceRange(*doc, cast(s64)s, cast(s64)e, repl)
+    ta_cursor = s + cast(s32)repl.count
+    ta_anchor = ta_cursor
+    dirty = true
+    spans_dirty = true
+}
+
+DoReplaceAll :: () {
+    needle := TextView(searchfor[:])
+    if needle.count == 0 {
+        OpenDialog(DialogFind, "")
+        return
+    }
+    hits := Model.ReplaceAll(*doc, needle, TextView(replacewith[:]))
+    if hits > 0 {
+        dirty = true
+        spans_dirty = true
+        if ta_cursor > cast(s32)doc.count { ta_cursor = cast(s32)doc.count }
+        ta_anchor = ta_cursor
+    }
+    SetStatus("", false)
+}
+
+ApplyLimboAutoIndent :: (insert_pos: s32) {
+    // Find start of the previous line (before the '\n' just inserted at insert_pos - 1).
+    prev_end := cast(s64)insert_pos - 1
+    if prev_end <= 0 { return }
+    prev_start := prev_end
+    while prev_start > 0 && doc[prev_start - 1] != cast(u8)10 { prev_start -= 1 }
+    // Copy leading whitespace of previous line.
+    ws_end := prev_start
+    while ws_end < prev_end && (doc[ws_end] == cast(u8)9 || doc[ws_end] == cast(u8)32) {
+        ws_end += 1
+    }
+    indent: Vec(u8)
+    defer VecFree(indent)
+    if ws_end > prev_start {
+        unused BuilderAppend(indent, TextView(doc[prev_start:ws_end]))
+    }
+    // Trim trailing spaces to check if previous line ended with '{'.
+    trim := prev_end
+    while trim > ws_end && (doc[trim - 1] == cast(u8)32 || doc[trim - 1] == cast(u8)9) { trim -= 1 }
+    extra := false
+    if trim > ws_end && doc[trim - 1] == cast(u8)123 { extra = true } // '{'
+    if !extra && trim > ws_end {
+        w_end := ws_end
+        while w_end < trim && doc[w_end] >= cast(u8)97 && doc[w_end] <= cast(u8)122 { w_end += 1 }
+        if w_end > ws_end && Model.IsBlockKeyword(TextView(doc[ws_end:w_end])) { extra = true }
+    }
+    if extra {
+        unused BuilderAppend(indent, TextView(tab_str[:]))
+    }
+    if indent.count > 0 {
+        collapsed: Vec(u8)
+        defer VecFree(collapsed)
+        Model.CollapseIndent(TextView(indent[:]), *collapsed)
+        ins := TextView(collapsed[:])
+        Model.ReplaceRange(*doc, cast(s64)insert_pos, cast(s64)insert_pos, ins)
+        ta_cursor = insert_pos + cast(s32)ins.count
+        ta_anchor = ta_cursor
+        spans_dirty = true
+    }
+}
+
+SubmitDialog :: () {
+    val := TextView(dialog_bytes[:dialog_field.length])
+    mode := dialog_mode
+    dialog_mode = DialogNone
+    if mode == DialogSaveAs {
+        if val.count == 0 { return }
+        full: Vec(u8)
+        defer VecFree(full)
+        if val[0] != cast(u8)47 && base_dir.count > 0 {
+            unused BuilderAppend(full, TextView(base_dir[:]))
+            unused BuilderAppend(full, "/")
+        }
+        unused BuilderAppend(full, val)
+        unused SaveToPath(TextView(full[:]))
+    } else if mode == DialogFind {
+        SetVec(*searchfor, val)
+        unused DoSearch()
+    } else if mode == DialogReplace {
+        SetVec(*replacewith, val)
+        s, e := SelectionRange()
+        if e > s { DoReplaceCurrent() }
+    } else if mode == DialogIndent {
+        if val.count > 0 {
+            collapsed: Vec(u8)
+            defer VecFree(collapsed)
+            Model.CollapseIndent(val, *collapsed)
+            SetVec(*tab_str, TextView(collapsed[:]))
+        }
+    }
+}
+
+Draw :: (frame: Surface.Frame) {
+    session: Session = .{frame.slot, frame.epoch}
+    bounds := TreeRootBounds(session)
+    w := bounds.width
+    h := bounds.height
+    if w < 240.0 { w = cast(float32)WinW }
+    if h < 160.0 { h = cast(float32)WinH }
+
+    PollChooser()
+
+    typed: [64]u8
+    text := TypedTextTake(session, typed[:])
+    key := KeyboardTake(session)
+    mods := KeyboardModifiers(session)
+    field_input := TextFieldInputFor(key, mods, text)
+    ta_input := TextAreaInputFor(key, mods, text)
+
+    // Middle-click (button 2) inside text area posts Edit popup menu.
+    p1 := PointerSample(session)
+    p2 := TertiaryPointerSample(session)
+    body_top: float32 = cast(float32)BarH + (ifx dialog_mode != DialogNone then cast(float32)PromptH else 0.0)
+    if p2.pressed && p1.y >= body_top && dialog_mode == DialogNone {
+        menu_open = MenuPopup
+        popup_x = p1.x
+        popup_y = p1.y
+        if popup_x + 90.0 > w { popup_x = w - 90.0 }
+        if popup_y + 72.0 > h { popup_y = h - 72.0 }
+    }
+
+    // Background + menu bar.
+    Box.Draw(session, .{.key = 1, .bounds = .{0.0, 0.0, w, h}, .fill = grey})
+    Box.Draw(session, .{.key = 2, .bounds = .{0.0, cast(float32)BarH - 1.0, w, 1.0}, .fill = dark})
+
+    if Button.Draw(session, .{.key = 10, .bounds = .{2.0, 2.0, 52.0, 20.0}, .label = "File"}) > 0 {
+        menu_open = ifx menu_open == MenuFile then MenuNone else MenuFile
+    }
+    if Button.Draw(session, .{.key = 11, .bounds = .{56.0, 2.0, 52.0, 20.0}, .label = "Edit"}) > 0 {
+        menu_open = ifx menu_open == MenuEdit then MenuNone else MenuEdit
+    }
+    if Button.Draw(session, .{.key = 12, .bounds = .{110.0, 2.0, 64.0, 20.0}, .label = "Search"}) > 0 {
+        menu_open = ifx menu_open == MenuSearch then MenuNone else MenuSearch
+    }
+    if Button.Draw(session, .{.key = 13, .bounds = .{176.0, 2.0, 68.0, 20.0}, .label = "Options"}) > 0 {
+        menu_open = ifx menu_open == MenuOptions then MenuNone else MenuOptions
+    }
+
+    // Right side of menu bar: filename + (dirty) or status message.
+    header: Vec(u8)
+    defer VecFree(header)
+    if status_msg.count > 0 {
+        unused BuilderAppend(header, TextView(status_msg[:]))
+    } else {
+        unused BuilderAppend(header, TextView(curfile[:]))
+        if dirty { unused BuilderAppend(header, " (dirty)") }
+    }
+    Text.Draw(session, .{.key = 19, .bounds = .{252.0, 2.0, w - 256.0, 20.0},
+        .text = TextView(header[:]), .size = 12,
+        .vertical_align = .TextAlignCenter})
+
+    // Inline prompt / confirmation bar when active.
+    if dialog_mode != DialogNone {
+        Box.Draw(session, .{.key = 20, .bounds = .{0.0, cast(float32)BarH, w, cast(float32)PromptH}, .fill = prompt_bg})
+        Box.Draw(session, .{.key = 21, .bounds = .{0.0, cast(float32)(BarH + PromptH) - 1.0, w, 1.0}, .fill = dark})
+        if dialog_mode == DialogConfirmNew || dialog_mode == DialogConfirmOpen || dialog_mode == DialogConfirmExit {
+            Text.Draw(session, .{.key = 22, .bounds = .{6.0, cast(float32)BarH + 4.0, 260.0, 20.0},
+                .text = "File was changed. Discard changes?", .size = 12, .vertical_align = .TextAlignCenter})
+            if Button.Draw(session, .{.key = 23, .bounds = .{274.0, cast(float32)BarH + 4.0, 56.0, 20.0}, .label = "Yes"}) > 0 {
+                act := dialog_mode
+                dialog_mode = DialogNone
+                if act == DialogConfirmNew { DoNew() }
+                else if act == DialogConfirmOpen { dirty = false; OpenChooser() }
+                else if act == DialogConfirmExit { dirty = false; Surface.Close() }
+            }
+            if Button.Draw(session, .{.key = 24, .bounds = .{336.0, cast(float32)BarH + 4.0, 56.0, 20.0}, .label = "No"}) > 0 {
+                dialog_mode = DialogNone
+            }
+        } else {
+            lbl := "File:"
+            if dialog_mode == DialogFind { lbl = "Search For:" }
+            else if dialog_mode == DialogReplace { lbl = "Replacement:" }
+            else if dialog_mode == DialogIndent { lbl = "Single indent:" }
+            Text.Draw(session, .{.key = 22, .bounds = .{6.0, cast(float32)BarH + 4.0, 96.0, 20.0},
+                .text = lbl, .size = 12, .vertical_align = .TextAlignCenter})
+            edit_res := Field.Draw(session, Field.StateProps(dialog_field, .{.key = 25, .focus_id = 25,
+                .bounds = .{104.0, cast(float32)BarH + 3.0, w - 230.0, 22.0},
+                .max_bytes = 510, .input = field_input}))
+            unused Field.StateApplyResult(*dialog_field, edit_res)
+            if edit_res.committed { SubmitDialog() }
+            else if edit_res.escaped { dialog_mode = DialogNone }
+            if Button.Draw(session, .{.key = 26, .bounds = .{w - 120.0, cast(float32)BarH + 4.0, 52.0, 20.0}, .label = "OK"}) > 0 {
+                SubmitDialog()
+            }
+            if Button.Draw(session, .{.key = 27, .bounds = .{w - 64.0, cast(float32)BarH + 4.0, 60.0, 20.0}, .label = "Cancel"}) > 0 {
+                dialog_mode = DialogNone
+            }
+        }
+    }
+
+    // Text area body.
+    if spans_dirty { RebuildSpans() }
+    if dialog_mode != DialogNone || menu_open != MenuNone {
+        // Suppress text input while a menu or prompt bar owns keyboard/pointer focus.
+        ta_input = TextArea.Input.{}
+    }
+
+    ta_res := TextArea.Draw(session, .{
+        .key = 30,
+        .focus_id = 30,
+        .bounds = .{2.0, body_top + 2.0, w - 4.0, h - body_top - 4.0},
+        .value = TextView(doc[:]),
+        .cursor = ta_cursor,
+        .anchor = ta_anchor,
+        .scroll_y = ta_scroll_y,
+        .focused = ta_focused && dialog_mode == DialogNone,
+        .selecting = ta_selecting,
+        .preferred_x = ta_pref_x,
+        .preferred_x_valid = ta_pref_x_valid,
+        .max_bytes = MaxDocBytes,
+        .colors = ta_spans[:],
+        .wrap = false,
+        .input = ta_input,
+    })
+
+    ta_cursor = ta_res.cursor
+    ta_anchor = ta_res.anchor
+    ta_scroll_y = ta_res.scroll_y
+    ta_focused = ta_res.focused
+    ta_selecting = ta_res.selecting
+    ta_pref_x = ta_res.preferred_x
+    ta_pref_x_valid = ta_res.preferred_x_valid
+
+    if ta_res.clipboard_write {
+        SnarfPut(ta_res.clipboard_text)
+    }
+    if ta_res.edit.changed {
+        Model.ReplaceRange(*doc, cast(s64)ta_res.edit.start, cast(s64)ta_res.edit.end, ta_res.edit.replacement)
+        dirty = true
+        spans_dirty = true
+        if is_limbo && ta_res.edit.replacement == "\n" {
+            ApplyLimboAutoIndent(ta_cursor)
+        }
+    }
+
+    // Dropdown menus drawn on top of the TextArea.
+    if menu_open == MenuFile {
+        Box.Draw(session, .{.key = 100, .bounds = .{2.0, cast(float32)BarH, 108.0, 114.0}, .fill = menu_bg})
+        if Button.Draw(session, .{.key = 101, .bounds = .{4.0, cast(float32)BarH + 2.0, 104.0, 20.0}, .label = "New"}) > 0 {
+            menu_open = MenuNone
+            if dirty { OpenDialog(DialogConfirmNew, "") } else { DoNew() }
+        }
+        if Button.Draw(session, .{.key = 102, .bounds = .{4.0, cast(float32)BarH + 24.0, 104.0, 20.0}, .label = "Open..."}) > 0 {
+            menu_open = MenuNone
+            if dirty { OpenDialog(DialogConfirmOpen, "") } else { OpenChooser() }
+        }
+        if Button.Draw(session, .{.key = 103, .bounds = .{4.0, cast(float32)BarH + 46.0, 104.0, 20.0}, .label = "Save"}) > 0 {
+            menu_open = MenuNone
+            DoSave(false)
+        }
+        if Button.Draw(session, .{.key = 104, .bounds = .{4.0, cast(float32)BarH + 68.0, 104.0, 20.0}, .label = "Save As..."}) > 0 {
+            menu_open = MenuNone
+            DoSave(true)
+        }
+        if Button.Draw(session, .{.key = 105, .bounds = .{4.0, cast(float32)BarH + 90.0, 104.0, 20.0}, .label = "Exit"}) > 0 {
+            menu_open = MenuNone
+            if dirty { OpenDialog(DialogConfirmExit, "") } else { Surface.Close() }
+        }
+    } else if menu_open == MenuEdit || menu_open == MenuPopup {
+        mx := ifx menu_open == MenuEdit then cast(float32)56.0 else popup_x
+        my := ifx menu_open == MenuEdit then cast(float32)BarH else popup_y
+        Box.Draw(session, .{.key = 110, .bounds = .{mx, my, 88.0, 70.0}, .fill = menu_bg})
+        if Button.Draw(session, .{.key = 111, .bounds = .{mx + 2.0, my + 2.0, 84.0, 20.0}, .label = "Cut"}) > 0 {
+            menu_open = MenuNone
+            s, e := SelectionRange()
+            if e > s {
+                SnarfPut(TextView(doc[s:e]))
+                Model.ReplaceRange(*doc, cast(s64)s, cast(s64)e, "")
+                ta_cursor = s
+                ta_anchor = s
+                dirty = true
+                spans_dirty = true
+            }
+        }
+        if Button.Draw(session, .{.key = 112, .bounds = .{mx + 2.0, my + 24.0, 84.0, 20.0}, .label = "Copy"}) > 0 {
+            menu_open = MenuNone
+            s, e := SelectionRange()
+            if e > s { SnarfPut(TextView(doc[s:e])) }
+        }
+        if Button.Draw(session, .{.key = 113, .bounds = .{mx + 2.0, my + 46.0, 84.0, 20.0}, .label = "Paste"}) > 0 {
+            menu_open = MenuNone
+            SnarfGet()
+            if snarf.count > 0 {
+                s, e := SelectionRange()
+                paste := TextView(snarf[:])
+                Model.ReplaceRange(*doc, cast(s64)s, cast(s64)e, paste)
+                ta_cursor = s + cast(s32)paste.count
+                ta_anchor = ta_cursor
+                dirty = true
+                spans_dirty = true
+            }
+        }
+    } else if menu_open == MenuSearch {
+        Box.Draw(session, .{.key = 120, .bounds = .{110.0, cast(float32)BarH, 168.0, 114.0}, .fill = menu_bg})
+        if Button.Draw(session, .{.key = 121, .bounds = .{112.0, cast(float32)BarH + 2.0, 164.0, 20.0}, .label = "Find ..."}) > 0 {
+            OpenDialog(DialogFind, TextView(searchfor[:]))
+        }
+        if Button.Draw(session, .{.key = 122, .bounds = .{112.0, cast(float32)BarH + 24.0, 164.0, 20.0}, .label = "Replace with..."}) > 0 {
+            OpenDialog(DialogReplace, TextView(replacewith[:]))
+        }
+        if Button.Draw(session, .{.key = 123, .bounds = .{112.0, cast(float32)BarH + 46.0, 164.0, 20.0}, .label = "Find Again"}) > 0 {
+            menu_open = MenuNone
+            unused DoSearch()
+        }
+        if Button.Draw(session, .{.key = 124, .bounds = .{112.0, cast(float32)BarH + 68.0, 164.0, 20.0}, .label = "Find and Replace"}) > 0 {
+            menu_open = MenuNone
+            DoReplaceCurrent()
+        }
+        if Button.Draw(session, .{.key = 125, .bounds = .{112.0, cast(float32)BarH + 90.0, 164.0, 20.0}, .label = "Find and Replace All"}) > 0 {
+            menu_open = MenuNone
+            DoReplaceAll()
+        }
+    } else if menu_open == MenuOptions {
+        Box.Draw(session, .{.key = 130, .bounds = .{176.0, cast(float32)BarH, 112.0, 48.0}, .fill = menu_bg})
+        limbo_lbl := ifx is_limbo then "[x] Limbo" else "[ ] Limbo"
+        if Button.Draw(session, .{.key = 131, .bounds = .{178.0, cast(float32)BarH + 2.0, 108.0, 20.0}, .label = limbo_lbl}) > 0 {
+            menu_open = MenuNone
+            is_limbo = !is_limbo
+            spans_dirty = true
+        }
+        if Button.Draw(session, .{.key = 132, .bounds = .{178.0, cast(float32)BarH + 24.0, 108.0, 20.0}, .label = "Indent"}) > 0 {
+            OpenDialog(DialogIndent, TextView(tab_str[:]))
+        }
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    SetVec(*curfile, "(New)")
+    SetVec(*base_dir, ".")
+    SetVec(*tab_str, "\t")
+    dialog_field.bytes = dialog_bytes[:]
+
+    if Args.OperandCount() > 0 {
+        path := Args.Operand(0)
+        if path.count > 0 { unused LoadFile(path) }
+    }
+
+    rc := Surface.RunRetained(.{.title = "Edit", .width = WinW, .height = WinH}, Draw, 50)
+    if choice_fd >= 0 { unused IO.Close(choice_fd) }
+    VecFree(doc)
+    VecFree(curfile)
+    VecFree(base_dir)
+    VecFree(snarf)
+    VecFree(searchfor)
+    VecFree(replacewith)
+    VecFree(tab_str)
+    VecFree(status_msg)
+    VecFree(model_spans)
+    VecFree(ta_spans)
+    return rc
+}
