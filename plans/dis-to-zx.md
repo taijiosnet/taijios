@@ -38,7 +38,7 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 - Sections 9 (spree), 10 (grid), 11 (demo) and 12 (ebook): `agy-taijios-dis-app-families`.
 - Section 2 (dis/lib), section 4 (services) and the mash command with its library: `claude-taijios-taijios-dis-commands-libs`.
 - The shell (sh, dis/sh, dis/tiny) is its own milestone. Acme and charon are not assigned yet.
-- Alphabet (section 8, dis/fs.dis aside, and dis/sh/alphabet.dis): `claude-taijios-zx-alphabet-port`. Its rows go in one commit once the ZX shell runs `load alphabet` from the Ziran library in appl/alphabet; until then the Dis builtin needs every row. /filter, /fs/exec, /fs/run, /fs/pipe and the grid rexec modules also need /dis/sh.zx; /auth needs a ZX Inferno Auth client.
+- Alphabet (section 8, 6 rows): `claude-taijios-zx-alphabet-port`. Remaining: `/auth` (needs a ZX Inferno Auth client), `grid/{farm,remote,rexec}` and `rexecsrv` (need a concurrent bundle procedure host call and fd/handle passing), and orphan `mktypeset.dis`.
 - One family per tested commit. Several tasks edit this file: commit only your own rows and counts.
 
 ## Next ready order (independent, boot-ordered)
@@ -47,13 +47,13 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 2. Non-boot libraries (148 rows in dis/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 4. Legacy misc (2 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (24 `dis/` rows + 2 helper binaries outside `dis/`), charon (15), alphabet (83), spree (0), grid (5), demo (6), ebook (0), math (0).
+5. App families: acme (24 `dis/` rows + 2 helper binaries outside `dis/`), charon (15), alphabet (6), spree (0), grid (5), demo (6), ebook (0), math (0).
 6. WM apps with zx-twins (2 rows) and the rest of dis/wm (54 rows total): delete or port through the desktop-core owner.
 7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
 ## Open blockers (preserved from lane reports)
 
-- **Grid `remote`, `rexec`, `farm`:** need a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus fd and handle passing.
+- **Alphabet (6 rows):** `grid/{remote,rexec,farm}` and `rexecsrv` need a Ziran host call that starts a procedure of the same bundle while the caller keeps running, plus fd and handle passing; `/auth` needs a ZX Inferno Auth client; `mktypeset.dis` is an orphan without source.
 - **`wmplay`:** needs the emulator audio device compiled in with a headless backend.
 - **`dis/disk/kfs.dis`:** needs a Ziran Styx (9P) codec (plus multi-name walk/create/remove/flush file server support and pread/pwrite).
 - **`dis/lego/clock.dis`:** needs `create arc -start -extent` / `itemconfigure -start` in out-of-tree `ziranlang/tk`, plus bare `<ButtonPress>`/`<ButtonRelease>` binds and `send`/`namechan`.
@@ -71,7 +71,7 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 | 5 | [5. WM apps - dis/wm/** desktop applications (deletions go through the desktop-core owner) - 43 rows](dis-to-zx/05-wm-apps.md) | WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner) | 43 |
 | 6 | [6. Acme - editor family - 24 rows](dis-to-zx/06-acme.md) | Acme (acme lane) | 24 |
 | 7 | [7. Charon - web browser family - 15 rows](dis-to-zx/07-charon.md) | Charon (unassigned; pending owner decision) | 15 |
-| 8 | [8. Alphabet - gridded documents family - 83 rows](dis-to-zx/08-alphabet.md) | Alphabet (`cmd-taijios-zx-alphabet-port`) | 83 |
+| 8 | [8. Alphabet - gridded documents family - 6 rows](dis-to-zx/08-alphabet.md) | Alphabet (`cmd-taijios-zx-alphabet-port`) | 6 |
 | 9 | [9. Spree - multiuser engine family - 0 rows](dis-to-zx/09-spree.md) | Spree (`agy-taijios-dis-app-families`) | 0 |
 | 10 | [10. Grid - computing grid family - 5 rows](dis-to-zx/10-grid.md) | Grid (`agy-taijios-dis-app-families`) | 5 |
 | 11 | [11. Demo - demonstration apps - 6 rows](dis-to-zx/11-demo.md) | Demo (`agy-taijios-dis-app-families`) | 6 |
@@ -81,4 +81,4 @@ Catalog applications that still need the legacy chain (30): avi bounce brutus c4
 | 15 | [15. Acme helper binaries outside dis/ - 2 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside dis/ (acme lane) | 2 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **546**.
+Total open table rows across sections 1–16: **469**.
