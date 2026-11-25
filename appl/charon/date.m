@@ -1,6 +1,6 @@
 
 Date: module{
-	PATH : con "/dis/charon/date.dis";
+	PATH : con "/zx/charon/date.dis";
 
 	dateconv: fn(secs :int): string; # returns an http formatted
 					 # date representing secs.

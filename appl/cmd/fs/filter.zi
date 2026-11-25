@@ -1,4 +1,4 @@
-// /dis/fs/filter.zx module entry point (replaces appl/cmd/fs/filter.b).
+// /zx/fs/filter.zx module entry point (replaces appl/cmd/fs/filter.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "xpx-d" }

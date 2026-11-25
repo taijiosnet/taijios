@@ -144,19 +144,19 @@ def limits(env, image, data):
 
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--installed", action="store_true", help="exercise /dis/math/graph0.zx")
+    cli.add_argument("--installed", action="store_true", help="exercise /zx/math/graph0.zx")
     cli.add_argument("--oracle-only", action="store_true", help="exercise the original Dis app and tkcmd")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     data = BUILD / "graph0-points.xy"
     data.write_text("".join(f"{x} {y}\n" for x, y in POINTS))
     data_path = f"/{data.relative_to(ROOT)}"
-    image = ROOT / "dis/math/graph0.zx" if args.installed else BUILD / "graph0.zx"
+    image = ROOT / "zx/math/graph0.zx" if args.installed else BUILD / "graph0.zx"
     if not args.oracle_only and not args.installed:
         compile_image("graph0_app", image, *FLAGS)
     with private_display() as env:
         expected = oracle_commands(env)
-        window_plot(env, f"/dis/math/graph0.dis {data_path}", hosted=False)
+        window_plot(env, f"/zx/math/graph0.dis {data_path}", hosted=False)
         print("Inferno Dis Graph0 plotted real file pairs, reported clicked data coordinates, and closed")
         if not args.oracle_only:
             actual = model_commands()

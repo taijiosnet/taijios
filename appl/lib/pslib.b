@@ -29,7 +29,7 @@ include "pslib.m";
 # linkages have been removed until there's time to do it properly.
 #Pslib : module 
 #{
-#	PATH:		con "/dis/lib/pslib.dis";
+#	PATH:		con "/zx/lib/pslib.dis";
 #
 #	init:	fn(env: ref Draw->Context, t: ref Tk->Toplevel, boxes: int, deb: int): string;
 #	getfonts:		fn(input: string): string;

@@ -151,12 +151,12 @@ rootfs(server: string): string
 boot(done: chan of string)
 {
 	{
-		shell := load Command "/dis/sh.dis";
+		shell := load Command "/zx/sh.dis";
 		if(shell == nil){
-			done <-= sys->sprint("load /dis/sh.dis: %r");
+			done <-= sys->sprint("load /zx/sh.dis: %r");
 			exit;
 		}
-		shell->init(nil, "/dis/sh.dis"::I4EBOOT::nil);
+		shell->init(nil, "/zx/sh.dis"::I4EBOOT::nil);
 	} exception e {
 	"*" =>
 		done <-= e;
@@ -200,11 +200,11 @@ fail(msg: string)
 	sys->print("%s\n", msg);
 	sys->bind("/", "#//n/remote", Sys->MREPL);
 	sys->bind("#//", "/", Sys->MREPL);
-	shell := load Command "#//dis/sh.dis";
+	shell := load Command "#//zx/sh.dis";
 	if(shell == nil){
 		sys->print("cannot load shell: %r\n");
 		exit;
 	}
-	shell->init(nil, "/dis/sh.dis"::"-i"::nil);
+	shell->init(nil, "/zx/sh.dis"::"-i"::nil);
 	exit;
 }

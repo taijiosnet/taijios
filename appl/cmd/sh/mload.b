@@ -18,7 +18,7 @@ Builtin, Sbuiltin: con iota;
 namespaces: list of ref Namespace;
 pending: list of (string, int, Shellbuiltin);
 lock: chan of int;
-BUILTINPATH: con "/dis/sh";
+BUILTINPATH: con "/zx/sh";
 
 initbuiltin(c: ref Sh->Context, shmod: Sh): string
 {

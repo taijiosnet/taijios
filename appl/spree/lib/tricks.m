@@ -1,5 +1,5 @@
 Tricks: module {
-	PATH:		con "/dis/spree/lib/tricks.dis";
+	PATH:		con "/zx/spree/lib/tricks.dis";
 	init:			fn(mod: Spree, g: ref Clique, cardlibmod: Cardlib);
 
 	Trick: adt {

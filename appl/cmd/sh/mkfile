@@ -15,19 +15,19 @@ TARG=sh.dis\
 	csv.dis\
 	test.dis\
 
-INS=	$ROOT/dis/sh.dis\
-	$ROOT/dis/sh/arg.dis\
-	$ROOT/dis/sh/expr.dis\
-	$ROOT/dis/sh/file2chan.dis\
-	$ROOT/dis/sh/mload.dis\
-	$ROOT/dis/sh/mpexpr.dis\
-	$ROOT/dis/sh/regex.dis\
-	$ROOT/dis/sh/std.dis\
-	$ROOT/dis/sh/string.dis\
-#	$ROOT/dis/sh/tk.dis\
-	$ROOT/dis/sh/echo.dis\
-	$ROOT/dis/sh/csv.dis\
-	$ROOT/dis/sh/test.dis\
+INS=	$ROOT/zx/sh.dis\
+	$ROOT/zx/sh/arg.dis\
+	$ROOT/zx/sh/expr.dis\
+	$ROOT/zx/sh/file2chan.dis\
+	$ROOT/zx/sh/mload.dis\
+	$ROOT/zx/sh/mpexpr.dis\
+	$ROOT/zx/sh/regex.dis\
+	$ROOT/zx/sh/std.dis\
+	$ROOT/zx/sh/string.dis\
+#	$ROOT/zx/sh/tk.dis\
+	$ROOT/zx/sh/echo.dis\
+	$ROOT/zx/sh/csv.dis\
+	$ROOT/zx/sh/test.dis\
 
 SYSMODULES=\
 	bufio.m\
@@ -43,7 +43,7 @@ SYSMODULES=\
 	tkclient.m\
 	zx.m
 
-DISBIN=$ROOT/dis/sh
+DISBIN=$ROOT/zx/sh
 
 <$ROOT/mkfiles/mkdis
 
@@ -51,7 +51,7 @@ all:V:		$TARG
 
 install:V:	$INS sh.install
 
-sh.install:V:	$ROOT/dis/sh.dis $DISBIN/sh.dis $ROOT/dis/sh.zx
+sh.install:V:	$ROOT/zx/sh.dis $DISBIN/sh.dis $ROOT/zx/sh.zx
 
 nuke:V: clean
 	rm -f $INS
@@ -62,7 +62,7 @@ clean:V:
 uninstall:V:
 	rm -f $INS
 
-$ROOT/dis/sh.dis:	sh.dis
+$ROOT/zx/sh.dis:	sh.dis
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 sh.dis "$staged" && mv "$staged" "$target"
@@ -80,9 +80,9 @@ sh.zx:	$SHZX $CMDZX $ALPHACMD $ALPHAZX mkfile
 	zi2zx --root . --module-path ../../alphabet --module-path main=../../alphabet/main --module-path abc=../../alphabet/abc --module-path fs=../../alphabet/fs --module-path grid=../../alphabet/grid --module-path auth=../auth --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_namespace --bind-host taijios_clock --bind-host taijios_keyring --bind-host taijios_files --bind-host taijios_dial --entry sh:main -o $target sh.zi
 	chmod 755 $target
 
-install-zx:V:	$ROOT/dis/sh.zx
+install-zx:V:	$ROOT/zx/sh.zx
 
-$ROOT/dis/sh.zx:	sh.zx
+$ROOT/zx/sh.zx:	sh.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0755 sh.zx "$staged" && mv "$staged" "$target"

@@ -7,7 +7,7 @@
 #
 CSS: module
 {
-	PATH:	con "/dis/lib/w3c/css.dis";
+	PATH:	con "/zx/lib/w3c/css.dis";
 
 	Stylesheet: adt {
 		charset:	string;

@@ -101,16 +101,16 @@ main :: (argc: s32, argv: **u8) -> s32 {
         Expect(RunProcess(.{arguments = limbo_cmd[:], capture_output = true}, *lrun), "compile limbo math3 driver");
         BuilderPrint(*script, "/%/drv.dis > result/drv.out >[2] result/drv.err\n", WORK);
     } else {
-        BuilderPrint(*script, "/dis/math/ffts.zx 6 > result/ffts.out\n");
-        BuilderPrint(*script, "/dis/math/geodesy.zx SE6022552235 > result/geodesy.out\n");
-        BuilderPrint(*script, "/dis/math/linalg.zx > result/linalg.out\n");
-        BuilderPrint(*script, "/dis/math/polyhedra.zx /lib/polyhedra > result/polyhedra.out\n");
-        BuilderPrint(*script, "/dis/math/polyfill.zx > result/polyfill.out\n");
-        BuilderPrint(*script, "/dis/math/gr.zx > result/gr.out\n");
-        BuilderPrint(*script, "/dis/math/hist0.zx /%/empty.xy > result/hist_empty.out\n", WORK);
-        BuilderPrint(*script, "/dis/math/hist0.zx /%/odd.xy > result/hist_odd.out\n", WORK);
-        BuilderPrint(*script, "/dis/math/hist0.zx /%/missing.xy > result/hist_missing.out\n", WORK);
-        BuilderPrint(*script, "/dis/math/hist0.zx /%/valid.xy > result/hist_valid.out\n", WORK);
+        BuilderPrint(*script, "/zx/math/ffts.zx 6 > result/ffts.out\n");
+        BuilderPrint(*script, "/zx/math/geodesy.zx SE6022552235 > result/geodesy.out\n");
+        BuilderPrint(*script, "/zx/math/linalg.zx > result/linalg.out\n");
+        BuilderPrint(*script, "/zx/math/polyhedra.zx /lib/polyhedra > result/polyhedra.out\n");
+        BuilderPrint(*script, "/zx/math/polyfill.zx > result/polyfill.out\n");
+        BuilderPrint(*script, "/zx/math/gr.zx > result/gr.out\n");
+        BuilderPrint(*script, "/zx/math/hist0.zx /%/empty.xy > result/hist_empty.out\n", WORK);
+        BuilderPrint(*script, "/zx/math/hist0.zx /%/odd.xy > result/hist_odd.out\n", WORK);
+        BuilderPrint(*script, "/zx/math/hist0.zx /%/missing.xy > result/hist_missing.out\n", WORK);
+        BuilderPrint(*script, "/zx/math/hist0.zx /%/valid.xy > result/hist_valid.out\n", WORK);
     }
     BuilderPrint(*script, "echo halt > /dev/sysctl\n");
 
@@ -119,7 +119,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

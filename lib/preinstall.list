@@ -23,24 +23,24 @@
 # Lines starting with # and blank lines are ignored.
 #
 # Sizes and digests below were read from the bundles installed in this tree on
-# 2026-11-23. Re-read them whenever a bundle is rebuilt.
+# 2026-11-24. Re-read them whenever a bundle is rebuilt.
 #
 # repo	bundle	desktop id	name	icon	categories	size	sha256	first-run
-taijios	/dis/wm/rill.zx	org.taijiosnet.wm-rill	Rill Desktop	system	System	11138532	aaae2bebc367147f39ab88c2dee127cc29960913c5a6c848ca295250541f2670	root
-taijios	/dis/wm/desktop_panel.zx	org.taijiosnet.wm-desktop_panel	Panel	system	System	119448	a31d04c94ff222122ed2a3bf25359a1a5951a07d71151abe3e0313a0e18f710e	root
-taijios	/dis/wm/about.zx	org.taijiosnet.wm-about	About	help	Utility	3294890	778c7c93dba48de1911031a5f852b07409c37ef9d618c5db4a3ebaef20b2d02d	lazy
-taijios	/dis/wm/calendar.zx	org.taijiosnet.wm-calendar	Calendar	office	Office	7535281	bf8c35c3e7469002581f059fdb5666854d747f3222ee1a4f1b9ab5a07b17ce94	lazy
-taijios	/dis/wm/clock.zx	org.taijiosnet.wm-clock	Clock	clock	Utility	3865029	a7456572413b6d52f999946248c500ece1f1b808b31761904509b0738a70c999	lazy
-taijios	/dis/wm/counter.zx	org.taijiosnet.wm-counter	Counter	clock	Utility	5549220	0165ae41841a62fff851bb453cdd145045c5f0c7f7dff612942c4956c63ed2eb	lazy
-taijios	/dis/wm/dir.zx	org.taijiosnet.wm-dir	Directory Browser	files	Utility	4857216	fd22dfa2c7aabb3e3fa45398908c66514f936bc05f09a61c2cf1c1be2340f384	lazy
-taijios	/dis/wm/explorer.zx	org.taijiosnet.wm-explorer	Explorer	files	Utility	8751776	bb92f8179bdb201c5c797250ae162ada8d507332c03eecfcc983dd14aa3c7648	lazy
-taijios	/dis/wm/filename.zx	org.taijiosnet.wm-filename	Filename	files	Utility	7436626	f4c350d5b040b62f4fac8ac1f24143744cdc8ea838022c4f7c2528f2b832dc6b	lazy
-taijios	/dis/wm/logwindow.zx	org.taijiosnet.wm-logwindow	Log Window	development	Development	3741286	cbe8fdf7b3ee252e1c8243b4834c9709445605fcd80fa6c52b7934d11ec53425	lazy
-taijios	/dis/wm/memory.zx	org.taijiosnet.wm-memory	Memory	utilities	Utility	3745842	08b409bf952184bdae68c7d2f9c347861871d222093f6f9ecb0d212051487293	lazy
-taijios	/dis/wm/polyhedra.zx	org.taijiosnet.wm-polyhedra	Polyhedra	game-polyhedra	Game	5680082	e18aef379dbafef5d4cc8ac569beabbc321bf4c050c5287397d83025cf0916ef	lazy
-taijios	/dis/wm/snake.zx	org.taijiosnet.wm-snake	Snake	game-snake	Game	5606569	da3463a3ecda8114a962989b680cfef7db3c7d3d4533bd85911d0bb5c15625d2	lazy
-taijios	/dis/wm/stopwatch.zx	org.taijiosnet.wm-stopwatch	Stopwatch	clock	Utility	5563743	27d9bc5e23b80ef423c419a482371110a6e826ba630ea69021d69425791cd4a8	lazy
-taijios	/dis/wm/sweeper.zx	org.taijiosnet.wm-sweeper	Mine Sweeper	game-sweeper	Game	5446114	759b02df132a505ded0b22a642d21e3018d7853a18aa80c8936ff795193d1b74	lazy
-taijios	/dis/wm/taskmgr.zx	org.taijiosnet.wm-taskmgr	Task Manager	system	System	7550378	109c2314690c0ecd19624119aa9a3229a91245b3ec91e883e6f4997b2a6be200	lazy
-taijios	/dis/wm/tetris.zx	org.taijiosnet.wm-tetris	Tetris	game-tetris	Game	5625894	ba4a75c926782439cf2a270f09502dff7d2d7696dbeb0cae837a446d2a1fab74	lazy
-taijios	/dis/wm/view.zx	org.taijiosnet.wm-view	Image Viewer	graphics	Graphics	7825769	ea460195e1f02e0735ac374fadab79ce461ad19bbb73be26761bfcb233428241	lazy
+taijios	/zx/wm/rill.zx	org.taijiosnet.wm-rill	Rill Desktop	system	System	11446225	58dee05b22aae2d52f833198c1990fadae94e31d77271bf84195009a6b89018c	root
+taijios	/zx/wm/desktop_panel.zx	org.taijiosnet.wm-desktop_panel	Panel	system	System	119448	776e382bfd576bee47dfa49fc03b2bccb98b47823e2f6ed8400c41f39cf77c39	root
+taijios	/zx/wm/about.zx	org.taijiosnet.wm-about	About	help	Utility	3294890	778c7c93dba48de1911031a5f852b07409c37ef9d618c5db4a3ebaef20b2d02d	lazy
+taijios	/zx/wm/calendar.zx	org.taijiosnet.wm-calendar	Calendar	office	Office	7530244	8a70208b81530d5cf2d62442e48313dccc0c920bf92e01ff08144858360997a6	lazy
+taijios	/zx/wm/clock.zx	org.taijiosnet.wm-clock	Clock	clock	Utility	4136324	68e25506463e51a2708d49b6b4cb0fb5ecafb1f072819ead6616130d715cf6b3	lazy
+taijios	/zx/wm/counter.zx	org.taijiosnet.wm-counter	Counter	clock	Utility	5912669	e2d152a8690ea3d385aeec73ce9ae04445093df5bea2868fd5e59e01af79481c	lazy
+taijios	/zx/wm/dir.zx	org.taijiosnet.wm-dir	Directory Browser	files	Utility	4857208	42659db487949495bc9a66ca225baa18f9237a9bb7518f79da1f5f18d6588e1b	lazy
+taijios	/zx/wm/explorer.zx	org.taijiosnet.wm-explorer	Explorer	files	Utility	8751776	bb92f8179bdb201c5c797250ae162ada8d507332c03eecfcc983dd14aa3c7648	lazy
+taijios	/zx/wm/filename.zx	org.taijiosnet.wm-filename	Filename	files	Utility	7438797	fa0307c18dfa7eb8f9257f22fddbad6e7e760d02548f136602295fde057eba24	lazy
+taijios	/zx/wm/logwindow.zx	org.taijiosnet.wm-logwindow	Log Window	development	Development	3741286	cbe8fdf7b3ee252e1c8243b4834c9709445605fcd80fa6c52b7934d11ec53425	lazy
+taijios	/zx/wm/memory.zx	org.taijiosnet.wm-memory	Memory	utilities	Utility	3745842	08b409bf952184bdae68c7d2f9c347861871d222093f6f9ecb0d212051487293	lazy
+taijios	/zx/wm/polyhedra.zx	org.taijiosnet.wm-polyhedra	Polyhedra	game-polyhedra	Game	5693733	4b9e13d514dfc7e271cd100abcb20cea48cd6a3f0e4d1984fb46f6ecac0a122a	lazy
+taijios	/zx/wm/snake.zx	org.taijiosnet.wm-snake	Snake	game-snake	Game	5634874	57defc6c26680027fb16bb098b1e3b7c2e3308d8d828e526b88745f0df535f8b	lazy
+taijios	/zx/wm/stopwatch.zx	org.taijiosnet.wm-stopwatch	Stopwatch	clock	Utility	5927783	04beb38625b991c7250d1ef2bf1e9725323646d854a48aac3c9fcbeccd0fec5c	lazy
+taijios	/zx/wm/sweeper.zx	org.taijiosnet.wm-sweeper	Mine Sweeper	game-sweeper	Game	5473741	70094d146794e4503d53e47142d60bd52305be18e6ef9785a05679e0df397651	lazy
+taijios	/zx/wm/taskmgr.zx	org.taijiosnet.wm-taskmgr	Task Manager	system	System	7550378	109c2314690c0ecd19624119aa9a3229a91245b3ec91e883e6f4997b2a6be200	lazy
+taijios	/zx/wm/tetris.zx	org.taijiosnet.wm-tetris	Tetris	game-tetris	Game	5653539	b27411f367aaee1d26cdb9e68d5439b4bdc10c680f75d50f91b5089af147e299	lazy
+taijios	/zx/wm/view.zx	org.taijiosnet.wm-view	Image Viewer	graphics	Graphics	8468771	fe515b22c5d278077e2ae934e8493f75be27d196699f2d4351075f6a0b22ef45	lazy

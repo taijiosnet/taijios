@@ -4,7 +4,7 @@ TARG=\
 
 SYSMODULES=\
 
-DISBIN=$ROOT/dis/avr
+DISBIN=$ROOT/zx/avr
 
 <$ROOT/mkfiles/mkdis
 

@@ -19,7 +19,7 @@ Colors: module {
 display: ref Display;
 top: ref Tk->Toplevel;
 tmpi: ref Image;
-ZXPalette: con "/dis/wm/colors.zx";
+ZXPalette: con "/zx/wm/colors.zx";
 
 task_cfg := array[] of {
 	"panel .c",

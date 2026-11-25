@@ -1,4 +1,4 @@
-// /dis/fs/query.zx module entry point (replaces appl/cmd/fs/query.b).
+// /zx/fs/query.zx module entry point (replaces appl/cmd/fs/query.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "pc-p-P" }

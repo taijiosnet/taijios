@@ -1903,7 +1903,7 @@ convextension(s: string) : ref Celem
 		if(i < 4 || file[i-4:i] != ".dis")
 			file += ".dis";
 		if(file[0] != '/')
-			file = "/dis/wm/brutus/" + file;
+			file = "/zx/wm/brutus/" + file;
 		mod = load Brutusext file;
 		if(mod == nil) {
 			sys->fprint(stderr, "can't load extension module %s: %r\n", file);

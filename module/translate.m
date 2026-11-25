@@ -3,7 +3,7 @@
 #
 Translate: module
 {
-	PATH:	con "/dis/lib/translate.dis";
+	PATH:	con "/zx/lib/translate.dis";
 
 	Dict: adt {
 		texts:	array of list of ref Phrase;

@@ -1,6 +1,6 @@
 Dial: module
 {
-	PATH: con "/dis/lib/dial.dis";
+	PATH: con "/zx/lib/dial.dis";
 
 	Connection: adt
 	{

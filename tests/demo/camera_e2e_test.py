@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test for dis/demo/camera/camera.zx (9P server) and tkinterface.zx (Tk GUI)."""
+"""End-to-end test for zx/demo/camera/camera.zx (9P server) and tkinterface.zx (Tk GUI)."""
 import io
 import os
 from pathlib import Path
@@ -21,7 +21,7 @@ if not EMU.exists():
 
 def test_camera_9p_server() -> None:
     script = r"""
-mount -A {zxrun /dis/demo/camera/camera.zx -S} /n/remote
+mount -A {zxrun /zx/demo/camera/camera.zx -S} /n/remote
 echo 'CAM_LS:'
 ls /n/remote
 echo 'STORAGE:'
@@ -49,7 +49,7 @@ unmount /n/remote
 echo 'CAMERA_9P_PASS'
 """
     proc = subprocess.Popen(
-        [str(EMU), "-r", str(ROOT), "/dis/sh.dis", "-c", script],
+        [str(EMU), "-r", str(ROOT), "/zx/sh.dis", "-c", script],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -85,15 +85,15 @@ def test_tkinterface_window() -> None:
     for key in ("WAYLAND_SOCKET", "SESSION_MANAGER", "ICEAUTHORITY", "XDG_RUNTIME_DIR"):
         os.environ.pop(key, None)
     command = (
-        "wm/wm /dis/sh.dis -c "
-        "'mount -A {zxrun /dis/demo/camera/camera.zx -S} /n/remote; "
-        "zxrun -w /dis/demo/camera/tkinterface.zx /n/remote; echo CAM_DONE; sleep 60'"
+        "wm/wm /zx/sh.dis -c "
+        "'mount -A {zxrun /zx/demo/camera/camera.zx -S} /n/remote; "
+        "zxrun -w /zx/demo/camera/tkinterface.zx /n/remote; echo CAM_DONE; sleep 60'"
     )
     log_path = OUT / "camera-window.log"
     with private_display() as env, log_path.open("w+b") as log:
         child = launch(
             env, EMU, "-p", "main=128M", "-r", ROOT,
-            "-g", "800x600", "/dis/sh.dis", "-c", command,
+            "-g", "800x600", "/zx/sh.dis", "-c", command,
             stdin=subprocess.DEVNULL, stdout=log, stderr=log,
         )
         try:

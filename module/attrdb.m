@@ -1,6 +1,6 @@
 Attrdb: module
 {
-	PATH:	con "/dis/lib/attrdb.dis";
+	PATH:	con "/zx/lib/attrdb.dis";
 
 	Attr: adt {
 		attr:	string;
@@ -78,7 +78,7 @@ Attrdb: module
 
 Attrindex: module
 {
-	PATH:	con "/dis/lib/attrhash.dis";
+	PATH:	con "/zx/lib/attrhash.dis";
 
 	Index: adt {
 		fd:	ref Sys->FD;
@@ -95,7 +95,7 @@ Attrindex: module
 
 Attrhash: module
 {
-	PATH:	con "/dis/lib/attrhash.dis";
+	PATH:	con "/zx/lib/attrhash.dis";
 
 	NDBPLEN: con 3;	# file pointer length in bytes
 	NDBHLEN:	con 4+4;	# file header length (mtime[4], length[4])

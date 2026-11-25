@@ -31,7 +31,7 @@ local device files are bound into the remote device directory.
 If
 .I command
 is not given, then
-.B /dis/sh
+.B /zx/sh
 is run.
 .PP
 The

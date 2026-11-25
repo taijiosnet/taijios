@@ -1,6 +1,6 @@
 Keyreps: module
 {
-	PATH: con "/dis/lib/spki/keyreps.dis";
+	PATH: con "/zx/lib/spki/keyreps.dis";
 	init: fn();
 	Keyrep: adt {
 		alg:	string;

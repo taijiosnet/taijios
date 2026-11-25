@@ -1,6 +1,6 @@
 
 Strmap: module {
-	PATH: con "/dis/ebook/strmap.dis";
+	PATH: con "/zx/ebook/strmap.dis";
 	Map: adt {
 		i2s:	array of string;
 		s2i:	array of list of (string, int);

@@ -9,7 +9,7 @@ MODULES=\
 
 SYSMODULES= \
 
-DISBIN=$ROOT/dis/demo/ns
+DISBIN=$ROOT/zx/demo/ns
 
 <$ROOT/mkfiles/mkdis
 

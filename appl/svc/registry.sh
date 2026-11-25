@@ -1,4 +1,4 @@
-#!/dis/sh.dis -n
+#!/zx/sh.dis -n
 load std
 or {ftest -f /mnt/registry/new} {
 	db=()

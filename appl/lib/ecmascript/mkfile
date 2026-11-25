@@ -18,6 +18,6 @@ SYSMODULES= \
 	daytime.m\
 	ecmascript.m\
 
-DISBIN=$ROOT/dis/lib
+DISBIN=$ROOT/zx/lib
 
 <$ROOT/mkfiles/mkdis

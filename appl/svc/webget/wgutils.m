@@ -1,6 +1,6 @@
 WebgetUtils: module
 {
-	PATH: con "/dis/svc/webget/wgutils.dis";
+	PATH: con "/zx/svc/webget/wgutils.dis";
 
 	Req: adt
 	{

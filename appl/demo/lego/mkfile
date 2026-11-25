@@ -19,7 +19,7 @@ SYSMODULES= \
 	sys.m\
 	timers.m\
 
-DISBIN=$ROOT/dis/demo/lego
+DISBIN=$ROOT/zx/demo/lego
 
 <$ROOT/mkfiles/mkdis
 

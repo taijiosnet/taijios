@@ -163,9 +163,9 @@ init()
 	setclock();
 
 	sys->print("sh...\n");
-	sh := load Command "/dis/sh.dis";
+	sh := load Command "/zx/sh.dis";
 	if (sh == nil)
-		print("cannot load /dis/sh.dis: %r\n");
+		print("cannot load /zx/sh.dis: %r\n");
 
 	sh->init(nil, "sh" :: "-i" :: nil);
 }

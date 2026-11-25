@@ -5,14 +5,14 @@
 
 Virgil: module
 {
-	PATH:	con "/dis/lib/virgil.dis";
+	PATH:	con "/zx/lib/virgil.dis";
 
 	virgil:	fn(args: list of string): string;
 };
 
 Random: module
 {
-	PATH:	con "/dis/lib/random.dis";
+	PATH:	con "/zx/lib/random.dis";
 
 	ReallyRandom:	con 0;
 	NotQuiteRandom:	con 1;
@@ -26,7 +26,7 @@ Random: module
 #
 SSL: module
 {
-	PATH:	con "/dis/lib/ssl.dis";
+	PATH:	con "/zx/lib/ssl.dis";
 
 	connect: fn(fd: ref Sys->FD): (string, ref Sys->Connection);
 	secret: fn(c: ref Sys->Connection, secretin, secretout: array of byte): string;
@@ -38,7 +38,7 @@ SSL: module
 #
 Login: module 
 {
-	PATH:	con "/dis/lib/login.dis";
+	PATH:	con "/zx/lib/login.dis";
 
 	login:	fn(id, password, dest: string): (string, ref Keyring->Authinfo);
 };
@@ -48,7 +48,7 @@ Login: module
 #
 Auth: module
 {
-	PATH:	con "/dis/lib/auth.dis";
+	PATH:	con "/zx/lib/auth.dis";
 
 	init: fn(): string;
 	server: fn(algs: list of string, ai: ref Keyring->Authinfo, fd: ref Sys->FD, setid: int): (ref Sys->FD, string);

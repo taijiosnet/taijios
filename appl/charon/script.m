@@ -1,6 +1,6 @@
 Script: module
 {
-	JSCRIPTPATH: con "/dis/charon/jscript.dis";
+	JSCRIPTPATH: con "/zx/charon/jscript.dis";
 
 	defaultStatus: string;
 	jevchan: chan of ref Events->ScriptEvent;

@@ -1,6 +1,6 @@
 Msgio: module
 {
-	PATH:	con "/dis/lib/msgio.dis";
+	PATH:	con "/zx/lib/msgio.dis";
 
 	init:	fn();
 

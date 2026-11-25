@@ -14,7 +14,7 @@ CgiData : adt {
 
 CgiParse : module
 {
-    PATH : con "/dis/svc/httpd/cgiparse.dis";
+    PATH : con "/zx/svc/httpd/cgiparse.dis";
     cgiparse : fn( g : ref Httpd->Private_info, req: Httpd->Request): ref CgiData;
     getbase : fn() : string;
     gethost : fn() : string;

@@ -51,7 +51,7 @@ are known to the modem module, but you can ignore them if
 and you haven't got appropriate modem hardware anyway.
 
 To build
-	mkdir /usr/inferno/dis/wm/minitel
+	mkdir /usr/inferno/zx/wm/minitel
 	mk install
 
 The code models the structure outlined in the Minitel 1B specification

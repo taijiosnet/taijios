@@ -378,7 +378,7 @@ RunBlurJob :: (ncpus: s32) {
     }
 
     ops: [2]string = .["/n/remote/data", TextView(imgpath)];
-    res := Proc.Run("/dis/grid/demo/blur.zx", ops[:]);
+    res := Proc.Run("/zx/grid/demo/blur.zx", ops[:]);
     if res.status < 0 {
         AppendLog("Error: blur master failed\n");
     }
@@ -592,7 +592,7 @@ Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
                 return .Changed;
             }
             ops: [1]string = .[TextView(full)];
-            unused Proc.Start("/dis/wm/view.zx", ops[:]);
+            unused Proc.Start("/zx/wm/view.zx", ops[:]);
         }
         return .Idle;
     }

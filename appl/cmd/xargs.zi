@@ -108,7 +108,7 @@ main :: () -> s32 {
         operands: Vec(string)
         unused VecPush(operands, "-c")
         unused VecPush(operands, TextDetach(BuilderFinish(script)))
-        unused Proc.Run("/dis/sh.zx", operands[:])
+        unused Proc.Run("/zx/sh.zx", operands[:])
     }
     return 0
 }

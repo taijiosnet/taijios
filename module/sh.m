@@ -1,13 +1,13 @@
 Command: module
 {
-	PATH:	con "/dis/sh.dis";
+	PATH:	con "/zx/sh.dis";
 
 	init:	fn(ctxt: ref Draw->Context, argv: list of string);
 };
 
 Sh: module
 {
-	PATH: con "/dis/sh.dis";
+	PATH: con "/zx/sh.dis";
 	initialise:		fn();
 	init:			fn(ctxt: ref Draw->Context, argv: list of string);
 	system:		fn(drawctxt: ref Draw->Context, cmd: string): string;

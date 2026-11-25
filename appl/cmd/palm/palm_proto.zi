@@ -1,5 +1,5 @@
 // Palm serial link (SLP), connection management (CMP), packet assembly (PADP),
-// and Desk Link Protocol (DLP) encoding/decoding for dis/palm.
+// and Desk Link Protocol (DLP) encoding/decoding for zx/palm.
 #import "std/vec";
 
 // SLP constants

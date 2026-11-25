@@ -8,8 +8,8 @@ Omega with the local wrangler login (see `site/README.md`).
   (`taijios/taijios`, the `taijios` org) nor the GitHub mirror
   `taijiosnet/taijios` has them. A CI deploy needs them added to the repository
   that runs it.
-- Build inputs: the root bundle packs ZX bundles from `dis/` (`rill.zx`,
-  `desktop_panel.zx`, the `dis/lib/*.zx` modules and the applications listed
+- Build inputs: the root bundle packs ZX bundles from `zx/` (`rill.zx`,
+  `desktop_panel.zx`, the `zx/lib/*.zx` modules and the applications listed
   as `lazy` in `site/root.list`). They are build outputs and not in git, so a
   runner cannot rebuild the site from a checkout alone. Either the runner
   builds them (Ziran, Kryon and Rill pins) or a verified `build/site` is

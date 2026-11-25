@@ -26,7 +26,7 @@ def exercise(env, emu, overlay, device):
     prefix = guest_overlay(overlay)
     prefix += f'bind -b /{device.relative_to(ROOT)} /dev; '
     prefix += "echo 'EET 7200 EEST 10800 0 2000000000' > /env/timezone; "
-    child = launch(env, emu, '-r', ROOT, '-g', '800x600', '/dis/sh.dis', '-c',
+    child = launch(env, emu, '-r', ROOT, '-g', '800x600', '/zx/sh.dis', '-c',
                    prefix + 'wm/wm wm/toolbar', stdin=subprocess.DEVNULL)
     try:
         def x(*command, check=True):

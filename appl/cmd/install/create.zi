@@ -249,7 +249,7 @@ WrapInit :: (name_in: string, t: s32, digest_out: []u8) -> bool {
     for i: 0..15 { digest_out[i] = 0 }
     unused Keyring.DigestEnd(Keyring.MD5, *md5s, digest_out);
 
-    // Sort md5_lines lexicographically (replaces spawning /dis/sort.dis)
+    // Sort md5_lines lexicographically (replaces spawning /zx/sort.dis)
     for i: 1..md5_lines.count - 1 {
         j := i;
         while j > 0 && Util.StrLess(TextView(md5_lines[j]), TextView(md5_lines[j - 1])) {

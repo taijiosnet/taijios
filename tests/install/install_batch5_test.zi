@@ -79,21 +79,21 @@ main :: (argc: s32, argv: **u8) -> s32 {
     BuilderPrint(*script, "bind -bc /%/tmp /tmp\n", WORK);
 
     // 1. create -x (dry list)
-    BuilderPrint(*script, "/dis/install/create% -x -s /%/src -p /%/proto demo > result/create_x.out >[2] result/create_x.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "/zx/install/create% -x -s /%/src -p /%/proto demo > result/create_x.out >[2] result/create_x.err\n", suffix, WORK, WORK);
 
     // 2. create base package archive (redirect to base.arch so 'demo' doesn't exist in cwd during create)
-    BuilderPrint(*script, "/dis/install/create% -o -t 1700000000 -d 'demo base' -s /%/src -p /%/proto demo > base.arch >[2] result/create_pkg.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "/zx/install/create% -o -t 1700000000 -d 'demo base' -s /%/src -p /%/proto demo > base.arch >[2] result/create_pkg.err\n", suffix, WORK, WORK);
     BuilderPrint(*script, "mv base.arch demo\n");
 
     // If testing .dis, mount demo on /mnt/wrap via archfs.zx so wrap.dis openmount finds /mnt/wrap/wrap/demo
     if suffix == ".dis" {
-        BuilderPrint(*script, "/dis/install/archfs.zx -s -m /mnt/wrap /%/demo /wrap &\n", WORK);
+        BuilderPrint(*script, "/zx/install/archfs.zx -s -m /mnt/wrap /%/demo /wrap &\n", WORK);
         BuilderPrint(*script, "sleep 1\n");
     }
 
     // 3. inst -h (header list) and inst (extract into dest)
-    BuilderPrint(*script, "/dis/install/inst% -h -r /%/dest demo > result/inst_h.out >[2] result/inst_h.err\n", suffix, WORK);
-    BuilderPrint(*script, "/dis/install/inst% -r /%/dest demo > result/inst.out >[2] result/inst.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/inst% -h -r /%/dest demo > result/inst_h.out >[2] result/inst_h.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/inst% -r /%/dest demo > result/inst.out >[2] result/inst.err\n", suffix, WORK);
     if suffix == ".dis" {
         BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
     }
@@ -102,31 +102,31 @@ main :: (argc: s32, argv: **u8) -> s32 {
     // 4. Modify src/hello.txt, remove src/gone.txt, create -u update archive, and apply with inst
     BuilderPrint(*script, "echo 'hello updated' > /%/src/hello.txt\n", WORK);
     BuilderPrint(*script, "rm /%/src/gone.txt\n", WORK);
-    BuilderPrint(*script, "/dis/install/create% -u -o -t 1700000100 -d 'demo patch' -R /%/rem_list -r /%/dest -s /%/src -p /%/proto demo > upd.arch >[2] result/create_upd.err\n", suffix, WORK, WORK, WORK, WORK);
+    BuilderPrint(*script, "/zx/install/create% -u -o -t 1700000100 -d 'demo patch' -R /%/rem_list -r /%/dest -s /%/src -p /%/proto demo > upd.arch >[2] result/create_upd.err\n", suffix, WORK, WORK, WORK, WORK);
     BuilderPrint(*script, "mv upd.arch demo\n");
     if suffix == ".dis" {
-        BuilderPrint(*script, "/dis/install/archfs.zx -s -m /mnt/wrap /%/demo /wrap &\n", WORK);
+        BuilderPrint(*script, "/zx/install/archfs.zx -s -m /mnt/wrap /%/demo /wrap &\n", WORK);
         BuilderPrint(*script, "sleep 1\n");
-        BuilderPrint(*script, "/dis/install/inst% -r /%/dest demo > result/inst_upd.out >[2] result/inst_upd.err\n", suffix, WORK);
+        BuilderPrint(*script, "/zx/install/inst% -r /%/dest demo > result/inst_upd.out >[2] result/inst_upd.err\n", suffix, WORK);
         BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
     } else {
-        BuilderPrint(*script, "/dis/install/inst% -r /%/dest demo > result/inst_upd.out >[2] result/inst_upd.err\n", suffix, WORK);
+        BuilderPrint(*script, "/zx/install/inst% -r /%/dest demo > result/inst_upd.out >[2] result/inst_upd.err\n", suffix, WORK);
     }
 
     // 5. install -d (dry-run package discovery)
-    BuilderPrint(*script, "/dis/install/install% -d -i /%/indir -r %/%/dest > result/install_d.out >[2] result/install_d.err\n", suffix, WORK, TextView(root), WORK);
+    BuilderPrint(*script, "/zx/install/install% -d -i /%/indir -r %/%/dest > result/install_d.out >[2] result/install_d.err\n", suffix, WORK, TextView(root), WORK);
 
     // 6. eproto and log (ZX CLI endpoints)
     if suffix == ".zx" {
-        BuilderPrint(*script, "/dis/install/eproto.zx -r /%/src /%/proto > result/eproto.out >[2] result/eproto.err\n", WORK, WORK);
-        BuilderPrint(*script, "/dis/install/log.zx -u alice -g sys /%/src/hello.txt > result/log.out >[2] result/log.err\n", WORK);
+        BuilderPrint(*script, "/zx/install/eproto.zx -r /%/src /%/proto > result/eproto.out >[2] result/eproto.err\n", WORK, WORK);
+        BuilderPrint(*script, "/zx/install/log.zx -u alice -g sys /%/src/hello.txt > result/log.out >[2] result/log.err\n", WORK);
     }
 
     unused WriteEntireFile("build/dis-legacy-math/inst5/script", BuilderFinish(script));
 
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

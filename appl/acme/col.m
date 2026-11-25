@@ -1,5 +1,5 @@
 Columnm : module {
-	PATH : con "/dis/acme/col.dis";
+	PATH : con "/zx/acme/col.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

@@ -778,7 +778,7 @@ launchwindow(ctxt: ref Draw->Context, payload: string): int
 		(n, info) := sys->fstat(fd);
 		if(n < 0 || info.mode & Sys->DMDIR)
 			return 0;
-		file = "/dis/zxrun.dis";
+		file = "/zx/zxrun.dis";
 		argv = hd argv :: "-c" :: "-w" :: program :: tl argv;
 	}
 	app := load Wm file;

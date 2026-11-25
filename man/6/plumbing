@@ -144,7 +144,7 @@ data matches '([a-zA-Z0-9]+\.m)(:[0-9]+)?'
 data isfile     /module/$1
 data set        /module/$0
 plumb to edit
-plumb start /dis/wm/brutus.dis $file$2
+plumb start /zx/wm/brutus.dis $file$2
 .EE
 .PP
 Note the use of

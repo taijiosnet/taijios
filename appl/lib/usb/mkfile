@@ -11,6 +11,6 @@ MODULES=
 SYSMODULES= \
 	usb.m\
 
-DISBIN=$ROOT/dis/lib/usb
+DISBIN=$ROOT/zx/lib/usb
 
 <$ROOT/mkfiles/mkdis

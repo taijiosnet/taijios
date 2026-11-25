@@ -1,5 +1,5 @@
 Rowm : module {
-	PATH : con "/dis/acme/row.dis";
+	PATH : con "/zx/acme/row.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

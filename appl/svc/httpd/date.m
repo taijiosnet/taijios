@@ -1,6 +1,6 @@
 
 Date: module{
-	PATH : con "/dis/svc/httpd/date.dis";
+	PATH : con "/zx/svc/httpd/date.dis";
 
 	init: fn();
 	dateconv: fn(secs :int): string; # returns an http formatted

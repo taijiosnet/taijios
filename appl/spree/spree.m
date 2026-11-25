@@ -126,7 +126,7 @@ Engine: module {
 };
 
 Archives: module {
-	PATH:	con "/dis/spree/archives.dis";
+	PATH:	con "/zx/spree/archives.dis";
 	Archive: adt {
 		argv:		list of string;			# how to restart the session.
 		members:	array of string;			# members involved.

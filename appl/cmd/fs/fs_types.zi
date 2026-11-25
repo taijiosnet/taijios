@@ -1,5 +1,5 @@
 // Shared types, value producers, file stat/readdir helpers, report collector,
-// mode/pattern helpers, and type signature formatting for /dis/fs and /dis/fs/*.zx.
+// mode/pattern helpers, and type signature formatting for /zx/fs and /zx/fs/*.zx.
 #import "std/vec"
 #import "std/option"
 Io :: #import "taijios_io";

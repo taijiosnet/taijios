@@ -61,14 +61,14 @@ main :: (argc: s32, argv: **u8) -> s32 {
     script: Vec(u8);
     BuilderPrint(*script, "cd /%/work\n", WORK);
     // 1. lego/link usage and missing serial port
-    BuilderPrint(*script, "/dis/lego/link% > ../result/link_usage.out >[2] ../result/link_usage.err\n", suffix);
-    BuilderPrint(*script, "/dis/lego/link% 99 > ../result/link_nop.out >[2] ../result/link_nop.err\n", suffix);
+    BuilderPrint(*script, "/zx/lego/link% > ../result/link_usage.out >[2] ../result/link_usage.err\n", suffix);
+    BuilderPrint(*script, "/zx/lego/link% 99 > ../result/link_nop.out >[2] ../result/link_nop.err\n", suffix);
     // 2. lego/clockface usage
-    BuilderPrint(*script, "/dis/lego/clockface% > ../result/cf_usage.out >[2] ../result/cf_usage.err\n", suffix);
+    BuilderPrint(*script, "/zx/lego/clockface% > ../result/cf_usage.out >[2] ../result/cf_usage.err\n", suffix);
     BuilderPrint(*script, "echo $status > ../result/cf_usage.st\n");
     // 3. lego/clockface live /chan/clockface test: read initial 12:00, write 3:15, read 3:15, bad syntax error
     BuilderPrint(*script, "bind '#s' /chan\n");
-    BuilderPrint(*script, "/dis/lego/clockface% /%/work > ../result/cf.out >[2] ../result/cf.err &\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/lego/clockface% /%/work > ../result/cf.out >[2] ../result/cf.err &\n", suffix, WORK);
     BuilderPrint(*script, "cfpid=$apid\n");
     BuilderPrint(*script, "sleep 1\n");
     BuilderPrint(*script, "read < /chan/clockface > ../result/cf_t0.out >[2] ../result/cf_t0.err\n");
@@ -82,7 +82,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [7]string = .["timeout", "8", emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [7]string = .["timeout", "8", emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

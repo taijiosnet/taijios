@@ -1,5 +1,5 @@
 CSSparser: module {
-	PATH: con "/dis/ebook/cssparser.dis";
+	PATH: con "/zx/ebook/cssparser.dis";
 	Decl: adt {
 		name:		string;
 		important:	int;

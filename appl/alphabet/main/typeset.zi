@@ -1,5 +1,5 @@
 // The modules of the root typeset "/", which the Dis alphabet loaded from
-// /dis/alphabet/main.
+// /zx/alphabet/main.
 Auth :: #import "main/auth";
 Cat :: #import "main/cat";
 Create :: #import "main/create";

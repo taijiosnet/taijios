@@ -1,4 +1,4 @@
-# /dis/sh script
+# /zx/sh script
 # wm defines "menu" and "delmenu" builtins
 load std
 prompt='% ' ''
@@ -28,16 +28,16 @@ menu Shell			{wmrun wm/sh}
 menu Acme			{wmrun acme}
 menu Edit				{wmrun wm/edit}
 menu Charon			{wmrun charon}
-menu Manual			{wmrun zxrun -w /dis/man.zx}
-menu Files			{if {ftest -d $home} {wmrun zxrun -w /dis/wm/dir.zx $home} {wmrun zxrun -w /dis/wm/dir.zx /}}
+menu Manual			{wmrun zxrun -w /zx/man.zx}
+menu Files			{if {ftest -d $home} {wmrun zxrun -w /zx/wm/dir.zx $home} {wmrun zxrun -w /zx/wm/dir.zx /}}
 menu ''	''
 menu System			'Debugger'		{wmrun wm/deb}
 menu System			'Module manager'	{wmrun wm/rt}
 menu System			'Task manager'		{wmrun wm/task}
-menu System			'Memory monitor'	{wmrun zxrun -p -w /dis/wm/memory.zx}
-menu System			'About'			{wmrun zxrun -w /dis/wm/about.zx}
-menu Misc			'Tetris'			{wmrun zxrun -w /dis/wm/tetris.zx}
-menu Misc			'Coffee'			{wmrun zxrun -w /dis/coffee.zx}
+menu System			'Memory monitor'	{wmrun zxrun -p -w /zx/wm/memory.zx}
+menu System			'About'			{wmrun zxrun -w /zx/wm/about.zx}
+menu Misc			'Tetris'			{wmrun zxrun -w /zx/wm/tetris.zx}
+menu Misc			'Coffee'			{wmrun zxrun -w /zx/coffee.zx}
 menu Misc			'Colours'			{wmrun wm/colors}
 menu Misc			'Winctl'			{wmrun wm/winctl}
 menu Misc			'Clock'			{wmrun wm/date}

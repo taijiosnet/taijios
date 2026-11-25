@@ -77,7 +77,7 @@ def check_clock(env):
     setup = "echo 9887000000 >/dev/time; echo 'EET 7200 EEST 10800 0 100000000' >/env/timezone"
     child = subprocess.Popen(
         [ROOT / 'Linux/386/bin/emu', '-r', ROOT, '-g', '800x600', 'wm/wm', 'sh',
-         '-c', f'{setup}; zxrun -w /dis/wm/clock.zx; echo CLOCK_CLOSED'],
+         '-c', f'{setup}; zxrun -w /zx/wm/clock.zx; echo CLOCK_CLOSED'],
         env=env, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
 

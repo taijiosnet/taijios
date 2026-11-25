@@ -98,11 +98,11 @@ init
 root
 	/chan
 	/dev
-	/dis
+	/zx
 #	/usr/jrf/limbo/cb.dis
 #	/usr/jrf/work/dl/test/test.dis
 #	/o/abc.o
-	/dis/sh.dis
+	/zx/sh.dis
 	/net
 	/prog
 	/osinit.dis

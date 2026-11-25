@@ -1,5 +1,5 @@
 Cvsimages: module {
-	PATH: 	con "/dis/lib/cvsimages.dis";
+	PATH: 	con "/zx/lib/cvsimages.dis";
 	init:		fn();
 	Cvsimage: adt {
 		new:		fn(win: ref Tk->Toplevel, w: string): ref Cvsimage;

@@ -1,4 +1,4 @@
-// /dis/fs/not.zx module entry point (replaces appl/cmd/fs/not.b).
+// /zx/fs/not.zx module entry point (replaces appl/cmd/fs/not.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "pp" }

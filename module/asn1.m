@@ -1,5 +1,5 @@
 ASN1: module {
-	PATH: con "/dis/lib/asn1.dis";
+	PATH: con "/zx/lib/asn1.dis";
 
 	# Tag classes
 	Universal : con 0;

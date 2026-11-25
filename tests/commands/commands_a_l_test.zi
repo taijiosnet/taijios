@@ -1,7 +1,7 @@
 // Guest parity regression for the top-level shell commands A to L rewritten in
 // Ziran: env, date, chgrp, chmod, comm, cmp, ... Every expected status, output
 // and diagnostic below is what the Limbo original printed. Each case runs
-// through the guest shell, which starts /dis/NAME.zx. While /dis/NAME.dis is
+// through the guest shell, which starts /zx/NAME.zx. While /zx/NAME.dis is
 // still installed the same case also runs it, from the same starting state,
 // and both must agree exactly.
 //
@@ -169,10 +169,10 @@ Prepare :: (binary: string) -> bool {
         Write("café blanc", "c\n") && Write("tree/x", "x\n") && Write("tree/sub/y", "yy\n")
 }
 
-// /dis/NAME.dis is compared while it is still installed.
+// /zx/NAME.dis is compared while it is still installed.
 DisInstalled :: (tool: string) -> bool {
     path: Vec(u8)
-    BuilderPrint(*path, "dis/%.dis", tool)
+    BuilderPrint(*path, "zx/%.dis", tool)
     return PathExists(BuilderFinish(path))
 }
 
@@ -207,7 +207,7 @@ Script :: () -> Text {
         } else {
             if DisInstalled(it.tool) {
                 if it.before != "" { BuilderAppend(script, it.before) }
-                BuilderPrint(*script, "/dis/%.dis %", it.tool, it.args)
+                BuilderPrint(*script, "/zx/%.dis %", it.tool, it.args)
                 BuilderPrint(*script, " < % > ../result/dis.out.% >[2] ../result/dis.err.%\n", input, it_index, it_index)
                 BuilderPrint(*script, "echo $status > ../result/dis.status.%\n", it_index)
                 if after != "" {
@@ -246,7 +246,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory()
     guest: Vec(u8)
     BuilderPrint(*guest, "/%/script", WORK)
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)]
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)]
     run: ProcessRun
     started := RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run)
     if !started { print("cannot start %\n", emu); return 1 }

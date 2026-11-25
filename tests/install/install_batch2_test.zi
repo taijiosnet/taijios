@@ -60,10 +60,10 @@ main :: (argc: s32, argv: **u8) -> s32 {
     script: Vec(u8);
     BuilderPrint(*script, "cd /%\n", WORK);
     // 1. updatelog -s -p srv.proto -r /.../srv -t 1700000000 0 srv.log
-    BuilderPrint(*script, "/dis/install/updatelog% -s -p srv.proto -r /%/srv -t 1700000000 0 srv.log > result/upd.log >[2] result/upd.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/updatelog% -s -p srv.proto -r /%/srv -t 1700000000 0 srv.log > result/upd.log >[2] result/upd.err\n", suffix, WORK);
     BuilderPrint(*script, "echo $status > result/upd.st\n");
     // 2. applylog -v cli.log /.../cli /.../srv < result/upd.log
-    BuilderPrint(*script, "/dis/install/applylog% -v cli.log /%/cli /%/srv < result/upd.log > result/app.out >[2] result/app.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "/zx/install/applylog% -v cli.log /%/cli /%/srv < result/upd.log > result/app.out >[2] result/app.err\n", suffix, WORK, WORK);
     BuilderPrint(*script, "echo $status > result/app.st\n");
     BuilderPrint(*script, "cat cli/hello.txt > result/cli_hello.txt\n");
     BuilderPrint(*script, "cat cli/sub/item.txt > result/cli_item.txt\n");
@@ -72,7 +72,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

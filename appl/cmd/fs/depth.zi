@@ -1,4 +1,4 @@
-// /dis/fs/depth.zx module entry point (replaces appl/cmd/fs/depth.b).
+// /zx/fs/depth.zx module entry point (replaces appl/cmd/fs/depth.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "ps" }

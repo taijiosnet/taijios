@@ -1,6 +1,6 @@
 Editlog: module {
 
-	PATH: con "/dis/acme/elog.dis";
+	PATH: con "/zx/acme/elog.dis";
 
 	Elog: adt{
 		typex: int;		# Delete, Insert, Filename

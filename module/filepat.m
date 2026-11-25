@@ -1,6 +1,6 @@
 Filepat: module
 {
-	PATH:	con "/dis/lib/filepat.dis";
+	PATH:	con "/zx/lib/filepat.dis";
 	
 	# Turn file name with * ? [] into list of files.  Slashes are significant.
 	expand:	fn(pat: string): list of string;

@@ -1,4 +1,4 @@
-// /dis/fs/mode.zx module entry point (replaces appl/cmd/fs/mode.b).
+// /zx/fs/mode.zx module entry point (replaces appl/cmd/fs/mode.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "ps" }

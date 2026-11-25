@@ -46,7 +46,7 @@ When the item is selected, as described below,
 .I mux
 runs the Dis file
 .IP
-.BI /dis/mux/ app .dis
+.BI /zx/mux/ app .dis
 .SS Applications
 The following applications are available:
 .TF audioctl

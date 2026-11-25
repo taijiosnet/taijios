@@ -115,7 +115,7 @@ init(ctxt: ref Draw->Context, argl: list of string)
 execprof(ctxt: ref Draw->Context, argl: list of string): Profile->Prof
 {
 	{
-		prof = load Prof "/dis/prof.dis";
+		prof = load Prof "/zx/prof.dis";
 		if(prof == nil)
 			fatal("cannot load profiler");
 		return prof->init0(ctxt, hd argl :: "-g" :: tl argl);

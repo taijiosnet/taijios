@@ -32,7 +32,7 @@ init(nil: ref Draw->Context, nil: list of string)
 	sys->pctl(Sys->NEWNS, nil);
 	if (imount("/n/remote")) {
 		bind("/n/remote", "/", sys->MAFTER);
-		bind("/n/remote/dis", "/dis", sys->MBEFORE);
+		bind("/n/remote/zx", "/zx", sys->MBEFORE);
 		mountkfs("#W/flash0fs", "fs", "/n/local", sys->MREPL);
 	}
 	else {
@@ -54,7 +54,7 @@ init(nil: ref Draw->Context, nil: list of string)
 	sys->print("starting shell (type wm/logon or wm/wmcp)\n");
 	shell := sysenv("shell");
 	if (shell == nil)
-		shell = "/dis/sh.dis";
+		shell = "/zx/sh.dis";
 	sh := load Sh shell;
 	spawn sh->init(nil, nil);
 }

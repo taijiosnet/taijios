@@ -111,7 +111,7 @@ ParseCpuCount :: (s: string) -> s32 {
 
 BuildWorkerCmd :: (work_dir: string, out: *Text) {
     unused VecResize(out.bytes, 0);
-    unused BuilderAppend(out.bytes, "/dis/grid/demo/blur.zx ");
+    unused BuilderAppend(out.bytes, "/zx/grid/demo/blur.zx ");
     unused BuilderAppend(out.bytes, work_dir);
 }
 

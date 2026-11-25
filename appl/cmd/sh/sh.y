@@ -144,7 +144,7 @@ EPIPE: con "write on closed pipe";
 
 #SHELLRC: con "lib/profile";
 LIBSHELLRC: con "/lib/sh/profile";
-BUILTINPATH: con "/dis/sh";
+BUILTINPATH: con "/zx/sh";
 
 DEBUG: con 0;
 
@@ -857,7 +857,7 @@ runexternal(ctxt: ref Context, args: list of ref Listnode, last: int): string
 	else if ((pl := ctxt.get("path")) != nil)
 		pathlist = list2stringlist(pl);
 	else
-		pathlist = list of {"/dis", "."};
+		pathlist = list of {"/zx", "."};
 
 	err := "";
 	do {
@@ -2136,7 +2136,7 @@ whatisit(ctxt: ref Context, el: ref Listnode): string
 		else if ((pl := ctxt.get("path")) != nil)
 			pathlist = list2stringlist(pl);
 		else
-			pathlist = list of {"/dis", "."};
+			pathlist = list of {"/zx", "."};
 	
 		foundpath := "";
 		while (pathlist != nil) {

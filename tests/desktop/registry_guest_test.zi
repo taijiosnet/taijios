@@ -17,7 +17,7 @@ main :: () -> s32 {
         if !Catalog.IconPath(Catalog.ZText(icon[:]), 30, path[:]) { print("missing icon: %\n", Catalog.ZText(icon[:])); return 4 }
         if Catalog.ZText(record.id[:]) == "org.taijiosnet.wm-clock.desktop" {
             found = true
-            if Catalog.ZText(exec[:]) != "/dis/wm/clock.zx" || Catalog.ZText(name[:]) != "Clock" { return 5 }
+            if Catalog.ZText(exec[:]) != "/zx/wm/clock.zx" || Catalog.ZText(name[:]) != "Clock" { return 5 }
         }
         for j: cast(s32)0..i-1 {
             previous := Catalog.At(j)

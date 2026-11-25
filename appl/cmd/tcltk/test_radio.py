@@ -85,7 +85,7 @@ def main():
     model = BUILD / "radio_command_test.zx"
     compile_image("radio_command_test", model, "--define", "TK_MENU", "--define", "TK_NO_CANVAS")
     portable = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
-    image = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
+    image = (ROOT / "zx" if args.installed else BUILD) / "tcltk.zx"
     if not args.installed:
         compile_image("tcltk", image, *RUNNER_FLAGS)
     lines = (SOURCES / "radio_commands.expected").read_bytes().splitlines()

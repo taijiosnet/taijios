@@ -1,6 +1,6 @@
 // Port of Inferno's WmPlay (appl/wm/wmplay.b), built as wmplay.zx. See ../../NOTICE.
 // usage: wm/wmplay [audiofile]
-// Without an argument, opens /dis/wm/filename.zx to choose *.iaf or *.wav.
+// Without an argument, opens /zx/wm/filename.zx to choose *.iaf or *.wav.
 // Parses the Inferno audio header ("rate" magic, "\n\n" terminator, 4-byte
 // alignment), configures /dev/audioctl, and streams audio data to /dev/audio.
 Surface :: #import "kryon/host/surface";
@@ -22,7 +22,7 @@ Ns :: #import "taijios_namespace";
 WinW :: 360
 WinH :: 96
 AtomIO :: 8192
-Chooser :: "/dis/wm/filename.zx"
+Chooser :: "/zx/wm/filename.zx"
 AudioData :: "/dev/audio"
 AudioCtl :: "/dev/audioctl"
 

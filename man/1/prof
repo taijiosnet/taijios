@@ -96,17 +96,17 @@ option is being used) according to the output format required.
 .SH EXAMPLE
 .EX
 To profile a particular command
-	prof /dis/math/parts 10000
-	wm/prof /dis/math/parts 10000
+	prof /zx/math/parts 10000
+	wm/prof /zx/math/parts 10000
 To profile the same command but restrict attention to its own module (Partitions).
-	prof -m Partitions /dis/math/parts 10000
-	wm/prof -m Partitions /dis/math/parts 10000
+	prof -m Partitions /zx/math/parts 10000
+	wm/prof -m Partitions /zx/math/parts 10000
 A shorter version of the above
-	prof -e /dis/math/parts 10000
-	wm/prof -e /dis/math/parts 10000
+	prof -e /zx/math/parts 10000
+	wm/prof -e /zx/math/parts 10000
 To profile interactively
 	prof -b -m Partitions -s 10
-	/dis/math/parts 10000
+	/zx/math/parts 10000
 	prof -f -l -n 
 .EE
 .PP

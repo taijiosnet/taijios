@@ -10,7 +10,7 @@ SYSMODULES=\
 
 MODULES=
 
-DISBIN=$ROOT/dis/lego
+DISBIN=$ROOT/zx/lego
 
 <$ROOT/mkfiles/mkdis
 

@@ -24,7 +24,7 @@ include "toolbar.m";
 
 MAXCONSOLELINES:	con 1024;
 PanelCapacity: con 192;
-PanelImage: con "/dis/wm/desktop_panel.zx";
+PanelImage: con "/zx/wm/desktop_panel.zx";
 
 panelstate: ref ZX->Panel;
 menucommands: array of string;

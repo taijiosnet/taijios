@@ -1,5 +1,5 @@
 Parseman: module {
-	PATH: con "/dis/lib/parseman.dis";
+	PATH: con "/zx/lib/parseman.dis";
 
 	Metrics: adt {
 		pagew: int;
@@ -34,7 +34,7 @@ Parseman: module {
 };
 
 Man: module {
-	PATH: con "/dis/lib/man.dis";
+	PATH: con "/zx/lib/man.dis";
 
 	loadsections: fn(sections: list of string): string;
 	getfiles: fn(sections: list of string , keys: list of string): list of (int, string, string);

@@ -1,7 +1,7 @@
 Filter: module
 {
-	DEFLATEPATH: con "/dis/lib/deflate.dis";
-	INFLATEPATH: con "/dis/lib/inflate.dis";
+	DEFLATEPATH: con "/zx/lib/deflate.dis";
+	INFLATEPATH: con "/zx/lib/inflate.dis";
 
 	Rq: adt {
 		pick {

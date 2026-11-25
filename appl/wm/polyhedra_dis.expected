@@ -1,5 +1,5 @@
 # The 72 panels of one Polyhedra turn, recorded from the Dis version (appl/wm/polyhedra.b
-# with its dis/math modules) in a private 640x560 guest: /dev/time bound to
+# with its zx/math modules) in a private 640x560 guest: /dev/time bound to
 # 1700000006000000, wm/wm wm/polyhedra -p 3, the 400x400 panel at (4,126) captured 250
 # times. The tiles in polyhedra_dis.png, 8 per row, are these panels in hash order.
 # Limbo and Ziran round the accumulated vertex positions differently in the last bit, so

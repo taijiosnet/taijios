@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private-display Xvfb test for dis/spree/clients/cards.zx with live stdin updates."""
+"""Private-display Xvfb test for zx/spree/clients/cards.zx with live stdin updates."""
 import io
 import os
 from pathlib import Path
@@ -38,14 +38,14 @@ def main():
         "remark Your turn\n"
     )
     command = (
-        "wm/wm /dis/sh.dis -c "
+        "wm/wm /zx/sh.dis -c "
         "'{cat /build/dis-app-families/cards-feed.txt; sleep 60} | "
-        "zxrun -w /dis/spree/clients/cards.zx; echo CARDS_DONE; sleep 60'"
+        "zxrun -w /zx/spree/clients/cards.zx; echo CARDS_DONE; sleep 60'"
     )
     log_path = OUT / 'cards-window.log'
     with private_display() as env, log_path.open('w+b') as log:
         child = launch(env, emu, '-p', 'main=128M', '-r', ROOT,
-                       '-g', '800x600', '/dis/sh.dis', '-c', command,
+                       '-g', '800x600', '/zx/sh.dis', '-c', command,
                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
         try:
             window = until(

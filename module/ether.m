@@ -1,6 +1,6 @@
 Ether: module
 {
-	PATH:	con "/dis/lib/ether.dis";
+	PATH:	con "/zx/lib/ether.dis";
 	Eaddrlen:	con 6;
 
 	init:	fn();

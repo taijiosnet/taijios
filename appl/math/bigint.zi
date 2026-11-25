@@ -1,4 +1,4 @@
-// Arbitrary-precision signed integer arithmetic (base 10^9) for dis/math ZX tools.
+// Arbitrary-precision signed integer arithmetic (base 10^9) for zx/math ZX tools.
 #import "std/format"
 #import "std/vec"
 

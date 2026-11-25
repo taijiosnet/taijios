@@ -9,7 +9,7 @@ Init: module
 };
 .EE
 .PP
-.B /dis/emuinit.dis
+.B /zx/emuinit.dis
 .PP
 .B #/./osinit.dis
 .SH DESCRIPTION
@@ -44,11 +44,11 @@ to decide which command to start and its arguments.
 The default
 .I command
 is
-.BR /dis/sh.dis ,
+.BR /zx/sh.dis ,
 unless the
 .B \-d
 option is given, in which case
-.B /dis/lib/srv.dis
+.B /zx/lib/srv.dis
 is used by default instead, to cause
 .I emu
 to run on the host system as a server (`daemon' mode).

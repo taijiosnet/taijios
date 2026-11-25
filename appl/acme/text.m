@@ -1,5 +1,5 @@
 Textm : module {
-	PATH : con "/dis/acme/text.dis";
+	PATH : con "/zx/acme/text.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

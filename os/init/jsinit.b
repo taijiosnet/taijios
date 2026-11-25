@@ -165,9 +165,9 @@ init()
 
 	sys->print("logon...\n");
 
-	logon := load Logon "/dis/wm/logon.dis";
+	logon := load Logon "/zx/wm/logon.dis";
 	if(logon == nil) {
-		print("init: load /dis/wm/logon.dis: %r");
+		print("init: load /zx/wm/logon.dis: %r");
 		exit;
 	}
 	dc: ref Context;

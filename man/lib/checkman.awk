@@ -112,7 +112,7 @@ END {
 	getindex("/usr/inferno/doc/man/1")
 	getindex("/usr/inferno/doc/man/8")
 	Skipdirs["lib"] = 1
-	getbinlist("/usr/inferno/dis")
+	getbinlist("/usr/inferno/zx")
 	for (i in List) {
 		if (!(i in Index))
 			print "Need", i, "(in " List[i] ")"
@@ -122,7 +122,7 @@ END {
 	print ""
 	print "Checking libraries"
 	getindex("/usr/inferno/doc/man/2")
-	getbinlist("/usr/inferno/dis/lib")
+	getbinlist("/usr/inferno/zx/lib")
 	for (i in List) {
 		if (!(i in Index))
 			print "Need", i, "(in " List[i] ")"

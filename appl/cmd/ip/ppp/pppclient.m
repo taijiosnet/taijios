@@ -1,6 +1,6 @@
 
 PPPClient:	module {
-	PATH:	con "/dis/ip/ppp/pppclient.dis";
+	PATH:	con "/zx/ip/ppp/pppclient.dis";
 
 	PPPInfo: adt {
 		ipaddr:			string;

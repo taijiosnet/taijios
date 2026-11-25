@@ -12,7 +12,7 @@
 
 Keyboard: module
 {
-        PATH:           con "/dis/wm/minitel/swkeyb.dis";
+        PATH:           con "/zx/wm/minitel/swkeyb.dis";
 
         initialize:     fn(t: ref Tk->Toplevel, ctxt : ref Draw->Context,
 				dot: string): chan of string;

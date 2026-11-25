@@ -121,7 +121,7 @@ port
 root
 	/chan
 	/dev
-	/dis
+	/zx
 	/env
 	/fd	/
 	/n
@@ -129,29 +129,29 @@ root
 	/net
 	/nvfs
 	/prog
-	/dis/lib
-	/dis/svc
-	/dis/wm
+	/zx/lib
+	/zx/svc
+	/zx/wm
 	/osinit.dis
-	/dis/sh.dis
-	/dis/ls.dis
-	/dis/cat.dis
-	/dis/bind.dis
-	/dis/mount.dis
-	/dis/pwd.dis
-	/dis/echo.dis
-	/dis/cd.dis
-	/dis/lib/bufio.dis
-	/dis/lib/string.dis
-	/dis/lib/readdir.dis
-	/dis/lib/workdir.dis
-	/dis/lib/daytime.dis
-	/dis/lib/auth.dis
-	/dis/lib/ssl.dis
+	/zx/sh.dis
+	/zx/ls.dis
+	/zx/cat.dis
+	/zx/bind.dis
+	/zx/mount.dis
+	/zx/pwd.dis
+	/zx/echo.dis
+	/zx/cd.dis
+	/zx/lib/bufio.dis
+	/zx/lib/string.dis
+	/zx/lib/readdir.dis
+	/zx/lib/workdir.dis
+	/zx/lib/daytime.dis
+	/zx/lib/auth.dis
+	/zx/lib/ssl.dis
 
 # kfs
-	/dis/disk/kfs.dis
-	/dis/lib/arg.dis
-	/dis/lib/daytime.dis
-	/dis/lib/string.dis
-	/dis/lib/styx.dis
+	/zx/disk/kfs.dis
+	/zx/lib/arg.dis
+	/zx/lib/daytime.dis
+	/zx/lib/string.dis
+	/zx/lib/styx.dis

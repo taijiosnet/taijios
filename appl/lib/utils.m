@@ -1,6 +1,6 @@
 Str_Hashtab : module
 {
-	PATH: con "/dis/lib/tcl_strhash.dis";
+	PATH: con "/zx/lib/tcl_strhash.dis";
 	
 	H_link : adt{
 		name : string;
@@ -22,7 +22,7 @@ Str_Hashtab : module
 
 Int_Hashtab : module
 {
-	PATH: con "/dis/lib/tcl_inthash.dis";
+	PATH: con "/zx/lib/tcl_inthash.dis";
 	
 	H_link : adt{
 		name : string;
@@ -42,7 +42,7 @@ Int_Hashtab : module
 
 Sym_Hashtab : module
 {
-	PATH: con "/dis/lib/tcl_symhash.dis";
+	PATH: con "/zx/lib/tcl_symhash.dis";
 	
 	H_link : adt{
 		name : string;
@@ -63,7 +63,7 @@ Sym_Hashtab : module
 
 Mod_Hashtab : module
 {
-	PATH: con "/dis/lib/tcl_modhash.dis";
+	PATH: con "/zx/lib/tcl_modhash.dis";
 	
 	H_link : adt{
 		name : string;
@@ -85,7 +85,7 @@ Mod_Hashtab : module
 
 Tcl_Stack : module
 {
-	PATH: con "/dis/lib/tcl_stack.dis";
+	PATH: con "/zx/lib/tcl_stack.dis";
 	
 	level : fn() : int;
 	examine : fn(lev : int) : 
@@ -105,7 +105,7 @@ Tcl_Stack : module
 
 Tcl_Utils : module
 {
-	PATH: con "/dis/lib/tcl_utils.dis";
+	PATH: con "/zx/lib/tcl_utils.dis";
 	break_it : fn(s : string) : array of string;
 	arr_resize : fn(argv : array of string) : array of string;
 };

@@ -45,12 +45,12 @@ xscroll, remcr:	int;
 
 sblpath :=	array[] of
 {
-	("/dis/",	"/appl/"),
-	("/dis/",	"/appl/cmd/"),
-	# ("/dis/mux/",	"/appl/mux/"),
-	# ("/dis/lib/",	"/appl/lib/"),
-	# ("/dis/wm/",	"/appl/wm/"),
-	("/dis/sh.",	"/appl/cmd/sh/sh."),
+	("/zx/",	"/appl/"),
+	("/zx/",	"/appl/cmd/"),
+	# ("/zx/mux/",	"/appl/mux/"),
+	# ("/zx/lib/",	"/appl/lib/"),
+	# ("/zx/wm/",	"/appl/wm/"),
+	("/zx/sh.",	"/appl/cmd/sh/sh."),
 };
 
 plumbed := 0;
@@ -264,7 +264,7 @@ attachdis(m: ref Mod): int
 		c = load Diss m.dis;
 	}
 	if(c != nil){
-		# if m.dis in /appl, prefer one in /dis if it exists (!)
+		# if m.dis in /appl, prefer one in /zx if it exists (!)
 		nd := len m.dis;
 		for(i := 0; i < len sblpath; i++){
 			(disd, srcd) := sblpath[i];

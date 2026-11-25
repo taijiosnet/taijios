@@ -1,4 +1,4 @@
-#!/dis/sh
+#!/zx/sh
 if{! ~ $#* 2}{
 	echo usage rexecsrv net!addr decls >[1=2]
 	raise usage

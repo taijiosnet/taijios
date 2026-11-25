@@ -35,7 +35,7 @@ main :: () -> s32 {
     if desktop {
         manager.shell = Link.StartDesktop(shell, noargs[:]);
         if manager.shell <= 0 {
-            return Fail(ifx count == 0 then "the Rill desktop is not installed at /dis/wm/rill.zx" else "start desktop");
+            return Fail(ifx count == 0 then "the Rill desktop is not installed at /zx/wm/rill.zx" else "start desktop");
         }
         if !VecPush(manager.apps, Application.{id = manager.shell}) { return Fail("start desktop") }
         first = 2;
@@ -50,7 +50,7 @@ main :: () -> s32 {
 
 #scope_file
 
-DefaultDesktop :: "/dis/wm/rill.zx";
+DefaultDesktop :: "/zx/wm/rill.zx";
 
 Application :: struct {
     id: s32;

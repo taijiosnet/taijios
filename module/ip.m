@@ -1,6 +1,6 @@
 IP: module
 {
-	PATH:	con "/dis/lib/ip.dis";
+	PATH:	con "/zx/lib/ip.dis";
 
 	IPaddrlen:	con 16;
 	IPv4addrlen:	con 4;

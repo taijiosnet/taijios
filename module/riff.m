@@ -4,7 +4,7 @@
 #
 Riff: module
 {
-	PATH:	con "/dis/lib/riff.dis";
+	PATH:	con "/zx/lib/riff.dis";
 
 	DEFBUF:		con 8192;
 

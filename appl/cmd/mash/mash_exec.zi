@@ -46,7 +46,7 @@ Exec :: struct {
 }
 
 // Where a child mash.zx is, so a pipeline element can start it.
-ShellPath :: "/dis/mash.zx";
+ShellPath :: "/zx/mash.zx";
 
 // A diagnostic on the environment's stderr.
 ExecError :: (x: *Exec, s: string) {
@@ -919,7 +919,7 @@ PathList :: (x: *Exec, out: *Vec(Text)) {
     pl: Vec(Text);
     unused Dollar(*x.env, "path", *pl);
     if pl.count == 0 {
-        VecPush(<<out, TextCopy("/dis"));
+        VecPush(<<out, TextCopy("/zx"));
         VecPush(<<out, TextCopy("."));
         return
     }
@@ -971,7 +971,7 @@ RunProgram :: (x: *Exec, words: *Vec(Text), wait: bool) -> Text {
             }
             msg: Vec(u8);
             if missing && HasSuffix(outcome.error, "file does not exist") {
-                BuilderPrint(*msg, "%: '/dis/%' does not exist\n", TextView(name[:]), TextView(name[:]));
+                BuilderPrint(*msg, "%: '/zx/%' does not exist\n", TextView(name[:]), TextView(name[:]));
             } else {
                 BuilderPrint(*msg, "%: %\n", TextView(words.*[0]), outcome.error);
             }

@@ -1,5 +1,5 @@
 Diskm : module {
-	PATH : con "/dis/acme/disk.dis";
+	PATH : con "/zx/acme/disk.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

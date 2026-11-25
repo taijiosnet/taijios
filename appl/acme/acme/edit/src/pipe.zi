@@ -37,17 +37,17 @@ ResolveCommand :: (cmd: string) -> string {
     if is_rel {
         if HasSuffix(cmd, ".zx") || HasSuffix(cmd, ".dis") {
             p: Vec(u8);
-            BuilderPrint(*p, "/dis/%", cmd);
+            BuilderPrint(*p, "/zx/%", cmd);
             ps := Edit.CopyStr(BuilderFinish(p));
             if Exists(ps) { return ps }
         } else {
             zx: Vec(u8);
-            BuilderPrint(*zx, "/dis/%.zx", cmd);
+            BuilderPrint(*zx, "/zx/%.zx", cmd);
             zxs := Edit.CopyStr(BuilderFinish(zx));
             if Exists(zxs) { return zxs }
 
             dis: Vec(u8);
-            BuilderPrint(*dis, "/dis/%.dis", cmd);
+            BuilderPrint(*dis, "/zx/%.dis", cmd);
             diss := Edit.CopyStr(BuilderFinish(dis));
             if Exists(diss) { return diss }
         }

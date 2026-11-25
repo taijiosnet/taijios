@@ -1,5 +1,5 @@
 Windowm : module {
-	PATH : con "/dis/acme/wind.dis";
+	PATH : con "/zx/acme/wind.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

@@ -6,7 +6,7 @@ MODULES=
 
 SYSMODULES=
 
-DISBIN=$ROOT/dis/install
+DISBIN=$ROOT/zx/install
 
 <$ROOT/mkfiles/mkdis
 

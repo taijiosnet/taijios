@@ -1,6 +1,6 @@
 CCI: module
 {
-	PATH:	con "/dis/lib/cci.dis";
+	PATH:	con "/zx/lib/cci.dis";
 
 	# Common Client Interface, for external control of Charon
 

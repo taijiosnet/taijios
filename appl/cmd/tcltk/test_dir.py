@@ -51,7 +51,7 @@ def guest(path):
 
 @contextmanager
 def desktop(env, emulator, script):
-    app = launch(env, emulator, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c", script,
+    app = launch(env, emulator, "-r", ROOT, "-g", "800x600", "wm/wm", "/zx/sh.dis", "-c", script,
                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         yield app
@@ -341,7 +341,7 @@ def main():
     parser.add_argument("--launcher", default="zxrun", help="guest command or path of a paired launcher candidate")
     args = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
-    image = (ROOT / "dis/wm" if args.installed else BUILD) / "dir.zx"
+    image = (ROOT / "zx/wm" if args.installed else BUILD) / "dir.zx"
     if not args.installed:
         compile_image("dir_app", image, *FLAGS)
     stock_icons, stock, stock_child, root_title, child_title = stock_results()

@@ -1,5 +1,5 @@
-// Guest parity test for /dis/fs and /dis/fs/* (all 30 verbs).
-// Runs the same input table through /dis/fs.dis (old) and /dis/fs.zx (new)
+// Guest parity test for /zx/fs and /zx/fs/* (all 30 verbs).
+// Runs the same input table through /zx/fs.dis (old) and /zx/fs.zx (new)
 // in the headless emulator and compares every output byte-for-byte.
 //
 // Run from TaijiOS root:
@@ -69,7 +69,7 @@ RunSuite :: (emu: string, suffix: string, out_sub: string) -> bool {
     unused WriteEntireFile(BuilderFinish(mw_keep), "old extra\n");
 
     fs_cmd: Vec(u8);
-    BuilderPrint(*fs_cmd, "/dis/fs%", suffix);
+    BuilderPrint(*fs_cmd, "/zx/fs%", suffix);
     fs := BuilderFinish(fs_cmd);
 
     script: Vec(u8);
@@ -126,7 +126,7 @@ RunSuite :: (emu: string, suffix: string, out_sub: string) -> bool {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script_%", WORK, out_sub);
-    command: [6]string = .[emu, "-x", "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [6]string = .[emu, "-x", "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

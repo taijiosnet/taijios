@@ -18,7 +18,7 @@ SYSMODULES=\
 
 MODULES=\
 
-DISBIN=$ROOT/dis/ndb
+DISBIN=$ROOT/zx/ndb
 
 <$ROOT/mkfiles/mkdis
 

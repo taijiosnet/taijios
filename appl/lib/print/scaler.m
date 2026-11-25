@@ -1,6 +1,6 @@
 Scaler: module
 {
-	PATH: con "/dis/lib/print/scaler.dis";
+	PATH: con "/zx/lib/print/scaler.dis";
 
 	init: fn(debug: int, WidthInPixels, ScaleFactorMultiplier, ScaleFactorDivisor: int): ref RESSYNSTRUCT;
 	rasterin: fn(rs: ref RESSYNSTRUCT, inraster: array of int);

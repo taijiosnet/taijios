@@ -56,7 +56,7 @@ init()
 	if(lfs() >= 0){
 		# let's just take a closer look
 		sys->bind("/n/local/nvfs", "/nvfs", Sys->MREPL|Sys->MCREATE);
-		(rc, nil) := sys->stat("/n/local/dis/sh.dis");
+		(rc, nil) := sys->stat("/n/local/zx/sh.dis");
 		if(rc >= 0)
 			localok = 1;
 		else
@@ -89,13 +89,13 @@ init()
 		(rootsource, timefile, scale) = askrootsource(localok, netok);
 		if(rootsource == nil)
 			break;	# internal
-		(rc, nil) := sys->stat(rootsource+"/dis/sh.dis");
+		(rc, nil) := sys->stat(rootsource+"/zx/sh.dis");
 		if(rc < 0)
 			err("%s has no shell");
 		else if(sys->bind(rootsource, "/", Sys->MAFTER) < 0)
 			sys->print("can't bind %s on /: %r\n", rootsource);
 		else{
-			sys->bind(rootsource+"/dis", "/dis", Sys->MBEFORE|Sys->MCREATE);
+			sys->bind(rootsource+"/zx", "/zx", Sys->MBEFORE|Sys->MCREATE);
 			break;
 		}
 	}
@@ -124,11 +124,11 @@ init()
 		}
 	}
 	user := username("inferno");
-	(ok, nil) := sys->stat("/dis/wm/wm.dis");
+	(ok, nil) := sys->stat("/zx/wm/wm.dis");
 	if(drawok && ok >= 0)
-		(ok, nil) = sys->stat("/dis/wm/logon.dis");
+		(ok, nil) = sys->stat("/zx/wm/logon.dis");
 	if(drawok && ok >= 0 && userok(user)){
-		wm := load Command "/dis/wm/wm.dis";
+		wm := load Command "/zx/wm/wm.dis";
 		if(wm != nil){
 			fd := sys->open("/nvfs/user", Sys->OWRITE);
 			if(fd != nil){
@@ -152,7 +152,7 @@ start(cmd: string, args: list of string)
 {
 	disfile := cmd;
 	if(disfile[0] != '/')
-		disfile = "/dis/"+disfile+".dis";
+		disfile = "/zx/"+disfile+".dis";
 	(ok, nil) := sys->stat(disfile);
 	if(ok >= 0){
 		dis := load Command disfile;
@@ -365,7 +365,7 @@ lfs(): int
 	if(!ftlinit("#F/flash/fs"))
 		return -1;
 	c := chan of string;
-	spawn startfs(c, "/dis/dossrv.dis", "dossrv" :: "-f" :: "#X/ftldata" :: "-m" :: "/n/local" :: nil);
+	spawn startfs(c, "/zx/dossrv.dis", "dossrv" :: "-f" :: "#X/ftldata" :: "-m" :: "/n/local" :: nil);
 	if(<-c != nil)
 		return -1;
 	return 0;

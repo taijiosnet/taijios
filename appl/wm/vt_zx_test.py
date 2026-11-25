@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the ZX VT100 model rules and live interactive /dis/sh.zx terminal window."""
+"""Check the ZX VT100 model rules and live interactive /zx/sh.zx terminal window."""
 import os
 import time
 
@@ -51,7 +51,7 @@ def check_window(env, args):
         assert bg1 == (192, 192, 192), bg1
         print('VT rendered 80x24 framebuffer and toggled Reverse video')
 
-        # Type a shell command into /dis/sh.zx and verify its output on row 1 (y = oy + 32 + 16).
+        # Type a shell command into /zx/sh.zx and verify its output on row 1 (y = oy + 32 + 16).
         guest.click(ox + 200, oy + 200)
         time.sleep(0.15)
         guest.run('xdotool', 'type', '--window', guest.window, '--delay', '120', 'echo HELLO_ZX_VT')
@@ -64,7 +64,7 @@ def check_window(env, args):
             'VT did not render shell command output on row 1',
         )
         assert found
-        print('VT ran interactive /dis/sh.zx command and rendered output')
+        print('VT ran interactive /zx/sh.zx command and rendered output')
 
 
 def main():

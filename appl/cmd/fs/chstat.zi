@@ -1,4 +1,4 @@
-// /dis/fs/chstat.zx module entry point (replaces appl/cmd/fs/chstat.b).
+// /zx/fs/chstat.zx module entry point (replaces appl/cmd/fs/chstat.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "xx-pp-ms-us-gs-ts-as-c" }

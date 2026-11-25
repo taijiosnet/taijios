@@ -1,6 +1,6 @@
 Url: module
 {
-	PATH : con "/dis/lib/url.dis";
+	PATH : con "/zx/lib/url.dis";
 
 	# scheme ids
 	NOSCHEME, HTTP, HTTPS, FTP, FILE, GOPHER, MAILTO, NEWS,

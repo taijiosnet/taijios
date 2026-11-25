@@ -1,5 +1,5 @@
 Hash: module{
-	PATH: con "/dis/lib/hash.dis";
+	PATH: con "/zx/lib/hash.dis";
 	fun1, fun2: fn(s:string,n:int):int;
 
 	HashVal: adt{

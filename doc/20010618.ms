@@ -892,7 +892,7 @@ and
 packages.
 You will see one warning:
 .P1
-skipping /dis/install/inst.dis: locally modified
+skipping /zx/install/inst.dis: locally modified
 .P2
 because that file was updated by step 4.
 You might see other warnings if you have modified any other files from the original release.

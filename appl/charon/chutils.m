@@ -1,6 +1,6 @@
 CharonUtils: module
 {
-	PATH: con "/dis/charon/chutils.dis";
+	PATH: con "/zx/charon/chutils.dis";
 
 	# Modules for everyone to share
 	C: Ctype;

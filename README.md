@@ -83,10 +83,10 @@ write one per line.
 
 Build the direct ZX window manager with `(cd appl/wm && mk native_wm.zx)`.
 To run an existing ZX GUI app under it with the current Linux build, use
-`emu/Linux/o.emu -r "$PWD" -g 960x600 /appl/wm/native_wm.zx /dis/wm/counter.zx`.
+`emu/Linux/o.emu -r "$PWD" -g 960x600 /appl/wm/native_wm.zx /zx/wm/counter.zx`.
 Pass multiple app paths to open them concurrently. Switch workspaces with
 Ctrl+Alt+Left or Ctrl+Alt+Right. Hold Shift as well to move the focused window.
-With Rill installed, pass `--desktop /dis/wm/rill.zx` after the manager path
+With Rill installed, pass `--desktop /zx/wm/rill.zx` after the manager path
 to start Rill directly in ZX. Rill can launch ZX apps from its guest catalog
 and manage them through its task list. Its window actions, workspaces, and
 panel regions use the native manager.
@@ -97,19 +97,19 @@ its application, and the manager does not report that as a failure when it
 exits.
 
 Install the manager as the session with `(cd appl/wm && mk install-wm-zx)`.
-Once `/dis/wm/wm.zx` is installed, starting the emulator without a command, as
+Once `/zx/wm/wm.zx` is installed, starting the emulator without a command, as
 in `Linux/386/bin/emu -r "$PWD" -g 1024x768`, boots the manager without loading
-Dis, and the manager opens the Rill desktop from `/dis/wm/rill.zx`. The
+Dis, and the manager opens the Rill desktop from `/zx/wm/rill.zx`. The
 emulator also starts a command name from its installed ZX bundle when the
 guest has no Dis module of that name, so `emu -r "$PWD" tclsh` boots
-`/dis/tclsh.zx`. `emu -r "$PWD" wm/wm` keeps starting the Dis window manager
-while `/dis/wm/wm.dis` is installed. Use it for the catalog applications that
+`/zx/tclsh.zx`. `emu -r "$PWD" wm/wm` keeps starting the Dis window manager
+while `/zx/wm/wm.dis` is installed. Use it for the catalog applications that
 exist only as Dis modules. A guest booted from a ZX bundle has the bundle's
 path in the `emuboot` environment variable, and the application catalog hides
 the entries whose program is a Dis module there.
 A Dis-booted emulator runs until its last Dis process ends, so a script that
 starts a server such as `ndb/cs` or a mounted export keeps it running. Start it
-with `-x`, as in `emu -x -r "$PWD" /dis/sh.dis -c 'ndb/cs; echo done'`, to end
+with `-x`, as in `emu -x -r "$PWD" /zx/sh.dis -c 'ndb/cs; echo done'`, to end
 the emulator when the boot program ends.
 The default desktop continues to start Rill through the regular desktop runner.
 
@@ -162,8 +162,8 @@ Images with assets or module links use the owned-image loader, as do small
 images and files without a known seekable length. An I/O or verification error
 ends the launch and reports an error to the guest shell.
 Use `zi2zx --library` to build a shared ZX module and place its image at
-`/dis/lib/<logical-name>.zx` in the application's guest namespace. The runner
-honors guest `bind` mounts at `/dis/lib`. Declare module requirements and imports
+`/zx/lib/<logical-name>.zx` in the application's guest namespace. The runner
+honors guest `bind` mounts at `/zx/lib`. Declare module requirements and imports
 with `zi2zx --require-module` and `--import`, and open the module with
 `std/zx_module`. Module output follows the application's guest console and shell
 redirections. The shared loader validates module images and typed imports.
@@ -201,7 +201,7 @@ From the TaijiOS root, with `ziran`, `mk`, and `limbo` available on `PATH`:
     cd appl/wm
     mk wm.install install-stopwatch-zx
 )
-Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /dis/wm/stopwatch.zx
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /zx/wm/stopwatch.zx
 ```
 
 The hosted ZX Stopwatch runs with `-p main=32M` when built with
@@ -255,7 +255,7 @@ header, including the colour map. Animated GIFs play their frames every 250
 ms, each drawn over the last with its transparency. X bitmaps and PIC
 pictures (`TYPE=dump`, rgb) are read as Inferno's `readxbitmap` and
 `readpicfile` read them. Build it with `(cd appl/wm && mk view.zx)` and open
-files with `zxrun -w /dis/wm/view.zx /icons/inferno.bit /services/webget/inferno.gif`:
+files with `zxrun -w /zx/wm/view.zx /icons/inferno.bit /services/webget/inferno.gif`:
 the first file opens in this viewer and each further file in a viewer of its
 own. `view -i` waits for files plumbed to the `view` port; the first opens in
 its window and each later one in a new viewer. Save writes the shown picture,
@@ -281,7 +281,7 @@ default memory setting.
 
 ```sh
 (cd appl/wm && mk install-clock-zx)
-Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /dis/wm/clock.zx
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /zx/wm/clock.zx
 python3 -u appl/wm/clock_zx_test.py
 ```
 
@@ -291,7 +291,7 @@ Clock draws through Kryon's hosted surface and reads `/dev/time`,
 ### Build and run the ZX desktop panel
 
 The Start menu, keyboard navigation, and minimized window buttons run in
-`/dis/wm/desktop_panel.zx`. The Ziran panel uses Kryon's palette and geometry.
+`/zx/wm/desktop_panel.zx`. The Ziran panel uses Kryon's palette and geometry.
 The `kryon/host/surface` binding supplies guest pointer and keyboard events.
 The typed `taijios_panel` binding supplies menu and task labels, manages the
 popup surface, and draws rectangles and text through the guest Draw service.
@@ -328,7 +328,7 @@ Application windows keep their existing Dis or ZX interfaces.
 
 The Rill installer generates missing stock launchers and hicolor icons under
 `/lib` using Python 3, ImageMagick (`magick`), and DejaVu Sans. It uses the
-installed guest bundles in `dis/` to choose between ZX and Dis launch commands,
+installed guest bundles in `zx/` to choose between ZX and Dis launch commands,
 so install the guest applications before running `install-rill-zx`. Existing
 catalog records, icon files, and MIME defaults are preserved.
 
@@ -350,7 +350,7 @@ TAIJIOS_MODULES="$PWD/appl/cmd" "$RILL_ROOT/scripts/package-taiji.sh"
 Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm
 ```
 
-`wm/wm` starts Rill when `/dis/wm/rill.zx` is installed. Use the default
+`wm/wm` starts Rill when `/zx/wm/rill.zx` is installed. Use the default
 128 MiB main pool to run Rill and multiple applications together. For a
 32 MiB guest, start `wm/wm wm/toolbar` to use the smaller toolbar. Pass
 `wm/wm -rill` with an alternate guest bundle path to test another build.
@@ -374,7 +374,7 @@ Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm
 ```
 
 The target installs `window_chrome.zx`, `winplace.zx`, and `wm_policy.zx` in
-`/dis/lib` with their callers. The typed `taijios_wm_call.Read` and `Reply`
+`/zx/lib` with their callers. The typed `taijios_wm_call.Read` and `Reply`
 bindings pass the current request and its result as bounded `[]s32` slices.
 The emulator keeps one instance of each service and caches each caption's paint
 commands until its dimensions, focus, or controls change. The window manager
@@ -398,8 +398,8 @@ Build and install the Kryon apps with `(cd appl/wm && mk install-kryon-zx)`.
 Start TaijiOS with `Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm` and choose
 **Clock**, **Stopwatch**, **Counter**, **Colours**, or **Date and Time** under **Utilities** in the toolbar menu.
 Counter uses the Kryon buttons and text widgets for decreasing, resetting, and
-increasing its value. Its image is `/dis/wm/counter.zx` and can also be launched
-with `zxrun -w /dis/wm/counter.zx` from a guest shell.
+increasing its value. Its image is `/zx/wm/counter.zx` and can also be launched
+with `zxrun -w /zx/wm/counter.zx` from a guest shell.
 
 Colours displays Draw's 256-color palette. Click a cell to read its index and
 RGB value. Drag from the palette to sample elsewhere in the TaijiOS guest. The
@@ -449,10 +449,10 @@ popup), Search (Find..., Replace with..., Find Again, Find and Replace, Find and
 Replace All) and Options (Limbo keyword/comment highlighting and auto-indent,
 Indent) menus. Unibrowse keeps By Category (`/lib/unidata/blocks.txt`), By
 number (hex lookup), Symbol wordsearch (`/lib/unidata/index2.txt`), Font
-information (with `/dis/wm/filename.zx` font chooser), the 3 by 8 glyph table
+information (with `/zx/wm/filename.zx` font chooser), the 3 by 8 glyph table
 with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`,
 category descriptions, Snarf and Paste). AVI Player keeps File, Stop, Pause,
-Play, the `/dis/wm/filename.zx` chooser, and 8-bit uncompressed and BI_RLE8
+Play, the `/zx/wm/filename.zx` chooser, and 8-bit uncompressed and BI_RLE8
 RIFF/AVI playback. WmPlay keeps Inferno audio header validation (`rate` magic,
 `\n\n` terminator, 4-byte alignment), `/dev/audioctl` configuration, `/dev/audio`
 streaming and the file chooser.
@@ -485,7 +485,7 @@ python3 -u appl/wm/sam_zx_test.py
 ### Use the ZX Calendar
 
 `(cd appl/wm && mk install-kryon-zx)` also installs Calendar at
-`/dis/wm/calendar.zx`. It keeps the Dis version's month grid, prev and next
+`/zx/wm/calendar.zx`. It keeps the Dis version's month grid, prev and next
 month and day, Show, Del and Save, the coloured oval, diamond and square
 marks, the schedule records of a raw schedule file or a dbfs directory, and
 the Set Time dialog that writes `/dev/time`. The schedule text area scrolls
@@ -499,7 +499,7 @@ python3 -u appl/wm/calendar_zx_test.py
 ### Use the ZX File Chooser
 
 `(cd appl/wm && mk install-filename-zx)` installs the File Chooser at
-`/dis/wm/filename.zx`. Like the Dis `filename`, it takes `-d startdir`,
+`/zx/wm/filename.zx`. Like the Dis `filename`, it takes `-d startdir`,
 `-t title` and glob patterns, prints the chosen path or an empty line on
 standard output, and lists the start directory in Miller columns: clicking an
 entry fills the path row, a second click on the same entry or OK accepts it, and
@@ -524,7 +524,7 @@ make -C "$TASKMGR_ROOT" taiji TAIJIOS_TASK_MODULES="$TAIJI_ROOT/appl/cmd"
 Linux/386/bin/emu -r "$TAIJI_ROOT" -g 800x600 wm/wm
 ```
 
-Choose **System → Task Manager** or run `zxrun -w /dis/wm/taskmgr.zx` from a guest
+Choose **System → Task Manager** or run `zxrun -w /zx/wm/taskmgr.zx` from a guest
 shell. The app shares its Ziran UI with the other Task Manager builds and uses
 Kryon's hosted surface for guest window drawing and input. `taijios_tasks`
 reads guest tasks and the three TaijiOS memory pools. Process memory is a Dis
@@ -562,7 +562,7 @@ make -C "$EXPLORER_ROOT" taiji TAIJIOS_MODULES="$TAIJI_ROOT/appl/cmd"
 Linux/386/bin/emu -r "$TAIJI_ROOT" -g 800x600 wm/wm
 ```
 
-Choose **Files** in Start or run `zxrun -w /dis/wm/explorer.zx` from a guest
+Choose **Files** in Start or run `zxrun -w /zx/wm/explorer.zx` from a guest
 shell. Explorer streams Kryon drawing in bounded row groups through
 `zx_surface.PresentOpaqueRows` and reads guest input through the same surface.
 The typed `taijios_io` binding handles filesystem operations in the current
@@ -607,13 +607,13 @@ when restored.
 
 Log Window uses these bindings to follow a live guest pipe with its window
 responsive. Install it with `(cd appl/cmd && mk install-logwindow-zx)` and
-run `zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log` from a
+run `zxrun -p -w /zx/wm/logwindow.zx 'System log' < /path/to/log` from a
 graphical guest shell. See the [Tk applications guide](appl/cmd/tcltk/README.md).
 
 Memory reads `/dev/memory` through `taijios_files` and updates the arena graphs
 using the `taijios_clock` and `zx_surface` bindings. Install it with
 `(cd appl/cmd && mk install-memory-zx)` and run
-`zxrun -p -w /dis/wm/memory.zx` from the graphical guest shell.
+`zxrun -p -w /zx/wm/memory.zx` from the graphical guest shell.
 
 ### Tcl and Tk packages
 
@@ -647,7 +647,7 @@ build and install the hosted emulator as above, then install the commands.
 
 ```sh
 (cd appl/cmd && mk install)
-Linux/386/bin/emu -r "$PWD" /dis/sh.dis -c 'whatis cat; echo hello | cat'
+Linux/386/bin/emu -r "$PWD" /zx/sh.dis -c 'whatis cat; echo hello | cat'
 ```
 
 For each directory in `$path`, `sh` tries an executable `.zx` when the ZX
@@ -656,7 +656,7 @@ Built-ins retain first priority. A name ending in `.dis` selects the Dis
 module. The shell launches a ZX command with `zxrun -s`, so existing scripts
 keep named errors such as `usage` and `bad open`. `xargs` and `time` hand a
 command that has no Dis module to the shell, so they start ZX commands too.
-`zxrun -c /dis/cat.zx [file ...]` accepts void or zero as success and puts a
+`zxrun -c /zx/cat.zx [file ...]` accepts void or zero as success and puts a
 nonzero return value in `$status`. `zxrun file.zx [args ...]` prints the
 returned value.
 
@@ -709,7 +709,7 @@ ziran run --target=c --root tests/commands tests/commands/commands_test.zi
 
 On the hosted tree used for this port, 376 of 845 installed Dis files loaded
 with the shell's `Command.init` signature. That includes 160 entries directly
-under `/dis` and 52 under `/dis/wm`. This inventory checks the entry
+under `/zx` and 52 under `/zx/wm`. This inventory checks the entry
 signature without invoking each program.
 
 | Order | Existing commands | Capabilities to exercise or add |

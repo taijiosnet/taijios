@@ -8,7 +8,7 @@ Httpd: module {
 	DEBUGLOG : con "/services/httpd/httpd.debug";
 	HTTP_SUFF : con "/services/httpd/httpd.suff";
 	REWRITE   : con "/services/httpd/httpd.rewrite";
-	MAGICPATH : con "/dis/svc/httpd/"; # must end in /
+	MAGICPATH : con "/zx/svc/httpd/"; # must end in /
 	
 	Private_info : adt{
 		# used in parse and httpd

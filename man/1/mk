@@ -160,7 +160,7 @@ might be:
 .EX
 %.dis:    %.b
 	limbo $stem.b
-	cp $stem.dis /dis
+	cp $stem.dis /zx
 .EE
 .PP
 Meta-rules may contain an ampersand
@@ -377,7 +377,7 @@ the command
 where the
 .I SHELL
 variable is the appropriate shell on the current platform - typically
-.B /dis/sh
+.B /zx/sh
 .
 The appropriate value is automatically supplied in the Inferno build environment.
 The
@@ -535,7 +535,7 @@ A simple mkfile to compile and install limbo programs:
 .EX
 O=dis
 prog:   a.$O b.$O c.$O
-    cp $prereq /dis
+    cp $prereq /zx
 
 %.$O:   %.b
     limbo $stem.b

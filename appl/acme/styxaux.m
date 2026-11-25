@@ -1,5 +1,5 @@
 Styxaux : module {
-	PATH : con "/dis/acme/styxaux.dis";
+	PATH : con "/zx/acme/styxaux.dis";
 
 	init : fn();
 

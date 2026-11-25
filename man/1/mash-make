@@ -137,7 +137,7 @@ Typically,
 .PP
 .EX
     *.dis       :~ $1.b     { limbo $lflags $1.b};
-    /dis/*.dis  :~ $1.dis   { cp $1.dis /dis};
+    /zx/*.dis  :~ $1.dis   { cp $1.dis /zx};
 .EE
 .PP
 A target is built with the command

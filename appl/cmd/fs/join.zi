@@ -1,4 +1,4 @@
-// /dis/fs/join.zx module entry point (replaces appl/cmd/fs/join.b).
+// /zx/fs/join.zx module entry point (replaces appl/cmd/fs/join.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "ms-d" }

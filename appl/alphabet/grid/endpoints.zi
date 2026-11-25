@@ -145,7 +145,7 @@ MountGen :: () -> string {
     ends: [2]s32;
     if Ns.Pipe(ends[:]) < 0 { return Cat2("mount mntgen failed: ", Io.LastError()) }
     none := string.[];
-    launch := Process.StartWith("/dis/mntgen.zx", none[:], ends[0], -1, -1);
+    launch := Process.StartWith("/zx/mntgen.zx", none[:], ends[0], -1, -1);
     unused Io.CloseFile(ends[0]);
     if launch.id == 0 {
         unused Io.CloseFile(ends[1]);
@@ -176,10 +176,10 @@ New :: (addr: string, force: bool) -> string {
     err := MountGen();
     if err.count > 0 { return err }
     args := string.[addr, d];
-    launch := Start("/dis/endpointsrv.zx", args[:]);
+    launch := Start("/zx/endpointsrv.zx", args[:]);
     if launch.id == 0 { return Cat2("endpoint failed: ", launch.error) }
     listened := string.[addr, "export", d];
-    launch = Start("/dis/listen.zx", listened[:]);
+    launch = Start("/zx/listen.zx", listened[:]);
     if launch.id == 0 {
         unused Ns.Unmount("", d);
         return Cat2("listen failed: ", launch.error);

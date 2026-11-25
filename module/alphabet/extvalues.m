@@ -1,5 +1,5 @@
 Extvalues: module {
-	PATH: con "/dis/alphabet/extvalues.dis";
+	PATH: con "/zx/alphabet/extvalues.dis";
 	Values: adt[V] {
 		lock: chan of int;
 		v: array of (int, V);

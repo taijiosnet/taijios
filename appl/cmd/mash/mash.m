@@ -77,7 +77,7 @@ include	"tk.m";
 
 Mashlib: module
 {
-	PATH:	con "/dis/lib/mashlib.dis";
+	PATH:	con "/zx/lib/mashlib.dis";
 
 	File: adt
 	{
@@ -320,7 +320,7 @@ Mashlib: module
 	FAIL:		con "fail:";
 	FAILLEN:	con len FAIL;
 	HISTF:		con "history";
-	LIB:		con "/dis/lib/mash/";
+	LIB:		con "/zx/lib/mash/";
 	MASHF:		con "mash";
 	MASHINIT:	con "mashinit";
 	PROFILE:	con "/lib/mashinit";

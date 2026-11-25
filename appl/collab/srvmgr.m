@@ -1,6 +1,6 @@
 Srvmgr: module
 {
-	PATH:	con "/dis/collab/srvmgr.dis";
+	PATH:	con "/zx/collab/srvmgr.dis";
 	Srvreq: adt {
 		sname: string;
 		id: string;

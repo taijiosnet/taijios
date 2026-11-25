@@ -175,7 +175,7 @@ exec(ctxt: ref Draw->Context, argv: list of string, errch: chan of string)
 {
 	sys->pctl(sys->NEWFD, 0 :: 1 :: 2 :: nil);
 	{
-		argv = "/dis/wm/toolbar.dis" :: nil;
+		argv = "/zx/wm/toolbar.dis" :: nil;
 		cmd := load Command hd argv;
 		if (cmd == nil) {
 			errch <-= sys->sprint("cannot load %s: %r", hd argv);

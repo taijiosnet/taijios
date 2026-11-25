@@ -6,7 +6,7 @@
 // auth/createsignerkey.
 // Every expected status, output and diagnostic below is what the Limbo
 // originals printed when they were replaced. Each case runs through the
-// guest shell, which starts /dis/NAME.zx. The Limbo tclsh printed its
+// guest shell, which starts /zx/NAME.zx. The Limbo tclsh printed its
 // prompts from a second thread, so they raced its results; here they are in
 // the order the commands were read.
 //
@@ -122,7 +122,7 @@ cases: [198]Case = Case.[
     .{tool = "test", args = "-d m2/a/b"},
     .{tool = "mkdir", args = "a.txt", status = "error", err = "mkdir: a.txt already exists\n"},
     .{tool = "mkdir", args = "missing/x", status = "error", err = "mkdir: can't create missing/x: 'missing' file does not exist\n"},
-    .{args = "whatis cat echo basename cleanname wc uniq tr tee cp test ls mkdir sh", out = "/dis/cat.zx\n/dis/echo.zx\n/dis/basename.zx\n/dis/cleanname.zx\n/dis/wc.zx\n/dis/uniq.zx\n/dis/tr.zx\n/dis/tee.zx\n/dis/cp.zx\n/dis/test.zx\n/dis/ls.zx\n/dis/mkdir.zx\n/dis/sh.dis\n"},
+    .{args = "whatis cat echo basename cleanname wc uniq tr tee cp test ls mkdir sh", out = "/zx/cat.zx\n/zx/echo.zx\n/zx/basename.zx\n/zx/cleanname.zx\n/zx/wc.zx\n/zx/uniq.zx\n/zx/tr.zx\n/zx/tee.zx\n/zx/cp.zx\n/zx/test.zx\n/zx/ls.zx\n/zx/mkdir.zx\n/zx/sh.dis\n"},
     .{tool = "tclsh", input = "lines.tcl", out = "tcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% In function set y.....\n\tcan't read \"y\": no such variable\ntcl% "},
     // A file stops at its first error without a report; its variables stay set.
     .{tool = "tclsh", args = "file.tcl missing.tcl two.tcl", input = "lines.tcl", out = "file-one\nfile-two\ntcl% 5\ntcl% hi\ntcl% tcl> tcl> tcl% 3\ntcl% tcl> 3\ntcl% In function noSuchCmd.....\n\tinvalid command name \"noSuchCmd\"\ntcl% tcl> a\nb\ntcl% 7\ntcl% "},
@@ -277,9 +277,9 @@ cases: [198]Case = Case.[
     .{args = "time cat empty >[2] /dev/null"},
     // The shell exports path to /env, so these two stay last.
     // A .zx that is not executable, or is a directory, falls through to the next path entry.
-    .{args = "path=(fake /dis); whatis sh ls", out = "/dis/sh.dis\n/dis/ls.zx\n"},
+    .{args = "path=(fake /zx); whatis sh ls", out = "/zx/sh.dis\n/zx/ls.zx\n"},
     // An executable .zx wins even when it is not a valid bundle.
-    .{args = "path=(fake /dis); whatis cat; cat >[2] /dev/null", status = "zx", out = "fake/cat.zx\n"},
+    .{args = "path=(fake /zx); whatis cat; cat >[2] /dev/null", status = "zx", out = "fake/cat.zx\n"},
 ];
 
 failures: s32;
@@ -384,7 +384,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory()
     guest: Vec(u8)
     BuilderPrint(*guest, "/%/script", WORK)
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)]
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)]
     run: ProcessRun
     started := RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run)
     if !started { print("cannot start %\n", emu); return 1 }

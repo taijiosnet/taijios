@@ -29,8 +29,8 @@ lasterr: string;
 
 bspath := array[] of
 {
-	("/dis/",		"/appl/cmd/"),
-	("/dis/",		"/appl/"),
+	("/zx/",		"/appl/cmd/"),
+	("/zx/",		"/appl/"),
 };
 
 error(s: string)
@@ -259,7 +259,7 @@ cpfstats(v: int): Prof
 		else
 			s = repsuff(s, "."+suf, ".dis");
 		if(!exists(s) && s[0] != '/' && s[0:2] != "./")
-			s = "/dis/"+s;
+			s = "/zx/"+s;
 		mp.path = s;
 		(mp.name, mp.srcpath, mp.rawtab, mp.linetab, mp.rngtab, mp.total, mp.coverage) = cprofile(nil, mp.path, 1, v);
 		if((sp := getb(mp.path)) != nil)

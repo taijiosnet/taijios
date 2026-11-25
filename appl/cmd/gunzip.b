@@ -24,7 +24,7 @@ Gunzip: module
 argv0:	con "gunzip";
 stderr:	ref Sys->FD;
 
-INFLATEPATH: con "/dis/lib/inflate.dis";
+INFLATEPATH: con "/zx/lib/inflate.dis";
 
 init(nil: ref Draw->Context, argv: list of string)
 {

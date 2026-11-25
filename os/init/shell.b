@@ -17,7 +17,7 @@ Sh: module
 
 init(nil: ref Draw->Context, nil: list of string)
 {
-	shell := load Sh "/dis/sh.dis";
+	shell := load Sh "/zx/sh.dis";
 
 	sys = load Sys Sys->PATH;
 

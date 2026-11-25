@@ -1,7 +1,7 @@
 
 # the public interface to this looks like:
 #	Reader: module {
-#		PATH: con "/dis/ebook/reader.dis";
+#		PATH: con "/zx/ebook/reader.dis";
 #		init: fn(displ: ref Draw->Display);
 #		Datasource: adt {
 #			new:		fn(f: string, win: ref Tk->Toplevel, width: int, evch: string): (ref Datasource, string);
@@ -18,7 +18,7 @@
 
 
 Reader: module {
-	PATH: con "/dis/ebook/reader.dis";
+	PATH: con "/zx/ebook/reader.dis";
 	init: fn(displ: ref Draw->Display);
 	Datasource: adt {
 		x:		ref Xml->Parser;

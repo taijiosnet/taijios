@@ -1,6 +1,6 @@
 Browser: module {
 
-	PATH: con "/dis/grid/lib/browser.dis";
+	PATH: con "/zx/grid/lib/browser.dis";
 
 	DESELECT: con 0;
 	SELECT: con 1;

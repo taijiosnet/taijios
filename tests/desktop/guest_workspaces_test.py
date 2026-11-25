@@ -28,10 +28,10 @@ FAR_PROBE = (700, 400)
 
 
 def exercise(env, emulator, staging, guest, log):
-    command = (f"home={guest}/home; bind -b {guest} /dis; bind -b {guest} /dis/wm; "
+    command = (f"home={guest}/home; bind -b {guest} /zx; bind -b {guest} /zx/wm; "
                f"bind -b {guest} /lib; wm/wm -rill {guest}/rill.zx")
     child = launch(env, emulator, "-p", "main=128M", "-r", ROOT,
-                   "-g", f"{WIDTH}x{HEIGHT}", "/dis/sh.dis", "-c", command,
+                   "-g", f"{WIDTH}x{HEIGHT}", "/zx/sh.dis", "-c", command,
                    stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
     def tail():

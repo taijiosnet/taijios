@@ -1,5 +1,5 @@
 Items: module {
-	PATH: con "/dis/lib/ftree/items.dis";
+	PATH: con "/zx/lib/ftree/items.dis";
 
 	Item: adt {
 		name:	string;	# tag held in common by all canvas items in this Item.

@@ -3567,9 +3567,9 @@ struct ZxWmPolicy {
 };
 
 static ZxWmPolicy zxwmpolicies[] = {
-	{.path = "/dis/lib/window_chrome.zx"},
-	{.path = "/dis/lib/winplace.zx"},
-	{.path = "/dis/lib/wm_policy.zx"},
+	{.path = "/zx/lib/window_chrome.zx"},
+	{.path = "/zx/lib/winplace.zx"},
+	{.path = "/zx/lib/wm_policy.zx"},
 };
 
 static int
@@ -3716,7 +3716,7 @@ zxrunner(ZxCommand *command, Proc *runner)
 static ZxResult
 zxexecute(const char *path, ZxSurface *surface, ZxCommand *command)
 {
-	static const char *const roots[] = {"/dis/lib"};
+	static const char *const roots[] = {"/zx/lib"};
 	HostBinding *bindings;
 	size_t count;
 	int i, ran;
@@ -3946,17 +3946,17 @@ zxcommand(const char *name)
 	   strstr(name, "..") != nil)
 		return nil;
 	if(!session){
-		snprint(host, sizeof(host), "%s/dis/%s.dis", rootdir, name);
+		snprint(host, sizeof(host), "%s/zx/%s.dis", rootdir, name);
 		if(access(host, F_OK) == 0)
 			return nil;
-		snprint(host, sizeof(host), "%s/dis/%s", rootdir, name);
+		snprint(host, sizeof(host), "%s/zx/%s", rootdir, name);
 		if(access(host, F_OK) == 0)
 			return nil;
 	}
-	snprint(host, sizeof(host), "%s/dis/%s.zx", rootdir, name);
+	snprint(host, sizeof(host), "%s/zx/%s.zx", rootdir, name);
 	if(access(host, R_OK) != 0)
 		return nil;
-	return smprint("/dis/%s.zx", name);
+	return smprint("/zx/%s.zx", name);
 #else
 	USED(name);
 	return nil;

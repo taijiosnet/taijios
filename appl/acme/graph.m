@@ -1,5 +1,5 @@
 Graph : module {
-	PATH : con "/dis/acme/graph.dis";
+	PATH : con "/zx/acme/graph.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

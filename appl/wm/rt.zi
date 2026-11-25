@@ -3,7 +3,7 @@
 // Keeps .dis binary inspection and full disassembly (pure Ziran, no Dis module),
 // MUSTCOMPILE / DONTCOMPILE / SHAREMP / DYNMOD flag toggles, Stack Extent (ss)
 // editing and lossless binary rewrite, .s disassembly export, and file loading
-// via command-line argument or /dis/wm/filename.zx.
+// via command-line argument or /zx/wm/filename.zx.
 Surface :: #import "kryon/host/surface";
 Box :: #import "kryon/box";
 Button :: #import "kryon/button";
@@ -29,7 +29,7 @@ WinW :: 660
 WinH :: 500
 MaxDisFile :: 4194304
 MaxDisText :: 4194304
-Chooser :: "/dis/wm/filename.zx"
+Chooser :: "/zx/wm/filename.zx"
 
 grey: Color = .{221, 221, 221, 255};
 panel_bg: Color = .{236, 236, 236, 255};

@@ -1680,7 +1680,7 @@ An example using an abridged version of an example above: given
 .P2
 one might say
 .P1
-	lin := load Linear "/dis/linear.dis";
+	lin := load Linear "/zx/linear.dis";
 	a: array of real;
 
 	v1: lin->Vector;
@@ -4380,7 +4380,7 @@ is called:
 32		file = cmd + ".dis";
 33		c = load Command file;
 34		if(c == nil)
-35			c = load Command "/dis/"+file;
+35			c = load Command "/zx/"+file;
 
 36		if(c == nil) {
 37			sys->print("%s: not found\en", cmd);
@@ -4408,7 +4408,7 @@ the module stored in that file does in fact implement the
 .CW Command
 module type.
 In case this fails, lines 34-35 make another attempt, after prefixing
-.CW /dis/
+.CW /zx/
 to the file name.
 .PP
 If either attempt to get a handle to the named module
@@ -4456,8 +4456,8 @@ Ir: module
 	Error:	con 9999;
 
 	init: fn(chan of int): int;
-	PATH: con "/dis/ir.dis";
-	SIMPATH: con "/dis/irsim.h";
+	PATH: con "/zx/ir.dis";
+	SIMPATH: con "/zx/irsim.h";
 };
 .P2
 The implementation for the `real' remote control is
@@ -5023,7 +5023,7 @@ when the buffer is empty.
 The module could be used in the following way:
 .P1
 Bufchan: module {
-	PATH: con "/dis/lib/bufchan.dis";
+	PATH: con "/zx/lib/bufchan.dis";
 	bufchan: fn(c: chan of string, size: int): chan of string;
 };
 \. . .

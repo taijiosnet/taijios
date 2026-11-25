@@ -31,7 +31,7 @@ include "readdir.m";
 
 TEST: con 0;
 
-RUN : con "#!/dis/sh\n" +
+RUN : con "#!/zx/sh\n" +
 		"load std\n" +
 		"if {~ $#* 0} {\n" +
 		"	echo usage: run.sh cmd args\n"+
@@ -567,7 +567,7 @@ runit(id, sessid: int, cmd: string, sync: chan of int)
 		sync <-= -1;
 		return;
 	}
-	sys->fprint(fd, "#!/dis/sh\n");
+	sys->fprint(fd, "#!/zx/sh\n");
 	sys->fprint(fd, "bind /prog /n/client/prog\n");
 	sys->fprint(fd, "bind /n/client /\n");
 	sys->fprint(fd, "cd /\n");

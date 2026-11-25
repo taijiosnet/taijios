@@ -9,7 +9,7 @@ Name[sr]=Language
 Name[sr_RS]=Country
 Name[sr@latin]=Modifier
 Name[sr_RS@latin]=Full
-Exec=/dis/probe.dis %F
+Exec=/zx/probe.dis %F
 GenericName=Tool
 Comment=Some\swords\nnext
 Icon=taiji-test
@@ -19,10 +19,10 @@ Keywords=one;two\;parts;
 Actions=New;Inspect;
 [Desktop Action New]
 Name=New window
-Exec=/dis/probe.dis --new %u
+Exec=/zx/probe.dis --new %u
 [Desktop Action Inspect]
 Name=Inspect
-Exec=/dis/probe.dis --inspect
+Exec=/zx/probe.dis --inspect
 END;
 
 Copy :: (text: string, output: []u8) -> s64 {
@@ -72,20 +72,20 @@ main :: () -> s32 {
     if n < 0 || TextView(bytes[:n]) != "Some words\nnext" { return 9 }
     if !D.ListHas(D.Value(Fixture, "Desktop Entry", "Keywords"), "two;parts") || D.ListHas("two;parts;", "two;parts") { return 10 }
     files: [2]string = .["a b.txt", "file:///c"]
-    n = D.ExpandExec("/dis/p.dis %F %i %c %k %%", "Display name", "my-icon", "/lib/apps/p.desktop", files[:], bytes[:])
-    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0file:///c\0--icon\0my-icon\0Display name\0/lib/apps/p.desktop\0%\0" { return 11 }
-    n = D.ExpandExec("/dis/p.dis %f", "", "", "", files[:], bytes[:])
-    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0" { return 12 }
-    n = D.ExpandExec("/dis/p.dis %u", "", "", "", files[:], bytes[:])
-    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0" { return 13 }
-    n = D.ExpandExec("/dis/p.dis %U", "", "", "", files[:], bytes[:])
-    if n < 0 || TextView(bytes[:n]) != "/dis/p.dis\0a b.txt\0file:///c\0" { return 14 }
+    n = D.ExpandExec("/zx/p.dis %F %i %c %k %%", "Display name", "my-icon", "/lib/apps/p.desktop", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/zx/p.dis\0a b.txt\0file:///c\0--icon\0my-icon\0Display name\0/lib/apps/p.desktop\0%\0" { return 11 }
+    n = D.ExpandExec("/zx/p.dis %f", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/zx/p.dis\0a b.txt\0" { return 12 }
+    n = D.ExpandExec("/zx/p.dis %u", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/zx/p.dis\0a b.txt\0" { return 13 }
+    n = D.ExpandExec("/zx/p.dis %U", "", "", "", files[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/zx/p.dis\0a b.txt\0file:///c\0" { return 14 }
     empty: [0]string
-    n = D.ExpandExec("\"/dis/space name.dis\" \"two words\" %F %i", "", "", "", empty[:], bytes[:])
-    if n < 0 || TextView(bytes[:n]) != "/dis/space name.dis\0two words\0" { return 15 }
+    n = D.ExpandExec("\"/zx/space name.dis\" \"two words\" %F %i", "", "", "", empty[:], bytes[:])
+    if n < 0 || TextView(bytes[:n]) != "/zx/space name.dis\0two words\0" { return 15 }
     invalid: [8]string = .["p %Z", "p %", "p %F %f", "p x%U", "p \"%f\"", "p \"unclosed", "p a;b", "p %iX"]
     for value: invalid { if D.ExpandExec(value, "", "", "", empty[:], bytes[:]) >= 0 { return 16 } }
-    if D.ActionExec(Fixture, "New") != "/dis/probe.dis --new %u" || D.ActionExec(Fixture, "Missing") != "" { return 17 }
+    if D.ActionExec(Fixture, "New") != "/zx/probe.dis --new %u" || D.ActionExec(Fixture, "Missing") != "" { return 17 }
     if !CheckIcon("probe", 16, "/icons/custom/16/apps/probe.png") { return 18 }
     if !CheckIcon("probe", 48, "/icons/custom/scalable/apps/probe.svg") { return 19 }
     if !CheckIcon("probe", 25, "/icons/custom/threshold/apps/probe.png") { return 20 }

@@ -1,4 +1,4 @@
-// /dis/fs/ls.zx module entry point (replaces appl/cmd/fs/ls.b).
+// /zx/fs/ls.zx module entry point (replaces appl/cmd/fs/ls.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "vt-u-m" }

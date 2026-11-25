@@ -1,4 +1,4 @@
-#!/dis/sh
+#!/zx/sh
 fn bindfs {
 	# this may be useful as a general purpose cmd
 	(mntpt dirs)=$*
@@ -30,7 +30,7 @@ fn x {
 	echo tcp!^$2
 }
 
-bindfs /tmp /dis /n/client /dev /prog
+bindfs /tmp /zx /n/client /dev /prog
 listen -A  `{x `{ndb/csquery tcp!^`{cat /dev/sysname}^!rstyx}} {
 		@{
 			load std

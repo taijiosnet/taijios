@@ -173,7 +173,7 @@ exec(ctxt: ref Draw->Context, argv: list of string, errch: chan of string)
 {
 	sys->pctl(sys->NEWFD, 0 :: 1 :: 2 :: nil);
 	if(argv == nil)
-		argv = "/dis/wm/toolbar.dis" :: nil;
+		argv = "/zx/wm/toolbar.dis" :: nil;
 	else {
 		sh := load Sh Sh->PATH;
 		if(sh != nil){

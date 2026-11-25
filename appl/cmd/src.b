@@ -36,7 +36,7 @@ src(progname: string): string
 	if (absolute(progname))
 		pathlist = list of {""};
 	else
-		pathlist = list of {"/dis", "."};
+		pathlist = list of {"/zx", "."};
 
 	err := "";
 	do {

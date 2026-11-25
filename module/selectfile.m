@@ -1,6 +1,6 @@
 Selectfile: module
 {
-	PATH:	con "/dis/lib/selectfile.dis";
+	PATH:	con "/zx/lib/selectfile.dis";
 
 	init:	fn(): string;
 	filename:	fn(ctxt: ref Draw->Context, parent: ref Draw->Image,

@@ -21,9 +21,9 @@ will be given the same options as were given it when it started.
 .SH FILES
 .B /dev/sysctl
 .SH SOURCE
-.TF /dis/shutdown
+.TF /zx/shutdown
 .TP
-.B /dis/shutdown
+.B /zx/shutdown
 .IR sh (1)
 script
 .SH "SEE ALSO"

@@ -77,10 +77,10 @@ Transports: adt
 transports: array of ref Transports;
 
 transtab := array[] of {
-	(Url->HTTP,	"/dis/svc/webget/http.dis"),
+	(Url->HTTP,	"/zx/svc/webget/http.dis"),
 	(Url->HTTPS,	nil),	# nil means: same as previous
-	(Url->FILE,	"/dis/svc/webget/file.dis"),
-	(Url->FTP,	"/dis/svc/webget/ftp.dis")
+	(Url->FILE,	"/zx/svc/webget/file.dis"),
+	(Url->FTP,	"/zx/svc/webget/ftp.dis")
 };
 
 Transpreq: adt

@@ -1,4 +1,4 @@
-# mash parity corpus: each case runs through /dis/mash.dis and /dis/mash.zx
+# mash parity corpus: each case runs through /zx/mash.dis and /zx/mash.zx
 # and both outputs must match. The cases use mash's own builtins only, so the
 # Limbo mash can record them in this tree, where the Limbo commands are gone.
 

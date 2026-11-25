@@ -113,28 +113,28 @@ root
 
 # authentication
 	/boot/nvfs/default	/usr/inferno/keyring/default
-	/boot/dis/lib/auth.dis	/dis/lib/auth.dis
-	/boot/dis/lib/ssl.dis	/dis/lib/ssl.dis
+	/boot/zx/lib/auth.dis	/zx/lib/auth.dis
+	/boot/zx/lib/ssl.dis	/zx/lib/ssl.dis
 # dhcp
-	/boot/dis/lib/dhcpclient.dis	/dis/lib/dhcpclient.dis
-	/boot/dis/lib/ip.dis	/dis/lib/ip.dis
+	/boot/zx/lib/dhcpclient.dis	/zx/lib/dhcpclient.dis
+	/boot/zx/lib/ip.dis	/zx/lib/ip.dis
 
 # and other files used to poke round during development
-	/boot/dis/cat.dis /dis/cat.dis
-	/boot/dis/echo.dis /dis/echo.dis
-	/boot/dis/lib/arg.dis /dis/lib/arg.dis
+	/boot/zx/cat.dis /zx/cat.dis
+	/boot/zx/echo.dis /zx/echo.dis
+	/boot/zx/lib/arg.dis /zx/lib/arg.dis
 
-	/boot/dis/sh.dis /dis/sh.dis
-	/boot/dis/lib/bufio.dis /dis/lib/bufio.dis
-	/boot/dis/lib/filepat.dis /dis/lib/filepat.dis
-	/boot/dis/lib/readdir.dis /dis/lib/readdir.dis
-	/boot/dis/lib/string.dis /dis/lib/string.dis
+	/boot/zx/sh.dis /zx/sh.dis
+	/boot/zx/lib/bufio.dis /zx/lib/bufio.dis
+	/boot/zx/lib/filepat.dis /zx/lib/filepat.dis
+	/boot/zx/lib/readdir.dis /zx/lib/readdir.dis
+	/boot/zx/lib/string.dis /zx/lib/string.dis
 
-	/boot/dis/cd.dis /dis/cd.dis
-	/boot/dis/bind.dis /dis/bind.dis
-	/boot/dis/dd.dis /dis/dd.dis
-	/boot/dis/p.dis /dis/p.dis
-	/boot/dis/ls.dis /dis/ls.dis
-	/boot/dis/lib/daytime.dis /dis/lib/daytime.dis
-	/boot/dis/time.dis /dis/time.dis
-	/boot/dis/xd.dis /dis/xd.dis
+	/boot/zx/cd.dis /zx/cd.dis
+	/boot/zx/bind.dis /zx/bind.dis
+	/boot/zx/dd.dis /zx/dd.dis
+	/boot/zx/p.dis /zx/p.dis
+	/boot/zx/ls.dis /zx/ls.dis
+	/boot/zx/lib/daytime.dis /zx/lib/daytime.dis
+	/boot/zx/time.dis /zx/time.dis
+	/boot/zx/xd.dis /zx/xd.dis

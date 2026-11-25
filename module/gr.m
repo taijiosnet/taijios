@@ -1,5 +1,5 @@
 GR: module{
-	PATH:	con "/dis/math/gr.dis";
+	PATH:	con "/zx/math/gr.dis";
 
 	OP: adt{
 		code, n: int;

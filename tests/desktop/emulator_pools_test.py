@@ -18,7 +18,7 @@ def run_guest(emulator, *options, emu_options=None):
     if emu_options is not None:
         env['EMU'] = emu_options
     return subprocess.run(
-        [str(emulator), *options, '-r', str(ROOT), '/dis/sh.dis', '-c', 'cat /dev/memory'],
+        [str(emulator), *options, '-r', str(ROOT), '/zx/sh.dis', '-c', 'cat /dev/memory'],
         env=env, capture_output=True, text=True, start_new_session=True, timeout=15,
     )
 

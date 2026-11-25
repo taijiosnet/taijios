@@ -271,13 +271,13 @@ init()
 	if(bind("#/./ir", Ir->PATH, sys->MREPL) < 0)
 		print("init: bind ir: %r\n");
 	# Uncomment the next line to load sh.dis.
-#	shell = load Shell "/dis/sh.dis";
+#	shell = load Shell "/zx/sh.dis";
 	dc : ref Context;
 	# Comment the next 2 lines to load sh.dis.
-	shell = load Shell "/dis/mux/mux.dis";
+	shell = load Shell "/zx/mux/mux.dis";
 	dc = ref Context(screen, disp, nil, nil, nil, nil, nil);
 	if(shell == nil) {
-		print("init: load /dis/sh.dis: %r");
+		print("init: load /zx/sh.dis: %r");
 		exit;
 	}
 	shell->init(dc, nil);

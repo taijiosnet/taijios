@@ -1,5 +1,5 @@
 Exec : module {
-	PATH : con "/dis/acme/exec.dis";
+	PATH : con "/zx/acme/exec.dis";
 
 	snarfbuf : ref Bufferm->Buffer;
 

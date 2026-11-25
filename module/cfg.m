@@ -1,5 +1,5 @@
 Cfg : module {
-	PATH : con "/dis/lib/cfg.dis";
+	PATH : con "/zx/lib/cfg.dis";
 
 	Attr : adt {
 		name : string;

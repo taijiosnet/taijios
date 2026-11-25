@@ -1,5 +1,5 @@
 ABCStyx: module {
-	PATH: con "/dis/alphabet/abcstyx.dis";
+	PATH: con "/zx/alphabet/abcstyx.dis";
 	Value: adt {
 		c:	fn(v: self ref Value): ref Value.C;	# cmd
 		s:	fn(v: self ref Value): ref Value.S;	# string

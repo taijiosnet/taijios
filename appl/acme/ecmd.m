@@ -1,6 +1,6 @@
 Editcmd: module {
 
-	PATH: con "/dis/acme/ecmd.dis";
+	PATH: con "/zx/acme/ecmd.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

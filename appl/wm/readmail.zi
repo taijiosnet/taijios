@@ -2,8 +2,8 @@
 // See ../../NOTICE.
 // Keeps POP3 Connect/Disconnect (APOP MD5 challenge-response via taijios_keyring
 // or USER/PASS over taijios_dial), STAT, RETR, DELE, TOP headers browser,
-// Prev/Next navigation, Reply/Forward launching /dis/wm/sendmail.zx, Save via
-// /dis/wm/filename.zx, and /usr/<user>/mail/popserver default.
+// Prev/Next navigation, Reply/Forward launching /zx/wm/sendmail.zx, Save via
+// /zx/wm/filename.zx, and /usr/<user>/mail/popserver default.
 Surface :: #import "kryon/host/surface";
 Box :: #import "kryon/box";
 Button :: #import "kryon/button";
@@ -30,8 +30,8 @@ Ns :: #import "taijios_namespace";
 WinW :: 620
 WinH :: 480
 MaxText :: 1048576
-Chooser :: "/dis/wm/filename.zx"
-SendmailProg :: "/dis/wm/sendmail.zx"
+Chooser :: "/zx/wm/filename.zx"
+SendmailProg :: "/zx/wm/sendmail.zx"
 
 grey: Color = .{221, 221, 221, 255};
 panel_bg: Color = .{236, 236, 236, 255};

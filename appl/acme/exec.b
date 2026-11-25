@@ -1327,7 +1327,7 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 	av = nil;
 	av = s :: av;
 	av = "-c" :: av;
-	av = "/dis/sh" :: av;
+	av = "/zx/sh" :: av;
 	exec(hd av, av);
 	dat->cwait <-= string c.pid + " \"Exec\":";
 	exit;

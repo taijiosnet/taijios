@@ -1,6 +1,6 @@
 Auth9: module
 {
-	PATH:	con "/dis/lib/auth9.dis";
+	PATH:	con "/zx/lib/auth9.dis";
 
 	#
 	# plan 9 authentication

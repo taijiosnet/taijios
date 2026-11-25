@@ -1,5 +1,5 @@
 OEBpackage: module {
-	PATH:	con "/dis/ebook/oebpackage.dis";
+	PATH:	con "/zx/ebook/oebpackage.dis";
 
 	Package: adt {
 		file:	string;

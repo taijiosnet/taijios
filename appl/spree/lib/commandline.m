@@ -1,7 +1,7 @@
 Commandline: module {
 	init:			fn();
 
-	PATH:		con "/dis/spree/lib/commandline.dis";
+	PATH:		con "/zx/spree/lib/commandline.dis";
 	Cmdline: adt {
 		new:			fn(win: ref Tk->Toplevel, w, textopts: string): (ref Cmdline, chan of string);
 		event:		fn(cmdl: self ref Cmdline, e: string): list of string;

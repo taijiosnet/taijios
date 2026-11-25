@@ -64,7 +64,7 @@ ResolveProgram :: (name: string, output: []u8) -> bool {
         if !Exists(name) || !D.Put(output, *n, name) || n >= output.count { return false }
         output[n] = 0; return true
     }
-    prefixes: [3]string = .["/dis/", "/dis/wm/", "/dis/math/"]
+    prefixes: [3]string = .["/zx/", "/zx/wm/", "/zx/math/"]
     suffixes: [3]string = .["", ".dis", ".zx"]
     for prefix: prefixes { for suffix: suffixes {
         n: s64
@@ -270,7 +270,7 @@ LaunchEntry :: (path: string, action: string, files: []string) -> bool {
     } else { if !D.Put(script[:], *used, TextView(words[:count])) { return false } }
     payload: [8192]u8; total: s64
     if !D.Put(payload[:], *total, "sh\0-c\0") || !D.Put(payload[:], *total, TextView(script[:used])) || !D.Put(payload[:], *total, "\0") { return false }
-    return WM.Launch("/dis/sh.dis", TextView(payload[:total])) == 0
+    return WM.Launch("/zx/sh.dis", TextView(payload[:total])) == 0
 }
 
 MimeType :: (path: string) -> string {

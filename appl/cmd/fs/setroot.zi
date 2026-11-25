@@ -1,4 +1,4 @@
-// /dis/fs/setroot.zx module entry point (replaces appl/cmd/fs/setroot.b).
+// /zx/fs/setroot.zx module entry point (replaces appl/cmd/fs/setroot.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "xsx-c" }

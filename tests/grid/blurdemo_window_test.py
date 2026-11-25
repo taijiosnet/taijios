@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private-display Xvfb test for dis/grid/blurdemo.zx."""
+"""Private-display Xvfb test for zx/grid/blurdemo.zx."""
 import io
 import os
 from pathlib import Path
@@ -22,11 +22,11 @@ def main():
         emu = ROOT / 'Linux/386/bin/emu'
     for key in ('WAYLAND_SOCKET', 'SESSION_MANAGER', 'ICEAUTHORITY', 'XDG_RUNTIME_DIR'):
         os.environ.pop(key, None)
-    command = "wm/wm /dis/sh.dis -c 'zxrun -w /dis/grid/blurdemo.zx /icons/inferno.bit; echo BLURDEMO_DONE; sleep 60'"
+    command = "wm/wm /zx/sh.dis -c 'zxrun -w /zx/grid/blurdemo.zx /icons/inferno.bit; echo BLURDEMO_DONE; sleep 60'"
     log_path = OUT / 'blurdemo-window.log'
     with private_display() as env, log_path.open('w+b') as log:
         child = launch(env, emu, '-p', 'main=128M', '-r', ROOT,
-                       '-g', '800x600', '/dis/sh.dis', '-c', command,
+                       '-g', '800x600', '/zx/sh.dis', '-c', command,
                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
         try:
             window = until(

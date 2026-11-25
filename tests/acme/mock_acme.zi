@@ -1,6 +1,6 @@
 // Minimal in-memory /mnt/acme 9P server for testing acme helpers in a guest.
 // Usage: mock_acme.zx <sh-script-path>
-// Mounts /mnt/acme (and binds it to /chan), runs /dis/sh.zx <script>, and
+// Mounts /mnt/acme (and binds it to /chan), runs /zx/sh.zx <script>, and
 // serves /mnt/acme/index plus windows 1 (/test/alpha.txt) and 2 (/test/beta.txt).
 #import "std/vec";
 using Args :: #import "taijios_args";
@@ -789,7 +789,7 @@ main :: () -> s32 {
     unused Namespace.Bind("/mnt/acme", "/dev/acme", Namespace.Replace);
 
     args := string.[script];
-    child := Process.Start("/dis/sh.zx", args[:]);
+    child := Process.Start("/zx/sh.zx", args[:]);
     if child.id <= 0 {
         unused Io.WriteBytes(2, "mock_acme: cannot start sh.zx\n");
         return 1;

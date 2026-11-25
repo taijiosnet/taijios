@@ -1,6 +1,6 @@
 Dis: module
 {
-	PATH:	con "/dis/lib/dis.dis";
+	PATH:	con "/zx/lib/dis.dis";
 
 	XMAGIC:		con	819248;
 	SMAGIC:		con	923426;

@@ -2,7 +2,7 @@
  
 Smtp : module
 {
-	PATH : con "/dis/lib/smtp.dis";
+	PATH : con "/zx/lib/smtp.dis";
  
 	# all functions return status (-ve when error)
 

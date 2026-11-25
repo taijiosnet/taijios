@@ -26,7 +26,7 @@ def guest_overlay(path):
     if path is None:
         return ''
     mount = '/' + path.resolve().relative_to(ROOT).as_posix()
-    return f'bind -b {mount} /dis; bind -b {mount} /dis/wm; bind -b {mount} /dis/lib; '
+    return f'bind -b {mount} /zx; bind -b {mount} /zx/wm; bind -b {mount} /zx/lib; '
 
 
 def wait_start(capture, legacy):
@@ -38,7 +38,7 @@ def wait_start(capture, legacy):
 
 def exercise_desktop(env, emu, overlay, legacy, chrome, resize):
     toolbar = 'wm/toolbar -l' if legacy else 'wm/toolbar'
-    child = launch(env, emu, '-p', 'main=32M', '-r', ROOT, '-g', '800x600', '/dis/sh.dis', '-c',
+    child = launch(env, emu, '-p', 'main=32M', '-r', ROOT, '-g', '800x600', '/zx/sh.dis', '-c',
                    f'{overlay}wm/wm {toolbar}', stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -242,7 +242,7 @@ def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
         trace = overlay / 'launch'
         (overlay / 'wmsetup').write_text(setup[:first] +
                                        f'fn wmrun {{echo MENU_COMMAND $* > {guest_path}/launch}}\n' + setup[last:])
-        guest = launch(env, emu, '-p', 'main=32M', '-r', ROOT, '-g', '800x600', '/dis/sh.dis', '-c',
+        guest = launch(env, emu, '-p', 'main=32M', '-r', ROOT, '-g', '800x600', '/zx/sh.dis', '-c',
                        f'{runtime_overlay}bind -b {guest_path} /lib; wm/wm wm/toolbar' + (' -l' if legacy else ''),
                        stdin=subprocess.DEVNULL,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -277,17 +277,17 @@ def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
             wait_start(capture, legacy)
             legacy_catalog = (
                 ((26, 473), (138, 473), 'wm/bounce'),
-                ((26, 473), (138, 490), 'zxrun -w /dis/wm/tetris.zx'),
-                ((42, 489), (142, 489), 'zxrun -w /dis/wm/counter.zx'),
-                ((42, 489), (150, 506), 'zxrun -w /dis/wm/stopwatch.zx'),
-                ((42, 489), (134, 522), 'zxrun -w /dis/wm/clock.zx'),
+                ((26, 473), (138, 490), 'zxrun -w /zx/wm/tetris.zx'),
+                ((42, 489), (142, 489), 'zxrun -w /zx/wm/counter.zx'),
+                ((42, 489), (150, 506), 'zxrun -w /zx/wm/stopwatch.zx'),
+                ((42, 489), (134, 522), 'zxrun -w /zx/wm/clock.zx'),
                 ((42, 489), (166, 538), 'wm/date'),
                 ((42, 489), (142, 554), 'wm/colors'),
                 ((42, 489), (138, 570), 'wm/coffee'),
                 ((42, 489), (138, 585), 'wm/man'),
-                ((30, 507), (134, 505), 'zxrun -w /dis/wm/about.zx'),
-                ((30, 507), (138, 522), 'zxrun -p -w /dis/wm/memory.zx'),
-                ((30, 507), (150, 538), 'zxrun -w /dis/wm/taskmgr.zx'),
+                ((30, 507), (134, 505), 'zxrun -w /zx/wm/about.zx'),
+                ((30, 507), (138, 522), 'zxrun -p -w /zx/wm/memory.zx'),
+                ((30, 507), (150, 538), 'zxrun -w /zx/wm/taskmgr.zx'),
                 ((30, 507), (138, 554), 'wm/rt'),
                 ((30, 507), (134, 570), 'wm/sh'),
                 ((50, 522), (146, 522), 'wm/deb'),
@@ -311,19 +311,19 @@ def exercise_catalog(env, emu, runtime_overlay, legacy, overlay_path):
                 local = overlay_path / name if overlay_path else None
                 if local and local.exists():
                     return local.is_file()
-                return (ROOT / 'dis/wm' / name).is_file()
+                return (ROOT / 'zx/wm' / name).is_file()
 
             guest_apps = (
                 ('wm/colors', 'colors.zx', '-w'),
                 ('wm/date', 'date.zx', '-w'),
             )
-            zx_routes = {entry: f'zxrun {options} /dis/wm/{bundle}' for entry, bundle, options in guest_apps
+            zx_routes = {entry: f'zxrun {options} /zx/wm/{bundle}' for entry, bundle, options in guest_apps
                          if has_bundle(bundle)}
             for category, point, command in catalog:
                 command = zx_routes.get(command, command)
                 if command == 'wm/ftree':
-                    if (ROOT / 'dis/wm/explorer.zx').is_file():
-                        command = 'zxrun -w /dis/wm/explorer.zx'
+                    if (ROOT / 'zx/wm/explorer.zx').is_file():
+                        command = 'zxrun -w /zx/wm/explorer.zx'
                     else:
                         home = '/usr/' + os.environ.get('USER', '')
                         command = 'wm/ftree ' + (home if (ROOT / home.lstrip('/')).is_dir() else '/')

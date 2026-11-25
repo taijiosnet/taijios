@@ -1,5 +1,5 @@
 Dat : module {
-	PATH : con "/dis/acme/dat.dis";
+	PATH : con "/zx/acme/dat.dis";
 
 	init : fn(mods : ref Mods);
 

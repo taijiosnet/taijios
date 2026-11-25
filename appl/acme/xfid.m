@@ -1,5 +1,5 @@
 Xfidm : module {
-	PATH : con "/dis/acme/xfid.dis";
+	PATH : con "/zx/acme/xfid.dis";
 
 	Xnil, Xflush, Xwalk, Xopen, Xclose, Xread, Xwrite : con iota;
 

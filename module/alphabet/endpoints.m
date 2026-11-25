@@ -1,5 +1,5 @@
 Endpoints: module {
-	PATH: con "/dis/alphabet/endpoints.dis";
+	PATH: con "/zx/alphabet/endpoints.dis";
 	Endpoint: adt {
 		addr: string;
 		id: string;

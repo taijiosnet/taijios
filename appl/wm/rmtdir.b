@@ -123,7 +123,7 @@ init(ctxt: ref Draw->Context, nil: list of string)
 		if(ai == nil){
 			tk->cmd(t, ".status configure -text {Error: certificate for "+
 					sys->sprint("%s",addr)+" not found}; update");
-			wmgetauthinfo := load Wm "/dis/wm/wmgetauthinfo.dis";
+			wmgetauthinfo := load Wm "/zx/wm/wmgetauthinfo.dis";
 			if(wmgetauthinfo == nil){
 				tk->cmd(t, ".status configure -text {Error: can't load module wmgetauthinfo.dis}; update");
 				exit;
@@ -169,7 +169,7 @@ init(ctxt: ref Draw->Context, nil: list of string)
 					sys->sprint("%r")+"}; update");
 			break;
 		}
-		spawn zxrun->init(ctxt, "zxrun" :: "-w" :: "/dis/wm/dir.zx" :: "/n/remote" :: nil);
+		spawn zxrun->init(ctxt, "zxrun" :: "-w" :: "/zx/wm/dir.zx" :: "/n/remote" :: nil);
 		return;
 	}
 }

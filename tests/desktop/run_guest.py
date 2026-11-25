@@ -22,9 +22,9 @@ if args.images or args.budget:
     marker = 'TAIJI_IMAGE_GUEST_OK\n'
 if (args.guest_overlay / 'zxrun.dis').exists():
     overlay = '/' + args.guest_overlay.resolve().relative_to(root).as_posix()
-    command = f'bind -b {overlay} /dis; bind -b {overlay} /dis/wm; ' + command
+    command = f'bind -b {overlay} /zx; bind -b {overlay} /zx/wm; ' + command
 result = subprocess.run([str(args.emu.resolve()), '-p', 'main=128M', '-r', str(root),
-                         '/dis/sh.dis', '-c', command],
+                         '/zx/sh.dis', '-c', command],
                         capture_output=True, text=True, timeout=90)
 print(result.stdout, end='')
 if result.stderr:

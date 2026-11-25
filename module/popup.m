@@ -1,7 +1,7 @@
 # pop-up menus.
 # use choicebuttons instead - it's difficult to get these right.
 Popup: module {
-	PATH: con "/dis/lib/popup.dis";
+	PATH: con "/zx/lib/popup.dis";
 	init: fn();
 #	mkbutton: fn(win: ref Tk->Toplevel, w: string, a: array of string, n: int): chan of string;
 #	changebutton: fn(win: ref Tk->Toplevel, w: string, a: array of string, n: int);

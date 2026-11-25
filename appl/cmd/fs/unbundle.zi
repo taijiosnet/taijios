@@ -1,4 +1,4 @@
-// /dis/fs/unbundle.zx module entry point (replaces appl/cmd/fs/unbundle.b).
+// /zx/fs/unbundle.zx module entry point (replaces appl/cmd/fs/unbundle.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "xs" }

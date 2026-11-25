@@ -1,5 +1,5 @@
 Paginate: module {
-	PATH: con "/dis/charon/paginate.dis";
+	PATH: con "/zx/charon/paginate.dis";
 
 	init: fn(layout: Layout, draw: Draw, display: ref Draw->Display): string;
 

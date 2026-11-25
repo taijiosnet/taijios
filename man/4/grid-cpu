@@ -50,7 +50,7 @@ and
 files) of the command or directory to be removed from the configuration.
 .PP
 For example, to import
-.B /dis
+.B /zx
 and
 .B /dev
 from a resource exporting a 9P (see
@@ -63,11 +63,11 @@ and
 .BR du ,
 the following commands would be used:
 .IP
-.B "echo 'add cmd /dis/ls -l' > ctl"
+.B "echo 'add cmd /zx/ls -l' > ctl"
 .br
-.B "echo 'add cmd /dis/du' > ctl"
+.B "echo 'add cmd /zx/du' > ctl"
 .br
-.B "echo 'add ns /dis tcp!200.1.5.53!7003' > ctl"
+.B "echo 'add ns /zx tcp!200.1.5.53!7003' > ctl"
 .br
 .B "echo 'add ns /dev tcp!200.1.5.53!7003' > ctl"
 .PP
@@ -79,13 +79,13 @@ files will give the following output:
 .IP
 .B cmd
 .br
-.B 1: /dis/ls -l
+.B 1: /zx/ls -l
 .br
-.B 2: /dis/du
+.B 2: /zx/du
 .IP
 .B ns
 .br
-.B 1: /dis (200.1.5.53!7003)
+.B 1: /zx (200.1.5.53!7003)
 .br
 .B 2: /dev (200.1.5.53!7003)
 .PP
@@ -98,7 +98,7 @@ namespace of its own. All required namespaces
 be imported, for a simple command such as
 .BR ls ,
 the minimum recommended namespace to import would be:
-.B /chan /dev /dis /module
+.B /chan /dev /zx /module
 .PP
 .IR Register (1)
 may be used in conjunction with 

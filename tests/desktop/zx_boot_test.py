@@ -591,17 +591,17 @@ def check_desktop_shell(emulator, root, env):
 
 def check_command_names(emulator, root, env, boot, operands):
     """A command name starts its installed ZX bundle unless a Dis module has that name."""
-    (root / 'dis').mkdir()
-    shutil.copy2(root / 'probe.zx', root / 'dis/probe.zx')
+    (root / 'zx').mkdir()
+    shutil.copy2(root / 'probe.zx', root / 'zx/probe.zx')
     result = boot('probe', *operands)
     assert result.returncode == 0 and not result.stderr, result
-    assert 'Initial ZX: "/dis/probe.zx"' in result.stdout and 'ZX_BOOT_OK' in result.stdout, result
+    assert 'Initial ZX: "/zx/probe.zx"' in result.stdout and 'ZX_BOOT_OK' in result.stdout, result
     assert 'Initial Dis:' not in result.stdout, result
 
     legacy = root / 'legacy'
-    (legacy / 'dis').mkdir(parents=True)
-    shutil.copy2(root / 'plain.zx', legacy / 'dis/twin.zx')
-    (legacy / 'dis/twin.dis').write_bytes(b'not a Dis module')
+    (legacy / 'zx').mkdir(parents=True)
+    shutil.copy2(root / 'plain.zx', legacy / 'zx/twin.zx')
+    (legacy / 'zx/twin.dis').write_bytes(b'not a Dis module')
     # This root has no Dis runtime files, so the emulator stops after naming its choice.
     with subprocess.Popen([emulator, '-v', '-r', legacy, 'twin'], env=env, stdin=subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True) as legacy_boot:
@@ -650,7 +650,7 @@ def check_namespace(root, env, boot):
 
 def check_hosted_process(emulator, root, env):
     """ZX commands run by the Dis shell start, kill and detach children too."""
-    zxrun = ROOT / 'dis/zxrun.dis'
+    zxrun = ROOT / 'zx/zxrun.dis'
     assert zxrun.exists(), 'install the Dis zxrun command first: (cd appl/cmd && mk zxrun.install)'
     probe = '/' + (root / 'namespace.zx').relative_to(ROOT).as_posix()
     mount = root / 'hosted-mount'
@@ -660,7 +660,7 @@ def check_hosted_process(emulator, root, env):
               f'cat {guest_mount}/hello; unmount {guest_mount}; echo HOSTED_DONE')
     # The mounted server outlives the script; -x ends the emulator with the shell
     # anyway. The emulator ends by killing its own process group.
-    result = subprocess.run([emulator, '-x', '-r', ROOT, '/dis/sh.dis', '-c', script], env=env,
+    result = subprocess.run([emulator, '-x', '-r', ROOT, '/zx/sh.dis', '-c', script], env=env,
                             stdin=subprocess.DEVNULL, capture_output=True, timeout=30, start_new_session=True)
     lines = result.stdout.decode().splitlines()
     assert lines == ['ZX_HOSTED_PROCESS_OK', 'hello from ZX', 'HOSTED_DONE'], result
@@ -710,8 +710,8 @@ def check_image_viewer(emulator, root, env):
 
     viewer = ROOT / 'appl/wm/view.zx'
     assert viewer.exists(), 'build the image viewer first: (cd appl/wm && mk view.zx)'
-    (root / 'dis/wm').mkdir(parents=True, exist_ok=True)
-    shutil.copy2(viewer, root / 'dis/wm/view.zx')
+    (root / 'zx/wm').mkdir(parents=True, exist_ok=True)
+    shutil.copy2(viewer, root / 'zx/wm/view.zx')
     for name in ('frames.gif', 'sample.xbm'):
         shutil.copy2(Path(__file__).with_name(name), root / name)
     (root / 'chan').mkdir(exist_ok=True)
@@ -835,15 +835,15 @@ def check_catalog_apps(emulator, root, env):
     catalog = ROOT / 'lib/apps'
     assert any(catalog.glob('*.desktop')), 'run tools/generate-app-catalog.py --guest-assets first'
     wm = ROOT / 'appl/wm'
-    bundles = root / 'dis/wm'
+    bundles = root / 'zx/wm'
     bundles.mkdir(parents=True)
-    for bundle in sorted((ROOT / 'dis/wm').glob('*.zx')):
+    for bundle in sorted((ROOT / 'zx/wm').glob('*.zx')):
         if bundle.stem not in ('rill', 'desktop_panel', 'wm'):
             shutil.copy2(bundle, bundles / bundle.name)
-    # Coffee and Man are Tcl/Tk apps installed under /dis, not /dis/wm.
+    # Coffee and Man are Tcl/Tk apps installed under /zx, not /zx/wm.
     for name in ('coffee', 'man'):
-        if (ROOT / 'dis' / f'{name}.zx').exists():
-            shutil.copy2(ROOT / 'dis' / f'{name}.zx', root / 'dis' / f'{name}.zx')
+        if (ROOT / 'zx' / f'{name}.zx').exists():
+            shutil.copy2(ROOT / 'zx' / f'{name}.zx', root / 'zx' / f'{name}.zx')
     # Colours and Date are built here until the installer ships them.
     for name, module, hosts in (('colors', 'colors', ('taijios_draw',)), ('date', 'date_window', ('taijios_files',))):
         if not (bundles / f'{name}.zx').exists():
@@ -885,12 +885,12 @@ def check_catalog_apps(emulator, root, env):
     # No Dis module can start here, so the menu must not offer one even when its file exists.
     (bundles / 'legacy.dis').write_bytes(b'not a Dis module')
     (root / 'lib/apps/org.taijiosnet.wm-legacy.desktop').write_text(
-        '[Desktop Entry]\nType=Application\nName=Legacy\nExec=/dis/wm/legacy.dis\n'
-        'TryExec=/dis/wm/legacy.dis\nTerminal=false\n', encoding='utf-8')
+        '[Desktop Entry]\nType=Application\nName=Legacy\nExec=/zx/wm/legacy.dis\n'
+        'TryExec=/zx/wm/legacy.dis\nTerminal=false\n', encoding='utf-8')
     expected = sorted(Path(program).stem for program in programs.values()
                       if program.endswith('.zx') and (root / program[1:]).exists())
     need_dis = sorted(Path(program).stem for program in programs.values() if program.endswith('.dis'))
-    assert expected, 'no ZX application bundles are installed in dis/wm'
+    assert expected, 'no ZX application bundles are installed in zx/wm'
 
     with private_display() as display:
         private_env = env | {'DISPLAY': display['DISPLAY']}
@@ -934,7 +934,7 @@ def check_catalog_apps(emulator, root, env):
             status = shell.wait(timeout=10)
             transcript.extend(shell.stdout.read(4096))
             assert status == 0, f'the desktop exited with status {status}'
-            assert b'Initial ZX: "/dis/wm/wm.zx"' in transcript and b'Initial Dis:' not in transcript
+            assert b'Initial ZX: "/zx/wm/wm.zx"' in transcript and b'Initial Dis:' not in transcript
             assert sorted(seen['ZX_APP_OPEN']) == sorted(seen['ZX_APP_RESIZED']) == expected, (seen, expected)
             assert f'ZX_APPS_OK {len(expected)}\n'.encode() in transcript
         except (AssertionError, subprocess.SubprocessError) as error:

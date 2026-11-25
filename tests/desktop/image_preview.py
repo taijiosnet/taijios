@@ -47,18 +47,18 @@ def main():
             shutil.copyfile(RILL / 'build/rill.zx', overlay / 'rill.zx')
     guest = '/build/desktop-registry/image-overlay'
     home_suffix = '/Desktop' if args.mode == 'explorer' else ''
-    setup = f'home=/build/desktop-registry/image-home{home_suffix}; bind -b {guest} /dis; bind -b {guest} /dis/wm; '
+    setup = f'home=/build/desktop-registry/image-home{home_suffix}; bind -b {guest} /zx; bind -b {guest} /zx/wm; '
     if args.mode == 'desktop':
         command = setup + f'wm/wm -rill {guest}/rill.zx'
     else:
         operand = f'/build/desktop-registry/images/{args.file}' if args.mode == 'viewer' else ''
         app = 'view' if args.mode == 'viewer' else 'explorer'
-        command = setup + f"wm/wm /dis/sh.dis -c 'wm/toolbar &; zxrun -w {guest}/{app}.zx {operand}; sleep 90'"
+        command = setup + f"wm/wm /zx/sh.dis -c 'wm/toolbar &; zxrun -w {guest}/{app}.zx {operand}; sleep 90'"
     for key in ('WAYLAND_SOCKET', 'SESSION_MANAGER', 'ICEAUTHORITY', 'XDG_RUNTIME_DIR'):
         os.environ.pop(key, None)
     with private_display() as env, (OUTPUT / f'image-{args.mode}.log').open('w+b') as log:
         child = launch(env, ROOT / 'emu/Linux/o.emu', '-p', 'main=128M', '-r', ROOT,
-                       '-g', '1024x768', '/dis/sh.dis', '-c', command,
+                       '-g', '1024x768', '/zx/sh.dis', '-c', command,
                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
         def query(*values):
             return subprocess.check_output(values, env=env, stderr=subprocess.DEVNULL, timeout=10)

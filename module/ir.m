@@ -1,8 +1,8 @@
 Ir: module
 {
-	PATH:	con	"/dis/lib/ir.dis";
-	SIMPATH:	con	"/dis/lib/irsim.dis";
-	MPATH:	con	"/dis/lib/irmpath.dis";
+	PATH:	con	"/zx/lib/ir.dis";
+	SIMPATH:	con	"/zx/lib/irsim.dis";
+	MPATH:	con	"/zx/lib/irmpath.dis";
 
 	#
 	# "standard" remote buttons

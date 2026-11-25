@@ -396,8 +396,8 @@ import /cat /filter
 autoconvert string fd /read
 autoconvert fd status {(fd); /print $1 1}
 define wc {(fd); /filter $1 "{wc}}
-- {cat /lib/polyhedra /dis/sh.dis | wc}
-echo ${rewrite {cat /lib/polyhedra /dis/sh.dis | wc} status}
+- {cat /lib/polyhedra /zx/sh.dis | wc}
+echo ${rewrite {cat /lib/polyhedra /zx/sh.dis | wc} status}
 .EE
 .SH SOURCE
 .B /appl/alphabet/*.b

@@ -4,7 +4,7 @@
 #
 Mpeg: module
 {
-	PATH:		con "/dis/lib/mpeg.dis";
+	PATH:		con "/zx/lib/mpeg.dis";
 
 	play:		fn(d: ref Draw->Display, w: ref Image, dopaint: int,
 			r: Draw->Rect, file: string, notify: chan of string): string;

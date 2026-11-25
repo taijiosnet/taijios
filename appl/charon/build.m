@@ -1,6 +1,6 @@
 Build: module
 {
-PATH: con "/dis/charon/build.dis";
+PATH: con "/zx/charon/build.dis";
 
 # Item layout is dictated by desire to have all but formfield and table
 # items allocated in one piece.

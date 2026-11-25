@@ -160,7 +160,7 @@ SYSMODULES= \
 	watchvars.m\
 	wmlib.m\
 
-DISBIN=$ROOT/dis/lib
+DISBIN=$ROOT/zx/lib
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs

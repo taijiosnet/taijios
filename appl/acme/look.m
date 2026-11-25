@@ -1,5 +1,5 @@
 Look : module {
-	PATH : con "/dis/acme/look.dis";
+	PATH : con "/zx/acme/look.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

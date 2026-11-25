@@ -62,7 +62,7 @@ def log_window(env, guest_command):
         feed = setup / "input"
         os.mkfifo(feed)
         (setup / "wmsetup").write_text(f"{{cat /{feed.relative_to(ROOT)} | {guest_command}; echo logwindow-returned}} &\n")
-        app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "/dis/sh.dis", "-c",
+        app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "/zx/sh.dis", "-c",
                      # wm/wm starts Rill when it is installed; this test drives the toolbar.
                      f"bind -b /{setup.relative_to(ROOT)} /lib; wm/wm wm/toolbar", stdin=subprocess.DEVNULL,
                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -258,7 +258,7 @@ def main():
     compile_image("logwindow_model_test", model)
     result = command("zi2zx", "run", "--backend", "engine", model, capture_output=True, text=True, check=True)
     assert result.stdout.splitlines() == [*TK_RESULT, "0"] and not result.stderr, result
-    hosted_image = ROOT / "dis/wm/logwindow.zx" if args.installed else BUILD / "logwindow.zx"
+    hosted_image = ROOT / "zx/wm/logwindow.zx" if args.installed else BUILD / "logwindow.zx"
     if not args.installed:
         compile_image("logwindow_app", hosted_image, "--bind-host", "zx_surface", "--bind-host", "taijios_stdin",
                       "--bind-host", "taijios_args", "--bind-host", "taijios_files")

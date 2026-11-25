@@ -66,7 +66,7 @@ All of the following commands behave as expected:
 date
 cat /lib/keyboard
 ls -l > file.names
-ls -l /dis >> file.names
+ls -l /zx >> file.names
 wc <file
 echo [a-f]*.b
 ls | wc
@@ -442,9 +442,9 @@ is a Dis module that
 implements the
 .CW Shellbuiltin
 interface; the shell looks in the directory
-.CW /dis/sh
+.CW /zx/sh
 for the module file, in this case
-.CW /dis/sh/std.dis .
+.CW /zx/sh/std.dis .
 .LP
 When a module is loaded, it is given the opportunity
 to define as many new commands as it wants.
@@ -1694,7 +1694,7 @@ the window closes and the chat finished:
 Now we can wrap up the network functions and the
 chat function in a shell script, to finish off the little demo:
 .P1
-#!/dis/sh
+#!/zx/sh
 .I "Include the earlier function definitions here."
 fn usage {
     echo 'usage: chat [-s] address' >[1=2]

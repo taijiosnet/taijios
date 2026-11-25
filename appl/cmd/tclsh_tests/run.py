@@ -38,7 +38,7 @@ def compile_zx(source, entry, output, *module_paths):
 
 
 def guest(command):
-    return capture([EMU, "-r", ROOT, "/dis/sh.dis", "-c", command], "")
+    return capture([EMU, "-r", ROOT, "/zx/sh.dis", "-c", command], "")
 
 
 PROMPT = "tcl% "
@@ -326,7 +326,7 @@ def main():
         ('puts before; format %.4097f 1.0', 'format precision exceeds limit'),
         ('puts before; dumpstack extra', 'wrong # args: should be "dumpstack"'),
         ('puts before; time {} wrong', 'expected integer but got "wrong"'),
-        ('puts before; load notRegistered', "Cannot load /dis/lib/tcl_notRegistered.dis"),
+        ('puts before; load notRegistered', "Cannot load /zx/lib/tcl_notRegistered.dis"),
     ):
         expect(capture([shell, "-"], script), "before\n", codes=(1,), error=diagnostic + "\n")
     print("Malformed and unsupported scripts returned the expected errors")

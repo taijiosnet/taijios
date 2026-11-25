@@ -1,5 +1,5 @@
 Bundle: module {
-	PATH: con "/dis/fs/bundle.dis";
+	PATH: con "/zx/fs/bundle.dis";
 
 	types: fn(): string;
 	init: fn();

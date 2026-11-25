@@ -47,7 +47,7 @@ def pointer(env, window, x, y, *actions):
 
 def sweeper(env):
     # Coordinates below the window manager's 32-pixel title bar.
-    with desktop(env, "zxrun -w /dis/wm/sweeper.zx"):
+    with desktop(env, "zxrun -w /zx/wm/sweeper.zx"):
         window = inferno_window(env)
 
         def capture():
@@ -133,7 +133,7 @@ def main():
     mode.add_argument("--oracle-only", action="store_true", help="exercise the shipped Inferno Tk only")
     mode.add_argument("--installed", action="store_true", help="exercise the installed guest launcher")
     args = cli.parse_args()
-    image = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
+    image = (ROOT / "zx" if args.installed else BUILD) / "tcltk.zx"
     if not args.oracle_only:
         BUILD.mkdir(parents=True, exist_ok=True)
         commands = MENU_SCRIPT.read_text()

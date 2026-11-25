@@ -149,65 +149,65 @@ to do the actual work.
 To profile a particular command
 .IP
 .EX
-cprof /dis/math/sieve 100
+cprof /zx/math/sieve 100
 .EE
 .PP
 To profile the same command but restrict attention to its own module (Sieve).
 .IP
 .EX
-cprof -m Sieve /dis/math/sieve 100
+cprof -m Sieve /zx/math/sieve 100
 .EE
 .PP
 A shorter version of the above:
 .IP
 .EX
-cprof -e /dis/math/sieve 100
+cprof -e /zx/math/sieve 100
 .EE
 .PP
 Make 3 runs recording results as we go:
 .IP
 .EX
-cprof -e -r /dis/math/sieve 100
-cprof -e -r /dis/math/sieve 1000
-cprof -e -r /dis/math/sieve 10000
+cprof -e -r /zx/math/sieve 100
+cprof -e -r /zx/math/sieve 1000
+cprof -e -r /zx/math/sieve 10000
 .EE
 .PP
 Now look at the cumulative results:
 .IP
 .EX
-cprof -m /dis/math/sieve.dis
+cprof -m /zx/math/sieve.dis
 .EE
 .PP
 To profile a particular command:
 .IP
 .EX
-wm/cprof /dis/math/sieve 100
+wm/cprof /zx/math/sieve 100
 .EE
 .PP
 To profile the same command but restrict attention to its own module (Partitions).
 .IP
 .EX
-wm/cprof -m Sieve /dis/math/sieve 100
+wm/cprof -m Sieve /zx/math/sieve 100
 .EE
 .PP
 A shorter version of the above:
 .IP
 .EX
-wm/cprof -e /dis/math/sieve 100
+wm/cprof -e /zx/math/sieve 100
 .EE
 .PP
 Make 3 runs recording results as we go using cprof for simplicity:
 .IP
 .EX
-cprof -e -r /dis/math/sieve 100
-cprof -e -r /dis/math/sieve 1000
-cprof -e -r /dis/math/sieve 10000
+cprof -e -r /zx/math/sieve 100
+cprof -e -r /zx/math/sieve 1000
+cprof -e -r /zx/math/sieve 10000
 .EE
 .PP
 Now look at the cumulative results graphically:
 .IP
 .EX
-wm/cprof -m /dis/math/sieve.dis
+wm/cprof -m /zx/math/sieve.dis
 .EE
 .SH SOURCE
 .B /appl/cmd/cprof.b

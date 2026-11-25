@@ -76,7 +76,7 @@ init(ctxt: ref Draw->Context, args: list of string)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emulator", type=Path, default=EMU)
-    parser.add_argument("--launcher", default="/dis/zxrun.dis")
+    parser.add_argument("--launcher", default="/zx/zxrun.dis")
     parser.add_argument("--legacy", action="store_true")
     parser.add_argument("--legacy-controls", action="store_true")
     options = parser.parse_args()
@@ -111,7 +111,7 @@ def main():
         if not options.legacy:
             expected |= {b"LAUNCH DIS CHILD OK", b"LAUNCH ZX CHILD OK", b"LAUNCH DEVICE CHILD OK"}
 
-        with private_display() as env, launch(env, options.emulator.resolve(), "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c",
+        with private_display() as env, launch(env, options.emulator.resolve(), "-r", ROOT, "-g", "800x600", "wm/wm", "/zx/sh.dis", "-c",
                     shell, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as app:
             def matched():
                 read_output(app, output)

@@ -1,6 +1,6 @@
 Dialog: module
 {
-	PATH:		con "/dis/lib/dialog.dis";
+	PATH:		con "/zx/lib/dialog.dis";
 	init:		fn(): string;
 
 	prompt:		fn(ctxt: ref Draw->Context, parent: ref Draw->Image, ico, title, msg: string,

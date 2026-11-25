@@ -3,7 +3,7 @@
 #
 QuickTime: module
 {
-	PATH:	con "/dis/lib/quicktime.dis";
+	PATH:	con "/zx/lib/quicktime.dis";
 
 	DEFBUF:		con 8192;
 

@@ -537,7 +537,7 @@ newsh(ctxt: ref Context, t: ref Tk->Toplevel, ioc: chan of (int, ref FileIO, ref
 {
 	pid := sys->pctl(sys->NEWFD, nil);
 
-	sh := load Command "/dis/mash.dis";
+	sh := load Command "/zx/mash.dis";
 	if(sh == nil) {
 		ioc <-= (0, nil, nil, nil);
 		return;

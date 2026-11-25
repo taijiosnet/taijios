@@ -1,6 +1,6 @@
 Lex: module
 {
-	PATH: con "/dis/charon/lex.dis";
+	PATH: con "/zx/charon/lex.dis";
 
 	# HTML 4.0 tags (blink, nobr)
 	# sorted in lexical order; used as array indices

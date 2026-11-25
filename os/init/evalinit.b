@@ -74,9 +74,9 @@ init()
 	sys->print("logon...\n");
 
 #	sys->chdir("/usr/inferno"); 
-#	logon := load Logon "/dis/sh.dis";
+#	logon := load Logon "/zx/sh.dis";
 #	spawn logon->init(dc, nil);
-	ts := load Sh "/dis/sh.dis";
+	ts := load Sh "/zx/sh.dis";
 	ts->init(nil, nil);
 }
 

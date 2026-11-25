@@ -61,7 +61,7 @@ def check_window(env, args):
     # Copy a real .dis file into build/wm-apps/ so we can test live disassembly + flag rewrite!
     BUILD.mkdir(parents=True, exist_ok=True)
     sample = BUILD / 'rt_sample.dis'
-    src_dis = ROOT / 'dis/sh.dis'
+    src_dis = ROOT / 'zx/sh.dis'
     shutil.copyfile(src_dis, sample)
     orig_rt, orig_ss = read_rt_and_ss(sample)
     try:

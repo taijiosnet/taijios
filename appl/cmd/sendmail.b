@@ -15,7 +15,7 @@ STRMAX : con 512;
 
 Sendmail : module
 {
-	PATH : con "/dis/sendmail.dis";
+	PATH : con "/zx/sendmail.dis";
 
 	# argv is list of persons to send mail to (or nil if To: lines present in message)
 	# mail is read from standard input

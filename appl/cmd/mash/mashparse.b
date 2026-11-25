@@ -8,7 +8,7 @@ include	"mash.m";
 #
 Mashparse: module {
 
-	PATH:	con "/dis/lib/mashparse.dis";
+	PATH:	con "/zx/lib/mashparse.dis";
 
 	init:		fn(l: Mashlib);
 	parse:	fn(e: ref Mashlib->Env);

@@ -1,12 +1,12 @@
-#!/dis/sh.dis
+#!/zx/sh.dis
 load std
 
 port=$1
-DIR=/dis/demo/lego
+DIR=/zx/demo/lego
 pctl forkns newpgrp
 
 cd $DIR
-if { firmdl $port /dis/demo/lego/styx.srec } {
+if { firmdl $port /zx/demo/lego/styx.srec } {
 	legolink $port
 	memfs /tmp
 	cd /tmp

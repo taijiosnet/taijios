@@ -6,7 +6,7 @@ MODULES=\
 
 SYSMODULES=\
 
-DISBIN=$ROOT/dis/grid/demo
+DISBIN=$ROOT/zx/grid/demo
 
 <$ROOT/mkfiles/mkdis
 

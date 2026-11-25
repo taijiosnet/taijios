@@ -7,10 +7,10 @@ and lock. The guest shell and test fixtures live under `appl/cmd`.
 
 ### Comparison with shipped Inferno Tcl
 
-The Limbo interpreter's `load` resolved `/dis/lib/tcl_<name>.dis` and called
+The Limbo interpreter's `load` resolved `/zx/lib/tcl_<name>.dis` and called
 the module’s `TclLib` interface. Its five libraries (`calc`, `io`, `list`,
-`string` and `tk`) and legacy `wm/wish` have been removed now that `/dis/tclsh.zx`,
-`/dis/tcltk.zx` and `/dis/wm/wish.zx` replace them. The first four libraries are built into the port, and the optional Tcl/Tk
+`string` and `tk`) and legacy `wm/wish` have been removed now that `/zx/tclsh.zx`,
+`/zx/tcltk.zx` and `/zx/wm/wish.zx` replace them. The first four libraries are built into the port, and the optional Tcl/Tk
 app imports its Tk bridge at startup. Hosted ZX resolves imports at startup.
 Loading separately compiled extensions after startup would require a guest API
 for named lookup and invocation.
@@ -44,7 +44,7 @@ libraries. `zxrun` prints a
 final scalar `0` on success and `1` on a Tcl error. `zxrun -c` reports the
 result as a guest command status.
 
-The guest `tclsh [file ...]` is `/dis/tclsh.zx`, built from
+The guest `tclsh [file ...]` is `/zx/tclsh.zx`, built from
 `appl/cmd/tclsh_shell.zi`. Like the Limbo shell it replaced, it evaluates
 each file, then reads commands from standard input. It prompts with `tcl% `,
 and with `tcl> ` while a command's braces, brackets or quotes are open. It
@@ -57,13 +57,13 @@ name only the command typed at the prompt. Scripts are limited to 1 MiB.
 
 ```sh
 (cd appl/cmd && mk zxrun.install install-tclsh-zx)
-python3 appl/cmd/tclsh_tests/run.py --stdin /dis/tclsh.zx
+python3 appl/cmd/tclsh_tests/run.py --stdin /zx/tclsh.zx
 ```
 
 At the Taiji shell, run `tclsh /appl/cmd/tclsh_tests/reference.tcl`. For emulators with only console output,
 `appl/cmd/tclsh.zi` takes `Script` from an in-memory `tcl_input` module.
 Install the tested reference example with
-`install -m 0644 build/tcl/tclsh.zx dis/tclsh.zx` and run `zxrun /dis/tclsh.zx`.
+`install -m 0644 build/tcl/tclsh.zx zx/tclsh.zx` and run `zxrun /zx/tclsh.zx`.
 To build a different script into an image:
 
 ```sh

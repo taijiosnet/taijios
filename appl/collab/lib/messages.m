@@ -1,6 +1,6 @@
 Messages:  module
 {
-	PATH:	con "/dis/collab/lib/messages.dis";
+	PATH:	con "/zx/collab/lib/messages.dis";
 
 	Msg: adt {
 		from:	cyclic ref User;

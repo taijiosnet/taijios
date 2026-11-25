@@ -97,7 +97,7 @@ root
 	/env	/
 #	/chan
 #	/dev
-#	/dis
+#	/zx
 #	/env
 #	/n
 #	/net
@@ -105,7 +105,7 @@ root
 #	/prog
 #	/icons
 #	/osinit.dis
-#	/dis/emuinit.dis
-#	/dis/lib/auth.dis
-#	/dis/lib/ssl.dis
+#	/zx/emuinit.dis
+#	/zx/lib/auth.dis
+#	/zx/lib/ssl.dis
 #	/n/local /

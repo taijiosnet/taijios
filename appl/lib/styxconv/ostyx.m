@@ -1,6 +1,6 @@
 OStyx: module
 {
-	PATH: con "/dis/lib/styxconv/ostyx.dis";
+	PATH: con "/zx/lib/styxconv/ostyx.dis";
 
 	Chan: adt {
 		fid: int;

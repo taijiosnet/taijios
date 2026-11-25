@@ -2,7 +2,7 @@
  
 Pop3: module
 {
-	PATH: con "/dis/lib/pop3.dis";
+	PATH: con "/zx/lib/pop3.dis";
  
 	# all functions return status (-ve when error)
 

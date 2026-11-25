@@ -1,5 +1,5 @@
 Fsys : module {
-	PATH : con "/dis/acme/fsys.dis";
+	PATH : con "/zx/acme/fsys.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

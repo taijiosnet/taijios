@@ -59,7 +59,7 @@ main :: () -> s32 {
 
     cmd: Text;
     Model.BuildWorkerCmd("/data/", *cmd);
-    Expect(TextView(cmd) == "/dis/grid/demo/blur.zx /data/", "BuildWorkerCmd");
+    Expect(TextView(cmd) == "/zx/grid/demo/blur.zx /data/", "BuildWorkerCmd");
 
     // Valid uncompressed and compressed .bit headers vs invalid header
     good_bit: Text;

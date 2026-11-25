@@ -7,12 +7,12 @@ TARG=	mash.dis\
 	history.dis\
 	make.dis\
 
-INS=	$ROOT/dis/mash.dis\
-	$ROOT/dis/lib/mashlib.dis\
-	$ROOT/dis/lib/mashparse.dis\
-	$ROOT/dis/lib/mash/builtins.dis\
-	$ROOT/dis/lib/mash/history.dis\
-	$ROOT/dis/lib/mash/make.dis\
+INS=	$ROOT/zx/mash.dis\
+	$ROOT/zx/lib/mashlib.dis\
+	$ROOT/zx/lib/mashparse.dis\
+	$ROOT/zx/lib/mash/builtins.dis\
+	$ROOT/zx/lib/mash/history.dis\
+	$ROOT/zx/lib/mash/make.dis\
 
 MODULES=\
 	mash.m\
@@ -56,17 +56,17 @@ MODDIR=$ROOT/module
 SYS_MODULE=${SYSMODULES:%=$MODDIR/%}
 LIMBOFLAGS=-I$MODDIR
 
-$ROOT/dis/mash.dis:	mash.dis
-	rm -f $ROOT/dis/mash.dis && cp mash.dis $ROOT/dis/mash.dis
+$ROOT/zx/mash.dis:	mash.dis
+	rm -f $ROOT/zx/mash.dis && cp mash.dis $ROOT/zx/mash.dis
 
-$ROOT/dis/lib/mashlib.dis:	mashlib.dis
-	rm -f $ROOT/dis/mashlib.dis && cp mashlib.dis $ROOT/dis/lib/mashlib.dis
+$ROOT/zx/lib/mashlib.dis:	mashlib.dis
+	rm -f $ROOT/zx/mashlib.dis && cp mashlib.dis $ROOT/zx/lib/mashlib.dis
 
-$ROOT/dis/lib/mashparse.dis:	mashparse.dis
-	rm -f $ROOT/dis/mashparse.dis && cp mashparse.dis $ROOT/dis/lib/mashparse.dis
+$ROOT/zx/lib/mashparse.dis:	mashparse.dis
+	rm -f $ROOT/zx/mashparse.dis && cp mashparse.dis $ROOT/zx/lib/mashparse.dis
 
-$ROOT/dis/lib/mash/%.dis:	%.dis
-	rm -f $ROOT/dis/$stem.dis && cp $stem.dis $ROOT/dis/lib/mash/$stem.dis
+$ROOT/zx/lib/mash/%.dis:	%.dis
+	rm -f $ROOT/zx/$stem.dis && cp $stem.dis $ROOT/zx/lib/mash/$stem.dis
 
 %.dis:		$MODULES $SYS_MODULE
 mashlib.dis:	$LIBSRC
@@ -86,9 +86,9 @@ mash.zx:	$MASHZX $ZXSH/shell_util.zi $ZXSH/shell_filepat.zi $ZXSH/shell_regexp.z
 	zi2zx --root . --module-path .. --module-path ../sh --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_process --entry mash:main -o $target mash.zi
 	chmod 755 $target
 
-install-zx:V:	$ROOT/dis/mash.zx
+install-zx:V:	$ROOT/zx/mash.zx
 
-$ROOT/dis/mash.zx:	mash.zx
+$ROOT/zx/mash.zx:	mash.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0755 mash.zx "$staged" && mv "$staged" "$target"

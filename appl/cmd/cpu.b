@@ -11,7 +11,7 @@ include "keyring.m";
 include "security.m";
 include "dial.m";
 
-DEFCMD:	con "/dis/sh";
+DEFCMD:	con "/zx/sh";
 
 CPU: module
 {

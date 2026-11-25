@@ -88,7 +88,7 @@ appended, followed by a readable, executable script of the original name.
 Relative command names use the directories in
 .BR $path ,
 which defaults to
-.B /dis
+.B /zx
 and the current directory.
 Paths beginning with
 .BR / ,
@@ -124,13 +124,13 @@ a built-in command named
 .RB `` ls ''.
 .IP 2)
 an executable ZX bundle named
-.RB `` /dis/ls.zx '',
+.RB `` /zx/ls.zx '',
 .IP 3)
 a Dis module named
-.RB `` /dis/ls.dis '',
+.RB `` /zx/ls.dis '',
 .IP 4)
 an executable script file named
-.RB `` /dis/ls '',
+.RB `` /zx/ls '',
 .IP 5)
 an executable ZX bundle named
 .RB `` ./ls.zx '',
@@ -623,7 +623,7 @@ Unless the path begins with
 or
 .BR ./ ,
 the shell looks in the standard builtins directory
-.B /dis/sh
+.B /zx/sh
 for the module.
 If a load fails, a
 .B bad module

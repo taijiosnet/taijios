@@ -1,5 +1,5 @@
 // Running a shell command for an fs module, as the Dis modules ran one in
-// a shell context of their own: here in /dis/sh.zx, with the variables
+// a shell context of their own: here in /zx/sh.zx, with the variables
 // they set ($file, and with -p or -P the entry's stat) assigned before it.
 #import "std/vec";
 using Io :: #import "taijios_io";
@@ -7,7 +7,7 @@ Sh :: #import "shcmd";
 Process :: #import "taijios_process";
 using Fs :: #import "fs/fsvalue";
 
-SHELL :: "/dis/sh.zx";
+SHELL :: "/zx/sh.zx";
 
 // name=(values...); in shell syntax, appended to out.
 Assign :: (out: *Vec(u8), name: string, values: []string) {

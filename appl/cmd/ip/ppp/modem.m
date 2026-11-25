@@ -1,6 +1,6 @@
 Modem: module
 {
-	PATH:	con "/dis/ip/ppp/modem.dis";
+	PATH:	con "/zx/ip/ppp/modem.dis";
 
 	ModemInfo: adt {
 		path:			string;

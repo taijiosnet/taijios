@@ -141,7 +141,7 @@ def run(argv, *, guest=False):
 
 
 def guest_run(command):
-    output = run([EMU, '-r', ROOT, '/dis/sh.dis', '-c',
+    output = run([EMU, '-r', ROOT, '/zx/sh.dis', '-c',
                   f'{command}; echo WINPLACE_EMU_DONE'], guest=True)
     assert output.endswith('WINPLACE_EMU_DONE\n'), output[-600:]
     return output.removesuffix('WINPLACE_EMU_DONE\n')
@@ -203,7 +203,7 @@ def main():
             ('Portable ZX engine', [zi2zx, 'run', '--backend', 'engine', image]),
         ):
             compare(expected, parse(run(argv), inputs, target), inputs, target)
-        hosted = guest_run(f'/dis/zxrun.dis {guest_path}/probe.zx')
+        hosted = guest_run(f'/zx/zxrun.dis {guest_path}/probe.zx')
         compare(expected, parse(hosted, inputs, 'TaijiOS hosted ZX'), inputs, 'TaijiOS hosted ZX')
 
 

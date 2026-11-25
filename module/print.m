@@ -1,6 +1,6 @@
 Print: module
 {
-	PATH: con "/dis/lib/print/print.dis";
+	PATH: con "/zx/lib/print/print.dis";
 	CONFIG_PATH: con "/lib/print/";
 
 	init: fn(): int;
@@ -77,7 +77,7 @@ Print: module
 
 Pdriver: module
 {
-	PATHPREFIX: con "/dis/lib/print/";
+	PATHPREFIX: con "/zx/lib/print/";
 	DATAPREFIX: con "/lib/print/";
 
 	init: fn(debug: int);

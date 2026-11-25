@@ -6,5 +6,5 @@ Env: module {
 	clone:	fn(): int;					# forks a copy of the environment, returns -1 on failure
 	new:		fn(): int;					# sets up new empty environment, returns -1 on failure
 
-	PATH:	con "/dis/lib/env.dis";
+	PATH:	con "/zx/lib/env.dis";
 };

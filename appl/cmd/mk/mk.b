@@ -3006,7 +3006,7 @@ subst(stem: array of byte, template: array of byte, dest: array of byte)
 # os
 #
 
-shell := "/dis/sh.dis";
+shell := "/zx/sh.dis";
 shellname := "sh";
 
 pcopy(a: array of ref Sys->FD): array of ref Sys->FD

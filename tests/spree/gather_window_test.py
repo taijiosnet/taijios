@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private-display Xvfb test for dis/spree/clients/gather.zx with live stdin updates."""
+"""Private-display Xvfb test for zx/spree/clients/gather.zx with live stdin updates."""
 import io
 import os
 from pathlib import Path
@@ -29,14 +29,14 @@ def main():
         "chat Alice ready to play!\n"
     )
     command = (
-        "wm/wm /dis/sh.dis -c "
+        "wm/wm /zx/sh.dis -c "
         "'{cat /build/dis-app-families/gather-feed.txt; sleep 60} | "
-        "zxrun -w /dis/spree/clients/gather.zx /n/remote 0; echo GATHER_DONE; sleep 60'"
+        "zxrun -w /zx/spree/clients/gather.zx /n/remote 0; echo GATHER_DONE; sleep 60'"
     )
     log_path = OUT / 'gather-window.log'
     with private_display() as env, log_path.open('w+b') as log:
         child = launch(env, emu, '-p', 'main=128M', '-r', ROOT,
-                       '-g', '640x480', '/dis/sh.dis', '-c', command,
+                       '-g', '640x480', '/zx/sh.dis', '-c', command,
                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
         try:
             window = until(

@@ -1,5 +1,5 @@
 Stylesheet: module {
-	PATH: con "/dis/ebook/stylesheet.dis";
+	PATH: con "/zx/ebook/stylesheet.dis";
 	DEFAULT, READER, AUTHOR: con iota;
 	init:		fn(stylenames: array of string);
 

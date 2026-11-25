@@ -4,7 +4,7 @@
 
 Styxlib: module
 {
-	PATH: con "/dis/lib/styxlib.dis";
+	PATH: con "/zx/lib/styxlib.dis";
 	Chan: adt {
 		fid: int;
 		qid: Sys->Qid;

@@ -4,7 +4,7 @@
 //
 //     zi2zx --root tests/limbo --module-path appl/lib --module-path appl/cmd --bind-host taijios_args \
 //         --bind-host taijios_io --entry lib_guest:main -o build/tests/limbo/lib_guest.zx tests/limbo/lib_guest.zi
-//     emu -r . /dis/sh.dis -c 'zxrun /build/tests/limbo/lib_guest.zx'
+//     emu -r . /zx/sh.dis -c 'zxrun /build/tests/limbo/lib_guest.zx'
 using Args :: #import "taijios_args"
 using Io :: #import "taijios_io"
 using Cli :: #import "zx_cli"

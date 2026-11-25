@@ -10,8 +10,6 @@ DIRS=\
 	mpeg\
 
 TARG=\
-	calendar.dis\
-	coffee.dis\
 	colors.dis\
 	cprof.dis\
 	date.dis\
@@ -21,12 +19,10 @@ TARG=\
 	getauthinfo.dis\
 	keyboard.dis\
 	logon.dis\
-	man.dis\
 	mash.dis\
 ##	mpeg.dis\
 	mprof.dis\
 	pen.dis\
-	polyhedra.dis\
 	prof.dis\
 	remotelogon.dis\
 	rmtdir.dis\
@@ -68,19 +64,19 @@ SYSMODULES=\
 	wmsrv.m\
 	workdir.m\
 
-DISBIN=$ROOT/dis/wm
+DISBIN=$ROOT/zx/wm
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs
 
 wm.dis: $MODDIR/zx.m $MODDIR/toolbar.m
 
-$DISBIN/wm.dis: $ROOT/dis/lib/winplace.zx $ROOT/dis/lib/wmsrv.dis
+$DISBIN/wm.dis: $ROOT/zx/lib/winplace.zx $ROOT/zx/lib/wmsrv.dis
 
-$ROOT/dis/lib/wmsrv.dis: ../lib/wmsrv.b $MODDIR/wmsrv.m $MODDIR/zx.m ../lib/mkfile
+$ROOT/zx/lib/wmsrv.dis: ../lib/wmsrv.b $MODDIR/wmsrv.m $MODDIR/zx.m ../lib/mkfile
 	cd ../lib && mk wmsrv.install
 
-$ROOT/dis/lib/winplace.zx: ../lib/winplace_service.zi ../lib/winplace.zi ../lib/taijios_wm_call.zi ../lib/mkfile
+$ROOT/zx/lib/winplace.zx: ../lib/winplace_service.zi ../lib/winplace.zi ../lib/taijios_wm_call.zi ../lib/mkfile
 	cd ../lib && mk install-winplace-zx
 toolbar.dis: $MODDIR/zx.m $MODDIR/zxrun.m $MODDIR/toolbar.m
 colors.dis: $MODDIR/zx.m $MODDIR/zxrun.m
@@ -99,7 +95,7 @@ $DISBIN/wm.zx: native_wm.zx
 desktop_panel.zx: desktop_panel.zi ../cmd/taijios_panel.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_panel --entry desktop_panel:main -o $target desktop_panel.zi
 
-install-desktop-zx:V: $ROOT/dis/lib/winplace.zx $DISBIN/toolbar.dis $DISBIN/desktop_panel.zx
+install-desktop-zx:V: $ROOT/zx/lib/winplace.zx $DISBIN/toolbar.dis $DISBIN/desktop_panel.zx
 
 clock.zx: clock.zi ../cmd/taijios_time.zi ../cmd/taijios_files.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_files --entry clock:main -o $target clock.zi
@@ -249,10 +245,10 @@ $DISBIN/%.zx: %.zx
 window_chrome.zx: window_chrome_service.zi ../lib/taijios_wm_call.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../lib --bind-host taijios_wm_call --entry window_chrome_service:main -o $target window_chrome_service.zi
 
-install-window-chrome-zx:V: $DISBIN/wm.dis $DISBIN/toolbar.dis $ROOT/dis/lib/window_chrome.zx
+install-window-chrome-zx:V: $DISBIN/wm.dis $DISBIN/toolbar.dis $ROOT/zx/lib/window_chrome.zx
 	cd ../lib && mk titlebar.install tkclient.install wmclient.install install-wm-policy-zx
 
-$ROOT/dis/lib/window_chrome.zx: window_chrome.zx
+$ROOT/zx/lib/window_chrome.zx: window_chrome.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0644 window_chrome.zx "$staged" && mv "$staged" "$target"

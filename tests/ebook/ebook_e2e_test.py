@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private-display Xvfb test for dis/ebook/ebook.zx with a real OEB book (OPF + HTML + CSS + table + image + link + annot)."""
+"""Private-display Xvfb test for zx/ebook/ebook.zx with a real OEB book (OPF + HTML + CSS + table + image + link + annot)."""
 import io
 import os
 from pathlib import Path
@@ -66,14 +66,14 @@ def main() -> None:
     for key in ("WAYLAND_SOCKET", "SESSION_MANAGER", "ICEAUTHORITY", "XDG_RUNTIME_DIR"):
         os.environ.pop(key, None)
     command = (
-        "wm/wm /dis/sh.dis -c "
-        "'zxrun -w /dis/ebook/ebook.zx /build/dis-app-families/ebook-test-book/book.opf; echo EBOOK_DONE; sleep 60'"
+        "wm/wm /zx/sh.dis -c "
+        "'zxrun -w /zx/ebook/ebook.zx /build/dis-app-families/ebook-test-book/book.opf; echo EBOOK_DONE; sleep 60'"
     )
     log_path = OUT.parent / "ebook-window.log"
     with private_display() as env, log_path.open("w+b") as log:
         child = launch(
             env, EMU, "-p", "main=128M", "-r", ROOT,
-            "-g", "800x600", "/dis/sh.dis", "-c", command,
+            "-g", "800x600", "/zx/sh.dis", "-c", command,
             stdin=subprocess.DEVNULL, stdout=log, stderr=log,
         )
         try:

@@ -1,6 +1,6 @@
 StringIntTab: module
 {
-	PATH: con "/dis/lib/strinttab.dis";
+	PATH: con "/zx/lib/strinttab.dis";
 
 	StringInt: adt{
 		key: string;

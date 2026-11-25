@@ -42,7 +42,7 @@ fakekbdin: chan of string;
 keyevents := 0;
 buttons := 0;
 
-RillImage: con "/dis/wm/rill.zx";
+RillImage: con "/zx/wm/rill.zx";
 Defaultworkspaces: con 4;
 Maxworkspaces: con 32;
 # Raw key protocol shared with /dev/keyevent and zxrun.
@@ -964,7 +964,7 @@ command(ctxt: ref Draw->Context, args: list of string, sync: chan of string)
 	if(c == nil) {
 		err := sys->sprint("%r");
 		if(err != "permission denied" && err != "access permission denied" && file[0]!='/' && file[0:2]!="./"){
-			c = load Wm "/dis/"+file;
+			c = load Wm "/zx/"+file;
 			if(c == nil)
 				err = sys->sprint("%r");
 		}

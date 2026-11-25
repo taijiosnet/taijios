@@ -1,10 +1,10 @@
 RImagefile: module 
 {
-	READGIFPATH:	con "/dis/lib/readgif.dis";
-	READJPGPATH:	con "/dis/lib/readjpg.dis";
-	READXBMPATH:	con "/dis/lib/readxbitmap.dis";
-	READPICPATH:	con "/dis/lib/readpicfile.dis";
-	READPNGPATH:	con "/dis/lib/readpng.dis";
+	READGIFPATH:	con "/zx/lib/readgif.dis";
+	READJPGPATH:	con "/zx/lib/readjpg.dis";
+	READXBMPATH:	con "/zx/lib/readxbitmap.dis";
+	READPICPATH:	con "/zx/lib/readpicfile.dis";
+	READPNGPATH:	con "/zx/lib/readpng.dis";
 
 	Rawimage: adt
 	{
@@ -31,7 +31,7 @@ RImagefile: module
 
 WImagefile: module 
 {
-	WRITEGIFPATH:	con "/dis/lib/writegif.dis";
+	WRITEGIFPATH:	con "/zx/lib/writegif.dis";
 
 	init:	fn(bufio: Bufio);
 #	write:	fn(fd: ref Bufio->Iobuf, ref RImagefile->Rawimage): string;
@@ -41,7 +41,7 @@ WImagefile: module
 
 Imageremap: module
 {
-	PATH:	con "/dis/lib/imageremap.dis";
+	PATH:	con "/zx/lib/imageremap.dis";
 
 	init:	fn(d: ref Draw->Display);
 	remap:	fn(i: ref RImagefile->Rawimage, d: ref Draw->Display, errdiff: int): (ref Draw->Image, string);

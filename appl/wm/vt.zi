@@ -2,7 +2,7 @@
 // See ../../NOTICE.
 // Keeps the 80x24 (dynamically resizable) 16-color VT100/ANSI terminal emulator,
 // Raw/Echo/Reverse toggles, dimensions indicator, CSI/SGR/scroll-region/cursor
-// handling, and interactive shell (/dis/sh.zx -n) over guest pipes.
+// handling, and interactive shell (/zx/sh.zx -n) over guest pipes.
 Surface :: #import "kryon/host/surface";
 Box :: #import "kryon/box";
 Button :: #import "kryon/button";
@@ -29,7 +29,7 @@ InitCols :: 80
 InitRows :: 24
 InitW :: InitCols * CellW + 8
 InitH :: BarH + InitRows * CellH + 8
-ShellProg :: "/dis/sh.zx"
+ShellProg :: "/zx/sh.zx"
 
 grey: Color = .{221, 221, 221, 255};
 

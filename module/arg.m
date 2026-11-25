@@ -1,6 +1,6 @@
 Arg : module
 {
-	PATH: con "/dis/lib/arg.dis";
+	PATH: con "/zx/lib/arg.dis";
 
 	init: fn(argv: list of string);
 	setusage: fn(usage: string);

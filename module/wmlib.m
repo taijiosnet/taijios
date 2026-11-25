@@ -1,6 +1,6 @@
 Wmlib: module
 {
-	PATH:		con "/dis/lib/wmlib.dis";
+	PATH:		con "/zx/lib/wmlib.dis";
 
 	init:		fn();
 	makedrawcontext: fn(): ref Draw->Context;

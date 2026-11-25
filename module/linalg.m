@@ -10,7 +10,7 @@
 # is used everywhere, and in particular in permutation vectors.
 
 LinAlg: module{
-	PATH:	con "/dis/math/linalg.dis";
+	PATH:	con "/zx/math/linalg.dis";
 
 	Vector: type array of real;
 	Matrix: adt{

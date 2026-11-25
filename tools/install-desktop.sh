@@ -21,7 +21,7 @@ def argument(value):
     return string('"' + escaped + '"')
 # Without a command the emulator opens the ZX desktop once its window manager is installed.
 command = [emulator, '-r', root, '-g', '1024x768']
-if not (Path(root) / 'dis/wm/wm.zx').exists():
+if not (Path(root) / 'zx/wm/wm.zx').exists():
     command.append('wm/wm')
 launch = ' '.join(map(argument, command))
 Path(destination).write_text('[Desktop Entry]\nType=Application\nVersion=1.5\n'

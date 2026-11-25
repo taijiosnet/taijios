@@ -1,4 +1,4 @@
-// /dis/fs/run.zx module entry point (replaces appl/cmd/fs/run.b).
+// /zx/fs/run.zx module entry point (replaces appl/cmd/fs/run.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "sc" }

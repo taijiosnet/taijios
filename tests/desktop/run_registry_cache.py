@@ -38,7 +38,7 @@ setup = 'REGISTRY_TICK=x; LC_ALL=sr_RS.UTF-8@latin; LC_MESSAGES=; LANG=; '
 if not args.benchmark:
     setup += 'home=/build/desktop-registry/cache-home; bind /build/desktop-registry/cache-system /lib/apps; '
 command = setup + 'zxrun /build/desktop-registry/registry-cache-test.zx' + (' benchmark' if args.benchmark else '')
-result = subprocess.run([str(root / 'emu/Linux/o.emu'), '-p', 'main=128M', '-r', str(root), '/dis/sh.dis', '-c', command], capture_output=True, text=True, timeout=120)
+result = subprocess.run([str(root / 'emu/Linux/o.emu'), '-p', 'main=128M', '-r', str(root), '/zx/sh.dis', '-c', command], capture_output=True, text=True, timeout=120)
 print(result.stdout, end='')
 print(result.stderr, end='')
 assert result.returncode in (0, -9), result.returncode

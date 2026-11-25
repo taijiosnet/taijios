@@ -12,7 +12,7 @@ Stob: module {
 };
 
 Convcs: module {
-	PATH: con "/dis/lib/convcs/convcs.dis";
+	PATH: con "/zx/lib/convcs/convcs.dis";
 	CHARSETS: con "/lib/charsets";
 
 	BTOS, STOB: con 1 << iota;		# enumcs() mode values

@@ -37,7 +37,7 @@ ESHostobj: module
 #
 Ecmascript: module
 {
-	PATH:	con "/dis/lib/ecmascript.dis";
+	PATH:	con "/zx/lib/ecmascript.dis";
 
 	#
 	# an execution context

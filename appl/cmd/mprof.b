@@ -180,7 +180,7 @@ disname(cmd: string): string
 	if(exists(file))
 		return file;
 	if(file[0]!='/' && file[0:2]!="./")
-		file = "/dis/"+file;
+		file = "/zx/"+file;
 	# if(exists(file))
 	#	return file;
 	return file;
@@ -196,7 +196,7 @@ execute(ctxt: ref Draw->Context, cmd : string, argl : list of string, ci: chan o
 	if(c == nil) {
 		err := sys->sprint("%r");
 		if(file[0]!='/' && file[0:2]!="./"){
-			c = load Command "/dis/"+file;
+			c = load Command "/zx/"+file;
 			if(c == nil)
 				err = sys->sprint("%r");
 		}
@@ -217,7 +217,7 @@ execute(ctxt: ref Draw->Context, cmd : string, argl : list of string, ci: chan o
 # 	if(c == nil) {
 # 		err := sys->sprint("%r");
 # 		if(file[0]!='/' && file[0:2]!="./"){
-# 			c = load Command "/dis/"+file;
+# 			c = load Command "/zx/"+file;
 # 			if(c == nil)
 # 				err = sys->sprint("%r");
 # 		}

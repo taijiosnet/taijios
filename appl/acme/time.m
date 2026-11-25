@@ -1,5 +1,5 @@
 Timerm : module {
-	PATH : con "/dis/acme/time.dis";
+	PATH : con "/zx/acme/time.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

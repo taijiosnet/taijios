@@ -1,6 +1,6 @@
 Srvbrowse: module
 {
-	PATH:	con "/dis/grid/lib/srvbrowse.dis";
+	PATH:	con "/zx/grid/lib/srvbrowse.dis";
 
 	services : list of ref Registries->Service;
 

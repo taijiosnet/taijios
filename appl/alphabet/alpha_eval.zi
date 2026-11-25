@@ -155,9 +155,9 @@ FindRegModule :: (reg: s32, name: string) -> s32 {
 ModulePath :: (reg: s32, name: string) -> string {
     out: Vec(u8);
     if reg < 0 {
-        BuilderPrint(*out, "/dis/alphabet/main/%.dis", name);
+        BuilderPrint(*out, "/zx/alphabet/main/%.dis", name);
     } else {
-        BuilderPrint(*out, "/dis/alphabet/%/%.dis", reg_typesets[reg].name, name);
+        BuilderPrint(*out, "/zx/alphabet/%/%.dis", reg_typesets[reg].name, name);
     }
     return BuilderFinish(out);
 }
@@ -469,11 +469,11 @@ LoadTypeset :: (sx: s32, qname: string, errc: s32) -> string {
         out: Vec(u8);
         if typesets[pts].reg < 0 {
             path: Vec(u8);
-            BuilderPrint(*path, "/dis/alphabet/%types.dis", name);
+            BuilderPrint(*path, "/zx/alphabet/%types.dis", name);
             BuilderPrint(*out, "cannot load %types.dis: '%' does not exist", name, BuilderFinish(path));
         } else {
             path: Vec(u8);
-            BuilderPrint(*path, "/dis/alphabet/%/%types.dis", reg_typesets[typesets[pts].reg].name, name);
+            BuilderPrint(*path, "/zx/alphabet/%/%types.dis", reg_typesets[typesets[pts].reg].name, name);
             BuilderAppend(out, NoFile(BuilderFinish(path)));
         }
         return BuilderFinish(out);

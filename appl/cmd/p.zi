@@ -93,7 +93,7 @@ Prompt :: () -> bool {
         operands: Vec(string);
         unused VecPush(operands, "-c");
         unused VecPush(operands, TextDetach(TextCopy(command[1:])));
-        unused Proc.Run("/dis/sh.zx", operands[:]);
+        unused Proc.Run("/zx/sh.zx", operands[:]);
     }
     return true;
 }

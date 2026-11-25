@@ -1,6 +1,6 @@
 Browser: module {
 
-	PATH: con "/dis/scheduler/browser.dis";
+	PATH: con "/zx/scheduler/browser.dis";
 
 	DESELECT: con 0;
 	SELECT: con 1;

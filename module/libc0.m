@@ -1,6 +1,6 @@
 Libc0: module
 {
-	PATH: con "/dis/lib/libc0.dis";
+	PATH: con "/zx/lib/libc0.dis";
 
 	isalnum: fn(c: int): int;
 	isalpha: fn(c: int): int;

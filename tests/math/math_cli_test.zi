@@ -1,4 +1,4 @@
-// Guest parity test for standalone dis/math CLI tools:
+// Guest parity test for standalone zx/math CLI tools:
 // ack, fibonacci, genprimes, perms, crackerbarrel, factor, primes, sieve, pi, fit.
 //
 // Run from TaijiOS root:
@@ -44,7 +44,7 @@ Result :: (name: string) -> string {
 
 main :: (argc: s32, argv: **u8) -> s32 {
     emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
-    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "/dis/math/";
+    prefix := ifx argc > 2 then TextFromCString(argv[2]) else "/zx/math/";
     suffix := ifx argc > 3 then TextFromCString(argv[3]) else ".dis";
 
     unused RemoveTree(WORK);
@@ -103,7 +103,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

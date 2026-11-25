@@ -1,4 +1,4 @@
-// Shared helpers for dis/install ZX commands (readdir, stat, paths, octal, CRC-32).
+// Shared helpers for zx/install ZX commands (readdir, stat, paths, octal, CRC-32).
 IO :: #import "taijios_io";
 Stat :: #import "taijios_stat";
 #import "std/format"

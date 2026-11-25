@@ -40,14 +40,14 @@ init(nil: ref Draw->Context, nil: list of string)
 	s = nil;
 	file: string;
 	if(cmd == "sh")
-		file = "/dis/sh.dis";
+		file = "/zx/sh.dis";
 	else
 		file = cmd + ".dis";
 	mod := load Command file;
 	if(mod == nil){
-		mod = load Command "/dis/"+file;
+		mod = load Command "/zx/"+file;
 		if(mod == nil)
-			badmod("/dis/"+file);
+			badmod("/zx/"+file);
 	}
 
 	sys->pctl(Sys->FORKNS|Sys->FORKENV, nil);

@@ -6,7 +6,7 @@ MODULES=
 
 SYSMODULES=
 
-DISBIN=$ROOT/dis/math
+DISBIN=$ROOT/zx/math
 
 <$ROOT/mkfiles/mkdis
 

@@ -29,7 +29,7 @@ CanvasH :: 270;
 BandY :: 14;
 BandH :: 18;
 MaxBytes :: 67108864;
-Chooser :: "/dis/wm/filename.zx";
+Chooser :: "/zx/wm/filename.zx";
 
 Stopped :: 0;
 Playing :: 1;

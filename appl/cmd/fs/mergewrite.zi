@@ -1,4 +1,4 @@
-// /dis/fs/mergewrite.zx module entry point (replaces appl/cmd/fs/mergewrite.b).
+// /zx/fs/mergewrite.zx module entry point (replaces appl/cmd/fs/mergewrite.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "vmsx" }

@@ -101,27 +101,27 @@ main :: (argc: s32, argv: **u8) -> s32 {
     BuilderPrint(*script, "bind -b /%/root/mnt /mnt\n", WORK);
     BuilderPrint(*script, "bind -a /%/root /\n", WORK);
     // 1. info on root dir
-    BuilderPrint(*script, "/dis/install/info% -r /%/root demo > result/info_dir.out >[2] result/info_dir.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/info% -r /%/root demo > result/info_dir.out >[2] result/info_dir.err\n", suffix, WORK);
     // 2. info on archive file
-    BuilderPrint(*script, "/dis/install/info% /%/demo.arch > result/info_arch.out >[2] result/info_arch.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/info% /%/demo.arch > result/info_arch.out >[2] result/info_arch.err\n", suffix, WORK);
     BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
     // 3. wdiff -l on archive against root
-    BuilderPrint(*script, "/dis/install/wdiff% -l -r /%/root /%/demo.arch > result/wdiff_l.out >[2] result/wdiff_l.err\n", suffix, WORK, WORK);
+    BuilderPrint(*script, "/zx/install/wdiff% -l -r /%/root /%/demo.arch > result/wdiff_l.out >[2] result/wdiff_l.err\n", suffix, WORK, WORK);
     BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
     // 4. wdiff (full diff) on archive against root (note: wdiff.dis deadlocks when diff.dis raises fail:some, so run on .zx)
     if suffix == ".zx" {
-        BuilderPrint(*script, "/dis/install/wdiff% -r /%/root /%/demo.arch > result/wdiff_d.out >[2] result/wdiff_d.err\n", suffix, WORK, WORK);
+        BuilderPrint(*script, "/zx/install/wdiff% -r /%/root /%/demo.arch > result/wdiff_d.out >[2] result/wdiff_d.err\n", suffix, WORK, WORK);
         BuilderPrint(*script, "unmount /mnt/wrap >[2] /dev/null\n");
     }
     // 5. wfind and wrap2list (with /wrap and /files visible via bind -a)
-    BuilderPrint(*script, "/dis/install/wfind% -p demo hello.txt > result/wfind.out >[2] result/wfind.err\n", suffix);
-    BuilderPrint(*script, "/dis/install/wrap2list% -i > result/wrap2list.out >[2] result/wrap2list.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/wfind% -p demo hello.txt > result/wfind.out >[2] result/wfind.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/wrap2list% -i > result/wrap2list.out >[2] result/wrap2list.err\n", suffix);
     unused WriteEntireFile("build/dis-legacy-math/inst4/script", BuilderFinish(script));
 
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

@@ -1,6 +1,6 @@
 Timers: module
 {
-	PATH: con "/dis/lib/timers.dis";
+	PATH: con "/zx/lib/timers.dis";
 
 	Sec: con 1000;
 

@@ -57,7 +57,7 @@ init(iomod: Bufio)
 	if(crc == nil)
 		crc =  load Crc Crc->PATH;
 	if(inflate == nil)
-		inflate = load Filter "/dis/lib/inflate.dis";
+		inflate = load Filter "/zx/lib/inflate.dis";
 	inflate->init();
 	bufio = iomod;
 }

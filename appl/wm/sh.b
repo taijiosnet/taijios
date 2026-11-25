@@ -825,7 +825,7 @@ newsh(ctxt: ref Context, ioc: chan of (int, ref FileIO, ref FileIO, string, ref 
 {
 	pid := sys->pctl(sys->NEWFD, nil);
 
-	sh := load Command "/dis/sh.dis";
+	sh := load Command "/zx/sh.dis";
 	if(sh == nil) {
 		ioc <-= (0, nil, nil, nil, nil);
 		return;

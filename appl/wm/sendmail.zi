@@ -1,7 +1,7 @@
 // Port of Inferno's Sendmail (appl/wm/sendmail.b), built as sendmail.zx.
 // See ../../NOTICE.
 // Keeps Connect/Disconnect (SMTP over taijios_dial), Send (MAIL FROM, RCPT TO,
-// CC list, DATA, Subject), No CC, New, Save (via /dis/wm/filename.zx), reply
+// CC list, DATA, Subject), No CC, New, Save (via /zx/wm/filename.zx), reply
 // header prefill from readmail, and /usr/<user>/mail/{smtpserver,domain}.
 Surface :: #import "kryon/host/surface";
 Box :: #import "kryon/box";
@@ -28,7 +28,7 @@ Ns :: #import "taijios_namespace";
 WinW :: 560
 WinH :: 440
 MaxBody :: 1048576
-Chooser :: "/dis/wm/filename.zx"
+Chooser :: "/zx/wm/filename.zx"
 
 grey: Color = .{221, 221, 221, 255};
 panel_bg: Color = .{234, 234, 234, 255};

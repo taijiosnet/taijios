@@ -1,6 +1,6 @@
 Secstore: module
 {
-	PATH:	con "/dis/lib/secstore.dis";
+	PATH:	con "/zx/lib/secstore.dis";
 
 	Maxfilesize: con 128*1024;	# default
 	Maxmsg:	con 4096;

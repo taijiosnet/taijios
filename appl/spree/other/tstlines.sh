@@ -1,4 +1,4 @@
-#!/dis/sh
+#!/zx/sh
 load tk std
 pctl newpgrp
 wid=${tk window 'Test lines'}

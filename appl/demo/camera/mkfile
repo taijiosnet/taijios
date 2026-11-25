@@ -1,6 +1,6 @@
 <../../../mkconfig
 
-DISBIN=$ROOT/dis/demo/camera
+DISBIN=$ROOT/zx/demo/camera
 
 ALL=\
 	$DISBIN/camera.zx \

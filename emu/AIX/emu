@@ -94,11 +94,11 @@ root
 	/chan	/
 	/nvfs	/
 	/env	/
-#	/dis
+#	/zx
 #	/n
 #	/icons
 #	/osinit.dis
-#	/dis/emuinit.dis
-#	/dis/lib/auth.dis
-#	/dis/lib/ssl.dis
+#	/zx/emuinit.dis
+#	/zx/lib/auth.dis
+#	/zx/lib/ssl.dis
 #	/n/local /

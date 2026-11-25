@@ -1,5 +1,5 @@
 Acme : module {
-	PATH : con "/dis/acme.dis";
+	PATH : con "/zx/acme.dis";
 
 	RELEASECOPY : con 1;
 

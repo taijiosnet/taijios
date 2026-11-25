@@ -1,6 +1,6 @@
 Lock: module
 {
-	PATH:	con "/dis/lib/lock.dis";
+	PATH:	con "/zx/lib/lock.dis";
 
 	Semaphore: adt {
 		c: chan of int;

@@ -54,28 +54,28 @@ init()
 	bind("#m", "/dev", sys->MAFTER);		# mouse setup device
 	bind("#t", "/dev", sys->MAFTER);		# serial device
 
-	mouse := load Shell "/dis/mouse.dis";
+	mouse := load Shell "/zx/mouse.dis";
 	if (mouse != nil) {
 		print("Setting up mouse\n");
-		mouse->init(nil, "/dis/mouse.dis" :: nil);
+		mouse->init(nil, "/zx/mouse.dis" :: nil);
 		mouse = nil;
 	}
 
 	# create fake nameserver db that can be written to later
-	ramfile := load Shell "/dis/ramfile.dis";
+	ramfile := load Shell "/zx/ramfile.dis";
 	if (ramfile != nil) {
-		ramfile->init(nil, "/dis/ramfile.dis" :: "/services/dns/db" :: "" :: nil);
+		ramfile->init(nil, "/zx/ramfile.dis" :: "/services/dns/db" :: "" :: nil);
 		ramfile = nil;
 	}
 
 	print("Console...\n");
-	shell := load Shell "/dis/sh.dis";
+	shell := load Shell "/zx/sh.dis";
 	if(shell == nil) {
-		print("init: load /dis/sh.dis: %r\n");
+		print("init: load /zx/sh.dis: %r\n");
 		exit;
 	}
 	print("starting shell\n");
-	shell->init(nil, "/dis/sh.dis" :: nil);
+	shell->init(nil, "/zx/sh.dis" :: nil);
 	print("shell exited, bye bye\n");
 }
 

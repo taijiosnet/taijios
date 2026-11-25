@@ -1,6 +1,6 @@
 Block : module
 {
-	PATH: con "/dis/grid/demo/block.dis";
+	PATH: con "/zx/grid/demo/block.dis";
 
 	init : fn (pathname: string, ep: Exproc);
 	slave : fn ();

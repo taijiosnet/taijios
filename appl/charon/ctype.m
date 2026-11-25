@@ -1,6 +1,6 @@
 Ctype: module
 {
-	PATH: con "/dis/charon/ctype.dis";
+	PATH: con "/zx/charon/ctype.dis";
 
 	# Classify first NCTYPE chars of Unicode into one of
 	#

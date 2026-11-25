@@ -1,5 +1,5 @@
 Framem : module {
-	PATH : con "/dis/acme/frame.dis";
+	PATH : con "/zx/acme/frame.dis";
 
 	BACK, HIGH, BORD, TEXT, HTEXT, NCOL : con iota;
 

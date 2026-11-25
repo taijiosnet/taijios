@@ -46,7 +46,7 @@ loadmod(args: list of string): (Command, list of string)
 	if (path != nil && path[0] == '/')
 		mod = load Command path;
 	else {
-		mod = load Command "/dis/"+path;
+		mod = load Command "/zx/"+path;
 		if (mod == nil)
 			mod = load Command "/"+path;
 	}

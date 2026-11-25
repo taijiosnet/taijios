@@ -1,7 +1,7 @@
 Edit: module {
 	#pragma	varargck	argpos	editerror	1
 
-	PATH: con "/dis/acme/edit.dis";
+	PATH: con "/zx/acme/edit.dis";
 
 	String: adt{
 		n: int;

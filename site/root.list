@@ -7,7 +7,7 @@
 # panel are root; every other application is lazy.
 #
 # `- .zx` keeps the Dis tree from packing ZX bundles as a side effect of the
-# directory walk. The porting lanes build app bundles into dis/, and packing
+# directory walk. The porting lanes build app bundles into zx/, and packing
 # them all would put tens of megabytes into the first download. A bundle
 # reaches the guest root only by being named in the manifest, and the emulator's
 # own libraries by being named below.
@@ -17,18 +17,18 @@ dis
 - .zx
 
 # The three ZX libraries emu/port/zx.c installs for the window manager.
-dis/lib/window_chrome.zx
-dis/lib/winplace.zx
-dis/lib/wm_policy.zx
+zx/lib/window_chrome.zx
+zx/lib/winplace.zx
+zx/lib/wm_policy.zx
 
 # Dis programs served on first open. They are not catalog applications, so the
 # preinstall manifest does not describe them.
-lazy dis/tclsh.zx
-lazy dis/tcltk.zx
-lazy dis/coffee.zx
-lazy dis/man.zx
-lazy dis/math/linbench.zx
-lazy dis/math/graph0.zx
+lazy zx/tclsh.zx
+lazy zx/tcltk.zx
+lazy zx/coffee.zx
+lazy zx/man.zx
+lazy zx/math/linbench.zx
+lazy zx/math/graph0.zx
 
 lib/apps
 lib/rill

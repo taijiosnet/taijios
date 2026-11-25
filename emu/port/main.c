@@ -9,7 +9,7 @@
 
 int		rebootargc = 0;
 char**		rebootargv;
-static	char	defaultimod[] = "/dis/emuinit.dis";
+static	char	defaultimod[] = "/zx/emuinit.dis";
 static	char	*imod = defaultimod;
 #ifdef __linux__
 static	char	*bootfile;

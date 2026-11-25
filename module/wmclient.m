@@ -1,6 +1,6 @@
 Wmclient: module
 {
-	PATH:		con "/dis/lib/wmclient.dis";
+	PATH:		con "/zx/lib/wmclient.dis";
 
 	Resize,
 	Hide,

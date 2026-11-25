@@ -1,5 +1,5 @@
 Xml: module {
-	PATH: con "/dis/lib/xml.dis";
+	PATH: con "/zx/lib/xml.dis";
 	Item: adt {
 		fileoffset:	int;
 		pick {

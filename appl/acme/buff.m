@@ -1,5 +1,5 @@
 Bufferm : module {
-	PATH : con "/dis/acme/buff.dis";
+	PATH : con "/zx/acme/buff.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

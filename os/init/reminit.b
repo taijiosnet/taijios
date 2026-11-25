@@ -137,8 +137,8 @@ init()
 				print("No remote filesystem\n");
 			else {
 				print("Remote filesystem mounted\n");
-				bind("/n/remote/dis", "/dis", sys->MBEFORE);
-				bind("/n/remote/dis/lib", "/dis/lib", sys->MBEFORE);
+				bind("/n/remote/zx", "/zx", sys->MBEFORE);
+				bind("/n/remote/zx/lib", "/zx/lib", sys->MBEFORE);
 			}
 	} else {
 		print("Standalone mode\n");
@@ -168,12 +168,12 @@ init()
 
 	print("Server...\n");
 	dc: ref Context;
-	cs := load Shell "/dis/ndb/cs.dis";
+	cs := load Shell "/zx/ndb/cs.dis";
 	if(cs == nil)
 		print("Server not loaded\n");
 	else
 		cs->init(dc, "cs" :: nil);
-	server := load Shell "/dis/lib/srv.dis";
+	server := load Shell "/zx/lib/srv.dis";
 	if(server == nil)
 		print("Server not loaded\n");
 	else {
@@ -182,9 +182,9 @@ init()
 
 	print("Console...\n");
 sys->chdir("/n/remote/usr/john/appl/bench");
-	shell := load Shell "/dis/sh.dis";
+	shell := load Shell "/zx/sh.dis";
 	if(shell == nil) {
-		print("init: load /dis/sh.dis: %r");
+		print("init: load /zx/sh.dis: %r");
 		exit;
 	}
 	shell->init(dc, nil);

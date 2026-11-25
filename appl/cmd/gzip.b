@@ -19,7 +19,7 @@ include "bufio.m";
 include "filter.m";
 	deflate: Filter;
 
-DEFLATEPATH: con "/dis/lib/deflate.dis";
+DEFLATEPATH: con "/zx/lib/deflate.dis";
 
 Gzip: module
 {

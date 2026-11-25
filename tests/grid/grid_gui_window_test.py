@@ -22,11 +22,11 @@ def run_app(name: str, guest_cmd: str):
         emu = ROOT / 'Linux/386/bin/emu'
     for key in ('WAYLAND_SOCKET', 'SESSION_MANAGER', 'ICEAUTHORITY', 'XDG_RUNTIME_DIR'):
         os.environ.pop(key, None)
-    command = f"wm/wm /dis/sh.dis -c '{guest_cmd}; echo APP_DONE; sleep 60'"
+    command = f"wm/wm /zx/sh.dis -c '{guest_cmd}; echo APP_DONE; sleep 60'"
     log_path = OUT / f'{name}-window.log'
     with private_display() as env, log_path.open('w+b') as log:
         child = launch(env, emu, '-p', 'main=128M', '-r', ROOT,
-                       '-g', '800x600', '/dis/sh.dis', '-c', command,
+                       '-g', '800x600', '/zx/sh.dis', '-c', command,
                        stdin=subprocess.DEVNULL, stdout=log, stderr=log)
         try:
             window = until(
@@ -65,10 +65,10 @@ def run_app(name: str, guest_cmd: str):
 def main():
     apps = sys.argv[1:] or ['query', 'find']
     specs = {
-        'query': 'zxrun -w /dis/grid/query.zx',
-        'find': 'zxrun -w /dis/grid/find.zx -a resource demo Open echo',
-        'blurdemo': 'zxrun -w /dis/grid/blurdemo.zx /icons/inferno.bit',
-        'fbrowse': 'zxrun -w /dis/grid/lib/fbrowse.zx Files / /icons',
+        'query': 'zxrun -w /zx/grid/query.zx',
+        'find': 'zxrun -w /zx/grid/find.zx -a resource demo Open echo',
+        'blurdemo': 'zxrun -w /zx/grid/blurdemo.zx /icons/inferno.bit',
+        'fbrowse': 'zxrun -w /zx/grid/lib/fbrowse.zx Files / /icons',
     }
     for app in apps:
         run_app(app, specs[app])

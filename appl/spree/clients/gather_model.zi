@@ -2,7 +2,7 @@
 // ported from appl/spree/clients/gather.b.
 #import "std/vec"
 
-CLIENTDIR :: "/dis/spree/clients";
+CLIENTDIR :: "/zx/spree/clients";
 MAX_EXTRA :: 8;
 
 UpdateKind :: enum s32 {

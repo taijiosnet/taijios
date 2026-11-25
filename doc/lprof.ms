@@ -77,7 +77,7 @@ profiles the polyhedra displayer. After letting the latter run for a reasonable
 amount of time, we exit and then get the following statistics.
 .br
 .DS
-Module: Wmlib(/dis/lib/wmlib.dis)
+Module: Wmlib(/zx/lib/wmlib.dis)
 
 34	0.06		str = load String String->PATH;
 
@@ -85,7 +85,7 @@ Module: Wmlib(/dis/lib/wmlib.dis)
 
 .DE
 .DS
-Module: Bufio(/dis/lib/bufio.dis)
+Module: Bufio(/zx/lib/bufio.dis)
 
 340	0.06			n := 0;
 341	0.12			while(b.index < b.size){
@@ -93,7 +93,7 @@ Module: Bufio(/dis/lib/bufio.dis)
 
 **** module sampling points 19 ****
 
-Module: Polyfill(/dis/math/polyfill.dis)
+Module: Polyfill(/zx/math/polyfill.dis)
 
 37	10.80		for(i := 0; i < n; i++)
 38	19.86			b0[i] = b1[i] = ∞;
@@ -167,7 +167,7 @@ Module: Polyfill(/dis/math/polyfill.dis)
 
 **** module sampling points 1584 ****
 
-Module: Polyhedra(/dis/wm/polyhedra.dis)
+Module: Polyhedra(/zx/wm/polyhedra.dis)
 
 327	0.12		return (int (geo.sx*v.x)+geo.tx, int (geo.sy*v.y)+geo.ty);
 471	0.06					if(allf || dot(geo.view, newn[j]) < 0.0)
@@ -368,7 +368,7 @@ and interact with it. Now show memory statistics
 This gives
 .br
 .DS
-Module: Polyhedra(/dis/wm/polyhedra.dis)
+Module: Polyhedra(/zx/wm/polyhedra.dis)
 
 44	100	100		sys = load Sys Sys->PATH;
 45	132	132		draw = load Draw Draw->PATH;

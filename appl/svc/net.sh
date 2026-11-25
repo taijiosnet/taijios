@@ -1,4 +1,4 @@
-#!/dis/sh.dis -n
+#!/zx/sh.dis -n
 load std
 or {ftest -e /net/dns} {ftest -e /env/emuhost} {ndb/dns}
 or {ftest -e /net/cs} {ndb/cs}

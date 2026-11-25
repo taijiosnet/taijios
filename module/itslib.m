@@ -1,7 +1,7 @@
 
 Itslib: module {
 
-	PATH: con "/dis/lib/itslib.dis";
+	PATH: con "/zx/lib/itslib.dis";
 
 	init: fn(): ref Tconfig;
  	S_INFO: con 0;

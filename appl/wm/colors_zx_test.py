@@ -45,7 +45,7 @@ def exercise(env, args, draw, colors):
         command = 'wm/wm wm/colors'
     guest = guest_overlay(args.guest_overlay) + command
     app = launch(env, args.emu, '-p', 'main=128M', '-r', ROOT, '-g', '800x600',
-                 '/dis/sh.dis', '-c', guest, stdin=subprocess.DEVNULL)
+                 '/zx/sh.dis', '-c', guest, stdin=subprocess.DEVNULL)
     try:
         def run(*command, check=True):
             return subprocess.run(command, env=env, capture_output=True, check=check, timeout=5).stdout

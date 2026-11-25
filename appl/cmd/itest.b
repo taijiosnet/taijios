@@ -375,11 +375,11 @@ runit(fullspec, sofile, sefile, tpath: string, mfd: ref Sys->FD, sync: chan of i
 	if (fullspec[len fullspec-1] == 's')
 		cmd := load Command fullspec;
 	else {
-		cmd = load Command "/dis/sh.dis";
+		cmd = load Command "/zx/sh.dis";
 		args = fullspec :: args;
 	}
 	if (cmd == nil) {
-		treport(mfd, S_FATAL, 0, sys->sprint("Failed to load Command from %s", "/dis/sh.dis"));
+		treport(mfd, S_FATAL, 0, sys->sprint("Failed to load Command from %s", "/zx/sh.dis"));
 		return;
 	}
 	if (sys->chdir(tpath))

@@ -1,5 +1,5 @@
 Cookiesrv: module {
-	PATH: con "/dis/charon/cookiesrv.dis";
+	PATH: con "/zx/charon/cookiesrv.dis";
 
 	Client: adt {
 		fd: ref Sys->FD;

@@ -1,5 +1,5 @@
 Alarms: module{
-	PATH:  		con	"/dis/svc/httpd/alarms.dis";	
+	PATH:  		con	"/zx/svc/httpd/alarms.dis";	
 
 	Alarm: adt{
 		alchan: chan of int;

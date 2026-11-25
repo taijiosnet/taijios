@@ -1,7 +1,7 @@
 IPattr: module
 {
 
-	PATH: con "/dis/lib/ipattr.dis";
+	PATH: con "/zx/lib/ipattr.dis";
 
 	Netattr: adt {
 		name:	string;

@@ -310,8 +310,8 @@ cp866=ibm866
 866=ibm866
 ibm866=
     desc='Russian MS-DOS CP 866'
-    stob=/dis/lib/convcs/cp_stob.dis    arg=/lib/convcs/ibm866.cp
-    btos=/dis/lib/convcs/cp_btos.dis    arg=/lib/convcs/ibm866.cp
+    stob=/zx/lib/convcs/cp_stob.dis    arg=/lib/convcs/ibm866.cp
+    btos=/zx/lib/convcs/cp_btos.dis    arg=/lib/convcs/ibm866.cp
 .EE
 .PP
 This entry defines

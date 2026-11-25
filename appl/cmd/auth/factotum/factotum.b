@@ -360,7 +360,7 @@ readprotos(): string
 	readdir := load Readdir Readdir->PATH;
 	if(readdir == nil)
 		return "unknown\n";
-	(dirs, nil) := readdir->init("/dis/auth/proto", Readdir->NAME|Readdir->COMPACT);
+	(dirs, nil) := readdir->init("/zx/auth/proto", Readdir->NAME|Readdir->COMPACT);
 	s := "";
 	for(i := 0; i < len dirs; i++){
 		n := dirs[i].name;
@@ -432,7 +432,7 @@ startproto(request: string): (Authproto, list of ref Attr, string)
 		sys->print("proto=%s\n", p);
 	if(any(p, "./"))	# avoid unpleasantness
 		return (nil, nil, "illegal protocol: "+p);
-	proto := load Authproto "/dis/auth/proto/"+p+".dis";
+	proto := load Authproto "/zx/auth/proto/"+p+".dis";
 	if(proto == nil)
 		return (nil, nil, sys->sprint("protocol %s: %r", p));
 	if(debug)

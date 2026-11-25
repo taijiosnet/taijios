@@ -1,6 +1,6 @@
 String: module
 {
-	PATH:		con	"/dis/lib/string.dis";
+	PATH:		con	"/zx/lib/string.dis";
 
 	# the second arg of the following is a character class
 	#    e.g., "a-zA-Z", or "^ \t\n"

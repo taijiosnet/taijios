@@ -1,5 +1,5 @@
 Titlebar: module{
-	PATH: con "/dis/lib/titlebar.dis";
+	PATH: con "/zx/lib/titlebar.dis";
 
 	Resize,
 	Hide,

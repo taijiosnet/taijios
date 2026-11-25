@@ -1,6 +1,6 @@
 Oldauth: module
 {
-	PATH:	con "/dis/lib/oldauth.dis";
+	PATH:	con "/zx/lib/oldauth.dis";
 
 	init:	fn();
 

@@ -106,7 +106,7 @@ def main():
     parser.add_argument("--installed", action="store_true")
     args = parser.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
-    image = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
+    image = (ROOT / "zx" if args.installed else BUILD) / "tcltk.zx"
     if not args.installed:
         compile_image("tcltk", image, *RUNNER_FLAGS)
     template = (SOURCES / "canvas_item_window.tcl").read_text()

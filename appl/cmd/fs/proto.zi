@@ -1,4 +1,4 @@
-// /dis/fs/proto.zx module entry point (replaces appl/cmd/fs/proto.b).
+// /zx/fs/proto.zx module entry point (replaces appl/cmd/fs/proto.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "xs-rs" }

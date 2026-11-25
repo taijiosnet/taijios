@@ -1,5 +1,5 @@
 CSSfont: module {
-	PATH: con "/dis/ebook/cssfont.dis";
+	PATH: con "/zx/ebook/cssfont.dis";
 	Spec: adt {
 		family, style, weight, size: string;
 	};

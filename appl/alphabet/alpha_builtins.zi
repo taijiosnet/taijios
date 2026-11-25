@@ -173,7 +173,7 @@ PrintErrors :: () -> s32 { return Va.PlainErrc(Va.NewSink("e: ", -1)) }
 Declares :: (state: *State, argv: []Arg) -> string {
     if argv.count < 2 || argv[1].cmd < 0 { return Fail("usage", "usage: declares decls") }
     if !have_declares {
-        return Fail("bad module", "alphabet: cannot load /dis/alphabet/abc/declares.dis: '/dis/alphabet/abc/declares.dis' does not exist");
+        return Fail("bad module", "alphabet: cannot load /zx/alphabet/abc/declares.dis: '/zx/alphabet/abc/declares.dis' does not exist");
     }
     e := declares_op(state.alphabet, argv[1].cmd, PrintErrors());
     if e.count > 0 {

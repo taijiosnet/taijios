@@ -1,6 +1,6 @@
 HTML: module
 {
-	PATH:		con "/dis/lib/html.dis";
+	PATH:		con "/zx/lib/html.dis";
 
 	Lex: adt
 	{

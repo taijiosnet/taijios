@@ -1,4 +1,4 @@
-// /dis/fs/pipe.zx module entry point (replaces appl/cmd/fs/pipe.b).
+// /zx/fs/pipe.zx module entry point (replaces appl/cmd/fs/pipe.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "vcx-1-p-P" }

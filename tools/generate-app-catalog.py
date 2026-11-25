@@ -121,7 +121,7 @@ def generate_desktop_icons(output):
             if size <= 256:
                 shutil.copyfile(directory / (original+'.rgba'), directory / (alias+'.rgba'))
 
-COMMAND_APPS = {'wm/coffee': '/dis/coffee.zx', 'wm/man': '/dis/man.zx'}
+COMMAND_APPS = {'wm/coffee': '/zx/coffee.zx', 'wm/man': '/zx/man.zx'}
 
 NAMES = {
     'about': 'About TaijiOS', 'avi': 'AVI Player', 'bounce': 'Bounce', 'brutus': 'Brutus',
@@ -179,9 +179,9 @@ def generate_catalog(output):
         name = relative.split('/')[-1]
         title = NAMES.get(name, name.replace('-', ' ').replace('_', ' ').title())
         category, icon = group(name)
-        program = '/dis/' + relative + '.dis'
-        if relative == 'wm/view' or (ROOT / ('dis/' + relative + '.zx')).exists():
-            program = '/dis/' + relative + '.zx'
+        program = '/zx/' + relative + '.dis'
+        if relative == 'wm/view' or (ROOT / ('zx/' + relative + '.zx')).exists():
+            program = '/zx/' + relative + '.zx'
         program = COMMAND_APPS.get(relative, program)
         if relative == 'wm/task':
             hidden = True

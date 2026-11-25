@@ -1,5 +1,5 @@
 Cardlib: module {
-	PATH:		con "/dis/spree/lib/cardlib.dis";
+	PATH:		con "/zx/spree/lib/cardlib.dis";
 
 	Layout: adt {
 		lay:			ref Spree->Object;		# the actual layout object

@@ -1,4 +1,4 @@
-#!/dis/sh -n
+#!/zx/sh -n
 autoload=std
 load std
 if{! ~ $#* 1}{

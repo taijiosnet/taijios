@@ -15,7 +15,7 @@ Dividers: module {
 	};
 
 	EW, NS: con iota;
-	PATH: con "/dis/lib/dividers.dis";
+	PATH: con "/zx/lib/dividers.dis";
 
 	# private from here
 	DWidget: adt {

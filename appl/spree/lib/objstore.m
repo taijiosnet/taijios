@@ -1,5 +1,5 @@
 Objstore: module {
-	PATH: con "/dis/spree/lib/objstore.dis";
+	PATH: con "/zx/spree/lib/objstore.dis";
 
 	init:			fn(mod: Spree, g: ref Clique);
 	unarchive:	fn();

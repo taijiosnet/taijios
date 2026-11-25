@@ -95,7 +95,7 @@ def test():
                'bind /build/desktop-registry/game-icons/lib/icons /lib/icons; '
                'zxrun /build/desktop-registry/game-icons-test.zx')
     guest = subprocess.run([str(ROOT / 'emu/Linux/o.emu'), '-p', 'main=128M', '-r', str(ROOT),
-                            '/dis/sh.dis', '-c', command], env=env, cwd=ROOT,
+                            '/zx/sh.dis', '-c', command], env=env, cwd=ROOT,
                            text=True, capture_output=True, timeout=180)
     print(guest.stdout, end='', flush=True)
     print(guest.stderr, end='', flush=True)
@@ -113,7 +113,7 @@ def main():
     parser.add_argument('--prepare', action='store_true')
     parser.add_argument('--test', action='store_true')
     args = parser.parse_args()
-    protected = [ROOT / 'emu/Linux/o.emu', ROOT / 'dis/wm/rill.zx', ROOT / 'dis/lib/window_chrome.zx']
+    protected = [ROOT / 'emu/Linux/o.emu', ROOT / 'zx/wm/rill.zx', ROOT / 'zx/lib/window_chrome.zx']
     before = [digest(path) for path in protected]
     if args.prepare:
         prepare()

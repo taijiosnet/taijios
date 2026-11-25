@@ -20,10 +20,10 @@ Ns :: #import "taijios_namespace";
 #scope_export
 
 // The program a child shell runs: this one. A guest booted straight into a
-// sh.zx names it in $emuboot; otherwise it is the installed /dis/sh.zx.
+// sh.zx names it in $emuboot; otherwise it is the installed /zx/sh.zx.
 shellpath: Text;
 LIBSHELLRC :: "/lib/sh/profile";
-BUILTINPATH :: "/dis/sh";
+BUILTINPATH :: "/zx/sh";
 EPERM :: "permission denied";
 
 // Context options, as Sh->Context.
@@ -1087,7 +1087,7 @@ PathList :: (name: string) -> Vec(Text) {
     if Absolute(name) { VecPush(out, TextCopy("")); return out }
     pl := Get("path");
     if pl.count == 0 {
-        VecPush(out, TextCopy("/dis"));
+        VecPush(out, TextCopy("/zx"));
         VecPush(out, TextCopy("."));
         return out;
     }
@@ -1806,7 +1806,7 @@ RunFile :: (h: s32, path: string, args: *Items) {
     Pop();
 }
 
-// load a module by name: "std", "/dis/sh/std.dis" or "./std.dis".
+// load a module by name: "std", "/zx/sh/std.dis" or "./std.dis".
 LoadModule :: (name: string) -> Text {
     for k: 0..bmods.count - 1 { if TextView(bmods[k].name) == name { return TextCopy("") } }
     path: Vec(u8);
@@ -1824,7 +1824,7 @@ LoadModule :: (name: string) -> Text {
     stem: Text = TextCopy(base[slash + 1:base.count - 4]);
     dir := ifx slash >= 0 then base[:slash] else "";
     mod: s32 = -1;
-    if dir == BUILTINPATH || dir == "." || dir == "./" || dir == "/dis/sh" {
+    if dir == BUILTINPATH || dir == "." || dir == "./" || dir == "/zx/sh" {
         for m: 1..modules.count - 1 { if modules[m].name == TextView(stem) { mod = cast(s32)m; break } }
     }
     if mod < 0 {
@@ -1899,7 +1899,7 @@ NewContext :: (autoload: bool) {
     if boot.count == 1 && TextView(boot[0].word).count >= 6 && TextView(boot[0].word)[TextView(boot[0].word).count - 6:] == "/sh.zx" {
         unused BuilderAppend(shellpath.bytes, TextView(boot[0].word));
     } else {
-        unused BuilderAppend(shellpath.bytes, "/dis/sh.zx");
+        unused BuilderAppend(shellpath.bytes, "/zx/sh.zx");
     }
     ignored: Text;
     unused InitShellBuiltins(0, *ignored);

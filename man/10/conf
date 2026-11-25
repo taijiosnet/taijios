@@ -264,7 +264,7 @@ which is automatically built from
 For hosted kernels,
 .B emuinit
 is normally used, referring to
-.BR /dis/emuinit.dis .
+.BR /zx/emuinit.dis .
 .PP
 The
 .B lib

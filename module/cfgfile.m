@@ -4,7 +4,7 @@
 #
 CfgFile: module
 {
-	PATH: con	"/dis/lib/cfgfile.dis";
+	PATH: con	"/zx/lib/cfgfile.dis";
 	ConfigFile: adt
 	{
 		getcfg:	fn(me: self ref ConfigFile,field:string):list of string;

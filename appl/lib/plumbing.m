@@ -1,7 +1,7 @@
 Plumbing: module
 {
 
-	PATH:	con "/dis/lib/plumbing.dis";
+	PATH:	con "/zx/lib/plumbing.dis";
 
 	Pattern: adt
 	{

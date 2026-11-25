@@ -69,13 +69,13 @@ Conventional place to mount mailboxes.
 .SS Limbo applications
 .TF /appl/cmd
 .TP
-.B /dis
+.B /zx
 Dis executables (commands)
 .TP
-.B /dis/lib
+.B /zx/lib
 Dis libraries
 .TP
-.B /dis/wm
+.B /zx/wm
 Dis commands that run under
 .IR wm (1).
 .TP
@@ -90,16 +90,16 @@ Source to Limbo applications.
 .TP
 .B /appl/cmd
 Source to the commands in
-.BR /dis
+.BR /zx
 (as documented in Section 1).
 .TP
 .B /appl/wm
 Source to the commands in
-.B /dis/wm
+.B /zx/wm
 .TP
 .B /appl/lib
 Source to the modules in
-.B /dis/lib
+.B /zx/lib
 (as documented in Section 2).
 .TP
 .B /module
@@ -270,7 +270,7 @@ The following gives a quick summary of the structure that
 must be provided for Inferno to function correctly.
 .TF /appl/cmd
 .TP
-.B /dis
+.B /zx
 This must contain Dis modules for all the applications
 you plan to run, and the modules they depend on.
 .IR Disdep (1)

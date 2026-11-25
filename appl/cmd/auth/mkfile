@@ -26,7 +26,7 @@ SYSMODULES=\
 	styx.m\
 	styxservers.m\
 
-DISBIN=$ROOT/dis/auth
+DISBIN=$ROOT/zx/auth
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs

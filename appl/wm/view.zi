@@ -170,7 +170,7 @@ LaunchViewer :: (path: string) {
     argv[used] = 0; used += 1
     for c: path { if used < argv.count - 1 { argv[used] = c; used += 1 } }
     argv[used] = 0; used += 1
-    unused WM.Launch("/dis/wm/view.zx", TextView(argv[:used]))
+    unused WM.Launch("/zx/wm/view.zx", TextView(argv[:used]))
 }
 
 // Open each further command-line file in a viewer of its own.

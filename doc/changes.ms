@@ -426,9 +426,9 @@ Renamed commands
 As part of a mild reorganisation of the
 .CW /appl
 and
-.CW /dis
+.CW /zx
 trees, we have moved commands out of
-.CW /dis/lib
+.CW /zx/lib
 so that it now contains only library modules except for a few commands left
 there temporarily for compatibility.
 Commands themselves have sometimes been shuffled to subdirectories,
@@ -486,7 +486,7 @@ and
 have moved to
 .CW auxi
 (ie,
-.CW /dis/auxi
+.CW /zx/auxi
 and
 .CW /appl/cmd/auxi)
 .IP •
@@ -510,7 +510,7 @@ They are typically started, with other signing services, by
 described in
 .I svc (8).
 .IP •
-.CW /dis/auth
+.CW /zx/auth
 and
 .CW /appl/cmd/auth
 contain commands related to authentication;
@@ -520,7 +520,7 @@ in most cases.
 The older ones that use
 .CW /keydb/passwd
 are still in
-.CW /dis/lib
+.CW /zx/lib
 and
 .CW /appl/lib
 during the transition

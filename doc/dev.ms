@@ -445,7 +445,7 @@ message (319 in this case).
 It produces something like the following output:
 .P1
 init() myprog.b:12.1, 29
-unknown fn() Module /dis/sh.dis PC 1706
+unknown fn() Module /zx/sh.dis PC 1706
 .P2
 As usual, a quick button-3 click on the
 .CW myprog.b

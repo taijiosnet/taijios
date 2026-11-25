@@ -1,6 +1,6 @@
 Plumbmsg: module
 {
-	PATH:	con "/dis/lib/plumbmsg.dis";
+	PATH:	con "/zx/lib/plumbmsg.dis";
 
 	# Message format:
 	#	source application\n

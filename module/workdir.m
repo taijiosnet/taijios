@@ -1,6 +1,6 @@
 Workdir: module
 {
-	PATH:	con	"/dis/lib/workdir.dis";
+	PATH:	con	"/zx/lib/workdir.dis";
 
 	# Return current working directory
 

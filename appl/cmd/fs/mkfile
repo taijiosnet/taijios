@@ -1,7 +1,7 @@
 <../../../mkconfig
 
 ZI2ZX=zi2zx
-ZXBIN=$ROOT/dis/fs
+ZXBIN=$ROOT/zx/fs
 ZIFLAGS=--root . --module-path .. --module-path ../sh --bind-host taijios_args --bind-host taijios_io --bind-host taijios_stat --bind-host taijios_files --bind-host taijios_time --bind-host taijios_namespace --bind-host taijios_process
 
 ZXCOMMANDS=\

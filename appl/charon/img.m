@@ -1,5 +1,5 @@
 Img: module {
-	PATH : con "/dis/charon/img.dis";
+	PATH : con "/zx/charon/img.dis";
 
 	Mimerror, Mimnone, Mimpartial, Mimdone: con iota + 1;
 

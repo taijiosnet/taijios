@@ -1,6 +1,6 @@
 Tkclient: module
 {
-	PATH:		con "/dis/lib/tkclient.dis";
+	PATH:		con "/zx/lib/tkclient.dis";
 
 	Resize,
 	Hide,

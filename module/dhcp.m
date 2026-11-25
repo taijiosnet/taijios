@@ -1,6 +1,6 @@
 Dhcpclient: module
 {
-	PATH: con "/dis/lib/dhcpclient.dis";
+	PATH: con "/zx/lib/dhcpclient.dis";
 
 	Bootconf: adt {
 		ip:	string;

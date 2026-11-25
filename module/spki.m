@@ -25,7 +25,7 @@ Rawsexprs: module
 
 SPKI: module
 {
-	PATH: con "/dis/lib/spki/spki.dis";
+	PATH: con "/zx/lib/spki/spki.dis";
 
 	Hash: adt {
 		alg:	string;
@@ -240,7 +240,7 @@ Proofs: module
 
 Verifier: module
 {
-	PATH:	con "/dis/lib/spki/verifier.dis";
+	PATH:	con "/zx/lib/spki/verifier.dis";
 
 	Speaksfor: adt {
 		subject:	ref SPKI->Subject;

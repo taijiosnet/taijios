@@ -1,7 +1,7 @@
 // Guest regression for the top-level shell commands M to Z rewritten in Ziran.
 // Every expected status, output and diagnostic below is what the Limbo
 // original printed when it was replaced. Each case runs through the guest
-// shell, which starts /dis/NAME.zx.
+// shell, which starts /zx/NAME.zx.
 //
 // From the TaijiOS root, after "(cd appl/cmd && mk install)":
 //     ziran run --target=c --root tests/commands tests/commands/m_z_test.zi -- [EMU]
@@ -58,7 +58,7 @@ cases: [251]Case = Case.[
     .{tool = "newer", args = "a.txt tree", status = "old:directory"},
     .{tool = "newer", args = "tree a.txt", status = "new:directory"},
     .{tool = "newer", args = "a.txt words"},
-    .{args = "sleep 1; echo x > late; /dis/newer.zx a.txt late", status = "older"},
+    .{args = "sleep 1; echo x > late; /zx/newer.zx a.txt late", status = "older"},
     .{tool = "newer", args = "-dash -dash"},
     // read: one read of count bytes after an optional seek.
     .{tool = "read", args = "5", input = "a.txt", out = "alpha"},
@@ -483,7 +483,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory()
     guest: Vec(u8)
     BuilderPrint(*guest, "%/script", WORK)
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)]
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)]
     run: ProcessRun
     started := RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run)
     if !started { print("cannot start %\n", emu); return 1 }

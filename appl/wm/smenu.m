@@ -1,6 +1,6 @@
 Smenu: module
 {
-	PATH: con "/dis/wm/smenu.dis";
+	PATH: con "/zx/wm/smenu.dis";
 
 	Scrollmenu: adt{
 		# private data

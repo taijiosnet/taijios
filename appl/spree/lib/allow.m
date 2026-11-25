@@ -1,5 +1,5 @@
 Allow: module {
-	PATH:	con "/dis/spree/lib/allow.dis";
+	PATH:	con "/zx/spree/lib/allow.dis";
 	init:		fn(srvmod: Spree, g: ref Spree->Clique);
 	add:		fn(tag: int, member: ref Spree->Member, action: string);
 	del:		fn(tag: int, member: ref Spree->Member);

@@ -1,6 +1,6 @@
 Styxservers: module
 {
-	PATH: con "/dis/lib/styxservers.dis";
+	PATH: con "/zx/lib/styxservers.dis";
 
 	Fid: adt {
 		fid:		int;		# client's fid
@@ -109,7 +109,7 @@ Styxservers: module
 };
 
 Nametree: module {
-	PATH: con "/dis/lib/nametree.dis";
+	PATH: con "/zx/lib/nametree.dis";
 	Tree: adt {
 		c:		chan of ref Treeop;
 		reply:	chan of string;

@@ -1,7 +1,7 @@
 <../../../mkconfig
 
 ZI2ZX=zi2zx
-ZXBIN=$ROOT/dis/mpeg
+ZXBIN=$ROOT/zx/mpeg
 ZIFLAGS=--root . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_io
 
 ZXCOMMANDS=\

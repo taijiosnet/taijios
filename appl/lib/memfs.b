@@ -10,7 +10,7 @@ include "draw.m";
 include "memfs.m";
 
 Cmd: module {
-	PATH: con "/dis/memfs.dis";
+	PATH: con "/zx/memfs.dis";
 	init: fn(ctxt: ref Draw->Context, argv: list of string);
 };
 

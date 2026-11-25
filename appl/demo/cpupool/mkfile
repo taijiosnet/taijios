@@ -9,7 +9,7 @@ MODULES=\
 
 SYSMODULES= \
 
-DISBIN=$ROOT/dis/demo/cpupool
+DISBIN=$ROOT/zx/demo/cpupool
 
 <$ROOT/mkfiles/mkdis
 

@@ -4,7 +4,7 @@
 
 SSL3: module {
 
-	PATH: con "/dis/lib/crypt/ssl3.dis";
+	PATH: con "/zx/lib/crypt/ssl3.dis";
 
 	init: fn(): string;
 

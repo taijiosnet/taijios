@@ -2,7 +2,7 @@ Parser: module {
 	Runeself : con 	16r80;
 	Word : con 1;
 
-	PATH:  		con	"/dis/svc/httpd/parser.dis";
+	PATH:  		con	"/zx/svc/httpd/parser.dis";
 
 	init: fn();
 	urlunesc: fn(s: string): string;

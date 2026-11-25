@@ -8,7 +8,7 @@ include "sh.m";
 .BI "cmd := load Command" " path" ;
 
 .EX
-PATH: con "/dis/sh.dis";
+PATH: con "/zx/sh.dis";
 init: fn(ctxt: ref Draw->Context, args: list of string);
 .EE
 .SH DESCRIPTION
@@ -68,7 +68,7 @@ include "sh.m";
 \&...
 .IP
 .EX
-cmd := load Command "/dis/date.dis";
+cmd := load Command "/zx/date.dis";
 cmd->init(nil, "date" :: nil);
 .EE
 .PP

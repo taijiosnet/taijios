@@ -20,9 +20,9 @@ def main():
     with private_display() as env:
         prefix = '/' + runner.parent.relative_to(tk.ROOT).as_posix()
         fixture = '/' + image.relative_to(tk.ROOT).as_posix()
-        run = f"bind -b {prefix} /dis; wm/wm /dis/sh.dis -c 'zxrun -w {fixture}'"
+        run = f"bind -b {prefix} /zx; wm/wm /zx/sh.dis -c 'zxrun -w {fixture}'"
         app = tk.launch(env, tk.EMU, '-p', 'main=128M', '-r', tk.ROOT, '-g', '800x600',
-                        '/dis/sh.dis', '-c', run, stdin=subprocess.DEVNULL,
+                        '/zx/sh.dis', '-c', run, stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         output = bytearray()
 

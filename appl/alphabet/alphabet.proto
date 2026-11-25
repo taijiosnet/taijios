@@ -1,10 +1,10 @@
-# -{/fs/proto alphabet.proto | /fs/filter {/fs/or {/fs/path /dis} {/fs/not {/fs/or *.dis *.sbl}}} | /fs/write /tmp/blah}
+# -{/fs/proto alphabet.proto | /fs/filter {/fs/or {/fs/path /zx} {/fs/not {/fs/or *.dis *.sbl}}} | /fs/write /tmp/blah}
 # -{/fs/proto alphabet.proto | /fs/filter {/fs/not {/fs/or *.dis *.sbl}} | /fs/select {/fs/mode -d}}
 module
 	alphabet.m
 	alphabet
 		+
-dis
+zx
 	sh
 		alphabet.dis
 	alphabet

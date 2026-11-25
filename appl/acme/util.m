@@ -1,5 +1,5 @@
 Utils : module {
-	PATH : con "/dis/acme/util.dis";
+	PATH : con "/zx/acme/util.dis";
 
 	stderr : ref Sys->FD;
 

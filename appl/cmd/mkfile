@@ -162,7 +162,7 @@ SYSMODULES=\
 	webget.m\
 	workdir.m\
 
-DISBIN=$ROOT/dis
+DISBIN=$ROOT/zx
 ZXLIB=$ROOT/appl/lib
 ZXCOMMANDS=cat echo basename cleanname wc uniq tr tee cp test ls mkdir tclsh env
 ZXCOMMANDS=$ZXCOMMANDS netstat

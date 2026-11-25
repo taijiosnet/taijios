@@ -1,6 +1,6 @@
 Sexprs: module
 {
-	PATH:	con "/dis/lib/sexprs.dis";
+	PATH:	con "/zx/lib/sexprs.dis";
 
 	Sexp: adt {
 		pick {

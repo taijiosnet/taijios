@@ -1,4 +1,4 @@
-// /dis/fs/print.zx module entry point (replaces appl/cmd/fs/print.b).
+// /zx/fs/print.zx module entry point (replaces appl/cmd/fs/print.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "vt" }

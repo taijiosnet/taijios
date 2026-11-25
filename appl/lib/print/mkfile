@@ -19,7 +19,7 @@ SYSMODULES= \
 	print.m \
 
 
-DISBIN=$ROOT/dis/lib/print
+DISBIN=$ROOT/zx/lib/print
 
 <$ROOT/mkfiles/mkdis
 # force compilation or it's very slow

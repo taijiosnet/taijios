@@ -145,7 +145,7 @@ command(ctxt: ref Draw->Context, args: list of string, sync: chan of string)
 	if(c == nil) {
 		err := sys->sprint("%r");
 		if(err != "permission denied" && err != "access permission denied" && file[0]!='/' && file[0:2]!="./"){
-			c = load Wm "/dis/"+file;
+			c = load Wm "/zx/"+file;
 			if(c == nil)
 				err = sys->sprint("%r");
 		}

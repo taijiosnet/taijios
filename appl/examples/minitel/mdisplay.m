@@ -7,7 +7,7 @@
 MDisplay: module
 {
 
-	PATH:	con "/dis/wm/minitel/mdisplay.dis";
+	PATH:	con "/zx/wm/minitel/mdisplay.dis";
 
 	# Available character sets
 	videotex, semigraphic, french, american : con iota;

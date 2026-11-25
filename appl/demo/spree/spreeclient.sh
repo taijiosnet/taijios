@@ -1,4 +1,4 @@
-#!/dis/sh
+#!/zx/sh
 load std
 autoload=std
 ndb/cs
@@ -30,7 +30,7 @@ fn notice {
 }
 
 ck mount -A 'tcp!$registry!registry' /mnt/registry
-ck /dis/grid/remotelogon wm/wm {
+ck /zx/grid/remotelogon wm/wm {
 	k = /usr/$user/keyring/default
 	addrs=`{ndb/regquery resource spree auth.signer `{getpk -s $k}}
 	if{~ $#addrs 0} {

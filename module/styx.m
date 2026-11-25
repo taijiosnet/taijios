@@ -1,7 +1,7 @@
 Styx: module
 {
-	PATH:	con "/dis/lib/styx.dis";
-	PATHV1:	con "/dis/lib/styx1.dis";
+	PATH:	con "/zx/lib/styx.dis";
+	PATHV1:	con "/zx/lib/styx1.dis";
 
 	VERSION:	con "9P2000";
 	MAXWELEM:	con 16;

@@ -16,7 +16,7 @@ svc: auth, net, registry, rstyx, styx \- start Inferno network services
 .B svc/styx
 .SH DESCRIPTION
 The directory
-.B /dis/svc
+.B /zx/svc
 contains several
 .IR sh (1)
 scripts to start network listeners (see

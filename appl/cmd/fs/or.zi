@@ -1,4 +1,4 @@
-// /dis/fs/or.zx module entry point (replaces appl/cmd/fs/or.b).
+// /zx/fs/or.zx module entry point (replaces appl/cmd/fs/or.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "pppp*" }

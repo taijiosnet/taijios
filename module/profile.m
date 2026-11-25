@@ -1,6 +1,6 @@
 Profile: module
 {
-	PATH: con "/dis/lib/profile.dis";
+	PATH: con "/zx/lib/profile.dis";
 
 	Range: adt{
 		l: int;

@@ -83,7 +83,7 @@ EPERM: con "permission denied";
 EPIPE: con "write on closed pipe";
 
 LIBSHELLRC: con "/lib/sh/profile";
-BUILTINPATH: con "/dis/sh";
+BUILTINPATH: con "/zx/sh";
 
 DEBUG: con 0;
 
@@ -765,7 +765,7 @@ runexternal(ctxt: ref Context, args: list of ref Listnode, last: int): string
 	else if ((pl := ctxt.get("path")) != nil)
 		pathlist = list2stringlist(pl);
 	else
-		pathlist = list of {"/dis", "."};
+		pathlist = list of {"/zx", "."};
 
 	err := "";
 	do {
@@ -782,7 +782,7 @@ runexternal(ctxt: ref Context, args: list of ref Listnode, last: int): string
 		if (!disfile)
 			zxfile = commandzx(path);
 		if (zxfile != nil)
-			npath = "/dis/zxrun.dis";
+			npath = "/zx/zxrun.dis";
 		mod := load Command npath;
 		if (mod != nil) {
 			argv := list2stringlist(args);
@@ -2002,7 +2002,7 @@ whatisit(ctxt: ref Context, el: ref Listnode): string
 		else if ((pl := ctxt.get("path")) != nil)
 			pathlist = list2stringlist(pl);
 		else
-			pathlist = list of {"/dis", "."};
+			pathlist = list of {"/zx", "."};
 	
 		foundpath := "";
 		while (pathlist != nil) {

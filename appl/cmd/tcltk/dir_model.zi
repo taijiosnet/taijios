@@ -129,10 +129,10 @@ EntryKind :: (listing: *Listing, index: s64) -> Kind {
 }
 
 Program :: (kind: Kind, path: string) -> string {
-    if kind == .Folder { return "/dis/wm/dir.zx" }
+    if kind == .Folder { return "/zx/wm/dir.zx" }
     if kind == .Executable { return path }
-    if kind == .Picture { return "/dis/wm/view.zx" }
-    return "/dis/wm/edit.dis";
+    if kind == .Picture { return "/zx/wm/view.zx" }
+    return "/zx/wm/edit.dis";
 }
 
 PackArguments :: (kind: Kind, name: string, path: string, arguments: *Text) -> bool {

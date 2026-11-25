@@ -68,7 +68,7 @@ class Guest:
         bundle = '/' + args.bundle.resolve().relative_to(ROOT).as_posix()
         command = setup + f'wm/wm zxrun -w {bundle}' + ''.join(f" '{word}'" for word in operands)
         self.env = env
-        self.app = launch(env, args.emu, '-p', 'main=128M', '-r', ROOT, '-g', size, '/dis/sh.dis', '-c',
+        self.app = launch(env, args.emu, '-p', 'main=128M', '-r', ROOT, '-g', size, '/zx/sh.dis', '-c',
                           guest_overlay(getattr(args, 'guest_overlay', None)) + command, stdin=subprocess.DEVNULL)
         self.window = until(lambda: self.run('xdotool', 'search', '--onlyvisible', '--name', '^inferno$',
                                              check=False).strip(), 'private guest did not open').decode().split()[0]
@@ -115,7 +115,7 @@ class Guest:
 def arguments(description, bundle):
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('bundle', type=Path, nargs='?', default=ROOT / 'dis/wm' / bundle)
+    parser.add_argument('bundle', type=Path, nargs='?', default=ROOT / 'zx/wm' / bundle)
     parser.add_argument('--emu', type=Path, default=EMU)
     parser.add_argument('--guest-overlay', type=Path)
     args = parser.parse_args()

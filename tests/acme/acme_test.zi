@@ -291,7 +291,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest_driver: Vec(u8);
     BuilderPrint(*guest_driver, "/%", dp);
-    command := string.["timeout", "120", emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest_driver)];
+    command := string.["timeout", "120", emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest_driver)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("cannot start %\n", emu);

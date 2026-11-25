@@ -1,6 +1,6 @@
 Toolbar: module
 {
-	PATH: con "/dis/wm/toolbar.dis";
+	PATH: con "/zx/wm/toolbar.dis";
 	init: fn(ctxt: ref Draw->Context, argv: list of string);
 	desktop: fn(ctxt: ref Draw->Context, service: ref ZX->Desktop, path: string);
 	initbuiltin: fn(c: ref Sh->Context, sh: Sh): string;

@@ -1,6 +1,6 @@
 Polyhedra: module
 {
-	PATH: con "/dis/math/polyhedra.dis";
+	PATH: con "/zx/math/polyhedra.dis";
 
 	Vector: adt{
 		x, y, z: real;

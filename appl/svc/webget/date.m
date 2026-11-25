@@ -1,6 +1,6 @@
 
 Date: module{
-	PATH : con "/dis/svc/webget/date.dis";
+	PATH : con "/zx/svc/webget/date.dis";
 
 	dateconv: fn(secs :int): string; # returns an http formatted
 					 # date representing secs.

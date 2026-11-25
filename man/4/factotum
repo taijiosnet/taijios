@@ -607,7 +607,7 @@ is the reason for the error.
 .I Factotum
 can support many authentication protocols, each implemented by a separate
 module in the directory
-.BR /dis/auth/proto .
+.BR /zx/auth/proto .
 Currently only a few are implemented in Inferno:
 .PP
 .B Infauth

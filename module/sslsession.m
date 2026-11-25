@@ -1,6 +1,6 @@
 SSLsession: module {
 
-	PATH: con "/dis/lib/crypt/sslsession.dis";
+	PATH: con "/zx/lib/crypt/sslsession.dis";
 
 	Session: adt {
 		session_id			: array of byte; # [32]

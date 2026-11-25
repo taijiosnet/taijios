@@ -303,7 +303,7 @@ mkprog(args: list of string, e: ref Env, in, out: ref Sys->FD, wc: chan of int, 
 			if (c == nil) {
 				err := errstr();
 				if (nonexistent(err) && file[0] != '/' && file[0:2] != "./") {
-					c = load Command "/dis/" + file;
+					c = load Command "/zx/" + file;
 					if (c == nil)
 						err = errstr();
 				}

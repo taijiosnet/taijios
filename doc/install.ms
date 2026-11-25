@@ -343,7 +343,7 @@ emu -r/usr/john/inferno -g1024x768
 When invoked in this way
 .I emu
 displays a command window running the Inferno shell
-.CW /dis/sh.dis .
+.CW /zx/sh.dis .
 To avoid typing the command line options each time you invoke
 .I emu
 you can store them in the environment variable
@@ -406,7 +406,7 @@ mode programs that do significant computation will run much faster.
 Whether in compiled or interpreted mode you should now have a functional
 hosted Inferno system.
 When Inferno starts the initial
-.CW /dis/sh.dis
+.CW /zx/sh.dis
 it reads commands from the file
 .CW /lib/sh/profile
 before becoming interactive. See the manual pages for the shell
@@ -430,7 +430,7 @@ Inferno/     appl/        keydb/       libmath/     mkfile       services/
 Irix/        asm/         legal/       libmemdraw/  mkfiles/     tmp/
 LICENCE      chan/        lib/         libmemlayer/ mnt/         tools/
 Linux/       dev/         lib9/        libtk/       module/      usr/
-MacOSX/      dis/         libbio/      licencedb/   n/           utils/
+MacOSX/      zx/         libbio/      licencedb/   n/           utils/
 NOTICE       doc/         libcrypt/    limbo/       net/         wrap/
 Nt/          emu/         libdraw/     locale/      nvfs/
 Plan9/       env/         libfreetype/ mail/        o/

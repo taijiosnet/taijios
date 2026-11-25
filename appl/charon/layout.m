@@ -1,6 +1,6 @@
 Layout: module
 {
-PATH: con "/dis/charon/layout.dis";
+PATH: con "/zx/charon/layout.dis";
 
 ReliefBd: con 2;
 ReliefSunk, ReliefRaised : con iota;

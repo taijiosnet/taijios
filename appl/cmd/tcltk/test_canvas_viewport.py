@@ -134,7 +134,7 @@ def main():
     cli.add_argument("--installed", action="store_true")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
-    runner = ROOT / "dis/tcltk.zx" if args.installed else BUILD / "tcltk-viewport.zx"
+    runner = ROOT / "zx/tcltk.zx" if args.installed else BUILD / "tcltk-viewport.zx"
     if not args.installed:
         compile_image("tcltk", runner, *RUNNER_FLAGS)
     fixture = guest(SOURCES / "canvas_viewport_window.tcl")

@@ -184,12 +184,12 @@ def exercise(env, invocation, *, hosted):
 
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--installed", action="store_true", help="exercise /dis/math/linbench.zx and /dis/tcltk.zx")
+    cli.add_argument("--installed", action="store_true", help="exercise /zx/math/linbench.zx and /zx/tcltk.zx")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     expected = model_results()
-    image = ROOT / "dis/math/linbench.zx" if args.installed else BUILD / "linbench.zx"
-    generic = ROOT / "dis/tcltk.zx" if args.installed else BUILD / "tcltk.zx"
+    image = ROOT / "zx/math/linbench.zx" if args.installed else BUILD / "linbench.zx"
+    generic = ROOT / "zx/tcltk.zx" if args.installed else BUILD / "tcltk.zx"
     if not args.installed:
         compile_image("linbench_app", image, *LINBENCH, "--module-path", ROOT / "appl/wm", "--bind-host", "zx_surface",
                       "--bind-host", "taijios_files", "--bind-host", "taijios_clock")
@@ -197,7 +197,7 @@ def main():
     with private_display() as env:
         oracle(env, expected)
         runner(env, generic)
-        exercise(env, "/dis/math/linbench.dis", hosted=False)
+        exercise(env, "/zx/math/linbench.dis", hosted=False)
         exercise(env, f"zxrun -p -w /{image.relative_to(ROOT)}", hosted=True)
 
 

@@ -167,7 +167,7 @@ option and pipes the output through
 .SH SOURCE
 .B /appl/cmd/ls.b
 .br
-.B /dis/lc
+.B /zx/lc
 .SH SEE ALSO
 .IR readdir (2),
 .IR mc (1)

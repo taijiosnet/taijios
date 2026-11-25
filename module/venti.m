@@ -1,5 +1,5 @@
 Venti: module {
-	PATH:	con "/dis/lib/venti.dis";
+	PATH:	con "/zx/lib/venti.dis";
 	Scoresize:		con 20;
 	Maxstringsize:	con 1000;
 	Authsize:		con  1024;  	# size of auth group - in bits - must be multiple of 8	

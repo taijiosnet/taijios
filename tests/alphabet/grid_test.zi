@@ -88,7 +88,7 @@ main :: () -> s32 {
     err := Ep.MountGen();
     Check(err == "", "mount mntgen", err, "");
     ops := string.["local", Cat2(Ep.DIR, "/local")];
-    launch := Ep.Start("/dis/endpointsrv.zx", ops[:]);
+    launch := Ep.Start("/zx/endpointsrv.zx", ops[:]);
     Check(launch.id != 0, "start endpointsrv", launch.error, "");
 
     // One endpoint's two ends: written on the .in side, read as its data.

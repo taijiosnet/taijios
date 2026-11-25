@@ -1,7 +1,7 @@
 Styxconv: module
 {
-	PATHOLD2NEW: con "/dis/lib/styxconv/old2new.dis";
-	PATHNEW2OLD: con "/dis/lib/styxconv/new2old.dis";
+	PATHOLD2NEW: con "/zx/lib/styxconv/old2new.dis";
+	PATHNEW2OLD: con "/zx/lib/styxconv/new2old.dis";
 
 	# call first
 	init: fn();

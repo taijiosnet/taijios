@@ -1,6 +1,6 @@
 Url: module
 {
-	PATH : con "/dis/charon/url.dis";
+	PATH : con "/zx/charon/url.dis";
 
 	# "Common Internet Scheme" url syntax (rfc 1808)
 	#

@@ -7,7 +7,7 @@ DIRS=\
 <$ROOT/mkfiles/mksubdirs
 
 
-# The Ziran Alphabet: /dis/alphabet.zx runs the builtins of "load alphabet".
+# The Ziran Alphabet: /zx/alphabet.zx runs the builtins of "load alphabet".
 ZXSOURCES=\
 	command.zi\
 	shcmd.zi\
@@ -93,18 +93,18 @@ ZXSOURCES=\
 alphabet.zx: $ZXSOURCES mkfile
 	ziran bundle --root . --module-path . --module-path ../cmd --module-path ../cmd/sh --module-path ../lib --module-path main=main --module-path abc=abc --module-path fs=fs --module-path grid=grid --module-path auth=../cmd/auth --bind-host taijios_args --bind-host taijios_io --bind-host taijios_files --bind-host taijios_dial --bind-host taijios_namespace --bind-host taijios_process --entry command:main -o $target command.zi
 
-$ROOT/dis/alphabet.zx: alphabet.zx
+$ROOT/zx/alphabet.zx: alphabet.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0755 alphabet.zx "$staged" && mv "$staged" "$target"
 
-# The endpoint server of the grid typeset: /dis/endpointsrv.zx.
+# The endpoint server of the grid typeset: /zx/endpointsrv.zx.
 endpointsrv.zx: endpointsrv.zi mkfile
 	zi2zx --root . --module-path ../cmd --module-path ../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_file2chan --entry endpointsrv:main -o $target endpointsrv.zi
 
-$ROOT/dis/endpointsrv.zx: endpointsrv.zx
+$ROOT/zx/endpointsrv.zx: endpointsrv.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
 	install -m 0755 endpointsrv.zx "$staged" && mv "$staged" "$target"
 
-install-zx:V: $ROOT/dis/alphabet.zx $ROOT/dis/endpointsrv.zx
+install-zx:V: $ROOT/zx/alphabet.zx $ROOT/zx/endpointsrv.zx

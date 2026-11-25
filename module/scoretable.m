@@ -1,6 +1,6 @@
 # only used by tetris currently. this interface will change.
 Scoretable: module {
-	PATH: con "/dis/lib/scoretable.dis";
+	PATH: con "/zx/lib/scoretable.dis";
 	Score: adt {
 		user: string;
 		score: int;

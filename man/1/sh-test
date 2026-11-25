@@ -29,7 +29,7 @@ verbosity level is greater than or equal to
 .I verbosity.
 .SH EXAMPLE
 .EX
-#!/dis/sh
+#!/zx/sh
 
 load std test
 

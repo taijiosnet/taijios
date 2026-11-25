@@ -1,6 +1,6 @@
 Factotum: module
 {
-	PATH:	con "/dis/lib/factotum.dis";
+	PATH:	con "/zx/lib/factotum.dis";
 
 	# client interface to Plan 9 or Inferno factotum
 

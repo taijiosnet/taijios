@@ -1,4 +1,4 @@
-// /dis/fs/and.zx module entry point (replaces appl/cmd/fs/and.b).
+// /zx/fs/and.zx module entry point (replaces appl/cmd/fs/and.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "pppp*" }

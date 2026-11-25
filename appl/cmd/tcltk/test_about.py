@@ -140,8 +140,8 @@ def main():
     cli.add_argument("--installed", action="store_true", help="exercise the installed About guest application")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
-    about = ROOT / "dis/wm/about.zx" if args.installed else BUILD / "about.zx"
-    runner = (ROOT / "dis" if args.installed else BUILD) / "tcltk.zx"
+    about = ROOT / "zx/wm/about.zx" if args.installed else BUILD / "about.zx"
+    runner = (ROOT / "zx" if args.installed else BUILD) / "tcltk.zx"
     if not args.installed:
         compile_image("about_app", about, *BITMAP_FLAGS)
         compile_image("tcltk", runner, *RUNNER_FLAGS)

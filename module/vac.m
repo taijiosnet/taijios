@@ -1,5 +1,5 @@
 Vac: module {
-	PATH:	con "/dis/lib/vac.dis";
+	PATH:	con "/zx/lib/vac.dis";
 	init:	fn();
 
 	dflag:	int;

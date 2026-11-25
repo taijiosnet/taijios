@@ -178,7 +178,7 @@ MountSelected :: (sel_idx: s32) {
     unused BuilderAppend(status_text.bytes, "Mounted at ");
     unused BuilderAppend(status_text.bytes, TextView(mdir));
     ops: [1]string = .[TextView(mdir)];
-    unused Proc.Start("/dis/wm/dir.zx", ops[:]);
+    unused Proc.Start("/zx/wm/dir.zx", ops[:]);
 }
 
 QueryDraw :: (_: s64, args: []Text, result: *T.Result) {

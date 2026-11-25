@@ -1,4 +1,4 @@
-// Shared math helpers for dis/math ZX commands.
+// Shared math helpers for zx/math ZX commands.
 Files :: #import "taijios_files";
 Io :: #import "taijios_io";
 #import "std/format"

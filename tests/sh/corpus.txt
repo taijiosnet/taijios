@@ -1,6 +1,6 @@
 # Script corpus for tests/sh/sh_test.zi. Each case starts with "=== name".
 # Scripts see $X too: .dis in the Limbo run and .zx in the ZX one, so
-# /dis/tiny/rm$X names the program under test. "guest: dis" runs the ZX
+# /zx/tiny/rm$X names the program under test. "guest: dis" runs the ZX
 # programs of a case in a Dis guest, for programs that read /prog.
 # "frozen:" marks a case whose Limbo program is deleted: its golden stays as
 # recorded.
@@ -538,7 +538,7 @@ whatis whatis
 
 === hashpling
 script:
-echo '#!/dis/sh' > $W/hp
+echo '#!/zx/sh' > $W/hp
 echo 'echo hashpling script $*' >> $W/hp
 chmod 755 $W/hp
 $W/hp a b
@@ -712,7 +712,7 @@ frozen: the Limbo tiny commands are removed
 script:
 echo x > $W/t1
 echo y > $W/t2
-/dis/tiny/rm$X $W/t1 $W/nonexistent $W/t2
+/zx/tiny/rm$X $W/t1 $W/nonexistent $W/t2
 echo $status
 ls $W/t1 $W/t2
 
@@ -720,30 +720,30 @@ ls $W/t1 $W/t2
 frozen: the Limbo tiny commands are removed
 script:
 echo a > $W/ta
-/dis/tiny/sh$X -c 'tiny/rm '$W'/ta'
+/zx/tiny/sh$X -c 'tiny/rm '$W'/ta'
 ls $W/ta
-/dis/tiny/sh$X -c 'nosuch arg'
-/dis/tiny/sh$X -c 'tiny/rm x |'
-/dis/tiny/sh$X -c 'tiny/rm | x'
-/dis/tiny/sh$X -c 'tiny/rm ''unterminated'
-/dis/tiny/sh$X -c 'tiny/rm < '$W'/missing'
-/dis/tiny/sh$X -c 'tiny/rm > /nonexistentdir/x'
-/dis/tiny/sh$X -c 'tiny/rm '$W'/q1 ; tiny/rm '$W'/q2 # comment'
-/dis/tiny/sh$X -q
-/dis/tiny/sh$X -c
+/zx/tiny/sh$X -c 'nosuch arg'
+/zx/tiny/sh$X -c 'tiny/rm x |'
+/zx/tiny/sh$X -c 'tiny/rm | x'
+/zx/tiny/sh$X -c 'tiny/rm ''unterminated'
+/zx/tiny/sh$X -c 'tiny/rm < '$W'/missing'
+/zx/tiny/sh$X -c 'tiny/rm > /nonexistentdir/x'
+/zx/tiny/sh$X -c 'tiny/rm '$W'/q1 ; tiny/rm '$W'/q2 # comment'
+/zx/tiny/sh$X -q
+/zx/tiny/sh$X -c
 echo $status
 echo 'tiny/rm '$W'/tb' > $W/tscript
 echo 'nosuch' >> $W/tscript
 echo b > $W/tb
-/dis/tiny/sh$X $W/tscript
+/zx/tiny/sh$X $W/tscript
 ls $W/tb
-/dis/tiny/sh$X $W/nonexistentscript
+/zx/tiny/sh$X $W/nonexistentscript
 
 === tiny-sh-stdin
 frozen: the Limbo tiny commands are removed
 script:
 echo 'tiny/rm '$W'/s1' > $W/tin
-/dis/tiny/sh$X -n < $W/tin
+/zx/tiny/sh$X -n < $W/tin
 echo
 echo $status
 
@@ -752,7 +752,7 @@ frozen: the Limbo tiny commands are removed
 guest: dis
 script:
 sh -n -c 'load std; pctl newfd 0 2; echo x; echo y' >[2] /dev/null
-/dis/tiny/broke$X
+/zx/tiny/broke$X
 echo $status
 
 === mod-file2chan

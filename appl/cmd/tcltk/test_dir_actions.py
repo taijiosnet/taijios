@@ -33,7 +33,7 @@ def fixture(root):
     (directory / DOCUMENT).write_text(MARKER + "\n")
     shutil.copyfile(ROOT / "icons/tk/file.bit", directory / PICTURE)
     # Any Dis module serves: stock Dir fails to load it, and Ziran Dir starts it.
-    shutil.copyfile(ROOT / "dis/wm/bounce.dis", directory / MODULE)
+    shutil.copyfile(ROOT / "zx/wm/bounce.dis", directory / MODULE)
     (root / "chan").mkdir()
     return directory, root / "chan/plumb.input"
 
@@ -213,7 +213,7 @@ def main():
     with TemporaryDirectory(prefix="d", dir=BUILD) as fixture_dir, private_display() as env:
         root = Path(fixture_dir)
         directory, sink = fixture(root)
-        setup = f"bind {args.launcher} /dis/zxrun.dis; " if args.launcher else ""
+        setup = f"bind {args.launcher} /zx/zxrun.dis; " if args.launcher else ""
         launcher = setup
         if not args.installed:
             overlay = root / "wm"
@@ -223,18 +223,18 @@ def main():
             viewer = ROOT / "appl/wm/view.zx"
             assert viewer.exists(), "build the image viewer first: (cd appl/wm && mk view.zx)"
             shutil.copyfile(viewer, overlay / "view.zx")
-            launcher += f"bind -b {guest(overlay)} /dis/wm; "
-        launcher += "zxrun -w /dis/wm/dir.zx"
+            launcher += f"bind -b {guest(overlay)} /zx/wm; "
+        launcher += "zxrun -w /zx/wm/dir.zx"
         folder, editor, picture, module = run_actions(env, args.emulator, launcher, directory, sink, stock=False)
         assert folder and editor and picture and module
         print("The Directory Browser opened a second directory, the editor with the document's text and the "
               "viewer with the picture, sent the exact WmDir message, and started a Dis module")
         native = directory / NATIVE_IMAGE
-        shutil.copyfile(ROOT / "dis/wm/about.zx", native)
+        shutil.copyfile(ROOT / "zx/wm/about.zx", native)
         native.chmod(0o644)
         with desktop(env, args.emulator, f"{launcher} {guest(directory)}") as process:
             logo = open_native_image(Browser(env, process, stock=False))
-        launched_directly = direct_about(env, args.emulator, f"{setup}zxrun -w /dis/wm/about.zx")
+        launched_directly = direct_about(env, args.emulator, f"{setup}zxrun -w /zx/wm/about.zx")
         assert logo == launched_directly, "the launched ZX child differed from the directly opened About window"
         print("ZX images show the executable icon and text kind and double-click launches a guest window without execute bits")
 

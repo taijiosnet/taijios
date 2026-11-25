@@ -1,5 +1,5 @@
 Fslib: module {
-	PATH: con "/dis/lib/fslib.dis";
+	PATH: con "/zx/lib/fslib.dis";
 	Value: adt {
 		x:	fn(v: self ref Value): ref Value.X;
 		p:	fn(v: self ref Value): ref Value.P;
@@ -79,7 +79,7 @@ Fsmodule: module {
 };
 
 Fsfilter: module {
-	PATH: con "/dis/lib/fsfilter.dis";
+	PATH: con "/zx/lib/fsfilter.dis";
 	filter: fn[T](t: T, src, dst: Fslib->Fschan)
 		for{
 		T =>

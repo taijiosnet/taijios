@@ -46,13 +46,13 @@ provides system services and a Dis virtual machine for Inferno applications.
 .PP
 .I Emu
 starts an Inferno initialisation program
-.BR /dis/emuinit.dis ,
+.BR /zx/emuinit.dis ,
 whose path name is interpreted in the
 Inferno file name space,
 not in
 the native operating system's name space.
 It in turn invokes the shell
-.BR /dis/sh.dis
+.BR /zx/sh.dis
 by default or the optional
 .I cmd
 and its arguments.
@@ -95,7 +95,7 @@ Run
 as a server, invoking
 .I daemon
 instead of
-.BR /dis/emuinit.dis ,
+.BR /zx/emuinit.dis ,
 and disabling
 input from
 .B cons
@@ -273,15 +273,15 @@ directly:
 .IP
 .EX
 EMU='-g800x600 -c1'
-emu /dis/wm/wm.dis wm/logon -u inferno
+emu /zx/wm/wm.dis wm/logon -u inferno
 .EE
 .SH FILES
-.TF /dis/emuinit.dis
+.TF /zx/emuinit.dis
 .TP
-.B /dis/emuinit.dis
+.B /zx/emuinit.dis
 The default initialisation program.
 .TP
-.B /dis/sh.dis
+.B /zx/sh.dis
 The default Inferno shell.
 .SH SOURCE
 .B /emu

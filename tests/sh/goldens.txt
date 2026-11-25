@@ -1,4 +1,4 @@
-# What /dis/sh.dis printed for each case of corpus.txt, recorded by
+# What /zx/sh.dis printed for each case of corpus.txt, recorded by
 # sh_test --record: escaped status, standard output and standard error.
 === echo
 status: \n
@@ -138,7 +138,7 @@ out: first|second\nleft|\n|right\na|b|c\n
 err: 
 === whatis
 status: \n
-out: x=a 'b c'\n/dis/echo.zx\nbuiltin load\n{block}\nnot found\nload std; if\nload std; fn f {echo body}\nload std; ${hd}\nload std; subfn s {result=1}\n
+out: x=a 'b c'\n/zx/echo.zx\nbuiltin load\n{block}\nnot found\nload std; if\nload std; fn f {echo body}\nload std; ${hd}\nload std; subfn s {result=1}\n
 err: load: not found\nnosuchthing: not found\n
 === builtin-command
 status: \n
@@ -151,7 +151,7 @@ err:
 === load-unload
 status: bad module\n
 out: have std\n\nnot found\n
-err: sh: module std not found\nsh: load: cannot load /dis/sh/nosuchmodule.dis: '/dis/sh/nosuchmodule.dis' does not exist\n
+err: sh: module std not found\nsh: load: cannot load /zx/sh/nosuchmodule.dis: '/zx/sh/nosuchmodule.dis' does not exist\n
 === external-not-found
 status: \n
 out: './nosuchcommand' file does not exist\n'/nonexistent' file does not exist\n'./relative' file does not exist\n
@@ -323,7 +323,7 @@ err: rm: $W/nonexistent: '$W/nonexistent' does not exist\nls: $W/t1: '$W/t1' doe
 === tiny-sh
 status: \n
 out: \n
-err: ls: $W/ta: '$W/ta' does not exist\nnosuch: '/dis/nosuch.dis' does not exist\nsh: syntax error\nx: '/dis/x.dis' does not exist\nsh: unmatched quote\nsh: can't open $W/missing: '$W/missing' does not exist\nsh: can't open /nonexistentdir/x: '/nonexistentdir' file does not exist\nrm: $W/q1: '$W/q1' does not exist\nrm: $W/q2: '$W/q2' does not exist\nUsage: sh [-n] [-c cmd] [file]\nUsage: sh [-n] [-c cmd] [file]\nnosuch: '/dis/nosuch.dis' does not exist\nls: $W/tb: '$W/tb' does not exist\nsh: open $W/nonexistentscript: '$W/nonexistentscript' does not exist\n
+err: ls: $W/ta: '$W/ta' does not exist\nnosuch: '/zx/nosuch.dis' does not exist\nsh: syntax error\nx: '/zx/x.dis' does not exist\nsh: unmatched quote\nsh: can't open $W/missing: '$W/missing' does not exist\nsh: can't open /nonexistentdir/x: '/nonexistentdir' file does not exist\nrm: $W/q1: '$W/q1' does not exist\nrm: $W/q2: '$W/q2' does not exist\nUsage: sh [-n] [-c cmd] [file]\nUsage: sh [-n] [-c cmd] [file]\nnosuch: '/zx/nosuch.dis' does not exist\nls: $W/tb: '$W/tb' does not exist\nsh: open $W/nonexistentscript: '$W/nonexistentscript' does not exist\n
 === tiny-sh-stdin
 status: \n
 out: omega$ omega$ \n\n

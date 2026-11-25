@@ -1,5 +1,5 @@
 // Guest live test for palm/palmsrv.zx:
-// Starts /dis/palm/palmsrv.zx on a dummy serial device file, verifies /chan/palmsrv
+// Starts /zx/palm/palmsrv.zx on a dummy serial device file, verifies /chan/palmsrv
 // is mounted, verifies "no transaction in progress" error on bare read, and verifies
 // clean shutdown on writing "exit" to /chan/palmsrv.
 //
@@ -41,7 +41,7 @@ Result :: (name: string) -> string {
 
 main :: (argc: s32, argv: **u8) -> s32 {
     emu := ifx argc > 1 then TextFromCString(argv[1]) else "Linux/386/bin/emu";
-    cmd := ifx argc > 2 then TextFromCString(argv[2]) else "/dis/palm/palmsrv.zx";
+    cmd := ifx argc > 2 then TextFromCString(argv[2]) else "/zx/palm/palmsrv.zx";
 
     unused RemoveTree(WORK);
     unused CreateDirectory("build");
@@ -76,7 +76,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

@@ -124,14 +124,14 @@ option is being used) according to the output format required.
 .SH EXAMPLE
 .EX
 To profile a particular command
-	mprof /dis/math/parts 10000
-	wm/mprof /dis/math/parts 10000
+	mprof /zx/math/parts 10000
+	wm/mprof /zx/math/parts 10000
 To profile the same command but restrict attention to its own module (Partitions).
-	mprof -m Partitions /dis/math/parts 10000
-	wm/mprof -m Partitions /dis/math/parts 10000
+	mprof -m Partitions /zx/math/parts 10000
+	wm/mprof -m Partitions /zx/math/parts 10000
 A shorter version of the above
-	mprof -e /dis/math/parts 10000
-	wm/mprof -e /dis/math/parts 10000
+	mprof -e /zx/math/parts 10000
+	wm/mprof -e /zx/math/parts 10000
 To profile interactively
 	mprof -b -m Polyhedra
 	wm/polyhedra &

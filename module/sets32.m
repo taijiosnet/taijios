@@ -2,7 +2,7 @@ Sets: module {
 	A: con 2r1010;
 	B: con 2r1100;
 
-	PATH: con "/dis/lib/sets32.dis";
+	PATH: con "/zx/lib/sets32.dis";
 
 	init:		fn();
 	set:		fn(): Set;

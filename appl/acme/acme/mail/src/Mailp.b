@@ -217,7 +217,7 @@ exec(cmd : string, argl : list of string)
 	if(c == nil) {
 		err := sprint("%r");
 		if(file[0]!='/' && file[0:2]!="./"){
-			c = load Command "/dis/"+file;
+			c = load Command "/zx/"+file;
 			if(c == nil)
 				err = sprint("%r");
 		}

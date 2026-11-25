@@ -1,6 +1,6 @@
 Geodesy: module
 {
-	PATH: con "/dis/math/geodesy.dis";
+	PATH: con "/zx/math/geodesy.dis";
 
 	# easting, northing in metres
 	Eano: adt{

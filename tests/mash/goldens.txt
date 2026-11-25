@@ -1,4 +1,4 @@
-# What /dis/mash.dis printed for each case of corpus.txt, recorded by
+# What /zx/mash.dis printed for each case of corpus.txt, recorded by
 # mash_test --record: escaped status, standard output and standard error.
 === assign and expand a list
 status: \n
@@ -79,7 +79,7 @@ err:
 === head tail and length
 status: \n
 out: 
-err: $W/case.19:2: syntax error\na.dis: '/dis/a.dis' does not exist\n$W/case.19:3: syntax error\n
+err: $W/case.19:2: syntax error\na.dis: '/zx/a.dis' does not exist\n$W/case.19:3: syntax error\n
 === cons builds a list
 status: \n
 out: a b c\n

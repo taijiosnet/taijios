@@ -1,6 +1,6 @@
 Crc: module
 {
-	PATH: con "/dis/lib/crc.dis";
+	PATH: con "/zx/lib/crc.dis";
 
 	CRCstate: adt {
 		crc: int;

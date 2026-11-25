@@ -47,7 +47,7 @@ has a built-in list of associations between
 .B dis
 directories and their associated source directories
 (e.g. it can automatically map from
-.B /dis/ls.dis
+.B /zx/ls.dis
 to
 .BR /appl/cmd/ls.sbl ).
 Giving the

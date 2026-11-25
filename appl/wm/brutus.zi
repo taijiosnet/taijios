@@ -30,7 +30,7 @@ Ns :: #import "taijios_namespace";
 WinW :: 720
 WinH :: 540
 MaxDoc :: 1048576
-Chooser :: "/dis/wm/filename.zx"
+Chooser :: "/zx/wm/filename.zx"
 
 grey: Color = .{221, 221, 221, 255};
 panel_bg: Color = .{236, 236, 236, 255};

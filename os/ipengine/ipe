@@ -96,7 +96,7 @@ init
 root
 	/chan	/
 	/dev	/
-	/dis	/
+	/zx	/
 	/env	/
 	/fd	/
 	/n	/
@@ -104,8 +104,8 @@ root
 	/nvfs /
 	/prog	/
 	/osinit.dis
-	/dis/lib/auth.dis
-	/dis/lib/ssl.dis
+	/zx/lib/auth.dis
+	/zx/lib/ssl.dis
 	/n/local /
 	/n/remote /
 # authentication

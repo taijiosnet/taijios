@@ -1,6 +1,6 @@
 Inflate: module
 {
-	PATH:	con "/dis/lib/inflate.dis";
+	PATH:	con "/zx/lib/inflate.dis";
 
 	InflateBlock:	con 16r8000;
 	InflateMask:	con 16rf0000;

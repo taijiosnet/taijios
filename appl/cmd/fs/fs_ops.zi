@@ -1,4 +1,4 @@
-// Gates, selectors, entries streams, void sinks, and shell command runners for /dis/fs.
+// Gates, selectors, entries streams, void sinks, and shell command runners for /zx/fs.
 #import "std/vec"
 #import "std/option"
 Io :: #import "taijios_io";
@@ -228,7 +228,7 @@ StripBraces :: (cmd: string) -> string {
 
 RunShellScript :: (script: string) -> Proc.Outcome {
     args: [2]string = .["-c", script];
-    return Proc.Run("/dis/sh.zx", args[:]);
+    return Proc.Run("/zx/sh.zx", args[:]);
 }
 
 RunQuery :: (opts: []FsOpt, args: []s32) -> s32 {
@@ -1001,7 +1001,7 @@ PopenShell :: (script: string, child_id: *s32) -> s32 {
     ends: [2]s32;
     if Ns.Pipe(ends[:]) < 0 { return -1 }
     args: [2]string = .["-c", script];
-    launch := Proc.StartWith("/dis/sh.zx", args[:], ends[0], -1, -1);
+    launch := Proc.StartWith("/zx/sh.zx", args[:], ends[0], -1, -1);
     unused Io.CloseFile(ends[0]);
     if launch.id <= 0 {
         unused Io.CloseFile(ends[1]);
@@ -1111,7 +1111,7 @@ RunRun :: (opts: []FsOpt, args: []s32) -> s32 {
     // Wait: in TaijiOS guest, /chan or /env or current directory or a pipe:
     // Look at sh.zx: in sh.zx, `s=(); <cmd>` sets `s`, which sh.zx exports to `/env/s` (or we can redirect `echo $#s; for (x in $s) { echo -n $x }` to a pipe if the command doesn't print to stdout, or if we use fd 1 of the pipe after running `{ <cmd> } >[1=2]`? No, run command in fs is used for `s=...` without stdout, e.g. `{s=hello}`!).
     // Wait: what if the command DOES or DOES NOT write to stdout?
-    // If we create a pipe `ends`, and run `Proc.StartWith("/dis/sh.zx", .["-c", script], -1, ends[1], -1)` where `script` is:
+    // If we create a pipe `ends`, and run `Proc.StartWith("/zx/sh.zx", .["-c", script], -1, ends[1], -1)` where `script` is:
     // `s := (); { <body of cmd> }; load std; echo $#s; for i in $s { echo $i }`
     // Wait: what if `<body of cmd>` raises `fail:something`?
     // In `sh.zx`, if `<body of cmd>` raises `fail:something` inside `{ <body of cmd> }` without `rescue`, `sh.zx` unwinds immediately and exits with status 1 and `outcome.error = "something"` (WITHOUT executing `echo $#s`)!
@@ -1120,7 +1120,7 @@ RunRun :: (opts: []FsOpt, args: []s32) -> s32 {
     script: Vec(u8);
     BuilderPrint(*script, "s := (); %; echo __FS_RUN_S__ $#s $s", cmd);
     sh_args: [2]string = .["-c", BuilderFinish(script)];
-    launch := Proc.StartWith("/dis/sh.zx", sh_args[:], -1, ends[1], -1);
+    launch := Proc.StartWith("/zx/sh.zx", sh_args[:], -1, ends[1], -1);
     unused Io.CloseFile(ends[1]);
     if launch.id <= 0 {
         unused Io.CloseFile(ends[0]);

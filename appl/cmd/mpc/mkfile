@@ -4,7 +4,7 @@ TARG=\
 
 SYSMODULES=\
 
-DISBIN=$ROOT/dis/mpc
+DISBIN=$ROOT/zx/mpc
 
 <$ROOT/mkfiles/mkdis
 

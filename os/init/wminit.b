@@ -170,10 +170,10 @@ init()
 	bind("#p", "/prog", sys->MREPL);		# prog device
 	sys->bind("#d", "/fd", Sys->MREPL);
 	if(bind("#m", "/dev", sys->MAFTER) >= 0){		# mouse setup device
-		mouse := load Command "/dis/mouse.dis";
+		mouse := load Command "/zx/mouse.dis";
 		if (mouse != nil) {
 			print("Setting up mouse\n");
-			mouse->init(nil, "/dis/mouse.dis" :: nil);
+			mouse->init(nil, "/zx/mouse.dis" :: nil);
 			mouse = nil;
 		}
 	}
@@ -183,10 +183,10 @@ init()
 
 	sys->print("logon...\n");
 
-	logon := load Command "/dis/wm/logon.dis";
+	logon := load Command "/zx/wm/logon.dis";
 	if(logon == nil) {
-		print("init: load /dis/wm/logon.dis: %r");
-		logon = load Command "/dis/sh.dis";
+		print("init: load /zx/wm/logon.dis: %r");
+		logon = load Command "/zx/sh.dis";
 	}
 	dc: ref Context;
 	spawn logon->init(dc, nil);

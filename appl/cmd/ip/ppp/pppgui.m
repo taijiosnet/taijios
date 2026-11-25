@@ -9,7 +9,7 @@
 
 PPPGUI: module
 {
-        PATH:	con "/dis/ip/ppp/pppgui.dis";
+        PATH:	con "/zx/ip/ppp/pppgui.dis";
 
 	# Dimension constant for ISP Connect window
 	WIDTH: con 300;

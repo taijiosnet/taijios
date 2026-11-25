@@ -1,6 +1,6 @@
 // Parity test for the ZX mash, appl/cmd/mash/mash.zi built as mash.zx.
 // tests/mash/corpus.txt holds the scripts; the goldens are what the Limbo
-// mash, /dis/mash.dis, printed for each: standard output, standard error and
+// mash, /zx/mash.dis, printed for each: standard output, standard error and
 // the status its caller saw. Some cases are recorded from mash.dis with its
 // own builtins only, so a case that runs a guest program is marked `frozen`
 // and keeps the golden recorded when that program was still Limbo.
@@ -209,10 +209,10 @@ Boot :: (emu: string, kind: string, shell: string, index: s64) -> bool {
     BuilderPrint(*guest, "%/%/driver.%", GUESTWORK, kind, index);
     // The driver is a sh script: it starts the mash under test, so that
     // mash's own exit status and streams are what the case records. Goldens
-    // come from a Dis guest, where /dis/mash.dis can load its modules; the
+    // come from a Dis guest, where /zx/mash.dis can load its modules; the
     // ZX run boots the ZX shell instead.
-    bootshell := "/dis/sh.zx";
-    if kind == "dis" { bootshell = "/dis/sh.dis" }
+    bootshell := "/zx/sh.zx";
+    if kind == "dis" { bootshell = "/zx/sh.dis" }
     command: [7]string = .["timeout", "120", emu, "-r", TextView(root), bootshell, TextView(guest[:])];
     scrub: [4]string = .["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"];
     run: ProcessRun;
@@ -278,7 +278,7 @@ Compare :: (kind: string) {
 
 Record :: () -> bool {
     out: Vec(u8);
-    unused BuilderAppend(out, "# What /dis/mash.dis printed for each case of corpus.txt, recorded by\n# mash_test --record: escaped status, standard output and standard error.\n");
+    unused BuilderAppend(out, "# What /zx/mash.dis printed for each case of corpus.txt, recorded by\n# mash_test --record: escaped status, standard output and standard error.\n");
     for i: 0..cases.count - 1 {
         status: Text = Result("dis", "status", i);
         o: Text = Result("dis", "out", i);
@@ -303,7 +303,7 @@ Record :: () -> bool {
 }
 
 main :: (argc: s32, argv: **u8) -> s32 {
-    shell := "/dis/mash.zx";
+    shell := "/zx/mash.zx";
     record := false;
     dis := false;
     emu := ifx PathExists("emu/Linux/o.emu") then "emu/Linux/o.emu" else "Linux/386/bin/emu";
@@ -319,10 +319,10 @@ main :: (argc: s32, argv: **u8) -> s32 {
     if !LoadCorpus() { print("cannot read tests/mash/corpus.txt\n"); return 1 }
     if record || dis {
         if record && !LoadGoldens() { print("cannot read tests/mash/goldens.txt\n"); return 1 }
-        if !Prepare("dis", "/dis/mash.dis") || !BootAll(emu, "dis", "/dis/mash.dis") { return 1 }
+        if !Prepare("dis", "/zx/mash.dis") || !BootAll(emu, "dis", "/zx/mash.dis") { return 1 }
         if record {
             if !Record() { print("cannot write tests/mash/goldens.txt\n"); return 1 }
-            print("mash: recorded % cases from /dis/mash.dis\n", cases.count);
+            print("mash: recorded % cases from /zx/mash.dis\n", cases.count);
             return 0;
         }
     }

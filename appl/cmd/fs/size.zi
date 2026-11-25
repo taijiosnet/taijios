@@ -1,4 +1,4 @@
-// /dis/fs/size.zx module entry point (replaces appl/cmd/fs/size.b).
+// /zx/fs/size.zx module entry point (replaces appl/cmd/fs/size.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "vt" }

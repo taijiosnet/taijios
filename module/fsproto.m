@@ -1,6 +1,6 @@
 FSproto: module
 {
-	PATH: con "/dis/lib/fsproto.dis";
+	PATH: con "/zx/lib/fsproto.dis";
 
 	Direntry: type (string, string, ref Sys->Dir);
 

@@ -97,7 +97,7 @@ it must be the path name of a Dis
 file to be loaded 
 and executed. Names containing no initial slash are searched for in the 
 current directory and then in
-.BR /dis .
+.BR /zx .
 The
 .B .dis
 extension need not be 
@@ -539,7 +539,7 @@ The argument
 .I file
 is assumed to contain a path to the loadable module. If no such module
 is found then the string
-.B /dis/lib/mash/
+.B /zx/lib/mash/
 is prepended to
 .I file
 and the load is retried.
@@ -621,7 +621,7 @@ builtin name and its arguments. See the examples in
 .SH FILES
 .B /lib/mashinit
 .br
-.B /dis/lib/mash
+.B /zx/lib/mash
 .SH SOURCE
 .B /appl/cmd/mash 
 .SH SEE ALSO

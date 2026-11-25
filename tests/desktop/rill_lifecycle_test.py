@@ -89,7 +89,7 @@ def main():
 
         pool_override = ('-p', f'main={args.pool}') if args.pool else ()
         app = launch(env, args.emu.resolve(), *pool_override, '-r', ROOT, '-g', args.geometry,
-                     '/dis/sh.dis', '-c', command, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+                     '/zx/sh.dis', '-c', command, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
 
         def tail():
             size = os.fstat(log.fileno()).st_size
@@ -392,7 +392,7 @@ def main():
             if args.favorites:
                 stop(app)
                 app = launch(env, args.emu.resolve(), *pool_override, '-r', ROOT, '-g', args.geometry,
-                             '/dis/sh.dis', '-c', command, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+                             '/zx/sh.dis', '-c', command, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
                 window = until(lambda: call('xdotool', 'search', '--onlyvisible', '--name', '^inferno$',
                                             check=False).strip(), 'Reloaded guest window missing').decode()
                 call('xdotool', 'windowfocus', window)

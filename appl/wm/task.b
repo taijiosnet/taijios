@@ -114,7 +114,7 @@ init(ctxt: ref Draw->Context, nil: list of string)
 			if(sel == "")
 				break;
 			pid := int tk->cmd(t, ".fl.l get "+sel);
-			stk := load Wm "/dis/wm/deb.dis";
+			stk := load Wm "/zx/wm/deb.dis";
 			if(stk == nil)
 				break;
 			spawn stk->init(ctxt, "wm/deb" :: "-p "+string pid :: nil);
@@ -157,7 +157,7 @@ init(ctxt: ref Draw->Context, nil: list of string)
 			if(sel == "")
 				break;
 			pid := int tk->cmd(t, ".fl.l get "+sel);
-			fi := load Wm "/dis/wm/edit.dis";
+			fi := load Wm "/zx/wm/edit.dis";
 			if(fi == nil)
 				break;
 			spawn fi->init(ctxt,

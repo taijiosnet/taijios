@@ -9,7 +9,7 @@ MODULES=\
 
 SYSMODULES= \
 
-DISBIN=$ROOT/dis/demo/odbc
+DISBIN=$ROOT/zx/demo/odbc
 
 <$ROOT/mkfiles/mkdis
 

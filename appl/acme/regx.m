@@ -1,5 +1,5 @@
 Regx : module {
-	PATH : con "/dis/acme/regx.dis";
+	PATH : con "/zx/acme/regx.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

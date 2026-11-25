@@ -1,5 +1,5 @@
 FFTs: module{
-	PATH:	con	"/dis/math/ffts.dis";
+	PATH:	con	"/zx/math/ffts.dis";
 
 	ffts: fn(a,b:array of real, ntot,n,nspan,isn:int);
 };

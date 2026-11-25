@@ -4,7 +4,7 @@
 
 X509: module {
 
-	PATH: con "/dis/lib/crypt/x509.dis";
+	PATH: con "/zx/lib/crypt/x509.dis";
 
 	init: fn(): string;
 

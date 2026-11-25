@@ -45,7 +45,7 @@ init(cu: CharonUtils)
 	D = load Draw Draw->PATH;
 	G = cu->G;
 	crc = load Crc Crc->PATH;
-	inflate = load Filter "/dis/lib/inflate.dis";
+	inflate = load Filter "/zx/lib/inflate.dis";
 	inflate->init();
 	init_tabs();
 }

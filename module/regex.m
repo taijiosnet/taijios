@@ -1,6 +1,6 @@
 Regex: module {
 
-	PATH:	con "/dis/lib/regex.dis";
+	PATH:	con "/zx/lib/regex.dis";
 
 # normally imported identifiers
 

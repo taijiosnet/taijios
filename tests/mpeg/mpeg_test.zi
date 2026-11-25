@@ -1,4 +1,4 @@
-// Guest parity test for dis/mpeg (16 modules):
+// Guest parity test for zx/mpeg (16 modules):
 //   vlc, makergbvmap, fixidct, fltidct, refidct, scidct,
 //   mpegio, decode, decode4, remap, remap1, remap2, remap4, remap8, remap24, mpeg.
 //
@@ -105,7 +105,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
 
     script: Vec(u8);
     BuilderPrint(*script, "cd /%\n", WORK);
-    BuilderPrint(*script, "bind -b /dis/mpeg /dis\n");
+    BuilderPrint(*script, "bind -b /zx/mpeg /zx\n");
 
     if suffix == ".dis" {
         drv: Vec(u8);
@@ -146,7 +146,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
         BuilderPrint(*drv, "  r1 := load Remap Remap->PATH1; r1->init(mi); b1 := r1->remap(f);\n");
         BuilderPrint(*drv, "  r2 := load Remap Remap->PATH2; r2->init(mi); b2 := r2->remap(f);\n");
         BuilderPrint(*drv, "  r4 := load Remap Remap->PATH4; r4->init(mi); b4 := r4->remap(f);\n");
-        BuilderPrint(*drv, "  r8 := load Remap \"/dis/mpeg/remap8.dis\"; r8->init(mi); b8 := r8->remap(f);\n");
+        BuilderPrint(*drv, "  r8 := load Remap \"/zx/mpeg/remap8.dis\"; r8->init(mi); b8 := r8->remap(f);\n");
         BuilderPrint(*drv, "  rm := load Remap Remap->PATH; rm->init(mi); bm := rm->remap(f);\n");
         BuilderPrint(*drv, "  r24 := load Remap Remap->PATH24; r24->init(mi); b24 := r24->remap(f);\n");
         BuilderPrint(*drv, "  sys->print(\"remaps: %%d:%%d %%d:%%d %%d:%%d %%d:%%d %%d:%%d %%d:%%d\\n\", len b1, int b1[0], len b2, int b2[0], len b4, int b4[0], len b8, int b8[0], len bm, int bm[0], len b24, int b24[0]);\n");
@@ -159,20 +159,20 @@ main :: (argc: s32, argv: **u8) -> s32 {
         BuilderPrint(*script, "/%/drv.dis > result/drv.out\n", WORK);
     } else {
         BuilderPrint(*script, "vlc -cfp c4 < /%/c4.vlc > result/vlc.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/makergbvmap.zx > result/rgbvmap.out\n");
-        BuilderPrint(*script, "/dis/mpeg/fixidct.zx > result/fixidct.out\n");
-        BuilderPrint(*script, "/dis/mpeg/fltidct.zx > result/fltidct.out\n");
-        BuilderPrint(*script, "/dis/mpeg/refidct.zx > result/refidct.out\n");
-        BuilderPrint(*script, "/dis/mpeg/scidct.zx > result/scidct.out\n");
-        BuilderPrint(*script, "/dis/mpeg/mpegio.zx /%/sample.mpg > result/mpegio.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/decode.zx /%/sample.mpg > result/decode.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/decode4.zx /%/sample.mpg > result/decode4.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 1 /%/sample.mpg > result/mpeg1.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 2 /%/sample.mpg > result/mpeg2.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 4 /%/sample.mpg > result/mpeg4.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 8 /%/sample.mpg > result/mpeg8.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/mpeg.zx -d 24 /%/sample.mpg > result/mpeg24.out\n", WORK);
-        BuilderPrint(*script, "/dis/mpeg/remap8.zx > result/remap8.out\n");
+        BuilderPrint(*script, "/zx/mpeg/makergbvmap.zx > result/rgbvmap.out\n");
+        BuilderPrint(*script, "/zx/mpeg/fixidct.zx > result/fixidct.out\n");
+        BuilderPrint(*script, "/zx/mpeg/fltidct.zx > result/fltidct.out\n");
+        BuilderPrint(*script, "/zx/mpeg/refidct.zx > result/refidct.out\n");
+        BuilderPrint(*script, "/zx/mpeg/scidct.zx > result/scidct.out\n");
+        BuilderPrint(*script, "/zx/mpeg/mpegio.zx /%/sample.mpg > result/mpegio.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/decode.zx /%/sample.mpg > result/decode.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/decode4.zx /%/sample.mpg > result/decode4.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/mpeg.zx -d 1 /%/sample.mpg > result/mpeg1.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/mpeg.zx -d 2 /%/sample.mpg > result/mpeg2.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/mpeg.zx -d 4 /%/sample.mpg > result/mpeg4.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/mpeg.zx -d 8 /%/sample.mpg > result/mpeg8.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/mpeg.zx -d 24 /%/sample.mpg > result/mpeg24.out\n", WORK);
+        BuilderPrint(*script, "/zx/mpeg/remap8.zx > result/remap8.out\n");
     }
     BuilderPrint(*script, "echo halt > /dev/sysctl\n");
     unused WriteEntireFile("build/dis-legacy-math/mpeg/script", BuilderFinish(script));
@@ -180,7 +180,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

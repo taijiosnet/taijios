@@ -618,7 +618,7 @@ is a built-in module provided by the system, it has a special form of name; othe
 .CW "PATH"
 variables name files containing actual code.  For example,
 .CW "Wmlib->PATH"
-is \f5"/dis/lib/wmlib.dis"\fP.
+is \f5"/zx/lib/wmlib.dis"\fP.
 Note, though, that the name of the implementation of the module in a
 .CW "load"
 statement can be any string.

@@ -1,4 +1,4 @@
-// /dis/fs/merge.zx module entry point (replaces appl/cmd/fs/merge.b).
+// /zx/fs/merge.zx module entry point (replaces appl/cmd/fs/merge.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "xxxx*-1-cm" }

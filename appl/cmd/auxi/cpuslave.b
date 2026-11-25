@@ -47,7 +47,7 @@ init(nil: ref Context, args: list of string)
 	file := hd args + ".dis";
 	cmd := load Command file;
 	if(cmd == nil)
-		cmd = load Command "/dis/"+file;
+		cmd = load Command "/zx/"+file;
 	if(cmd == nil){
 		sys->fprint(stderr, "cpuslave: can't load %s: %r\n", hd args);
 		raise "fail:bad command";

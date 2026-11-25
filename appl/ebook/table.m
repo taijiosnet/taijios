@@ -1,5 +1,5 @@
 Table: module {
-	PATH: con "/dis/ebook/table.dis";
+	PATH: con "/zx/ebook/table.dis";
 	Cell: adt {
 		w: string;
 		span: Draw->Point;

@@ -6,7 +6,7 @@ using Namespace :: #import "taijios_namespace"
 using Proc :: #import "taijios_process"
 using Model :: #import "join_model"
 
-CLIENTDIR :: "/dis/spree/clients";
+CLIENTDIR :: "/zx/spree/clients";
 
 Usage :: () -> s32 {
     print("usage: joinsession [-d mntdir] [-j joinrequest] name\n");

@@ -2080,7 +2080,7 @@ pctoloc(mod: string, pc: int) : string
 
 startcs()
 {
-	cs := load Command "/dis/ndb/cs.dis";
+	cs := load Command "/zx/ndb/cs.dis";
 	if (cs == nil) {
 		sys->print("failed to start cs\n");
 		return;
@@ -2097,7 +2097,7 @@ startcharon(url: string, c: chan of string)
 	ctxt.c = c;
 	ctxt.cksrv = CU->CK;
 	ctxt.ckclient = CU->ckclient;
-	ch := load Charon "/dis/charon.dis";
+	ch := load Charon "/zx/charon.dis";
 	fdl := list of {0, 1, 2};
 	if (CU->ckclient != nil)
 		fdl = (CU->ckclient).fd.fd :: fdl;

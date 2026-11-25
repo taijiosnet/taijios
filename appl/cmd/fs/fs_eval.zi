@@ -1,4 +1,4 @@
-// Expression parser, type converter, verb dispatcher, and CLI entry points for /dis/fs and /dis/fs/*.zx.
+// Expression parser, type converter, verb dispatcher, and CLI entry points for /zx/fs and /zx/fs/*.zx.
 #import "std/vec"
 #import "std/option"
 Args :: #import "taijios_args";
@@ -52,7 +52,7 @@ VERBS: [30]VerbDef = .[
 
 FindVerb :: (cmd_in: string) -> s64 {
     cmd := cmd_in;
-    if cmd.count > 8 && cmd[0:8] == "/dis/fs/" {
+    if cmd.count > 8 && cmd[0:8] == "/zx/fs/" {
         cmd = cmd[8:];
     }
     if cmd.count > 4 && cmd[cmd.count - 4:] == ".dis" {
@@ -435,7 +435,7 @@ RunCmd :: (cmd: string, args: []s32) -> s32 {
     if v_idx < 0 {
         p := Join(cmd, ".dis");
         if p.count > 0 && p[0] != #char "/" && !(p.count > 1 && p[0] == #char "." && p[1] == #char "/") {
-            p = Join("/dis/fs/", p);
+            p = Join("/zx/fs/", p);
         }
         eb1: Vec(u8);
         BuilderPrint(*eb1, "fs: eval: cannot load %: % does not exist", p, QQ(p));

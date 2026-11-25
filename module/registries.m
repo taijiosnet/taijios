@@ -1,5 +1,5 @@
 Registries: module {
-	PATH:	con "/dis/lib/registries.dis";
+	PATH:	con "/zx/lib/registries.dis";
 	init:			fn();
 
 	Attributes: adt {

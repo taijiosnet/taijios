@@ -882,7 +882,7 @@ Parts of this declaration are shown here:
 .P1
 Bufio: module	# edited to fit your screen
 {
-	PATH:	con "/dis/bufio.dis";
+	PATH:	con "/zx/bufio.dis";
 	EOF:	con -1;
 	Iobuf: adt {
 		fd:	ref Sys->FD;	# the file

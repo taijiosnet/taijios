@@ -109,60 +109,60 @@ init
 root
 	/chan	/
 	/dev	/
-	/dis
+	/zx
 	/env	/
 	/fd	/
 	/net	/
 	/net.alt	/
 	/nvfs /
 	/prog	/
-	/dis/lib
-	/dis/disk
+	/zx/lib
+	/zx/disk
 	/osinit.dis
 
 # initialisation
-	/dis/touchcal.dis
+	/zx/touchcal.dis
 
 # dos file system
-	/dis/dossrv.dis
-	/dis/disk/format.dis
+	/zx/dossrv.dis
+	/zx/disk/format.dis
 
 # kfs file system
-	/dis/disk/kfs.dis
-	/dis/disk/kfscmd.dis
+	/zx/disk/kfs.dis
+	/zx/disk/kfscmd.dis
 
 # used by file systems and commands
-	/dis/lib/arg.dis
-	/dis/lib/styx.dis
-	/dis/lib/string.dis
-	/dis/lib/daytime.dis
+	/zx/lib/arg.dis
+	/zx/lib/styx.dis
+	/zx/lib/string.dis
+	/zx/lib/daytime.dis
 
 # For development work:
-	/dis/sh.dis	/dis/tiny/sh.dis
-	/dis/ls.dis
-	/dis/cat.dis
-	/dis/bind.dis
-	/dis/mount.dis
-	/dis/pwd.dis
-	/dis/echo.dis
-	/dis/cd.dis
-	/dis/xd.dis
-	/dis/cp.dis
-	/dis/mkdir.dis
-	/dis/rm.dis
-	/dis/p.dis
-	/dis/ps.dis
-	/dis/lib/readdir.dis
-	/dis/lib/workdir.dis
-	/dis/lib/daytime.dis
-	/dis/lib/auth.dis
-	/dis/lib/ssl.dis
-	/dis/lib/bufio.dis
-	/dis/lib/string.dis
-#	/dis/pcmcia.dis	/dis/auxi/pcmcia.dis
+	/zx/sh.dis	/zx/tiny/sh.dis
+	/zx/ls.dis
+	/zx/cat.dis
+	/zx/bind.dis
+	/zx/mount.dis
+	/zx/pwd.dis
+	/zx/echo.dis
+	/zx/cd.dis
+	/zx/xd.dis
+	/zx/cp.dis
+	/zx/mkdir.dis
+	/zx/rm.dis
+	/zx/p.dis
+	/zx/ps.dis
+	/zx/lib/readdir.dis
+	/zx/lib/workdir.dis
+	/zx/lib/daytime.dis
+	/zx/lib/auth.dis
+	/zx/lib/ssl.dis
+	/zx/lib/bufio.dis
+	/zx/lib/string.dis
+#	/zx/pcmcia.dis	/zx/auxi/pcmcia.dis
 # dhcp
-	/dis/lib/dhcpclient.dis	/dis/lib/dhcpclient.dis
-	/dis/lib/ip.dis	/dis/lib/ip.dis
+	/zx/lib/dhcpclient.dis	/zx/lib/dhcpclient.dis
+	/zx/lib/ip.dis	/zx/lib/ip.dis
 
 	/n/remote
 	/n/local

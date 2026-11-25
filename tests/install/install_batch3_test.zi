@@ -66,7 +66,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     script: Vec(u8);
     BuilderPrint(*script, "cd /%\n", WORK);
     // 1. Mount full plain archive
-    BuilderPrint(*script, "/dis/install/archfs% -m /%/m1 test.arch &\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/archfs% -m /%/m1 test.arch &\n", suffix, WORK);
     BuilderPrint(*script, "sleep 1\n");
     BuilderPrint(*script, "cat m1/hello.txt > result/hello.txt\n");
     BuilderPrint(*script, "cat m1/sub/item.txt > result/item.txt\n");
@@ -74,14 +74,14 @@ main :: (argc: s32, argv: **u8) -> s32 {
     BuilderPrint(*script, "unmount /%/m1\n", WORK);
 
     // 2. Mount with -s and /wrap prefix filter
-    BuilderPrint(*script, "/dis/install/archfs% -s -m /%/m2 test.arch /wrap &\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/archfs% -s -m /%/m2 test.arch /wrap &\n", suffix, WORK);
     BuilderPrint(*script, "sleep 1\n");
     BuilderPrint(*script, "cat m2/wrap/demo/1700000000/desc > result/desc2.txt\n");
     BuilderPrint(*script, "cat m2/hello.txt > result/m2_hello >[2] /dev/null\n");
     BuilderPrint(*script, "unmount /%/m2\n", WORK);
 
     // 3. Mount gzipped archive
-    BuilderPrint(*script, "/dis/install/archfs% -m /%/m3 test.arch.gz &\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/archfs% -m /%/m3 test.arch.gz &\n", suffix, WORK);
     BuilderPrint(*script, "sleep 1\n");
     BuilderPrint(*script, "cat m3/hello.txt > result/gz_hello.txt\n");
     BuilderPrint(*script, "cat m3/sub/item.txt > result/gz_item.txt\n");
@@ -92,7 +92,7 @@ main :: (argc: s32, argv: **u8) -> s32 {
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

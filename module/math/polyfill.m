@@ -1,6 +1,6 @@
 Polyfill: module
 {
-	PATH: con "/dis/math/polyfill.dis";
+	PATH: con "/zx/math/polyfill.dis";
 
 	Zstate: adt{
 		r: Draw->Rect;

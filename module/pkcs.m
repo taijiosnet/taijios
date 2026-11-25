@@ -7,7 +7,7 @@
 
 PKCS: module {
 
-	PATH: con "/dis/lib/crypt/pkcs.dis";
+	PATH: con "/zx/lib/crypt/pkcs.dis";
 
 	init: fn(): string;
 

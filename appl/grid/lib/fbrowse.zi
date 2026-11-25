@@ -79,7 +79,7 @@ GetExt :: (file: string) -> string {
 }
 
 GetPlumb :: (ext: string) -> string {
-    if ext == "bit" || ext == "jpg" { return "/dis/wm/view.zx" }
+    if ext == "bit" || ext == "jpg" { return "/zx/wm/view.zx" }
     return "";
 }
 
@@ -317,7 +317,7 @@ Tick :: (tcl: *Tcl.Interpreter, _: Surface.SurfaceEvent) -> Window.PollResult {
     }
     if act == 1 {
         ops: [0]string;
-        unused Proc.Start("/dis/wm/sh.dis", ops[:]);
+        unused Proc.Start("/zx/wm/sh.dis", ops[:]);
         return .Idle;
     }
     if act == 2 {

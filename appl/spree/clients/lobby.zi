@@ -144,7 +144,7 @@ JoinSelected :: (tcl: *Tcl.Interpreter, how: string) {
         return;
     }
     ops: [5]string = .["-d", "/n/remote", "-j", how, TextView(so.filename)];
-    launch := Proc.Start("/dis/spree/joinsession.zx", ops[:]);
+    launch := Proc.Start("/zx/spree/joinsession.zx", ops[:]);
     if launch.id <= 0 {
         AppendChat(tcl, "couldn't join clique\n");
     } else {

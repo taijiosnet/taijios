@@ -1,4 +1,4 @@
-#!/dis/sh
+#!/zx/sh
 load std
 if {~ $#* 0} {
 	echo usage: runns path0 path1 ... pathn

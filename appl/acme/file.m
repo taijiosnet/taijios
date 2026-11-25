@@ -1,5 +1,5 @@
 Filem : module {
-	PATH : con "/dis/acme/file.dis";
+	PATH : con "/zx/acme/file.dis";
 
 	init : fn(mods : ref Dat->Mods);
 

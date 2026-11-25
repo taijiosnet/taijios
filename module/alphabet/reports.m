@@ -1,5 +1,5 @@
 Reports: module {
-	PATH: con "/dis/alphabet/reports.dis";
+	PATH: con "/zx/alphabet/reports.dis";
 	Report: adt {
 		startc: chan of (string, chan of string, chan of int);
 		enablec: chan of int;

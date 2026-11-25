@@ -1,5 +1,5 @@
 Script: module {
-	PATH:	con "/dis/ip/ppp/script.dis";
+	PATH:	con "/zx/ip/ppp/script.dis";
 
 	ScriptInfo: adt {
 		path:			string;

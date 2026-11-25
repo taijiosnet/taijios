@@ -1,5 +1,5 @@
 Gui: module {
-	PATH: con "/dis/charon/gui.dis";
+	PATH: con "/zx/charon/gui.dis";
 
 	Progressmsg : adt {
 		bsid : int;

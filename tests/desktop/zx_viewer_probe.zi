@@ -85,7 +85,7 @@ main :: () -> s32 {
     state: [7]s32;
     if Desktop.Capture(state[:]) < 0 || !Surface.Open("viewer probe", state[3], state[4]) { return Fail("open desktop") }
     // Several files: the first in this viewer, the next in a viewer of its own.
-    if WM.Launch("/dis/wm/view.zx", "view\0-f\0/frames.gif\0/sample.xbm\0") != 0 || !WaitWindows(2) {
+    if WM.Launch("/zx/wm/view.zx", "view\0-f\0/frames.gif\0/sample.xbm\0") != 0 || !WaitWindows(2) {
         return Fail("viewer windows for two files");
     }
     if !Report("ZX_VIEWER_FILES") { return Fail("files checked") }
@@ -98,7 +98,7 @@ main :: () -> s32 {
     // to the sender's directory, opens in the viewer; the next in a new one.
     port: Served.File;
     if !Served.Create(*port, "/chan", "plumb.view") { return Fail("serve the view port") }
-    if WM.Launch("/dis/wm/view.zx", "view\0-i\0") != 0 { return Fail("plumbed viewer") }
+    if WM.Launch("/zx/wm/view.zx", "view\0-i\0") != 0 { return Fail("plumbed viewer") }
     if !Plumb(*port, "test\nview\n/\ntext\n\n10\nsample.xbm") || !WaitWindows(1) { return Fail("plumb a file") }
     // The harness saves the picture from this window before acknowledging.
     if !Report("ZX_VIEWER_PLUMBED") { return Fail("plumbed checked") }

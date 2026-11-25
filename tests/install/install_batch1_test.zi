@@ -61,22 +61,22 @@ main :: (argc: s32, argv: **u8) -> s32 {
     script: Vec(u8);
     BuilderPrint(*script, "cd /%\n", WORK);
     // 1. mkproto
-    BuilderPrint(*script, "/dis/install/mkproto% tree > result/mkp.out >[2] result/mkp.err\n", suffix);
-    BuilderPrint(*script, "/dis/install/mkproto% -extra.txt tree > result/mkp_ex.out >[2] result/mkp_ex.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/mkproto% tree > result/mkp.out >[2] result/mkp.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/mkproto% -extra.txt tree > result/mkp_ex.out >[2] result/mkp_ex.err\n", suffix);
     // 2. ckproto
-    BuilderPrint(*script, "/dis/install/ckproto% -r /%/tree test.proto > result/ckp.out >[2] result/ckp.err\n", suffix, WORK);
-    BuilderPrint(*script, "/dis/install/ckproto% -v -r /%/tree test.proto > result/ckpv.out >[2] result/ckpv.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/ckproto% -r /%/tree test.proto > result/ckp.out >[2] result/ckp.err\n", suffix, WORK);
+    BuilderPrint(*script, "/zx/install/ckproto% -v -r /%/tree test.proto > result/ckpv.out >[2] result/ckpv.err\n", suffix, WORK);
     // 3. proto2list
-    BuilderPrint(*script, "/dis/install/proto2list% abs.proto > result/p2l.out >[2] result/p2l.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/proto2list% abs.proto > result/p2l.out >[2] result/p2l.err\n", suffix);
     // 4. mergelog usage + path restriction
-    BuilderPrint(*script, "/dis/install/mergelog% > result/ml_u.out >[2] result/ml_u.err\n", suffix);
-    BuilderPrint(*script, "/dis/install/mergelog% a b c > result/ml_r.out >[2] result/ml_r.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/mergelog% > result/ml_u.out >[2] result/ml_u.err\n", suffix);
+    BuilderPrint(*script, "/zx/install/mergelog% a b c > result/ml_r.out >[2] result/ml_r.err\n", suffix);
     unused WriteEntireFile("build/dis-legacy-math/inst1/script", BuilderFinish(script));
 
     root: Text = WorkingDirectory();
     guest: Vec(u8);
     BuilderPrint(*guest, "/%/script", WORK);
-    command: [5]string = .[emu, "-r", TextView(root), "/dis/sh.dis", BuilderFinish(guest)];
+    command: [5]string = .[emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
     run: ProcessRun;
     if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
         print("FAIL: cannot start %\n", emu);

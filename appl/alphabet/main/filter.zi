@@ -8,7 +8,7 @@ Sh :: #import "shcmd";
 Ns :: #import "taijios_namespace";
 Process :: #import "taijios_process";
 
-SHELL :: "/dis/sh.zx";
+SHELL :: "/zx/sh.zx";
 
 Register :: () { Al.RegisterModule(-1, "filter", "ffcs*", Run) }
 

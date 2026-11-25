@@ -550,7 +550,7 @@ creates a new
 window and runs a
 .I command
 (default
-.BR /dis/sh.dis )
+.BR /zx/sh.dis )
 in it, turning the window into a shell window in which commands may be executed.
 Executing text in a
 .I win
@@ -561,7 +561,7 @@ window with button
 Similarly
 .I winm
 creates a new window but runs the shell
-.BR /dis/mash.dis
+.BR /zx/mash.dis
 by default.
 .I adiff
 behaves as diff in finding the difference between two files but the listing uses
@@ -610,7 +610,7 @@ Also,
 binds the directory
 .B /acme/dis
 in front of
-.B /dis
+.B /zx
 when it starts; this is where
 .IR acme -specific
 programs such as

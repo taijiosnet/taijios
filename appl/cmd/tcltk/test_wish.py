@@ -1,4 +1,4 @@
-"""Verify /dis/wm/wish.zx on a private display: stdin REPL, -f script, and GUI prompt."""
+"""Verify /zx/wm/wish.zx on a private display: stdin REPL, -f script, and GUI prompt."""
 
 import io
 import os
@@ -31,7 +31,7 @@ def test_stdin_and_file(emu, env):
         # 1. Piped stdin evaluates multi-line Tcl and exits cleanly.
         script = 'set x 40\nif {$x == 40} {\n    puts [expr {$x + 2}]\n}\nexit\n'
         proc = subprocess.run(
-            [emu, '-r', ROOT, '-g', '640x480', '/dis/wm/wm.zx', '/dis/wm/wish.zx'],
+            [emu, '-r', ROOT, '-g', '640x480', '/zx/wm/wm.zx', '/zx/wm/wish.zx'],
             env=private_env, input=script, capture_output=True, text=True,
             start_new_session=True, timeout=20,
         )
@@ -39,8 +39,8 @@ def test_stdin_and_file(emu, env):
         assert '42\n' in proc.stdout, (proc.stdout, proc.stderr)
 
         # 2. -k -f loads and paints a Tk script file.
-        app = launch(private_env, emu, '-r', ROOT, '-g', '640x480', '/dis/wm/wm.zx',
-                     '/dis/wm/wish.zx', '-k', '-f', '/appl/cmd/tcltk/bounce_controls.tcl',
+        app = launch(private_env, emu, '-r', ROOT, '-g', '640x480', '/zx/wm/wm.zx',
+                     '/zx/wm/wish.zx', '-k', '-f', '/appl/cmd/tcltk/bounce_controls.tcl',
                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
         def desktop(*args, check=True):

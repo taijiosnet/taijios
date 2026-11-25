@@ -225,9 +225,9 @@ init()
 
 	sys->print("Console...\n");
 
-	shell := load Shell "/dis/sh.dis";
+	shell := load Shell "/zx/sh.dis";
 	if(shell == nil) {
-		sys->print("init: load /dis/sh.dis: %r");
+		sys->print("init: load /zx/sh.dis: %r");
 		exit;
 	}
 	dc: ref Draw->Context;

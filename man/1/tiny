@@ -41,9 +41,9 @@ For example, the Dis object files can be as much as 5 times smaller (or better) 
 mainstream alternatives.
 They are also useful when initially porting the system.
 They live in the directory
-.BR /dis/tiny ,
+.BR /zx/tiny ,
 but could be placed in the
-.B /dis
+.B /zx
 of a small device
 (eg, via
 .IR root (3))·
@@ -134,9 +134,9 @@ As a convenience, the user need not specify the
 suffix to the filename. If missing, it will be added by the shell.
 .PP
 If the load fails there is, in general, a second attempt to load the module by resolving the pathname relative to the
-.B /dis
+.B /zx
 directory (or any directory bound to the
-.B /dis
+.B /zx
 directory in the current namespace).
 .PP
 There are two exceptions to this second attempt. The second load attempt is not performed if the command field provides an absolute pathname or a relative pathname starting with dot-slash
@@ -152,7 +152,7 @@ module as specified in
 Otherwise, the named file will not load.
 .PP
 In lieu of a path mechanism, a process can create a union directory at
-.BR /dis .
+.BR /zx .
 .SS "File name expansion"
 Command line arguments (including the command field itself) are expanded by the shell according to the regular expression rules described in
 .IR filepat (2).

@@ -1,6 +1,6 @@
 Daytime: module
 {
-	PATH:	con "/dis/lib/daytime.dis";
+	PATH:	con "/zx/lib/daytime.dis";
 
 	Tm: adt {
 		sec:	int;	# seconds (0 to 59)

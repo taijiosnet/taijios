@@ -1,6 +1,6 @@
 Debug: module
 {
-	PATH:	con "/dis/lib/debug.dis";
+	PATH:	con "/zx/lib/debug.dis";
 
 	Terror, Tid, Tadt, Tadtpick, Tarray, Tbig, Tbyte, Tchan, Treal,
 	Tfn, Targ, Tlocal, Tglobal, Tint, Tlist, Tmodule, Tnil, Tnone,

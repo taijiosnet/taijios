@@ -136,7 +136,7 @@ names a Dis file implementing that service;
 path names are interpreted relative to
 .BR /services/collab ,
 but usually refer to files in
-.BR /dis/collab/servers .
+.BR /zx/collab/servers .
 .PP
 Each
 .I collabsrv
@@ -321,7 +321,7 @@ active service directory
 .B /services/collab/services.cfg
 maps service names to modules
 .TP
-.B /dis/collab/servers
+.B /zx/collab/servers
 service implementation modules
 .SH SOURCE
 .B /appl/collabsrv

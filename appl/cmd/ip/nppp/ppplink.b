@@ -709,7 +709,7 @@ userinterface(sync: chan of int)
 {
 	pppgui := load Command "pppchat.dis";
 	if(pppgui == nil){
-		sys->fprint(sys->fildes(2), "ppplink: can't load %s: %r\n", "/dis/svc/nppp/pppchat.dis");
+		sys->fprint(sys->fildes(2), "ppplink: can't load %s: %r\n", "/zx/svc/nppp/pppchat.dis");
 		# TO DO: should be optional
 		sync <-= 0;
 	}

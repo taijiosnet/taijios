@@ -33,7 +33,7 @@ CreateDirTree :: (path: string) -> bool {
 RunMemfs :: () -> bool {
     ops: [1]string = .["/n/remote"];
     meta: [12]u8;
-    memfs_path := ifx IO.Stat("/dis/memfs.zx", meta[:]) == 0 then "/dis/memfs.zx" else "/dis/memfs.dis";
+    memfs_path := ifx IO.Stat("/zx/memfs.zx", meta[:]) == 0 then "/zx/memfs.zx" else "/zx/memfs.dis";
     outcome := Process.Run(memfs_path, ops[:]);
     return outcome.status >= 0 && outcome.error.count == 0;
 }

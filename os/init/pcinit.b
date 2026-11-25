@@ -190,9 +190,9 @@ init()
 	if(SHELL) {
 		sys->print("shell...\n");
 
-		logon := load Logon "/dis/sh.dis";
+		logon := load Logon "/zx/sh.dis";
 		if(logon == nil) {
-			sys->print("init: load /dis/wm/logon.dis: %r");
+			sys->print("init: load /zx/wm/logon.dis: %r");
 			exit;
 		}
 		dc: ref Draw->Context;
@@ -292,7 +292,7 @@ run(dc: ref Draw->Context, argv: list of string): string
 		ext = "";
 	sh:= load Sh prog+ext;
 	if(sh == nil)
-		sh = load Sh "/dis/"+prog+ext;
+		sh = load Sh "/zx/"+prog+ext;
 	if(sh == nil)
 		return sys->sprint("%s: load: %r", prog);
 

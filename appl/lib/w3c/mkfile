@@ -10,6 +10,6 @@ SYSMODULES= \
 	bufio.m\
 	css.m\
 
-DISBIN=$ROOT/dis/lib/w3c
+DISBIN=$ROOT/zx/lib/w3c
 
 <$ROOT/mkfiles/mkdis

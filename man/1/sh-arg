@@ -81,7 +81,7 @@ where
 .B f
 takes a file name argument.
 .EX
-#!/dis/sh
+#!/zx/sh
 load arg
 bflag := cflag := 0
 file  := ()

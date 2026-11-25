@@ -4,7 +4,7 @@ TARG=\
 
 SYSMODULES=\
 
-DISBIN=$ROOT/dis/dbm
+DISBIN=$ROOT/zx/dbm
 
 <$ROOT/mkfiles/mkdis
 

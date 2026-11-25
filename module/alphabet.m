@@ -1,5 +1,5 @@
 Alphabet: module {
-	PATH: con "/dis/alphabet/alphabet.dis";
+	PATH: con "/zx/alphabet/alphabet.dis";
 	ONDEMAND, CHECK: con 1<<iota;
 
 	init:	fn();
@@ -111,7 +111,7 @@ Mainmodule: module {
 
 # evaluate an expression
 Eval: module {
-	PATH: con "/dis/alphabet/eval.dis";
+	PATH: con "/zx/alphabet/eval.dis";
 	init: fn();
 
 	Context: adt[V, M, Ectxt]
@@ -163,7 +163,7 @@ Eval: module {
 };
 
 Extvalues: module {
-	PATH: con "/dis/alphabet/extvalues.dis";
+	PATH: con "/zx/alphabet/extvalues.dis";
 	Values: adt[V] {
 		lock: chan of int;
 		v: array of (int, V);
@@ -177,7 +177,7 @@ Extvalues: module {
 
 # generic proxy implementation:
 Proxy: module {
-	PATH: con "/dis/alphabet/proxy.dis";
+	PATH: con "/zx/alphabet/proxy.dis";
 
 	# operators on a type system
 	Typescmd: adt[V] {

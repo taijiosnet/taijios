@@ -1,6 +1,6 @@
 Charon : module
 {
-	PATH: con "/dis/charon.dis";
+	PATH: con "/zx/charon.dis";
 
 	Context: adt {
 		ctxt: ref Draw->Context;

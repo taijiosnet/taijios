@@ -22,7 +22,7 @@ make -C site live     # compare https://taijios.net/ with build/site and boot it
 
 Requirements: Emscripten (`EMSDK`, default `~/emsdk`), the Ziran checkout
 (`ZIRAN_ROOT`), `ziran`, `gzip`, `chromium` and `tesseract`, and the built
-guest in `dis/`, including the ZX bundles the preinstall manifest names.
+guest in `zx/`, including the ZX bundles the preinstall manifest names.
 
 ## What ships in the first download
 

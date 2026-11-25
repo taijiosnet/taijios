@@ -214,17 +214,17 @@ index.
 .SH SOURCE
 .B /appl/wm/man.b
 .br
-.B /dis/man
+.B /zx/man
 .IR sh (1)
 script
 .br
 .B /appl/cmd/man2txt.b
 .br
-.B /dis/lookman
+.B /zx/lookman
 .IR sh (1)
 script
 .br
-.B /dis/sig
+.B /zx/sig
 .IR sh (1)
 script
 .br

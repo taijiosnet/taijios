@@ -49,7 +49,7 @@ main :: () -> s32 {
     if !Expect(*tcl, "fixture_word", .Error, "library callback requires one argument") { return 11 }
     if !Expect(*tcl, "load conflicts", .Error, "command \"fixture_word\" already exists") { return 12 }
     if !Expect(*tcl, "unpublished test", .Error, "invalid command name \"unpublished\"") { return 13 }
-    if !Expect(*other, "load probe", .Error, "Cannot load /dis/lib/tcl_probe.dis") { return 14 }
+    if !Expect(*other, "load probe", .Error, "Cannot load /zx/lib/tcl_probe.dis") { return 14 }
 
     if !Expect(*tcl, "package names", .Error, "invalid command name \"package\"") { return 16 }
     Packages.Attach(*tcl);

@@ -129,7 +129,7 @@ def check_bridge(emu, overlay):
             ("bind '#p' /prog; sleep 5 &; sleep 1;", '', 'TASK_BRIDGE_OK'),
             ('bind /usr /prog;', 'masked', 'TASK_NAMESPACE_OK'),
         ):
-            proc = subprocess.run([emu, '-p', 'main=32M', '-r', ROOT, '/dis/sh.dis', '-c',
+            proc = subprocess.run([emu, '-p', 'main=32M', '-r', ROOT, '/zx/sh.dis', '-c',
                                    f'{overlay}{setup} zxrun {guest_image} {arguments}'],
                                   start_new_session=True, text=True, capture_output=True, timeout=15)
             assert proc.returncode in (0, -9), proc
@@ -151,7 +151,7 @@ def check_cpu(emu, overlay):
         subprocess.run(['zi2zx', '--root', scratch, '--module-path', ROOT / 'appl/cmd',
                         '--bind-host', 'taijios_tasks', '--entry', 'cpu_probe:main', '-o', image, source], check=True)
         guest = '/' + scratch.relative_to(ROOT).as_posix()
-        proc = subprocess.run([emu, '-p', 'main=32M', '-r', ROOT, '/dis/sh.dis', '-c',
+        proc = subprocess.run([emu, '-p', 'main=32M', '-r', ROOT, '/zx/sh.dis', '-c',
                                f"{overlay}bind '#p' /prog; {guest}/cpu_busy.dis &; sleep 8 &; sleep 1; "
                                f'zxrun {guest}/cpu_probe.zx; sleep 1; zxrun {guest}/cpu_probe.zx'],
                               start_new_session=True, text=True, capture_output=True, timeout=12)
@@ -182,8 +182,8 @@ def check_gui(emu, overlay, legacy, resize):
     with private_display() as env:
         # The only sleeper this test can select belongs to this disposable guest.
         toolbar = 'wm/toolbar -l' if legacy else 'wm/toolbar'
-        guest = launch(env, emu, '-p', 'main=32M', '-r', ROOT, '-g', '800x600', '/dis/sh.dis', '-c',
-                       f"{overlay}wm/wm /dis/sh.dis -c 'sleep 90 &; ps; {toolbar}'",
+        guest = launch(env, emu, '-p', 'main=32M', '-r', ROOT, '-g', '800x600', '/zx/sh.dis', '-c',
+                       f"{overlay}wm/wm /zx/sh.dis -c 'sleep 90 &; ps; {toolbar}'",
                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         def command(*args, data=None, check=True):

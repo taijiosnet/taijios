@@ -14,10 +14,10 @@ if '--guest-overlay' in sys.argv[2:]:
     if not path.is_dir() or not path.is_relative_to(root) or path == root:
         sys.exit('--guest-overlay requires a directory under the TaijiOS root')
     mount = "'/" + path.relative_to(root).as_posix().replace("'", "''") + "'"
-    overlay = f'bind -b {mount} /dis; bind -b {mount} /dis/wm; bind -b {mount} /dis/lib; '
+    overlay = f'bind -b {mount} /zx; bind -b {mount} /zx/wm; bind -b {mount} /zx/lib; '
 
 def run(command):
-    proc = subprocess.run([emu, '-r', root, '/dis/sh.dis', '-c', overlay + command],
+    proc = subprocess.run([emu, '-r', root, '/zx/sh.dis', '-c', overlay + command],
                           start_new_session=True, capture_output=True, text=True, timeout=25)
     print(repr(proc.stdout), repr(proc.stderr), proc.returncode)
     assert proc.returncode in (0, -9)
@@ -27,7 +27,7 @@ ok = run("echo TAIJIOS_BOOT_OK; bind -c /build/zx-smoke /chan; cd /chan; "
     "zxrun 'hello app.zx' > guest.stdout; echo ZX_RUN_DONE")
 assert ok.stdout == "TAIJIOS_BOOT_OK\nZX_RUN_DONE\n" and ok.stderr == ""
 assert (files / 'guest.stdout').read_text() == 'Hello from ZX 42\n4294967338\n'
-failed = run('/dis/zxrun.dis /build/zx-smoke/bad.zx >[2] /build/zx-smoke/guest.stderr; echo $status; echo DIS_OK')
+failed = run('/zx/zxrun.dis /build/zx-smoke/bad.zx >[2] /build/zx-smoke/guest.stderr; echo $status; echo DIS_OK')
 assert 'zx\n' in failed.stdout and 'DIS_OK\n' in failed.stdout
 assert 'invalid ZX image' in (files / 'guest.stderr').read_text()
 pipe = run("zxrun '/build/zx-smoke/hello app.zx' | cat; echo PIPE_OK")
@@ -140,7 +140,7 @@ if '--runtime' in sys.argv[2:]:
     unbound = run('zxrun /build/zx-smoke/linked.zx >[2] /build/zx-smoke/module.stderr; echo $status')
     assert unbound.stdout == 'zx\n' and unbound.stderr == ''
     assert 'ZX module not found: guest_counter' in (files / 'module.stderr').read_text()
-    linked = run('bind -b /build/zx-smoke/modules /dis/lib; '
+    linked = run('bind -b /build/zx-smoke/modules /zx/lib; '
                  'zxrun /build/zx-smoke/linked.zx | cat; echo GUEST_MODULE_OK')
     assert linked.stdout == 'Guest module received 41\n42\nGUEST_MODULE_OK\n'
     assert linked.stderr == ''
@@ -215,7 +215,7 @@ def graphics():
         guest = ['wm/wm', app, *args]
         if overlay:
             command = ' '.join("'" + str(arg).replace("'", "''") + "'" for arg in guest)
-            guest = ['/dis/sh.dis', '-c', overlay + command]
+            guest = ['/zx/sh.dis', '-c', overlay + command]
         return subprocess.Popen([emu, *pool, '-r', root, '-g', '800x600', *guest], env=env,
                                 start_new_session=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
@@ -286,7 +286,7 @@ def graphics():
             (setup / 'wmsetup').write_text(
                 f"{{cat {guest}/input | {{zxrun -c -p -w /build/zx-smoke/windowio.zx "
                 "mode 'café marker'; echo WINDOWIO_STATUS $status; ps; echo WINDOWIO_DONE}} &\n")
-            proc = subprocess.Popen([emu, '-r', root, '-g', '800x600', '/dis/sh.dis', '-c',
+            proc = subprocess.Popen([emu, '-r', root, '-g', '800x600', '/zx/sh.dis', '-c',
                                      f'{overlay}bind -b {guest} /lib; wm/wm'], env=env,
                                     stdin=subprocess.DEVNULL, start_new_session=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)

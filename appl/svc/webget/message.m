@@ -1,6 +1,6 @@
 Message: module
 {
-	PATH:	con "/dis/svc/webget/message.dis";
+	PATH:	con "/zx/svc/webget/message.dis";
 
 	init: fn(bufio: Bufio, smod: String);
 

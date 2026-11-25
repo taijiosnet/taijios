@@ -1,4 +1,4 @@
-// /dis/fs/path.zx module entry point (replaces appl/cmd/fs/path.b).
+// /zx/fs/path.zx module entry point (replaces appl/cmd/fs/path.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "pss*-x" }

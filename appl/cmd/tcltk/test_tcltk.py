@@ -68,7 +68,7 @@ def launch(env, *args, **options):
 
 
 def reference(env, fixture="tk_commands.tcl", expected=None):
-    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c",
+    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/zx/sh.dis", "-c",
                  f"tkcmd < /appl/cmd/tcltk/{fixture}", stdin=subprocess.DEVNULL,
                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = bytearray()
@@ -105,7 +105,7 @@ def interaction(env, image, script, exercise, *, size=(300, 208)):
     run = f"zxrun -w {path}"
     if script is not None:
         run += f" < /{script.relative_to(ROOT)}"
-    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c",
+    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/zx/sh.dis", "-c",
                  run,
                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = bytearray()
@@ -340,7 +340,7 @@ def file_and_manual_probe(env):
     compile_image("man_probe", image, "--bind-host", "taijios_files")
     (BUILD / "man-mount").mkdir(exist_ok=True)
     script = "bind /man/1 /build/tcltk/man-mount; zxrun /build/tcltk/man_probe.zx"
-    result = command(EMU, "-r", ROOT, "/dis/sh.dis", "-c", script, env=env, stdin=subprocess.DEVNULL,
+    result = command(EMU, "-r", ROOT, "/zx/sh.dis", "-c", script, env=env, stdin=subprocess.DEVNULL,
                      start_new_session=True,
                      capture_output=True, text=True)
     expected = "Guest namespace offsets, mount, errors, real manual lookup and formatting verified\n0\n"
@@ -361,7 +361,7 @@ def coffee_window(env, run, *, native):
         art = (4, 50, 404, 350)
         button = (2, 25, 42, 43)
         close_x = 396
-    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c", run,
+    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/zx/sh.dis", "-c", run,
                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         window = until(lambda: command("xdotool", "search", "--onlyvisible", "--name", "^inferno$",
@@ -470,10 +470,10 @@ def main():
     assert portable.stdout.splitlines() == [".f.input.e", "aßéz", *COFFEE_RESULTS, "0"] and not portable.stderr, (
         portable.stdout, portable.stderr
     )
-    coffee = (ROOT / "dis" if args.installed else BUILD) / "coffee.zx"
+    coffee = (ROOT / "zx" if args.installed else BUILD) / "coffee.zx"
     if args.installed:
-        image = ROOT / "dis/tcltk.zx"
-        manual = ROOT / "dis/man.zx"
+        image = ROOT / "zx/tcltk.zx"
+        manual = ROOT / "zx/man.zx"
     else:
         image = BUILD / "tcltk.zx"
         if not args.coffee_only:

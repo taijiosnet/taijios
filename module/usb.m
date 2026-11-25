@@ -1,6 +1,6 @@
 Usb: module
 {
-	PATH: con "/dis/lib/usb/usb.dis";
+	PATH: con "/zx/lib/usb/usb.dis";
 	DATABASEPATH: con "/lib/usbdb";
 	RH2D: con 0<<7;
 	RD2H: con 1<<7;

@@ -20,7 +20,7 @@ from test_tcltk import BUILD, EMU, ROOT, SOURCES, command, compile_image, launch
 
 @contextmanager
 def desktop(env, script):
-    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/dis/sh.dis", "-c", script,
+    app = launch(env, EMU, "-r", ROOT, "-g", "800x600", "wm/wm", "/zx/sh.dis", "-c", script,
                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         yield app
@@ -141,7 +141,7 @@ def exercise(env, invocation, *, device_fixture, hosted=False):
 
 def main():
     cli = argparse.ArgumentParser()
-    cli.add_argument("--installed", action="store_true", help="exercise /dis/wm/memory.zx")
+    cli.add_argument("--installed", action="store_true", help="exercise /zx/wm/memory.zx")
     args = cli.parse_args()
     BUILD.mkdir(parents=True, exist_ok=True)
     model = BUILD / "memory_model_test.zx"
@@ -159,7 +159,7 @@ def main():
     portable = command("zi2zx", "run", "--backend", "engine", canvas, capture_output=True, text=True, check=True)
     assert portable.stdout.splitlines() == [*oracle, "0"] and not portable.stderr, portable
     print("Ziran Tk matched the recorded Inferno canvas creation, sizes, coordinates, bounds and item text")
-    image = ROOT / "dis/wm/memory.zx" if args.installed else BUILD / "memory.zx"
+    image = ROOT / "zx/wm/memory.zx" if args.installed else BUILD / "memory.zx"
     if not args.installed:
         compile_image("memory_app", image, "--module-path", ROOT / "appl/wm", "--bind-host", "zx_surface",
                       "--bind-host", "taijios_files", "--bind-host", "taijios_clock")

@@ -37,8 +37,8 @@ def main():
             bundle = OUTPUT / 'rill.zx'
             shutil.copyfile(RILL / 'build/rill.zx', bundle)
             command = [str(ROOT / 'emu/Linux/o.emu'), '-p', 'main=128M', '-r', str(ROOT),
-                       '-g', '1024x768', '/dis/sh.dis', '-c',
-                       'bind /build/desktop-registry/rill.zx /dis/wm/rill.zx; wm/wm']
+                       '-g', '1024x768', '/zx/sh.dis', '-c',
+                       'bind /build/desktop-registry/rill.zx /zx/wm/rill.zx; wm/wm']
             output = OUTPUT / 'guest-applications.png'
         else:
             applications = OUTPUT / 'applications'

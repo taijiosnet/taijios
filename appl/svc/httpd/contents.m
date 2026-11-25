@@ -1,6 +1,6 @@
 Contents: module
 {
-	PATH:		con	"/dis/svc/httpd/contents.dis";
+	PATH:		con	"/zx/svc/httpd/contents.dis";
 
 	Content: adt{
 		generic: string;

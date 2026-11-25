@@ -82,8 +82,8 @@ syms:=		array[SymHash] of list of ref Sym;
 
 sblpath :=	array[] of
 {
-	("/dis/",	"/appl/cmd/"),
-	("/dis/",	"/appl/"),
+	("/zx/",	"/appl/cmd/"),
+	("/zx/",	"/appl/"),
 };
 
 init(): int

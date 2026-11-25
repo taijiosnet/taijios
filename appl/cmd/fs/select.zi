@@ -1,4 +1,4 @@
-// /dis/fs/select.zx module entry point (replaces appl/cmd/fs/select.b).
+// /zx/fs/select.zx module entry point (replaces appl/cmd/fs/select.b).
 Eval :: #import "fs_eval";
 
 Types :: () -> string { return "tpt" }

@@ -36,7 +36,7 @@ SYSMODULES= \
 	tkclient.m\
 	workdir.m\
 
-DISBIN=$ROOT/dis/grid
+DISBIN=$ROOT/zx/grid
 
 <$ROOT/mkfiles/mkdis
 <$ROOT/mkfiles/mksubdirs

@@ -235,7 +235,7 @@ main(argl : list of string)
 	snarfrune = utils->stralloc(NSnarf);
 	sys->pctl(Sys->FORKNS|Sys->FORKENV, nil);
 	utils->setenv("font", fontnames[0]);
-	sys->bind("/acme/dis", "/dis", Sys->MBEFORE);
+	sys->bind("/acme/dis", "/zx", Sys->MBEFORE);
 	wdir = workdir->init();
 	if (wdir == nil)
 		wdir = ".";

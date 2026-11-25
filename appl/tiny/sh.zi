@@ -199,7 +199,7 @@ Parse :: (words: *Vec(Text), pipes: *Vec(Pipeline)) -> bool {
 }
 
 // The ZX program for a command, as exec: cmd.zx where it is named, else
-// in /dis; or the reason there is none.
+// in /zx; or the reason there is none.
 Resolve :: (cmd: string, path: *Text, err: *Text) -> bool {
     file: Vec(u8);
     if cmd.count >= 4 && cmd[cmd.count - 4:] == ".dis" { unused BuilderAppend(file, cmd[:cmd.count - 4]) } else { unused BuilderAppend(file, cmd) }
@@ -213,10 +213,10 @@ Resolve :: (cmd: string, path: *Text, err: *Text) -> bool {
     absolute := file.count > 0 && (file[0] == #char "/" || (file.count >= 2 && file[0] == #char "." && file[1] == #char "/"));
     if !absolute {
         inbin: Vec(u8);
-        BuilderPrint(*inbin, "/dis/%.zx", TextView(file[:]));
+        BuilderPrint(*inbin, "/zx/%.zx", TextView(file[:]));
         if Executable(TextView(inbin[:]), 73) { SetTo(path, TextView(inbin[:])); return true }
         VecClear(err.bytes);
-        BuilderPrint(*err.bytes, "'/dis/%' does not exist", TextView(dis[:]));
+        BuilderPrint(*err.bytes, "'/zx/%' does not exist", TextView(dis[:]));
     }
     return false;
 }

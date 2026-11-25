@@ -1,6 +1,6 @@
 Gui: module {
-	PATH: con "/dis/acme/gui.dis";
-	WMPATH: con "/dis/acme/guiwm.dis";
+	PATH: con "/zx/acme/gui.dis";
+	WMPATH: con "/zx/acme/guiwm.dis";
 
 	display : ref Draw->Display;
 	mainwin : ref Draw->Image;

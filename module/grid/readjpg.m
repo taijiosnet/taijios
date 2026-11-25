@@ -1,7 +1,7 @@
 Readjpg: module
 {
 
-	PATH: con "/dis/grid/readjpg.dis";
+	PATH: con "/zx/grid/readjpg.dis";
 
 	ImageSource: adt
 	{

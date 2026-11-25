@@ -1,4 +1,4 @@
-// Top-level /dis/fs.zx command (replaces appl/cmd/fs.b).
+// Top-level /zx/fs.zx command (replaces appl/cmd/fs.b).
 Eval :: #import "fs_eval";
 
 main :: () -> s32 {

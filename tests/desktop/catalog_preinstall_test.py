@@ -92,7 +92,7 @@ def main():
     # A missing-bundle row must emit nothing, proven with a row that cannot exist.
     probe = output / 'lib/preinstall-probe.list'
     probe.write_text(
-        'taijios\t/dis/wm/__absent_probe__.zx\torg.taijiosnet.wm-__absent_probe__\tProbe\tsystem\tSystem\t\t\tlazy\n',
+        'taijios\t/zx/wm/__absent_probe__.zx\torg.taijiosnet.wm-__absent_probe__\tProbe\tsystem\tSystem\t\t\tlazy\n',
         encoding='utf-8')
     subprocess.run([sys.executable, str(GENERATOR), '--preinstall', str(probe), '--output-root', str(output)],
                    check=True, stdout=subprocess.DEVNULL)

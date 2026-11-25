@@ -101,7 +101,7 @@ built from this checkout:
 
 ```sh
 python3 appl/cmd/tcltk/test_tcltk.py
-target="$PWD/dis/tcltk.zx"
+target="$PWD/zx/tcltk.zx"
 (cd appl/cmd && mk "$target")
 (cd appl/cmd && mk install-coffee-zx install-man-zx)
 python3 appl/cmd/tcltk/test_tcltk.py --installed
@@ -115,10 +115,10 @@ python3 appl/cmd/tcltk/test_logwindow.py
 (cd appl/cmd && mk install-logwindow-zx)
 python3 appl/cmd/tcltk/test_logwindow.py --installed
 python3 appl/cmd/tcltk/test_memory.py
-install -m 0644 build/tcltk/memory.zx dis/wm/memory.zx
+install -m 0644 build/tcltk/memory.zx zx/wm/memory.zx
 python3 appl/cmd/tcltk/test_memory.py --installed
 python3 appl/cmd/tcltk/test_linbench.py
-install -m 0644 build/tcltk/linbench.zx dis/math/linbench.zx
+install -m 0644 build/tcltk/linbench.zx zx/math/linbench.zx
 python3 appl/cmd/tcltk/test_linbench.py --installed
 python3 appl/cmd/tcltk/test_graph0.py
 (cd appl/cmd && mk install-graph0-zx)
@@ -137,14 +137,14 @@ The general Tk launcher reads guest stdin until EOF and accepts scripts up to
 Taiji graphical shell run:
 
 ```sh
-zxrun -w /dis/tcltk.zx < /appl/cmd/tcltk/bounce_controls.tcl
-zxrun -w /dis/man.zx
-zxrun -w /dis/coffee.zx
-zxrun -p -w /dis/wm/logwindow.zx 'System log' < /path/to/log
-zxrun -p -w /dis/wm/memory.zx
-zxrun -p -w /dis/math/linbench.zx
-zxrun -w /dis/math/graph0.zx /path/to/coordinates.xy
-zxrun -w /dis/wm/dir.zx /path/to/directory
+zxrun -w /zx/tcltk.zx < /appl/cmd/tcltk/bounce_controls.tcl
+zxrun -w /zx/man.zx
+zxrun -w /zx/coffee.zx
+zxrun -p -w /zx/wm/logwindow.zx 'System log' < /path/to/log
+zxrun -p -w /zx/wm/memory.zx
+zxrun -p -w /zx/math/linbench.zx
+zxrun -w /zx/math/graph0.zx /path/to/coordinates.xy
+zxrun -w /zx/wm/dir.zx /path/to/directory
 ```
 
 Log Window accepts `-e` to close when input ends. By default it prints `Got EOF`
@@ -155,7 +155,7 @@ the image path. Both forms accept an optional title.
 To start the manual browser directly from the project root:
 
 ```sh
-Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /dis/man.zx
+Linux/386/bin/emu -r "$PWD" -g 800x600 wm/wm zxrun -w /zx/man.zx
 ```
 
 Man opens `man(1)` on startup. Enter a topic such as `ls`, `lc(1)`, or `2 sys-open`.
@@ -199,7 +199,7 @@ and the artwork corner recorded from the Dis version.
 The ZX run also verifies that each slider tracks a held drag, retains its value,
 and leaves the paused frame frozen. To run the Coffee tests alone, use
 `python3 appl/cmd/tcltk/test_tcltk.py --coffee-only` and add `--installed` to
-exercise `/dis/coffee.zx`.
+exercise `/zx/coffee.zx`.
 
 `test_logwindow.py` compares the Tk model with Inferno `tkcmd` and runs the
 original and hosted Log Window against a live guest pipe in a private WM
@@ -250,13 +250,13 @@ types and their labels, then exercises the sort and view commands and Walk
 from the icon grid. It compares text rows, all four sort orders, and live
 window titles, and checks selection, scrolling and recovery when a directory
 in the listing disappears. Run with `--installed` to exercise
-`/dis/wm/dir.zx`.
+`/zx/wm/dir.zx`.
 
 `test_dir_geometry.py` compares the startup Canvas width and the full glyphs
 of a 65-character UTF-8 filename with the Dis Directory Browser in private Xvfb.
 It also checks that Walk widens the existing window without moving it, and
 that the same window can navigate back through `..`. Run with `--installed`
-to test `/dis/wm/dir.zx`.
+to test `/zx/wm/dir.zx`.
 
 `test_cursor.py` compares `cursor -image` and `cursor -default` with stock
 `tkcmd`. It reads the cursor pixels and hotspot from private Xvfb and checks
@@ -271,7 +271,7 @@ same app. The ZX copy has a UTF-8 filename with a space and mode `0644`. The
 test checks that it shares the executable icon and text kind with the Dis
 module. Launches use the guest window service. Directory Browser chooses what
 to open and formats the plumbing message in Ziran. Run with `--installed` to
-test `/dis/wm/dir.zx`.
+test `/zx/wm/dir.zx`.
 
 `test_canvas_items.py` compares tag and item command results with `tkcmd`. It
 drives overlapping Canvas items on both the stock and hosted desktops in
@@ -290,7 +290,7 @@ uses the Directory Browser's masked folder bitmap and scrollbar wiring in
 private Xvfb. It checks pixel clipping, scrollbar arrow and trough presses,
 allocated widths, and item hits and coordinates after scrolling. Use
 `python3 appl/cmd/tcltk/test_canvas_viewport.py --installed` to test
-`/dis/tcltk.zx`.
+`/zx/tcltk.zx`.
 
 `test_canvas_distances.py` compares Canvas dimensions, item coordinates, stroke
 widths, and scroll distances with `tkcmd`. In private Xvfb it verifies the
@@ -309,7 +309,7 @@ and use a runner in `build/tcltk`.
 guest namespace supplies a different `/dev/sysctl`. It also opens a script in
 the generic runner and compares the exact foreground pixels of a 1-bit bitmap
 after deleting its name. Run without `--installed` to build both ZX apps first.
-In the Taiji graphical shell, launch About with `zxrun -w /dis/wm/about.zx`.
+In the Taiji graphical shell, launch About with `zxrun -w /zx/wm/about.zx`.
 
 ## Supported commands
 

@@ -1,5 +1,5 @@
 Scroll : module {
-	PATH : con "/dis/acme/scrl.dis";
+	PATH : con "/zx/acme/scrl.dis";
 
 	init : fn(mods : ref Dat->Mods);
 	scrsleep : fn(n : int);

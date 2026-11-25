@@ -1,6 +1,6 @@
 Tabs: module
 {
-	PATH:	con "/dis/lib/tabs.dis";
+	PATH:	con "/zx/lib/tabs.dis";
 
 	init:	fn();
 

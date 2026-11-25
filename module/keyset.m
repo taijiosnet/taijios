@@ -1,6 +1,6 @@
 Keyset: module
 {
-	PATH:	con "/dis/lib/keyset.dis";
+	PATH:	con "/zx/lib/keyset.dis";
 
 	init:	fn(): string;
 	pkhash:	fn(pk: string): string;

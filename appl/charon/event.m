@@ -1,5 +1,5 @@
 Events: module {
-	PATH: con "/dis/charon/event.dis";
+	PATH: con "/zx/charon/event.dis";
 	Event: adt {
 		pick {
 			Ekey =>

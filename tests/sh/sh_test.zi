@@ -1,6 +1,6 @@
 // Parity test for the ZX shell, appl/cmd/sh/sh.zi built as sh.zx.
 // tests/sh/corpus.txt holds the scripts; tests/sh/goldens.txt holds what
-// the Limbo shell, /dis/sh.dis, printed for each: standard output, standard
+// the Limbo shell, /zx/sh.dis, printed for each: standard output, standard
 // error and the status its caller saw. Each case boots its own guest, in
 // which a driver script run by the shell under test starts the case in a
 // fresh shell: the ZX guest boots without Dis. Paths under the private
@@ -9,7 +9,7 @@
 // From the TaijiOS root, after `(cd appl/cmd && mk install)` and
 // `(cd appl/cmd/sh && mk install-zx)`:
 //     ziran run --target=c --root tests/sh tests/sh/sh_test.zi -- [--shell GUEST.zx] [--record] [--dis] [EMU]
-// --shell picks the ZX shell (default /dis/sh.zx). --record runs the Dis
+// --shell picks the ZX shell (default /zx/sh.zx). --record runs the Dis
 // shell instead and rewrites goldens.txt, keeping the goldens of frozen
 // cases, whose Limbo programs are gone; --dis also checks the Dis shell
 // against the goldens. EMU defaults to emu/Linux/o.emu.
@@ -200,7 +200,7 @@ Prepare :: (kind: string, shell: string) -> bool {
         driver: Vec(u8);
         BuilderPrint(*driver, "W = %/%\nX = %\n", GUESTWORK, kind, suffix);
         if kind == "zx" && cases[i].disguest {
-            BuilderPrint(*driver, "/dis/sh.dis %", TextView(cases[i].args));
+            BuilderPrint(*driver, "/zx/sh.dis %", TextView(cases[i].args));
         } else {
             BuilderPrint(*driver, "% %", shell, TextView(cases[i].args));
         }
@@ -231,7 +231,7 @@ Boot :: (emu: string, kind: string, shell: string, index: s64) -> bool {
 
 BootAll :: (emu: string, kind: string, shell: string) -> bool {
     for i: 0..cases.count - 1 {
-        boot := ifx cases[i].disguest then "/dis/sh.dis" else shell;
+        boot := ifx cases[i].disguest then "/zx/sh.dis" else shell;
         if !Boot(emu, kind, boot, i) { return false }
     }
     return true;
@@ -289,7 +289,7 @@ Compare :: (kind: string) {
 
 Record :: () -> bool {
     out: Vec(u8);
-    unused BuilderAppend(out, "# What /dis/sh.dis printed for each case of corpus.txt, recorded by\n# sh_test --record: escaped status, standard output and standard error.\n");
+    unused BuilderAppend(out, "# What /zx/sh.dis printed for each case of corpus.txt, recorded by\n# sh_test --record: escaped status, standard output and standard error.\n");
     for i: 0..cases.count - 1 {
         status: Text = Result("dis", "status", i);
         o: Text = Result("dis", "out", i);
@@ -314,7 +314,7 @@ Record :: () -> bool {
 }
 
 main :: (argc: s32, argv: **u8) -> s32 {
-    shell := "/dis/sh.zx";
+    shell := "/zx/sh.zx";
     record := false;
     dis := false;
     emu := ifx PathExists("emu/Linux/o.emu") then "emu/Linux/o.emu" else "Linux/386/bin/emu";
@@ -331,10 +331,10 @@ main :: (argc: s32, argv: **u8) -> s32 {
     if record || dis {
         // Frozen cases keep the goldens already recorded.
         if record && !LoadGoldens() { print("cannot read tests/sh/goldens.txt\n"); return 1 }
-        if !Prepare("dis", "/dis/sh.dis") || !BootAll(emu, "dis", "/dis/sh.dis") { return 1 }
+        if !Prepare("dis", "/zx/sh.dis") || !BootAll(emu, "dis", "/zx/sh.dis") { return 1 }
         if record {
             if !Record() { print("cannot write tests/sh/goldens.txt\n"); return 1 }
-            print("sh: recorded % cases from /dis/sh.dis\n", cases.count);
+            print("sh: recorded % cases from /zx/sh.dis\n", cases.count);
             return 0;
         }
     }

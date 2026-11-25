@@ -85,7 +85,7 @@ def main():
         (child / LONG_NAME).touch()
         (directory / "zzzzzzzzzzzz").touch()
         expected = mask_value(json.loads(STOCK_LABEL.read_text()))
-        path = "/dis/wm/dir.zx" if args.installed else guest(image)
+        path = "/zx/wm/dir.zx" if args.installed else guest(image)
         launcher = f"{args.launcher} -w {path}"
         actual = startup(env, args.emulator, f"{launcher} {guest(child)}")
         assert actual == expected, "the Ziran long label pixels differ from the recorded Dis label"

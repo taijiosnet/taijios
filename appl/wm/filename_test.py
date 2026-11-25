@@ -69,12 +69,12 @@ def exercise(args, env, root):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / 'folder').mkdir(exist_ok=True)
     (directory / FILE).write_text('Selected by the ZX File Chooser.\n', encoding='utf-8')
-    bundle = '/' + (ROOT / 'dis/wm/filename.zx').relative_to(ROOT).as_posix()
+    bundle = '/' + (ROOT / 'zx/wm/filename.zx').relative_to(ROOT).as_posix()
     # The guest is rooted at ROOT, so the fixture is named without the host prefix.
     inside = '/' + directory.relative_to(ROOT).as_posix()
     command = guest_overlay(getattr(args, 'guest_overlay', None))
     command += f"wm/wm zxrun -w {bundle} -d '{inside}'"
-    child = launch(env, args.emu, '-p', 'main=128M', '-r', ROOT, '-g', '640x480', '/dis/sh.dis', '-c',
+    child = launch(env, args.emu, '-p', 'main=128M', '-r', ROOT, '-g', '640x480', '/zx/sh.dis', '-c',
                    command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
         def x(*command, check=True):

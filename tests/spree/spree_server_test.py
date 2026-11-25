@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end headless emu + zxrun test for dis/spree/spree.zx 9P server."""
+"""End-to-end headless emu + zxrun test for zx/spree/spree.zx 9P server."""
 import os
 import subprocess
 import sys
@@ -12,7 +12,7 @@ if not os.path.exists(EMU):
 
 def run_emu_until(script: str, sentinel: str, timeout: int = 20) -> str:
     proc = subprocess.Popen(
-        [EMU, "-r", ROOT, "/dis/sh.dis", "-c", script],
+        [EMU, "-r", ROOT, "/zx/sh.dis", "-c", script],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -36,7 +36,7 @@ def run_emu_until(script: str, sentinel: str, timeout: int = 20) -> str:
 
 def main() -> int:
     script = r"""
-mount -A {zxrun /dis/spree/spree.zx} /n/remote
+mount -A {zxrun /zx/spree/spree.zx} /n/remote
 echo -n 'NAME:'
 cat /n/remote/name
 echo ''

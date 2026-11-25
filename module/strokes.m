@@ -3,7 +3,7 @@
 #
 Strokes: module
 {
-	PATH:	con "/dis/lib/strokes/strokes.dis";
+	PATH:	con "/zx/lib/strokes/strokes.dis";
 
 	Penpoint: adt
 	{
@@ -79,7 +79,7 @@ Strokes: module
 
 Readstrokes: module
 {
-	PATH: con "/dis/lib/strokes/readstrokes.dis";
+	PATH: con "/zx/lib/strokes/readstrokes.dis";
 
 	init:	fn(nil: Strokes);
 	read_classifier:	fn(file: string, build: int, needex: int): (string, ref Strokes->Classifier);
@@ -89,7 +89,7 @@ Readstrokes: module
 
 Writestrokes: module
 {
-	PATH: con "/dis/lib/strokes/writestrokes.dis";
+	PATH: con "/zx/lib/strokes/writestrokes.dis";
 
 	init:	fn(nil: Strokes);
 	write_digest:	fn(fd: ref Sys->FD, nil: array of string, nil: array of ref Strokes->Stroke): string;
@@ -98,7 +98,7 @@ Writestrokes: module
 
 Buildstrokes: module
 {
-	PATH: con "/dis/lib/strokes/buildstrokes.dis";
+	PATH: con "/zx/lib/strokes/buildstrokes.dis";
 
 	init:	fn(nil: Strokes);
 	canonical_example:	fn(n: int, cnames: array of string, nil: array of list of ref Strokes->Stroke): (string, array of ref Strokes->Stroke, array of ref Strokes->Stroke);

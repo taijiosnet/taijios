@@ -1,6 +1,6 @@
 Bufio: module
 {
-	PATH:		con "/dis/lib/bufio.dis";
+	PATH:		con "/zx/lib/bufio.dis";
 
 	SEEKSTART:	con Sys->SEEKSTART;
 	SEEKRELA:	con Sys->SEEKRELA;
@@ -63,7 +63,7 @@ BufioFill: module
 
 ChanFill: module
 {
-	PATH:	con "/dis/lib/chanfill.dis";
+	PATH:	con "/zx/lib/chanfill.dis";
 
 	init:	fn(data: array of byte, fid: int, wc: Sys->Rwrite, r: ref Sys->FileIO, b: Bufio): ref Bufio->Iobuf;
 	fill:	fn(b: ref Bufio->Iobuf): int;

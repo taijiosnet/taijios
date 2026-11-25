@@ -1,6 +1,6 @@
 Readdir: module
 {
-	PATH:	con	"/dis/lib/readdir.dis";
+	PATH:	con	"/zx/lib/readdir.dis";
 
 	# sortkey is one of NAME, ATIME, MTIME, SIZE, or NONE
 	# possibly with DESCENDING or'd in

@@ -18,7 +18,7 @@ init(nil: ref Draw->Context, argv: list of string)
 	sys = load Sys Sys->PATH;
 	stderr = sys->fildes(2);
 
-	ns := load Newns "/dis/lib/newns.dis";
+	ns := load Newns "/zx/lib/newns.dis";
 	if(ns == nil) {
 		sys->fprint(stderr, "nsbuild: can't load %s: %r", Newns->PATH);
 		raise "fail:load";

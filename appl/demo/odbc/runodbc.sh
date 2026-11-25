@@ -1,4 +1,4 @@
-#!/dis/sh
+#!/zx/sh
 
 mount -A {auxi/odbcmnt -a tcp!200.1.1.113} /mnt/odbc
 
