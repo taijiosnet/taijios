@@ -1,4 +1,4 @@
-# 2. Libraries - zx/lib/** (boot-loaded rows first) - 143 rows
+# 2. Libraries - zx/lib/** (boot-loaded rows first) - 141 rows
 
 Owner: Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane)
 
@@ -114,8 +114,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/lib/scoretable.dis | appl/lib/scoretable.b | module/scoretable.m | - |  |
 | zx/lib/secstore.dis | appl/lib/secstore.b | module/secstore.m | - |  |
 | zx/lib/selectfile.dis | appl/lib/selectfile.b | module/selectfile.m | - |  |
-| zx/lib/sets.dis | appl/lib/sets.b | module/sets.m | - |  |
-| zx/lib/sets32.dis | appl/lib/sets32.b | module/sets32.m | - |  |
 | zx/lib/sexprs.dis | appl/lib/sexprs.b | module/sexprs.m | - |  |
 | zx/lib/smtp.dis | appl/lib/smtp.b | module/smtp.m | - |  |
 | zx/lib/spki/keyreps.dis | appl/cmd/auth/factotum/proto/keyreps.b |  | - |  |

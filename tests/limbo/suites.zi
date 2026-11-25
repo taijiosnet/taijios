@@ -12,9 +12,10 @@ using Slip :: #import "slip_cases"
 using Ubfa :: #import "ubfa_cases"
 using Uris :: #import "uris_cases"
 using Pointers :: #import "xpointers_cases"
+using Sets :: #import "sets_cases"
 using Golden :: #import "golden"
 
-NAMES: [11]string = .["bloomfilter", "complete", "csv", "diskblocks", "ninep", "rabin", "rfc822", "slip", "ubfa", "uris", "xpointers"];
+NAMES: [12]string = .["bloomfilter", "complete", "csv", "diskblocks", "ninep", "rabin", "rfc822", "slip", "ubfa", "uris", "xpointers", "sets"];
 
 Lines :: (suite: s64, out: *Vec(u8)) {
     if suite == 0 { Bloom.Lines(out) }
@@ -28,6 +29,7 @@ Lines :: (suite: s64, out: *Vec(u8)) {
     if suite == 8 { Ubfa.Lines(out) }
     if suite == 9 { Uris.Lines(out) }
     if suite == 10 { Pointers.Lines(out) }
+    if suite == 11 { Sets.Lines(out) }
 }
 
 // Appends "DIR/NAME.limbo.txt", the file a suite is compared with.

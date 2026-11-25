@@ -1017,8 +1017,8 @@ appl
 		secstore.b
 		scoretable.b
 		selectfile.b
-		sets.b
-		sets32.b
+		sets.zi
+		sets32.zi
 		sexprs.b
 		sha1.zi
 		slip.zi
@@ -1190,7 +1190,6 @@ appl
 			commandline.m
 			objstore.b
 			objstore.m
-			testsets.b
 			tricks.b
 			tricks.m
 		other
@@ -1585,8 +1584,6 @@ zx
 		secstore.dis
 		scoretable.dis
 		selectfile.dis
-		sets.dis
-		sets32.dis
 		sexprs.dis
 		smtp.dis
 		spki
@@ -2190,8 +2187,6 @@ module
 	secstore.m
 	security.m
 	selectfile.m
-	sets.m
-	sets32.m
 	sexprs.m
 	sh.m
 	smtp.m

@@ -1,0 +1,262 @@
+big str2set <:0> -> <:0>
+big str2set <:1> -> <:1>
+big str2set <1234567:0> -> <1234567:0>
+big str2set <deadbeef:1> -> <deadbeef:1>
+big str2set <ffffffff:1> -> <:1>
+big str2set <a:0> -> <a:0>
+big str2set <ff:1> -> <:1>
+big str2set <80000000:0> -> <80000000:0>
+big str2set <12345678:0> -> <12345678:0>
+big str2set <7f:1> -> <7f:1>
+big str2set <123456789:0> -> <123456789:0>
+big str2set <1:1> -> <1:1>
+big str2set <0:0> -> <:0>
+big str2set <00:1> -> <00:1>
+big str2set <ffffffff:0> -> <ffffffff:0>
+big str2set <100000000:1> -> <100000000:1>
+big str2set <e:1> -> <e:1>
+big str2set <76543210:0> -> <76543210:0>
+big bad <> -> <:0>
+big bad <0> -> <:0>
+big bad <x:0> -> <:0>
+big bad <0:x> -> <:0>
+big bad <123> -> <:0>
+big bad <:2> -> <:0>
+show str <:0>
+show debug <:0>
+show limit 0 isempty 1 msb 0 holds0 0 holds33 0
+show bytes4 <00000000>
+show str <408102040810204081:0>
+show debug <40:81020408:10204081::0>
+show limit 71 isempty 0 msb 0 holds0 1 holds33 0
+show bytes4 <814020100804028140>
+show str <8102040810204001:0>
+show debug <0:81020408:10204001::0>
+show limit 64 isempty 0 msb 0 holds0 1 holds33 0
+show bytes4 <014020100804028100>
+show str <10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000038102040a10204001:0>
+show debug <100:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:3:8102040a:10204001::0>
+show limit 1001 isempty 0 msb 0 holds0 1 holds33 2
+show bytes4 <014020100a04028103000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001>
+show str <efffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc7efdfbf5efdfbffe:1>
+show debug <fffffeff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:ffffffff:fffffffc:7efdfbf5:efdfbffe::ffffffff>
+show limit 1001 isempty 0 msb 1 holds0 0 holds33 0
+show bytes4 <febfdfeff5fbfd7efcfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe>
+big X 0 <:0>
+big X 1 <f000f0:0>
+big X 2 <f000f:0>
+big X 3 <ff00ff:0>
+big X 4 <000f000:1>
+big X 5 <0f0f0f0:1>
+big X 6 <00ff00f:1>
+big X 7 <0fff0ff:1>
+big X 8 <f000f00:0>
+big X 9 <ff00ff0:0>
+big X 10 <f0f0f0f:0>
+big X 11 <fff0fff:0>
+big X 12 <00ff00:1>
+big X 13 <0fff0:1>
+big X 14 <0fff0f:1>
+big X 15 <:1>
+big XL 0 <:0>
+big XL 1 <ff00ff00ff0000:0>
+big XL 2 <ff:0>
+big XL 3 <ff00ff00ff00ff:0>
+big XL 4 <00ff00ff00ff00:1>
+big XL 5 <00:1>
+big XL 6 <00ff00ff00ffff:1>
+big XL 7 <:1>
+big XL 8 <:0>
+big XL 9 <ff00ff00ff0000:0>
+big XL 10 <ff:0>
+big XL 11 <ff00ff00ff00ff:0>
+big XL 12 <00ff00ff00ff00:1>
+big XL 13 <00:1>
+big XL 14 <00ff00ff00ffff:1>
+big XL 15 <:1>
+big XS 0 <:0>
+big XS 1 <ff00ff00ff0000:0>
+big XS 2 <00ff00ff00ff00:1>
+big XS 3 <00:1>
+big XS 4 <ff:0>
+big XS 5 <ff00ff00ff00ff:0>
+big XS 6 <00ff00ff00ffff:1>
+big XS 7 <:1>
+big XS 8 <:0>
+big XS 9 <ff00ff00ff0000:0>
+big XS 10 <00ff00ff00ff00:1>
+big XS 11 <00:1>
+big XS 12 <ff:0>
+big XS 13 <ff00ff00ff00ff:0>
+big XS 14 <00ff00ff00ffff:1>
+big XS 15 <:1>
+show str <:1>
+show debug <:ffffffff>
+show limit 0 isempty 0 msb 1 holds0 -1 holds33 -1
+show bytes4 <ffffffff>
+big XA 0 <:0>
+big XA 1 <:0>
+big XA 2 <edcb:1>
+big XA 3 <edcb:1>
+big XA 4 <:0>
+big XA 5 <:0>
+big XA 6 <edcb:1>
+big XA 7 <edcb:1>
+big XA 8 <1234:0>
+big XA 9 <1234:0>
+big XA 10 <:1>
+big XA 11 <:1>
+big XA 12 <1234:0>
+big XA 13 <1234:0>
+big XA 14 <:1>
+big XA 15 <:1>
+big eq 1 1 1 0 1
+big bytes <efbeadde00> <efbeadde00> <efbeadde00> <efbeadde00000000> <efbeadde00>
+big bytesall <ffffff> <ffffffffffff>
+big b2s <> -> <:0>
+big b2s <7f> -> <7f:0>
+big b2s <80> -> <80:1>
+big b2s <ff> -> <:1>
+big b2s <0102> -> <201:0>
+big b2s <010203> -> <30201:0>
+big b2s <01020304> -> <4030201:0>
+big b2s <0102030405> -> <504030201:0>
+big b2s <ffffffff> -> <:1>
+big limit 32 8 0 0
+big holds 256 0 -1 0 -1
+big isempty 1 1 0 0 msb 0 0 1
+big addall <:1>
+big delall <df:1>
+big delall70 <bfffffffffffffffff:1> <71>
+s32 str2set <:0> -> <:0>
+s32 str2set <:1> -> <:1>
+s32 str2set <1234567:0> -> <1234567:0>
+s32 str2set <deadbeef:1> -> <5eadbeef:1>
+s32 str2set <ffffffff:1> -> <:1>
+s32 str2set <a:0> -> <a:0>
+s32 str2set <ff:1> -> <:1>
+s32 str2set <80000000:0> -> <:0>
+s32 str2set <12345678:0> -> <12345678:0>
+s32 str2set <7f:1> -> <7f:1>
+s32 str2set <123456789:0> -> <23456789:0>
+s32 str2set <1:1> -> <1:1>
+s32 str2set <0:0> -> <:0>
+s32 str2set <00:1> -> <00:1>
+s32 str2set <ffffffff:0> -> <7fffffff:0>
+s32 str2set <100000000:1> -> <00000000:1>
+s32 str2set <e:1> -> <e:1>
+s32 str2set <76543210:0> -> <76543210:0>
+s32 str2set <7fffffff:0> -> <7fffffff:0>
+s32 str2set <fffffffe:1> -> <e:1>
+s32 bad <> -> <:0>
+s32 bad <0> -> <:0>
+s32 bad <x:0> -> <:0>
+s32 bad <0:x> -> <:0>
+s32 bad <123> -> <:0>
+s32 bad <:2> -> <:0>
+show str <:0>
+show debug <0>
+show limit 0 isempty 1 msb 0 holds0 0 holds33 0
+show bytes4 <00000000>
+show str <112244c9:1>
+show debug <912244c9>
+show limit 31 isempty 0 msb 1 holds0 1 holds33 0
+show bytes4 <c9442291>
+show str <11224409:1>
+show debug <91224409>
+show limit 31 isempty 0 msb 1 holds0 1 holds33 0
+show bytes4 <09442291>
+show str <1122450b:1>
+show debug <9122450b>
+show limit 31 isempty 0 msb 1 holds0 1 holds33 2
+show bytes4 <0b452291>
+show str <6eddbaf4:0>
+show debug <6eddbaf4>
+show limit 31 isempty 0 msb 0 holds0 0 holds33 0
+show bytes4 <f4badd6e>
+s32 X 0 <:0>
+s32 X 1 <f000f0:0>
+s32 X 2 <f000f:0>
+s32 X 3 <ff00ff:0>
+s32 X 4 <000f000:1>
+s32 X 5 <0f0f0f0:1>
+s32 X 6 <00ff00f:1>
+s32 X 7 <0fff0ff:1>
+s32 X 8 <f000f00:0>
+s32 X 9 <ff00ff0:0>
+s32 X 10 <f0f0f0f:0>
+s32 X 11 <fff0fff:0>
+s32 X 12 <00ff00:1>
+s32 X 13 <0fff0:1>
+s32 X 14 <0fff0f:1>
+s32 X 15 <:1>
+s32 XL 0 <:0>
+s32 XL 1 <ff0000:0>
+s32 XL 2 <ff:0>
+s32 XL 3 <ff00ff:0>
+s32 XL 4 <00ff00:1>
+s32 XL 5 <00:1>
+s32 XL 6 <00ffff:1>
+s32 XL 7 <:1>
+s32 XL 8 <:0>
+s32 XL 9 <ff0000:0>
+s32 XL 10 <ff:0>
+s32 XL 11 <ff00ff:0>
+s32 XL 12 <00ff00:1>
+s32 XL 13 <00:1>
+s32 XL 14 <00ffff:1>
+s32 XL 15 <:1>
+s32 XS 0 <:0>
+s32 XS 1 <ff0000:0>
+s32 XS 2 <00ff00:1>
+s32 XS 3 <00:1>
+s32 XS 4 <ff:0>
+s32 XS 5 <ff00ff:0>
+s32 XS 6 <00ffff:1>
+s32 XS 7 <:1>
+s32 XS 8 <:0>
+s32 XS 9 <ff0000:0>
+s32 XS 10 <00ff00:1>
+s32 XS 11 <00:1>
+s32 XS 12 <ff:0>
+s32 XS 13 <ff00ff:0>
+s32 XS 14 <00ffff:1>
+s32 XS 15 <:1>
+show str <:1>
+show debug <ffffffff>
+show limit 0 isempty 0 msb 1 holds0 1 holds33 2
+show bytes4 <ffffffff>
+s32 XA 0 <:0>
+s32 XA 1 <:0>
+s32 XA 2 <edcb:1>
+s32 XA 3 <edcb:1>
+s32 XA 4 <:0>
+s32 XA 5 <:0>
+s32 XA 6 <edcb:1>
+s32 XA 7 <edcb:1>
+s32 XA 8 <1234:0>
+s32 XA 9 <1234:0>
+s32 XA 10 <:1>
+s32 XA 11 <:1>
+s32 XA 12 <1234:0>
+s32 XA 13 <1234:0>
+s32 XA 14 <:1>
+s32 XA 15 <:1>
+s32 eq 1 1 1 0 1
+s32 bytes <efbead5e> <efbead5e> <efbead5e00> <efbead5e00000000> <efbead5e>
+s32 bytesall <ffffff> <ffffffffffff>
+s32 b2s <> -> <:0>
+s32 b2s <7f> -> <7f:0>
+s32 b2s <80> -> <80:1>
+s32 b2s <ff> -> <:1>
+s32 b2s <0102> -> <201:0>
+s32 b2s <010203> -> <30201:0>
+s32 b2s <01020304> -> <4030201:0>
+s32 b2s <0102030405> -> <4030201:0>
+s32 b2s <ffffffff> -> <:1>
+s32 limit 0 8 0 0
+s32 holds 256 0 64 0 1
+s32 isempty 1 1 0 0 msb 0 0 1
+s32 addall <:1>
+s32 delall <df:1>
+s32 delall70 <bf:1> <7>

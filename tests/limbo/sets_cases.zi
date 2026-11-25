@@ -1,0 +1,551 @@
+// The cases of the integer set test: both set libraries, printed as the
+// Limbo probes printed them, for comparison with sets.limbo.txt. The big
+// set exercises the unlimited word-vector form, the s32 set the 32-bit
+// scalar form with its wrapping quirks.
+using BigSets :: #import "sets"
+using SmallSets :: #import "sets32"
+
+Flag :: (v: bool) -> s64 {
+    return ifx v then 1 else 0
+}
+
+// v as a signed decimal, the way Limbo's %d printed the raw word a
+// holds call returned: the word is 32 bits and the sign sits at its
+// top.
+SignedStr :: (out: *Vec(u8), v: u64) {
+    x := v & 0xFFFFFFFF
+    if (x >> 31) != 0 {
+        BuilderAppend(<<out, "-")
+        DigitStr(out, (0 - x) & 0xFFFFFFFF)
+    } else {
+        DigitStr(out, x)
+    }
+}
+
+DigitStr :: (out: *Vec(u8), v0: u64) {
+    glyphs := "0123456789"
+    tmp: Vec(u8)
+    x := v0
+    if x == 0 { VecPush(tmp, glyphs[0]) }
+    while x != 0 {
+        VecPush(tmp, glyphs[x % 10])
+        x = x / 10
+    }
+    i := tmp.count - 1
+    while i >= 0 {
+        VecPush(<<out, tmp[i])
+        i -= 1
+    }
+}
+
+Hex :: (out: *Vec(u8), bytes: []u8) {
+    glyphs := "0123456789abcdef"
+    for bytes {
+        VecPush(<<out, glyphs[it >> 4])
+        VecPush(<<out, glyphs[it & 15])
+    }
+}
+
+ShowBig :: (out: *Vec(u8), s: *BigSets.Set) {
+    buf: Vec(u8)
+    BigSets.Str(s, *buf)
+    BuilderPrint(out, "show str <%>\n", TextView(buf[:]))
+    VecClear(buf)
+    BigSets.DebugStr(s, *buf)
+    BuilderPrint(out, "show debug <%>\n", TextView(buf[:]))
+    BuilderAppend(<<out, "show limit ")
+    BuilderPrint(out, "%", BigSets.Limit(s))
+    BuilderPrint(out, " isempty % msb % holds0 ", Flag(BigSets.IsEmpty(s)), Flag(BigSets.Msb(s)))
+    SignedStr(out, BigSets.Holds(s, 0))
+    BuilderAppend(<<out, " holds33 ")
+    SignedStr(out, BigSets.Holds(s, 33))
+    BuilderAppend(<<out, "\n")
+    VecClear(buf)
+    BigSets.Bytes(s, 4, *buf)
+    BuilderAppend(<<out, "show bytes4 <")
+    Hex(out, buf[:])
+    BuilderAppend(<<out, ">\n")
+}
+
+ShowSmall :: (out: *Vec(u8), s: *SmallSets.Set) {
+    buf: Vec(u8)
+    SmallSets.Str(s, *buf)
+    BuilderPrint(out, "show str <%>\n", TextView(buf[:]))
+    VecClear(buf)
+    SmallSets.DebugStr(s, *buf)
+    BuilderPrint(out, "show debug <%>\n", TextView(buf[:]))
+    BuilderAppend(<<out, "show limit ")
+    BuilderPrint(out, "%", SmallSets.Limit(s))
+    BuilderPrint(out, " isempty % msb % holds0 ", Flag(SmallSets.IsEmpty(s)), Flag(SmallSets.Msb(s)))
+    SignedStr(out, SmallSets.Holds(s, 0))
+    BuilderAppend(<<out, " holds33 ")
+    SignedStr(out, SmallSets.Holds(s, 33))
+    BuilderAppend(<<out, "\n")
+    VecClear(buf)
+    SmallSets.Bytes(s, 4, *buf)
+    BuilderAppend(<<out, "show bytes4 <")
+    Hex(out, buf[:])
+    BuilderAppend(<<out, ">\n")
+}
+
+Str2Lines :: (out: *Vec(u8), tag: string, strs: []string) {
+    for strs {
+        t: BigSets.Set
+        BigSets.Str2Set(it, *t)
+        buf: Vec(u8)
+        BigSets.Str(*t, *buf)
+        BuilderPrint(out, "% str2set <%> -> <%>\n", tag, it, TextView(buf[:]))
+    }
+}
+
+BigLines :: (out: *Vec(u8)) {
+    strs: [18]string = .[":0", ":1", "1234567:0", "deadbeef:1", "ffffffff:1",
+        "a:0", "ff:1", "80000000:0", "12345678:0", "7f:1", "123456789:0",
+        "1:1", "0:0", "00:1", "ffffffff:0", "100000000:1", "e:1", "76543210:0"]
+    Str2Lines(out, "big", strs[:])
+    bads: [6]string = .["", "0", "x:0", "0:x", "123", ":2"]
+    for bads {
+        t: BigSets.Set
+        BigSets.Str2Set(it, *t)
+        buf: Vec(u8)
+        BigSets.Str(*t, *buf)
+        BuilderPrint(out, "big bad <%> -> <%>\n", it, TextView(buf[:]))
+    }
+
+    s: BigSets.Set
+    BigSets.New(*s)
+    ShowBig(out, *s)
+    BigSets.Add(*s, 0, *s)
+    n := 7
+    while n <= 70 {
+        BigSets.Add(*s, n, *s)
+        n += 7
+    }
+    ShowBig(out, *s)
+    BigSets.Del(*s, 7, *s)
+    BigSets.Del(*s, 70, *s)
+    BigSets.Del(*s, 200, *s)
+    ShowBig(out, *s)
+    ns: [5]s64 = .[0, 33, 64, 65, 1000]
+    BigSets.AddList(*s, ns[:], *s)
+    ShowBig(out, *s)
+    BigSets.Invert(*s, *s)
+    ShowBig(out, *s)
+
+    a: BigSets.Set
+    b: BigSets.Set
+    BigSets.Str2Set("0f0f0f0f:0", *a)
+    BigSets.Str2Set("ff00ff00:1", *b)
+    for o: 0..15 {
+        r: BigSets.Set
+        buf: Vec(u8)
+        BigSets.X(*a, o, *b, *r)
+        BigSets.Str(*r, *buf)
+        BuilderPrint(out, "big X % <%>\n", o, TextView(buf[:]))
+    }
+    a2: BigSets.Set
+    b2: BigSets.Set
+    BigSets.Str2Set("ff:0", *a2)
+    BigSets.Str2Set("ff00ff00ff00ff00:1", *b2)
+    for o: 0..15 {
+        r: BigSets.Set
+        buf: Vec(u8)
+        BigSets.X(*a2, o, *b2, *r)
+        BigSets.Str(*r, *buf)
+        BuilderPrint(out, "big XL % <%>\n", o, TextView(buf[:]))
+    }
+    for o: 0..15 {
+        r: BigSets.Set
+        buf: Vec(u8)
+        BigSets.X(*b2, o, *a2, *r)
+        BigSets.Str(*r, *buf)
+        BuilderPrint(out, "big XS % <%>\n", o, TextView(buf[:]))
+    }
+
+    all: BigSets.Set
+    BigSets.All(*all)
+    ShowBig(out, *all)
+    other: BigSets.Set
+    BigSets.Str2Set("1234:0", *other)
+    for o: 0..15 {
+        r: BigSets.Set
+        buf: Vec(u8)
+        BigSets.X(*all, o, *other, *r)
+        BigSets.Str(*r, *buf)
+        BuilderPrint(out, "big XA % <%>\n", o, TextView(buf[:]))
+    }
+
+    e1: BigSets.Set
+    e2: BigSets.Set
+    e3: BigSets.Set
+    e4: BigSets.Set
+    e5: BigSets.Set
+    e6: BigSets.Set
+    e7: BigSets.Set
+    BigSets.Str2Set("1:0", *e1)
+    BigSets.Str2Set("01:0", *e2)
+    BigSets.Str2Set("000000001:0", *e3)
+    BigSets.Str2Set("1234:0", *e4)
+    BigSets.Str2Set("1235:0", *e5)
+    BigSets.Str2Set(":1", *e6)
+    BigSets.Str2Set("ffffffffffffffff:1", *e7)
+    BuilderPrint(out, "big eq % % % % %\n",
+        Flag(BigSets.Eq(*e1, *e2)), Flag(BigSets.Eq(*e1, *e3)),
+        Flag(BigSets.Eq(*all, *e7)), Flag(BigSets.Eq(*e4, *e5)),
+        Flag(BigSets.Eq(*e6, *all)))
+
+    dset: BigSets.Set
+    BigSets.Str2Set("deadbeef:0", *dset)
+    lens: [5]s64 = .[4, 3, 5, 8, 0]
+    BuilderAppend(<<out, "big bytes")
+    for lens {
+        buf: Vec(u8)
+        BigSets.Bytes(*dset, it, *buf)
+        BuilderAppend(<<out, " <")
+        Hex(out, buf[:])
+        BuilderAppend(<<out, ">")
+    }
+    BuilderAppend(<<out, "\n")
+    b3: Vec(u8)
+    BigSets.Bytes(*all, 3, *b3)
+    BuilderAppend(<<out, "big bytesall <")
+    Hex(out, b3[:])
+    BuilderAppend(<<out, "> <")
+    VecClear(b3)
+    BigSets.Bytes(*all, 6, *b3)
+    Hex(out, b3[:])
+    BuilderAppend(<<out, ">\n")
+
+    d0: [0]u8
+    d1: [1]u8 = .[0x7f]
+    d2: [1]u8 = .[0x80]
+    d3: [1]u8 = .[0xff]
+    d4: [2]u8 = .[1, 2]
+    d5: [3]u8 = .[1, 2, 3]
+    d6: [4]u8 = .[1, 2, 3, 4]
+    d7: [5]u8 = .[1, 2, 3, 4, 5]
+    d8: [4]u8 = .[255, 255, 255, 255]
+    br: BigSets.Set
+    buf2: Vec(u8)
+    BigSets.Bytes2Set(d0[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d1[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <7f> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d2[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <80> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d3[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <ff> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d4[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <0102> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d5[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <010203> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d6[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <01020304> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d7[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <0102030405> -> <%>\n", TextView(buf2[:]))
+    BigSets.Bytes2Set(d8[:], *br)
+    VecClear(buf2)
+    BigSets.Str(*br, *buf2)
+    BuilderPrint(out, "big b2s <ffffffff> -> <%>\n", TextView(buf2[:]))
+
+    l1: BigSets.Set
+    l2: BigSets.Set
+    e0: BigSets.Set
+    BigSets.Str2Set("80000000:0", *l1)
+    BigSets.Str2Set("7f:1", *l2)
+    BigSets.New(*e0)
+    BuilderPrint(out, "big limit % % % %\n",
+        BigSets.Limit(*l1), BigSets.Limit(*l2), BigSets.Limit(*all), BigSets.Limit(*e0))
+
+    h0: BigSets.Set
+    h1: BigSets.Set
+    BigSets.Str2Set("ff00ff00:0", *h0)
+    BigSets.Str2Set("1:1", *h1)
+    BuilderAppend(<<out, "big holds ")
+    SignedStr(out, BigSets.Holds(*h0, 8))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, BigSets.Holds(*h0, 16))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, BigSets.Holds(*all, 70))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, BigSets.Holds(*e0, 70))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, BigSets.Holds(*h1, 64))
+    BuilderAppend(<<out, "\n")
+
+    z00: BigSets.Set
+    m1: BigSets.Set
+    s0: BigSets.Set
+    BigSets.Str2Set("0:0", *z00)
+    BigSets.Str2Set("00000000:1", *m1)
+    BigSets.Str2Set(":0", *s0)
+    BuilderPrint(out, "big isempty % % % % msb % % %\n",
+        Flag(BigSets.IsEmpty(*e0)), Flag(BigSets.IsEmpty(*z00)),
+        Flag(BigSets.IsEmpty(*all)), Flag(BigSets.IsEmpty(*m1)),
+        Flag(BigSets.Msb(*e0)), Flag(BigSets.Msb(*s0)), Flag(BigSets.Msb(*all)))
+
+    r5: BigSets.Set
+    r6: BigSets.Set
+    BigSets.Add(*all, 5, *r5)
+    VecClear(buf2)
+    BigSets.Str(*r5, *buf2)
+    BuilderPrint(out, "big addall <%>\n", TextView(buf2[:]))
+    BigSets.Del(*all, 5, *r6)
+    VecClear(buf2)
+    BigSets.Str(*r6, *buf2)
+    BuilderPrint(out, "big delall <%>\n", TextView(buf2[:]))
+    b70: BigSets.Set
+    BigSets.Str2Set(":1", *b70)
+    BigSets.Del(*b70, 70, *b70)
+    VecClear(buf2)
+    BigSets.Str(*b70, *buf2)
+    BuilderPrint(out, "big delall70 <%> <%>\n", TextView(buf2[:]), BigSets.Limit(*b70))
+}
+
+SmallLines :: (out: *Vec(u8)) {
+    strs: [20]string = .[":0", ":1", "1234567:0", "deadbeef:1", "ffffffff:1",
+        "a:0", "ff:1", "80000000:0", "12345678:0", "7f:1", "123456789:0",
+        "1:1", "0:0", "00:1", "ffffffff:0", "100000000:1", "e:1", "76543210:0",
+        "7fffffff:0", "fffffffe:1"]
+    for strs {
+        t: SmallSets.Set
+        SmallSets.Str2Set(it, *t)
+        buf: Vec(u8)
+        SmallSets.Str(*t, *buf)
+        BuilderPrint(out, "s32 str2set <%> -> <%>\n", it, TextView(buf[:]))
+    }
+    bads: [6]string = .["", "0", "x:0", "0:x", "123", ":2"]
+    for bads {
+        t: SmallSets.Set
+        SmallSets.Str2Set(it, *t)
+        buf: Vec(u8)
+        SmallSets.Str(*t, *buf)
+        BuilderPrint(out, "s32 bad <%> -> <%>\n", it, TextView(buf[:]))
+    }
+
+    s: SmallSets.Set
+    SmallSets.New(*s)
+    ShowSmall(out, *s)
+    SmallSets.Add(*s, 0, *s)
+    n := 7
+    while n <= 70 {
+        SmallSets.Add(*s, n, *s)
+        n += 7
+    }
+    ShowSmall(out, *s)
+    SmallSets.Del(*s, 7, *s)
+    SmallSets.Del(*s, 70, *s)
+    SmallSets.Del(*s, 200, *s)
+    ShowSmall(out, *s)
+    ns: [5]s64 = .[0, 33, 64, 65, 1000]
+    SmallSets.AddList(*s, ns[:], *s)
+    ShowSmall(out, *s)
+    SmallSets.Invert(*s, *s)
+    ShowSmall(out, *s)
+
+    a: SmallSets.Set
+    b: SmallSets.Set
+    SmallSets.Str2Set("0f0f0f0f:0", *a)
+    SmallSets.Str2Set("ff00ff00:1", *b)
+    for o: 0..15 {
+        r: SmallSets.Set
+        buf: Vec(u8)
+        SmallSets.X(*a, o, *b, *r)
+        SmallSets.Str(*r, *buf)
+        BuilderPrint(out, "s32 X % <%>\n", o, TextView(buf[:]))
+    }
+    a2: SmallSets.Set
+    b2: SmallSets.Set
+    SmallSets.Str2Set("ff:0", *a2)
+    SmallSets.Str2Set("ff00ff00ff00ff00:1", *b2)
+    for o: 0..15 {
+        r: SmallSets.Set
+        buf: Vec(u8)
+        SmallSets.X(*a2, o, *b2, *r)
+        SmallSets.Str(*r, *buf)
+        BuilderPrint(out, "s32 XL % <%>\n", o, TextView(buf[:]))
+    }
+    for o: 0..15 {
+        r: SmallSets.Set
+        buf: Vec(u8)
+        SmallSets.X(*b2, o, *a2, *r)
+        SmallSets.Str(*r, *buf)
+        BuilderPrint(out, "s32 XS % <%>\n", o, TextView(buf[:]))
+    }
+
+    all: SmallSets.Set
+    SmallSets.All(*all)
+    ShowSmall(out, *all)
+    other: SmallSets.Set
+    SmallSets.Str2Set("1234:0", *other)
+    for o: 0..15 {
+        r: SmallSets.Set
+        buf: Vec(u8)
+        SmallSets.X(*all, o, *other, *r)
+        SmallSets.Str(*r, *buf)
+        BuilderPrint(out, "s32 XA % <%>\n", o, TextView(buf[:]))
+    }
+
+    e1: SmallSets.Set
+    e2: SmallSets.Set
+    e3: SmallSets.Set
+    e4: SmallSets.Set
+    e5: SmallSets.Set
+    e6: SmallSets.Set
+    e7: SmallSets.Set
+    SmallSets.Str2Set("1:0", *e1)
+    SmallSets.Str2Set("01:0", *e2)
+    SmallSets.Str2Set("000000001:0", *e3)
+    SmallSets.Str2Set("1234:0", *e4)
+    SmallSets.Str2Set("1235:0", *e5)
+    SmallSets.Str2Set(":1", *e6)
+    SmallSets.Str2Set("ffffffffffffffff:1", *e7)
+    BuilderPrint(out, "s32 eq % % % % %\n",
+        Flag(SmallSets.Eq(*e1, *e2)), Flag(SmallSets.Eq(*e1, *e3)),
+        Flag(SmallSets.Eq(*all, *e7)), Flag(SmallSets.Eq(*e4, *e5)),
+        Flag(SmallSets.Eq(*e6, *all)))
+
+    dset: SmallSets.Set
+    SmallSets.Str2Set("deadbeef:0", *dset)
+    lens: [5]s64 = .[4, 3, 5, 8, 0]
+    BuilderAppend(<<out, "s32 bytes")
+    for lens {
+        buf: Vec(u8)
+        SmallSets.Bytes(*dset, it, *buf)
+        BuilderAppend(<<out, " <")
+        Hex(out, buf[:])
+        BuilderAppend(<<out, ">")
+    }
+    BuilderAppend(<<out, "\n")
+    b3: Vec(u8)
+    SmallSets.Bytes(*all, 3, *b3)
+    BuilderAppend(<<out, "s32 bytesall <")
+    Hex(out, b3[:])
+    BuilderAppend(<<out, "> <")
+    VecClear(b3)
+    SmallSets.Bytes(*all, 6, *b3)
+    Hex(out, b3[:])
+    BuilderAppend(<<out, ">\n")
+
+    d0: [0]u8
+    d1: [1]u8 = .[0x7f]
+    d2: [1]u8 = .[0x80]
+    d3: [1]u8 = .[0xff]
+    d4: [2]u8 = .[1, 2]
+    d5: [3]u8 = .[1, 2, 3]
+    d6: [4]u8 = .[1, 2, 3, 4]
+    d7: [5]u8 = .[1, 2, 3, 4, 5]
+    d8: [4]u8 = .[255, 255, 255, 255]
+    br: SmallSets.Set
+    buf2: Vec(u8)
+    SmallSets.Bytes2Set(d0[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d1[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <7f> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d2[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <80> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d3[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <ff> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d4[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <0102> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d5[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <010203> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d6[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <01020304> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d7[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <0102030405> -> <%>\n", TextView(buf2[:]))
+    SmallSets.Bytes2Set(d8[:], *br)
+    VecClear(buf2)
+    SmallSets.Str(*br, *buf2)
+    BuilderPrint(out, "s32 b2s <ffffffff> -> <%>\n", TextView(buf2[:]))
+
+    l1: SmallSets.Set
+    l2: SmallSets.Set
+    e0: SmallSets.Set
+    SmallSets.Str2Set("80000000:0", *l1)
+    SmallSets.Str2Set("7f:1", *l2)
+    SmallSets.New(*e0)
+    BuilderPrint(out, "s32 limit % % % %\n",
+        SmallSets.Limit(*l1), SmallSets.Limit(*l2), SmallSets.Limit(*all), SmallSets.Limit(*e0))
+
+    h0: SmallSets.Set
+    h1: SmallSets.Set
+    SmallSets.Str2Set("ff00ff00:0", *h0)
+    SmallSets.Str2Set("1:1", *h1)
+    BuilderAppend(<<out, "s32 holds ")
+    SignedStr(out, SmallSets.Holds(*h0, 8))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, SmallSets.Holds(*h0, 16))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, SmallSets.Holds(*all, 70))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, SmallSets.Holds(*e0, 70))
+    BuilderAppend(<<out, " ")
+    SignedStr(out, SmallSets.Holds(*h1, 64))
+    BuilderAppend(<<out, "\n")
+
+    z00: SmallSets.Set
+    m1: SmallSets.Set
+    s0: SmallSets.Set
+    SmallSets.Str2Set("0:0", *z00)
+    SmallSets.Str2Set("00000000:1", *m1)
+    SmallSets.Str2Set(":0", *s0)
+    BuilderPrint(out, "s32 isempty % % % % msb % % %\n",
+        Flag(SmallSets.IsEmpty(*e0)), Flag(SmallSets.IsEmpty(*z00)),
+        Flag(SmallSets.IsEmpty(*all)), Flag(SmallSets.IsEmpty(*m1)),
+        Flag(SmallSets.Msb(*e0)), Flag(SmallSets.Msb(*s0)), Flag(SmallSets.Msb(*all)))
+
+    r5: SmallSets.Set
+    r6: SmallSets.Set
+    SmallSets.Add(*all, 5, *r5)
+    VecClear(buf2)
+    SmallSets.Str(*r5, *buf2)
+    BuilderPrint(out, "s32 addall <%>\n", TextView(buf2[:]))
+    SmallSets.Del(*all, 5, *r6)
+    VecClear(buf2)
+    SmallSets.Str(*r6, *buf2)
+    BuilderPrint(out, "s32 delall <%>\n", TextView(buf2[:]))
+    b70: SmallSets.Set
+    SmallSets.Str2Set(":1", *b70)
+    SmallSets.Del(*b70, 70, *b70)
+    VecClear(buf2)
+    SmallSets.Str(*b70, *buf2)
+    BuilderPrint(out, "s32 delall70 <%> <%>\n", TextView(buf2[:]), SmallSets.Limit(*b70))
+}
+
+Lines :: (out: *Vec(u8)) {
+    BigLines(out)
+    SmallLines(out)
+}

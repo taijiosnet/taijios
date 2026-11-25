@@ -1,0 +1,426 @@
+// Integer sets of unlimited size, packed into 32-bit words, called the
+// way Limbo programs called the Sets module: add, delete and list add,
+// the sixteen boolean operations, holds, the hex and byte forms, and
+// membership past the stored words extrapolated from the top bit. The
+// Limbo module quirks are kept: words are compared against the top
+// bit, the hex form drops leading nibbles that match it, and a set
+// whose top word differs from the top bit in its first nibble encodes
+// with no digits for that word. The builders write their result into
+// an out set given last, which may be an operand; results share no
+// words with any operand.
+#import "std/vec";
+
+MASK :: 0xFFFFFFFF;
+A :: 0xA;
+B :: 0xC;
+
+Set :: struct {
+    msb: u64;        // 0 or all ones: membership past the stored words
+    words: Vec(u64); // word n>>5 holds members 32n .. 32n+31
+}
+
+// The bit swapped-operand form of each boolean operation.
+SWAP_OPS: [16]u64 = .[0x0, 0x1, 0x4, 0x5, 0x2, 0x3, 0x6, 0x7,
+                     0x8, 0x9, 0xC, 0xD, 0xA, 0xB, 0xE, 0xF];
+
+// Reset s to the empty set; members are excluded past the words.
+New :: (s: *Set) {
+    s.msb = 0;
+    VecClear(s.words);
+}
+
+// Reset s to the set holding everything; members are included past
+// the words.
+All :: (s: *Set) {
+    s.msb = MASK;
+    VecClear(s.words);
+}
+
+// Replace out with a copy of s; out may be s itself. The copy is
+// built in fresh words and moved in, so aliasing cannot truncate the
+// source.
+Clone :: (s: *Set, out: *Set) {
+    r: Set;
+    r.msb = s.msb;
+    for i: 0..s.words.count - 1 {
+        VecPush(r.words, s.words[i]);
+    }
+    Store(r, out);
+}
+
+// Move builder b's words into out; out may alias anything.
+Store :: (b: Set, out: *Set) {
+    out.msb = b.msb;
+    VecClear(out.words);
+    for i: 0..b.words.count - 1 {
+        VecPush(out.words, b.words[i]);
+    }
+}
+
+// One of the sixteen boolean operations; o's four low bits select the
+// result of a and b, as in the Limbo module.
+OpWord :: (o: s64, a: u64, b: u64) -> u64 {
+    sel := o & 15;
+    if sel == 0x0 { return 0 }
+    if sel == 0x1 { return (~(a | b)) & MASK }
+    if sel == 0x2 { return a & (~b & MASK) }
+    if sel == 0x3 { return (~b) & MASK }
+    if sel == 0x4 { return (~a & MASK) & b }
+    if sel == 0x5 { return (~a) & MASK }
+    if sel == 0x6 { return a ^ b }
+    if sel == 0x7 { return (~(a & b)) & MASK }
+    if sel == 0x8 { return a & b }
+    if sel == 0x9 { return (~(a ^ b)) & MASK }
+    if sel == 0xA { return a }
+    if sel == 0xB { return (a | (~b & MASK)) & MASK }
+    if sel == 0xC { return b }
+    if sel == 0xD { return ((~a & MASK) | b) & MASK }
+    if sel == 0xE { return a | b }
+    return MASK;
+}
+
+// Replace out with the operation applied word by word, comparing past
+// the shorter operand's words with its top bit. The operands swap when
+// the first is longer, and the operation becomes its swapped-operand
+// form. Out may be either operand.
+X :: (first: *Set, o: s64, second: *Set, out: *Set) {
+    a := first;
+    b := second;
+    if a.words.count > b.words.count {
+        t := a;
+        a = b;
+        b = t;
+        o = cast(s64) SWAP_OPS[o & 15];
+    }
+    r: Set;
+    r.msb = OpWord(o, a.msb, b.msb);
+    i: s64 = 0;
+    while i < a.words.count {
+        VecPush(r.words, OpWord(o, a.words[i], b.words[i]));
+        i += 1;
+    }
+    while i < b.words.count {
+        VecPush(r.words, OpWord(o, a.msb, b.words[i]));
+        i += 1;
+    }
+    Store(r, out);
+}
+
+Invert :: (s: *Set, out: *Set) {
+    r: Set;
+    r.msb = (~s.msb) & MASK;
+    for i: 0..s.words.count - 1 {
+        VecPush(r.words, (~s.words[i]) & MASK);
+    }
+    Store(r, out);
+}
+
+// Replace out with a copy of s, large enough to hold member n when n
+// is not negative.
+Grown :: (s: *Set, n: s64, out: *Set) {
+    if n >= 0 {
+        req := (n >> 5) + 1;
+        if req > s.words.count {
+            r: Set;
+            r.msb = s.msb;
+            for i: 0..s.words.count - 1 {
+                VecPush(r.words, s.words[i]);
+            }
+            while r.words.count < req {
+                VecPush(r.words, s.msb);
+            }
+            Store(r, out);
+            return;
+        }
+    }
+    Clone(s, out);
+}
+
+// Replace out with s plus member n; out may be s.
+Add :: (s: *Set, n: s64, out: *Set) {
+    d := n >> 5;
+    if s.msb != 0 && d >= s.words.count {
+        Clone(s, out);
+        return;
+    }
+    r: Set;
+    Grown(s, n, *r);
+    r.words[d] |= cast(u64) 1 << cast(u64)(n & 31);
+    Store(r, out);
+}
+
+// Replace out with s plus every member of ns; out may be s.
+AddList :: (s: *Set, ns: []s64, out: *Set) {
+    r: Set;
+    if s.msb == 0 {
+        max := -1;
+        for i: 0..ns.count - 1 {
+            if ns[i] > max { max = ns[i] }
+        }
+        Grown(s, max, *r);
+    } else {
+        Grown(s, -1, *r);
+    }
+    for i: 0..ns.count - 1 {
+        d := ns[i] >> 5;
+        if d < r.words.count {
+            r.words[d] |= cast(u64) 1 << cast(u64)(ns[i] & 31);
+        }
+    }
+    Store(r, out);
+}
+
+// Replace out with s less member n; out may be s.
+Del :: (s: *Set, n: s64, out: *Set) {
+    d := n >> 5;
+    if s.msb == 0 && d >= s.words.count {
+        Clone(s, out);
+        return;
+    }
+    r: Set;
+    Grown(s, n, *r);
+    r.words[d] &= ~(cast(u64) 1 << cast(u64)(n & 31));
+    Store(r, out);
+}
+
+// Nonzero when n is a member: its bit, or the top bit past the words.
+Holds :: (s: *Set, n: s64) -> u64 {
+    d := n >> 5;
+    if d >= s.words.count {
+        return s.msb;
+    }
+    return s.words[d] & (cast(u64) 1 << cast(u64)(n & 31));
+}
+
+Limit :: (s: *Set) -> s64 {
+    i := s.words.count - 1;
+    while i >= 0 {
+        if s.words[i] != s.msb {
+            return (i << 5) + TopBit(s.msb ^ s.words[i]);
+        }
+        i -= 1;
+    }
+    return 0;
+}
+
+Eq :: (first: *Set, second: *Set) -> bool {
+    a := first;
+    b := second;
+    if a.words.count > b.words.count {
+        t := a;
+        a = b;
+        b = t;
+    }
+    i: s64 = 0;
+    while i < a.words.count {
+        if a.words[i] != b.words[i] { return false }
+        i += 1;
+    }
+    while i < b.words.count {
+        if a.msb != b.words[i] { return false }
+        i += 1;
+    }
+    return a.msb == b.msb;
+}
+
+IsEmpty :: (s: *Set) -> bool {
+    empty: Set;
+    return Eq(*empty, s);
+}
+
+Msb :: (s: *Set) -> bool {
+    return s.msb != 0;
+}
+
+// Lowercase hex digits of v, at least digits of them; nothing at all
+// for a zero value with a zero digit count, as Limbo's %.*ux printed.
+HexDigits :: (out: *Vec(u8), v: u64, digits: s64) {
+    tmp: Vec(u8);
+    glyphs := "0123456789abcdef";
+    x := v;
+    if x == 0 {
+        if digits > 0 { VecPush(tmp, glyphs[0]) }
+    }
+    while x != 0 {
+        VecPush(tmp, glyphs[x & 15]);
+        x = x >> 4;
+    }
+    while tmp.count < digits {
+        VecPush(tmp, glyphs[0]);
+    }
+    i := tmp.count - 1;
+    while i >= 0 {
+        VecPush(<<out, tmp[i]);
+        i -= 1;
+    }
+}
+
+// The compact hex form: leading nibbles that match the top bit are
+// dropped from the top word, lower words print whole, and the top bit
+// follows a colon.
+Str :: (s: *Set, out: *Vec(u8)) {
+    sig: s64 = 0;
+    i := s.words.count - 1;
+    broke := false;
+    while i >= 0 {
+        t := cast(u64) 0xF << 28;
+        sig = 8;
+        while t != 0 {
+            if (s.msb & t) != (s.words[i] & t) {
+                broke = true;
+                break;
+            }
+            sig -= 1;
+            t = (t >> 4) & 0x0FFFFFFF;
+        }
+        if broke { break }
+        i -= 1;
+    }
+    if i >= 0 {
+        top := s.words[i];
+        if sig < 8 {
+            top &= (cast(u64) 1 << cast(u64)(sig << 2)) - 1;
+        }
+        HexDigits(out, top, sig);
+        i -= 1;
+        while i >= 0 {
+            HexDigits(out, s.words[i], 8);
+            i -= 1;
+        }
+    }
+    BuilderAppend(<<out, ":");
+    if (s.msb & 1) != 0 {
+        BuilderAppend(<<out, "1");
+    } else {
+        BuilderAppend(<<out, "0");
+    }
+}
+
+// Every word and the top bit, colon separated, as debugstr printed.
+DebugStr :: (s: *Set, out: *Vec(u8)) {
+    i := s.words.count - 1;
+    while i >= 0 {
+        HexDigits(out, s.words[i], 1);
+        BuilderAppend(<<out, ":");
+        i -= 1;
+    }
+    BuilderAppend(<<out, ":");
+    HexDigits(out, s.msb, 1);
+}
+
+// The members as little-endian bytes, at least to the limit's byte and
+// always n of them; past the words the top bit's byte repeats.
+Bytes :: (s: *Set, n: s64, out: *Vec(u8)) {
+    VecClear(<<out);
+    m := (Limit(s) >> 3) + 1;
+    if m > n { n = m }
+    i: s64 = 0;
+    while i < n {
+        j := i >> 2;
+        if j >= s.words.count {
+            VecPush(<<out, cast(u8) s.msb);
+        } else {
+            VecPush(<<out, cast(u8)((s.words[j] >> cast(u64)((i & 3) << 3)) & 0xFF));
+        }
+        i += 1;
+    }
+}
+
+// The set from little-endian bytes; a top bit set in the last byte
+// extends through any trailing partial word.
+Bytes2Set :: (d: []u8, out: *Set) {
+    r: Set;
+    if d.count != 0 {
+        msb: u64 = 0;
+        if (d[d.count - 1] >> 7) != 0 { msb = MASK }
+        r.msb = msb;
+        n := d.count >> 2;
+        i: s64 = 0;
+        while i < n {
+            j := i << 2;
+            w := cast(u64) d[j] | (cast(u64) d[j + 1] << 8) | (cast(u64) d[j + 2] << 16) | (cast(u64) d[j + 3] << 24);
+            VecPush(r.words, w & MASK);
+            i += 1;
+        }
+        if (d.count & 3) != 0 {
+            j := i << 2;
+            v := cast(u64) d[j];
+            if (d.count & 3) == 2 {
+                v |= cast(u64) d[j + 1] << 8;
+            }
+            if (d.count & 3) == 3 {
+                v |= (cast(u64) d[j + 1] << 8) | (cast(u64) d[j + 2] << 16);
+            }
+            if (d.count & 3) == 1 { v |= msb & 0xFFFFFF00 }
+            if (d.count & 3) == 2 { v |= msb & 0xFFFF0000 }
+            if (d.count & 3) == 3 { v |= msb & 0xFF000000 }
+            VecPush(r.words, v & MASK);
+        }
+    }
+    Store(r, out);
+}
+
+// The set from its compact hex form, which must end in a colon and the
+// top bit. Digits fill from the right in eight-digit words; the
+// leftmost partial word takes the top bit in its missing nibbles.
+// Anything else stores the empty set.
+Str2Set :: (str: string, out: *Set) {
+    r: Set;
+    n: s64 = str.count;
+    if n >= 2 && str[n - 2] == #char ":" {
+        c := str[n - 1];
+        if c == #char "0" || c == #char "1" {
+            msb: u64 = 0;
+            if c == #char "1" { msb = MASK }
+            r.msb = msb;
+            n -= 2;
+            i := n;
+            while i > 0 {
+                j := i - 8;
+                if j < 0 { j = 0 }
+                VecPush(r.words, Hex2Int(str, j, i, msb));
+                i = j;
+            }
+        }
+    }
+    Store(r, out);
+}
+
+// The hex digits s[from:to] as a word, the top bit filling any missing
+// leading nibbles; unknown digits count as zero, as in Limbo.
+Hex2Int :: (s: string, from: s64, to: s64, fill: u64) -> u64 {
+    n := fill;
+    i := from;
+    while i < to {
+        c := s[i];
+        v: u64 = 0;
+        if c >= #char "0" && c <= #char "9" {
+            v = cast(u64)(c - #char "0");
+        } else if c >= #char "a" && c <= #char "f" {
+            v = cast(u64)(c - #char "a") + 10;
+        } else if c >= #char "A" && c <= #char "F" {
+            v = cast(u64)(c - #char "A") + 10;
+        }
+        n = ((n << 4) | v) & MASK;
+        i += 1;
+    }
+    return n;
+}
+
+// The position of v's top set bit, 1-based, or 0 when v is empty.
+TopBit :: (v0: u64) -> s64 {
+    v := v0;
+    if v == 0 { return 0 }
+    b: s64 = 1;
+    n: s64 = 16;
+    mask := cast(u64) 0xFFFF0000;
+    while n != 0 {
+        if (v & mask) != 0 {
+            b += n;
+            v = v >> cast(u64) n;
+        }
+        n = n >> 1;
+        mask = mask >> cast(u64) n;
+    }
+    return b;
+}

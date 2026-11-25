@@ -95,7 +95,6 @@
 16rffffff00	/man/2/draw-display
 16rffffffff	/man/2/crc
 16rffffffff	/man/2/draw-display
-1::2::5::nil	/man/2/sets
 1:adm:adm	/man/4/kfs
 1ctl	/man/3/dup
 1immediately	/man/10/qio
@@ -157,7 +156,6 @@
 9srvfs.b	/man/4/9srvfs
 9win	/man/1/9win
 9win.b	/man/1/9win
-a&b	/man/2/sets
 a'b	/man/1/tiny
 a,b,c	/man/2/draw-image
 a,b,c,d	/man/2/draw-image
@@ -253,7 +251,6 @@ absence	/man/8/prep
 absent	/man/1/acme
 absent	/man/1/alphabet-fs
 absent	/man/1/fs
-absent	/man/2/sets
 absolute	/man/1/acme
 absolute	/man/1/calc
 absolute	/man/1/gettar
@@ -929,7 +926,6 @@ add	/man/2/keyring-ipint
 add	/man/2/math-0intro
 add	/man/2/popup
 add	/man/2/security-0intro
-add	/man/2/sets
 add	/man/2/sh
 add	/man/2/spree-allow
 add	/man/2/sys-bind
@@ -982,7 +978,6 @@ added	/man/10/styxserver
 added	/man/2/draw-display
 added	/man/2/draw-image
 added	/man/2/factotum
-added	/man/2/sets
 added	/man/2/spree-cardlib
 added	/man/3/sd
 added	/man/3/ssl
@@ -1062,7 +1057,6 @@ additions	/man/1/tktester
 additions	/man/8/applylog
 addlayframe	/man/2/spree-cardlib
 addlayobj	/man/2/spree-cardlib
-addlist	/man/2/sets
 addmodule	/man/2/sh
 addmulti	/man/3/ether
 addmulti	/man/3/ip
@@ -1391,7 +1385,6 @@ adt	/man/2/prof
 adt	/man/2/registries
 adt	/man/2/security-login
 adt	/man/2/security-ssl
-adt	/man/2/sets
 adt	/man/2/sexprs
 adt	/man/2/sh
 adt	/man/2/spki
@@ -1806,7 +1799,6 @@ allow	/man/2/keyring-getmsg
 allow	/man/2/keyring-sha1
 allow	/man/2/plumbmsg
 allow	/man/2/prof
-allow	/man/2/sets
 allow	/man/2/sh
 allow	/man/2/spki
 allow	/man/2/spki-verifier
@@ -2942,7 +2934,6 @@ arbitrary	/man/2/keyring-getstring
 arbitrary	/man/2/keyring-ipint
 arbitrary	/man/2/msgio
 arbitrary	/man/2/prefab-element
-arbitrary	/man/2/sets
 arbitrary	/man/2/spki
 arbitrary	/man/2/spree-allow
 arbitrary	/man/2/spree-cardlib
@@ -3060,7 +3051,6 @@ arcs	/man/9/canvas
 arctan	/man/2/math-elem
 aren't	/man/1/alphabet-fs
 aren't	/man/1/fs
-aren't	/man/2/sets
 arena	/man/1/emu
 arenas	/man/8/prep
 arestore	/man/2/dis
@@ -3284,7 +3274,6 @@ array	/man/2/regex
 array	/man/2/secstore
 array	/man/2/security-random
 array	/man/2/security-ssl
-array	/man/2/sets
 array	/man/2/sexprs
 array	/man/2/spki
 array	/man/2/spree
@@ -4704,7 +4693,6 @@ behaviour	/man/1/sh-alphabet
 behaviour	/man/1/wm-sh
 behaviour	/man/1/yacc
 behaviour	/man/2/draw-image
-behaviour	/man/2/sets
 behaviour	/man/2/sh
 behaviour	/man/2/sys-read
 behaviour	/man/2/wmsrv
@@ -5038,7 +5026,6 @@ bit	/man/2/keyring-crypt
 bit	/man/2/math-export
 bit	/man/2/math-fp
 bit	/man/2/security-0intro
-bit	/man/2/sets
 bit	/man/2/sexprs
 bit	/man/2/string
 bit	/man/2/styxservers
@@ -5131,7 +5118,6 @@ bits	/man/2/keyring-gensk
 bits	/man/2/keyring-ipint
 bits	/man/2/math-0intro
 bits	/man/2/math-fp
-bits	/man/2/sets
 bits	/man/2/sh
 bits	/man/2/sys-open
 bits	/man/2/sys-stat
@@ -5165,7 +5151,6 @@ bitwise	/man/1/fc
 bitwise	/man/1/mdb
 bitwise	/man/1/sh-expr
 bitwise	/man/2/keyring-ipint
-bitwise	/man/2/sets
 bitwise	/man/2/tkclient
 bitwise	/man/2/wmclient
 bitwise	/man/4/acme
@@ -5412,7 +5397,6 @@ boolean	/man/2/asn1
 boolean	/man/2/draw-0intro
 boolean	/man/2/draw-image
 boolean	/man/2/prof
-boolean	/man/2/sets
 boolean	/man/9/canvas
 boolean	/man/9/checkbutton
 boolean	/man/9/grid
@@ -6392,7 +6376,6 @@ byte	/man/2/prof
 byte	/man/2/secstore
 byte	/man/2/security-random
 byte	/man/2/security-ssl
-byte	/man/2/sets
 byte	/man/2/sexprs
 byte	/man/2/spki
 byte	/man/2/spree
@@ -6526,7 +6509,6 @@ bytes	/man/2/pop3
 bytes	/man/2/print
 bytes	/man/2/secstore
 bytes	/man/2/security-random
-bytes	/man/2/sets
 bytes	/man/2/sexprs
 bytes	/man/2/sh
 bytes	/man/2/spki
@@ -6599,7 +6581,6 @@ bytes	/man/8/ping
 bytes	/man/8/prep
 bytes	/man/8/rstyxd
 bytes	/man/8/styxchat
-bytes2set	/man/2/sets
 bytestoip	/man/2/keyring-ipint
 bytewise	/man/10/memory
 c's	/man/10/strcat
@@ -6667,7 +6648,6 @@ calculating	/man/2/crc
 calculating	/man/2/popup
 calculation	/man/2/crc
 calculation	/man/2/draw-image
-calculation	/man/2/sets
 calculations	/man/3/draw
 calculator	/man/1/calc
 calculator	/man/1/fc
@@ -6737,7 +6717,6 @@ calling	/man/2/print
 calling	/man/2/pslib
 calling	/man/2/secstore
 calling	/man/2/security-0intro
-calling	/man/2/sets
 calling	/man/2/sh
 calling	/man/2/spree
 calling	/man/2/spree-cardlib
@@ -8849,7 +8828,6 @@ combination	/man/2/ip
 combination	/man/2/keyring-0intro
 combination	/man/2/prof
 combination	/man/2/security-0intro
-combination	/man/2/sets
 combination	/man/2/spki
 combination	/man/2/tkclient
 combination	/man/2/wmclient
@@ -8877,7 +8855,6 @@ combined	/man/5/0intro
 combined	/man/9/bind
 combined	/man/9/menu
 combines	/man/2/secstore
-combining	/man/2/sets
 combo	/man/10/plan9.ini
 comes	/man/10/memory
 comes	/man/2/asn1
@@ -9136,7 +9113,6 @@ compatible	/man/2/bufio
 compatible	/man/2/debug
 compatible	/man/2/filter-deflate
 compatible	/man/2/ip
-compatible	/man/2/sets
 compatible	/man/2/styx
 compatible	/man/2/sys-self
 compatible	/man/3/i82365
@@ -10218,7 +10194,6 @@ constants	/man/2/draw-display
 constants	/man/2/ir
 constants	/man/2/math-0intro
 constants	/man/2/math-fp
-constants	/man/2/sets
 constants	/man/2/sh
 constants	/man/2/spree-cardlib
 constants	/man/2/styx
@@ -10323,7 +10298,6 @@ contained	/man/10/plan9.ini
 contained	/man/2/0intro
 contained	/man/2/draw-example
 contained	/man/2/prefab-compound
-contained	/man/2/sets
 contained	/man/2/sh
 contained	/man/2/spree-cardlib
 contained	/man/2/tabs
@@ -11046,7 +11020,6 @@ converts	/man/2/ir
 converts	/man/2/keyring-ipint
 converts	/man/2/math-export
 converts	/man/2/plumbmsg
-converts	/man/2/sets
 converts	/man/2/sh
 converts	/man/2/spree
 converts	/man/2/string
@@ -11234,7 +11207,6 @@ copy	/man/2/math-fp
 copy	/man/2/plumbmsg
 copy	/man/2/registries
 copy	/man/2/security-0intro
-copy	/man/2/sets
 copy	/man/2/sexprs
 copy	/man/2/sh
 copy	/man/2/styxservers
@@ -11720,7 +11692,6 @@ created	/man/2/prefab-element
 created	/man/2/prefab-style
 created	/man/2/security-0intro
 created	/man/2/selectfile
-created	/man/2/sets
 created	/man/2/sh
 created	/man/2/spki
 created	/man/2/spree
@@ -12501,7 +12472,6 @@ data	/man/2/security-0intro
 data	/man/2/security-auth
 data	/man/2/security-random
 data	/man/2/security-ssl
-data	/man/2/sets
 data	/man/2/sexprs
 data	/man/2/sh
 data	/man/2/spki
@@ -12749,7 +12719,6 @@ dd	/man/1/dd
 dd	/man/2/spki
 dd	/man/4/kfs
 dd.b	/man/1/dd
-dd:1	/man/2/sets
 ddmmyyyy	/man/8/changelogin
 ddmmyyyy	/man/8/createsignerkey
 ddp	/man/4/vacfs
@@ -12988,7 +12957,6 @@ declared	/man/2/0intro
 declared	/man/2/alphabet-intro
 declared	/man/2/dis
 declared	/man/2/draw-screen
-declared	/man/2/sets
 declared	/man/2/sh
 declared	/man/2/sys-0intro
 declared	/man/2/tk
@@ -13408,7 +13376,6 @@ defined	/man/2/print
 defined	/man/2/readdir
 defined	/man/2/regex
 defined	/man/2/secstore
-defined	/man/2/sets
 defined	/man/2/sexprs
 defined	/man/2/sh
 defined	/man/2/smtp
@@ -13605,7 +13572,6 @@ del	/man/1/grid-monitor
 del	/man/1/sh-tk
 del	/man/10/9load
 del	/man/10/ntsrv
-del	/man/2/sets
 del	/man/2/spree
 del	/man/2/spree-allow
 del	/man/3/prog
@@ -17345,7 +17311,6 @@ efficient	/man/1/acme
 efficient	/man/1/dd
 efficient	/man/2/draw-0intro
 efficient	/man/2/math-export
-efficient	/man/2/sets
 efficient	/man/2/sys-pipe
 efficient	/man/2/sys-read
 efficient	/man/6/sexprs
@@ -17958,7 +17923,6 @@ endian	/man/10/2c
 endian	/man/10/a.out
 endian	/man/2/keyring-ipint
 endian	/man/2/math-export
-endian	/man/2/sets
 endian	/man/3/audio
 endian	/man/3/cons
 endian	/man/3/dbg
@@ -18449,7 +18413,6 @@ eq	/man/2/draw-point
 eq	/man/2/draw-rect
 eq	/man/2/ip
 eq	/man/2/keyring-ipint
-eq	/man/2/sets
 eq	/man/2/sexprs
 eq	/man/2/spki
 eq	/man/2/venti
@@ -19282,7 +19245,6 @@ except	/man/2/msgio
 except	/man/2/prefab-0intro
 except	/man/2/prefab-style
 except	/man/2/readdir
-except	/man/2/sets
 except	/man/2/sh
 except	/man/2/spree
 except	/man/2/spree-cardlib
@@ -19775,7 +19737,6 @@ existing	/man/2/popup
 existing	/man/2/prefab-compound
 existing	/man/2/prefab-element
 existing	/man/2/security-ssl
-existing	/man/2/sets
 existing	/man/2/sh
 existing	/man/2/spree-cardlib
 existing	/man/2/string
@@ -20070,7 +20031,6 @@ explicitly	/man/2/0intro
 explicitly	/man/2/asn1
 explicitly	/man/2/cfg
 explicitly	/man/2/prefab-element
-explicitly	/man/2/sets
 explicitly	/man/2/styxservers
 explicitly	/man/2/styxservers-nametree
 explicitly	/man/3/dbg
@@ -21720,7 +21680,6 @@ fillpolyop	/man/2/draw-image
 fills	/man/10/devattach
 fills	/man/2/bufio-chanfill
 fills	/man/2/draw-image
-fills	/man/2/sets
 fills	/man/3/draw
 fillx	/man/2/spree-cardlib
 filly	/man/2/spree-cardlib
@@ -22193,7 +22152,6 @@ fn	/man/2/security-login
 fn	/man/2/security-random
 fn	/man/2/security-ssl
 fn	/man/2/selectfile
-fn	/man/2/sets
 fn	/man/2/sexprs
 fn	/man/2/sh
 fn	/man/2/smtp
@@ -22514,7 +22472,6 @@ format	/man/2/newns
 format	/man/2/plumbmsg
 format	/man/2/prefab-element
 format	/man/2/print
-format	/man/2/sets
 format	/man/2/smtp
 format	/man/2/styx
 format	/man/2/sys-0intro
@@ -24152,7 +24109,6 @@ hence	/man/10/intrenable
 hence	/man/10/plan9.ini
 hence	/man/2/draw-0intro
 hence	/man/2/msgio
-hence	/man/2/sets
 hence	/man/5/0intro
 hence	/man/9/scale
 henceforth	/man/1/bind
@@ -24187,7 +24143,6 @@ hexadecimal	/man/2/ether
 hexadecimal	/man/2/ip
 hexadecimal	/man/2/keyset
 hexadecimal	/man/2/registries
-hexadecimal	/man/2/sets
 hexadecimal	/man/2/sexprs
 hexadecimal	/man/2/sys-print
 hexadecimal	/man/3/arch
@@ -24214,7 +24169,6 @@ hexadecimal	/man/9/bind
 hexadecimal	/man/9/types
 hexcolour	/man/2/w3c-css
 hexdigit	/man/2/w3c-css
-hexdigits	/man/2/sets
 hexmax	/man/1/unicode
 hexmin	/man/1/unicode
 hh	/man/10/print
@@ -24285,7 +24239,6 @@ higher	/man/10/lock
 higher	/man/10/xalloc
 higher	/man/2/draw-0intro
 higher	/man/2/draw-image
-higher	/man/2/sets
 higher	/man/2/wmlib
 higher	/man/3/flash
 higher	/man/3/kprof
@@ -24405,7 +24358,6 @@ holding	/man/2/convcs
 holding	/man/2/daytime
 holding	/man/2/draw-display
 holding	/man/2/keyset
-holding	/man/2/sets
 holding	/man/2/spree
 holding	/man/2/sys-file2chan
 holding	/man/2/wmsrv
@@ -24433,7 +24385,6 @@ holds	/man/2/keyset
 holds	/man/2/prefab-compound
 holds	/man/2/print
 holds	/man/2/registries
-holds	/man/2/sets
 holds	/man/2/sh
 holds	/man/2/spree
 holds	/man/2/spree-allow
@@ -24821,7 +24772,6 @@ identical	/man/10/ntsrv
 identical	/man/2/0intro
 identical	/man/2/draw-image
 identical	/man/2/math-0intro
-identical	/man/2/sets
 identical	/man/2/sexprs
 identical	/man/2/sys-read
 identical	/man/3/dup
@@ -25324,7 +25274,6 @@ implementation	/man/2/keyring-ipint
 implementation	/man/2/msgio
 implementation	/man/2/print
 implementation	/man/2/registries
-implementation	/man/2/sets
 implementation	/man/2/sexprs
 implementation	/man/2/spki-verifier
 implementation	/man/2/spree-cardlib
@@ -25359,7 +25308,6 @@ implementations	/man/10/devattach
 implementations	/man/10/dmainit
 implementations	/man/10/strcat
 implementations	/man/2/filter
-implementations	/man/2/sets
 implementations	/man/2/spki
 implementations	/man/2/styxservers
 implementations	/man/3/audio
@@ -25457,7 +25405,6 @@ import	/man/2/ip
 import	/man/2/itslib
 import	/man/2/math-export
 import	/man/2/plumbmsg
-import	/man/2/sets
 import	/man/2/sh
 import	/man/2/spki-verifier
 import	/man/2/spree
@@ -25668,7 +25615,6 @@ include	/man/2/security-login
 include	/man/2/security-random
 include	/man/2/security-ssl
 include	/man/2/selectfile
-include	/man/2/sets
 include	/man/2/sexprs
 include	/man/2/sh
 include	/man/2/smtp
@@ -25835,7 +25781,6 @@ inclusive	/man/1/calc
 inclusive	/man/1/strings
 inclusive	/man/10/plan9.ini
 inclusive	/man/2/keyring-ipint
-inclusive	/man/2/sets
 inclusive	/man/2/spree-cardlib
 inclusive	/man/2/string
 inclusive	/man/6/font
@@ -26389,7 +26334,6 @@ infile	/man/10/ms2
 infinite	/man/2/keyring-0intro
 infinite	/man/2/keyring-ipint
 infinitely	/man/2/math-fp
-infinitely	/man/2/sets
 infinity	/man/1/calc
 infinity	/man/2/math-fp
 infinity	/man/2/math-linalg
@@ -26500,7 +26444,6 @@ init	/man/2/registries
 init	/man/2/secstore
 init	/man/2/security-auth
 init	/man/2/selectfile
-init	/man/2/sets
 init	/man/2/sexprs
 init	/man/2/spki
 init	/man/2/spki-verifier
@@ -26575,7 +26518,6 @@ initialise	/man/2/ir
 initialise	/man/2/popup
 initialise	/man/2/print
 initialise	/man/2/selectfile
-initialise	/man/2/sets
 initialise	/man/2/spree-allow
 initialise	/man/2/spree-cardlib
 initialise	/man/2/styxservers
@@ -27267,7 +27209,6 @@ int	/man/2/registries
 int	/man/2/secstore
 int	/man/2/security-auth
 int	/man/2/security-random
-int	/man/2/sets
 int	/man/2/sexprs
 int	/man/2/sh
 int	/man/2/smtp
@@ -27371,7 +27312,6 @@ integer	/man/2/prof
 integer	/man/2/rand
 integer	/man/2/readdir
 integer	/man/2/security-random
-integer	/man/2/sets
 integer	/man/2/spree
 integer	/man/2/spree-allow
 integer	/man/2/spree-cardlib
@@ -27429,7 +27369,6 @@ integers	/man/2/draw-0intro
 integers	/man/2/draw-display
 integers	/man/2/keyring-ipint
 integers	/man/2/rand
-integers	/man/2/sets
 integers	/man/2/string
 integers	/man/2/styx
 integers	/man/3/cons
@@ -27750,7 +27689,6 @@ internal	/man/2/prefab-element
 internal	/man/2/print
 internal	/man/2/registries
 internal	/man/2/selectfile
-internal	/man/2/sets
 internal	/man/2/sexprs
 internal	/man/2/spki
 internal	/man/2/spree-allow
@@ -27946,7 +27884,6 @@ intersection	/man/1/alphabet-fs
 intersection	/man/1/fs
 intersection	/man/2/draw-image
 intersection	/man/2/draw-rect
-intersection	/man/2/sets
 intersection	/man/2/spree
 intersil	/man/10/plan9.ini
 interspersed	/man/1/mash
@@ -28146,7 +28083,6 @@ inverse	/man/2/math-elem
 inverse	/man/2/sys-byte2char
 inverse	/man/6/utf
 invert	/man/1/sh-expr
-invert	/man/2/sets
 invert	/man/6/image
 inverted	/man/6/image
 inverts	/man/1/sh-std
@@ -28464,7 +28400,6 @@ isdir	/man/10/styxserver
 isdir	/man/6/plumbing
 isect	/man/8/prep
 iseek	/man/1/dd
-isempty	/man/2/sets
 isempty	/man/2/spree-cardlib
 iseve	/man/10/eve
 isfile	/man/6/plumbing
@@ -29400,7 +29335,6 @@ largest	/man/2/plumbmsg
 largest	/man/2/prefab-element
 largest	/man/2/readdir
 largest	/man/2/secstore
-largest	/man/2/sets
 largest	/man/2/wmsrv
 largest	/man/3/cons
 largest	/man/3/ip
@@ -30275,7 +30209,6 @@ limit	/man/10/lock
 limit	/man/10/plan9.ini
 limit	/man/10/qio
 limit	/man/2/0intro
-limit	/man/2/sets
 limit	/man/2/styx
 limit	/man/3/cons
 limit	/man/3/eia
@@ -30571,7 +30504,6 @@ list	/man/2/registries
 list	/man/2/secstore
 list	/man/2/security-auth
 list	/man/2/selectfile
-list	/man/2/sets
 list	/man/2/sexprs
 list	/man/2/sh
 list	/man/2/smtp
@@ -30962,7 +30894,6 @@ load	/man/2/security-login
 load	/man/2/security-random
 load	/man/2/security-ssl
 load	/man/2/selectfile
-load	/man/2/sets
 load	/man/2/sexprs
 load	/man/2/sh
 load	/man/2/smtp
@@ -32003,7 +31934,6 @@ manipulated	/man/9/text
 manipulates	/man/10/2c
 manipulates	/man/9/canvas
 manipulating	/man/2/draw-0intro
-manipulating	/man/2/sets
 manipulating	/man/2/styx
 manipulating	/man/9/listbox
 manipulating	/man/9/scrollbar
@@ -32677,7 +32607,6 @@ member	/man/2/plumbmsg
 member	/man/2/prefab-0intro
 member	/man/2/prefab-compound
 member	/man/2/prefab-element
-member	/man/2/sets
 member	/man/2/spree
 member	/man/2/spree-allow
 member	/man/2/spree-cardlib
@@ -32705,7 +32634,6 @@ member.id	/man/2/spree
 membername	/man/10/mk
 membernamed	/man/2/spree
 membership	/man/2/prefab-element
-membership	/man/2/sets
 membership	/man/4/kfs
 memccpy	/man/10/memory
 memchr	/man/10/memory
@@ -33710,7 +33638,6 @@ module	/man/2/registries
 module	/man/2/secstore
 module	/man/2/security-0intro
 module	/man/2/security-login
-module	/man/2/sets
 module	/man/2/sexprs
 module	/man/2/sh
 module	/man/2/spki
@@ -34179,7 +34106,6 @@ ms2	/man/10/ms2
 ms2hz	/man/10/seconds
 ms2tk	/man/10/seconds
 msb	/man/2/asn1
-msb	/man/2/sets
 mschap	/man/4/factotum
 msec	/man/2/timers
 msec	/man/3/cons
@@ -34835,7 +34761,6 @@ negative	/man/2/plumbmsg
 negative	/man/2/prof
 negative	/man/2/rand
 negative	/man/2/secstore
-negative	/man/2/sets
 negative	/man/2/styxservers
 negative	/man/2/sys-0intro
 negative	/man/2/sys-export
@@ -34890,7 +34815,6 @@ neither	/man/10/iar
 neither	/man/10/print
 neither	/man/2/convcs
 neither	/man/2/security-auth
-neither	/man/2/sets
 neither	/man/2/sys-export
 neither	/man/3/fs
 neither	/man/3/ip
@@ -35469,7 +35393,6 @@ non	/man/2/rand
 non	/man/2/regex
 non	/man/2/registries
 non	/man/2/security-auth
-non	/man/2/sets
 non	/man/2/sexprs
 non	/man/2/sh
 non	/man/2/spree
@@ -35566,7 +35489,6 @@ none	/man/2/hash
 none	/man/2/keyring-0intro
 none	/man/2/readdir
 none	/man/2/security-auth
-none	/man/2/sets
 none	/man/2/spree
 none	/man/2/spree-objstore
 none	/man/2/styxservers
@@ -35623,7 +35545,6 @@ nor	/man/10/print
 nor	/man/2/convcs
 nor	/man/2/prefab-element
 nor	/man/2/security-auth
-nor	/man/2/sets
 nor	/man/2/sys-export
 nor	/man/3/cmd
 nor	/man/3/flash
@@ -35716,7 +35637,6 @@ note	/man/2/plumbmsg
 note	/man/2/pop3
 note	/man/2/prefab-style
 note	/man/2/security-auth
-note	/man/2/sets
 note	/man/2/spree
 note	/man/2/styx
 note	/man/2/styxpersist
@@ -35801,7 +35721,6 @@ notion	/man/9/canvas
 notional	/man/10/devattach
 notionally	/man/10/master
 notionally	/man/10/styxserver
-notionally	/man/2/sets
 notionally	/man/4/ftpfs
 notionally	/man/8/applylog
 notquiterandom	/man/2/security-random
@@ -35831,7 +35750,6 @@ ns	/man/1/grid-session
 ns	/man/1/ns
 ns	/man/2/dividers
 ns	/man/2/newns
-ns	/man/2/sets
 ns	/man/2/sys-0intro
 ns	/man/2/sys-fd2path
 ns	/man/3/prog
@@ -36577,7 +36495,6 @@ op	/man/1/sh-regex
 op	/man/10/dev
 op	/man/2/dis
 op	/man/2/draw-image
-op	/man/2/sets
 op	/man/2/sexprs
 op	/man/2/spki
 op	/man/2/spree-cardlib
@@ -36601,7 +36518,6 @@ opacity	/man/6/colour
 opaque	/man/10/2c
 opaque	/man/2/draw-display
 opaque	/man/2/draw-image
-opaque	/man/2/sets
 opaque	/man/6/colour
 opcode	/man/6/dis
 opcodes	/man/6/dis
@@ -36851,7 +36767,6 @@ operations	/man/2/keyring-certtostr
 operations	/man/2/math-0intro
 operations	/man/2/prefab-0intro
 operations	/man/2/registries
-operations	/man/2/sets
 operations	/man/2/sexprs
 operations	/man/2/spki
 operations	/man/2/spki-verifier
@@ -36917,7 +36832,6 @@ operator	/man/2/draw-0intro
 operator	/man/2/draw-image
 operator	/man/2/plumbmsg
 operator	/man/2/regex
-operator	/man/2/sets
 operator	/man/2/sh
 operator	/man/2/sys-self
 operator	/man/2/w3c-css
@@ -38039,7 +37953,6 @@ packed	/man/2/keyring-getmsg
 packed	/man/2/msgio
 packed	/man/2/plumbmsg
 packed	/man/2/popup
-packed	/man/2/sets
 packed	/man/2/spree-cardlib
 packed	/man/2/styx
 packed	/man/2/tabs
@@ -38102,7 +38015,6 @@ padding	/man/1/sh-string
 padding	/man/1/tktester
 padding	/man/10/allocb
 padding	/man/10/ar
-padding	/man/2/sets
 padding	/man/3/pbus
 padding	/man/3/tls
 padding	/man/6/colour
@@ -38946,7 +38858,6 @@ path	/man/2/security-login
 path	/man/2/security-random
 path	/man/2/security-ssl
 path	/man/2/selectfile
-path	/man/2/sets
 path	/man/2/sexprs
 path	/man/2/sh
 path	/man/2/smtp
@@ -40947,7 +40858,6 @@ print	/man/2/itslib
 print	/man/2/keyring-0intro
 print	/man/2/print
 print	/man/2/prof
-print	/man/2/sets
 print	/man/2/sys-0intro
 print	/man/2/sys-print
 print	/man/2/sys-werrstr
@@ -41537,7 +41447,6 @@ produces	/man/10/print
 produces	/man/2/draw-image
 produces	/man/2/keyring-certtostr
 produces	/man/2/keyring-sha1
-produces	/man/2/sets
 produces	/man/2/sys-print
 produces	/man/3/ip
 produces	/man/3/prog
@@ -42215,7 +42124,6 @@ provides	/man/2/registries
 provides	/man/2/security-0intro
 provides	/man/2/security-ssl
 provides	/man/2/selectfile
-provides	/man/2/sets
 provides	/man/2/sexprs
 provides	/man/2/smtp
 provides	/man/2/spki
@@ -45024,7 +44932,6 @@ removed	/man/10/print
 removed	/man/10/styxserver
 removed	/man/2/factotum
 removed	/man/2/registries
-removed	/man/2/sets
 removed	/man/2/sh
 removed	/man/2/styxservers
 removed	/man/2/sys-fd2path
@@ -45456,7 +45363,6 @@ representations	/man/2/plumbmsg
 representations	/man/6/sexprs
 representative	/man/10/plan9.ini
 representative	/man/10/print
-representaton	/man/2/sets
 representing	/man/1/acme
 representing	/man/1/cp
 representing	/man/1/fc
@@ -45492,7 +45398,6 @@ representing	/man/2/plumbmsg
 representing	/man/2/prefab-element
 representing	/man/2/registries
 representing	/man/2/secstore
-representing	/man/2/sets
 representing	/man/2/sexprs
 representing	/man/2/spki
 representing	/man/2/spree-cardlib
@@ -46180,7 +46085,6 @@ rest	/man/1/sh-tk
 rest	/man/2/arg
 rest	/man/2/filter-deflate
 rest	/man/2/prefab-element
-rest	/man/2/sets
 rest	/man/2/sexprs
 rest	/man/2/sh
 rest	/man/2/spree
@@ -46641,7 +46545,6 @@ returned	/man/2/secstore
 returned	/man/2/security-login
 returned	/man/2/security-ssl
 returned	/man/2/selectfile
-returned	/man/2/sets
 returned	/man/2/sh
 returned	/man/2/spki
 returned	/man/2/spree-allow
@@ -46831,7 +46734,6 @@ returns	/man/2/security-auth
 returns	/man/2/security-login
 returns	/man/2/security-random
 returns	/man/2/security-ssl
-returns	/man/2/sets
 returns	/man/2/sexprs
 returns	/man/2/sh
 returns	/man/2/smtp
@@ -47341,7 +47243,6 @@ routines	/man/2/math-linalg
 routines	/man/2/prefab-style
 routines	/man/2/prof
 routines	/man/2/security-0intro
-routines	/man/2/sets
 routines	/man/2/spree-cardlib
 routines	/man/2/sys-0intro
 routines	/man/2/sys-dial
@@ -48763,7 +48664,6 @@ self	/man/2/plumbmsg
 self	/man/2/prefab-compound
 self	/man/2/prefab-element
 self	/man/2/registries
-self	/man/2/sets
 self	/man/2/sexprs
 self	/man/2/sh
 self	/man/2/spki
@@ -49459,8 +49359,6 @@ session.b	/man/1/grid-session
 session.rpc	/man/2/venti
 sessions	/man/2/spree
 sessions	/man/4/spree
-set.bytes	/man/2/sets
-set.str	/man/2/sets
 setalpha	/man/2/draw-0intro
 setalpha	/man/6/colour
 setarchivename	/man/2/spree-cardlib
@@ -49487,10 +49385,8 @@ setproc	/man/10/acid
 setrange	/man/2/spree-cardlib
 setroot	/man/1/alphabet-fs
 setroot	/man/1/fs
-sets.m	/man/2/sets
 sets.m	/man/2/spree
 sets.m	/man/2/spree-cardlib
-sets32.m	/man/2/sets
 setting	/man/1/auplay
 setting	/man/1/charon
 setting	/man/1/deb
@@ -50171,7 +50067,6 @@ significant	/man/2/draw-image
 significant	/man/2/draw-pointer
 significant	/man/2/itslib
 significant	/man/2/math-export
-significant	/man/2/sets
 significant	/man/2/sys-print
 significant	/man/3/tls
 significant	/man/5/0intro
@@ -50832,7 +50727,6 @@ somewhat	/man/1/sh
 somewhat	/man/10/iar
 somewhat	/man/2/dividers
 somewhat	/man/2/security-0intro
-somewhat	/man/2/sets
 somewhat	/man/5/0intro
 somewhere	/man/1/collab-clients
 somewhere	/man/1/spree-join
@@ -52634,7 +52528,6 @@ status	/man/2/math-0intro
 status	/man/2/math-fp
 status	/man/2/mpeg
 status	/man/2/pop3
-status	/man/2/sets
 status	/man/2/sh
 status	/man/2/styxservers
 status	/man/2/sys-0intro
@@ -52941,7 +52834,6 @@ storer	/man/6/image
 stores	/man/1/webgrab
 stores	/man/2/0intro
 stores	/man/2/draw-0intro
-stores	/man/2/sets
 stores	/man/2/spree-allow
 stores	/man/2/sys-fd2path
 stores	/man/4/dbfs
@@ -52969,13 +52861,11 @@ str	/man/2/draw-font
 str	/man/2/draw-image
 str	/man/2/keyring-ipint
 str	/man/2/prefab-element
-str	/man/2/sets
 str	/man/2/string
 str	/man/2/xml
 str2en	/man/2/geodesy
 str2lalo	/man/2/geodesy
 str2mark	/man/2/xml
-str2set	/man/2/sets
 straddle	/man/1/acme
 straight	/man/2/asn1
 straight	/man/9/canvas
@@ -53188,7 +53078,6 @@ string	/man/2/security-auth
 string	/man/2/security-login
 string	/man/2/security-ssl
 string	/man/2/selectfile
-string	/man/2/sets
 string	/man/2/sexprs
 string	/man/2/sh
 string	/man/2/smtp
@@ -54752,7 +54641,6 @@ sys	/man/2/secstore
 sys	/man/2/security-auth
 sys	/man/2/security-login
 sys	/man/2/security-ssl
-sys	/man/2/sets
 sys	/man/2/spree
 sys	/man/2/srv
 sys	/man/2/styx
@@ -56483,7 +56371,6 @@ toplevel	/man/2/tabs
 toplevel	/man/2/tk
 toplevel	/man/2/tkclient
 toplevel	/man/9/bind
-topmost	/man/2/sets
 topmost	/man/9/canvas
 topmost	/man/9/menu
 topological	/man/1/tsort
@@ -57732,7 +57619,6 @@ undefined	/man/10/inm
 undefined	/man/10/print
 undefined	/man/2/draw-image
 undefined	/man/2/draw-rect
-undefined	/man/2/sets
 undefined	/man/3/draw
 undefined	/man/9/bind
 undefined	/man/9/canvas
@@ -57917,7 +57803,6 @@ union	/man/10/c2l
 union	/man/10/styx
 union	/man/2/alphabet-intro
 union	/man/2/readdir
-union	/man/2/sets
 union	/man/2/sys-0intro
 union	/man/2/sys-bind
 union	/man/2/sys-open
@@ -61693,7 +61578,6 @@ yields	/man/1/sh-string
 yields	/man/1/sh-tk
 yields	/man/2/asn1
 yields	/man/2/cfg
-yields	/man/2/sets
 yields	/man/2/sexprs
 yields	/man/2/spree
 yields	/man/2/xml

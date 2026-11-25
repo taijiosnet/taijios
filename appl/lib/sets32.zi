@@ -1,0 +1,253 @@
+// 32-bit integer sets called the way Limbo programs called the Sets32
+// module: add, delete and list add, the sixteen boolean operations,
+// holds, the hex and byte forms, and the top bit's extrapolation. The
+// Limbo module quirks are kept: the hex form drops leading nibbles
+// that match the top bit and prints nothing at all when the whole word
+// matches it, and bytes beyond the fourth are ignored when converting
+// from bytes. The builders write their result into an out set given
+// last, which may be the operand.
+#import "std/vec";
+
+MASK :: 0xFFFFFFFF;
+MSB :: 0x80000000;
+A :: 0xA;
+B :: 0xC;
+
+Set :: struct {
+    bits: u64; // members 0..31; bit n is member n
+}
+
+// Reset s to the empty set.
+New :: (s: *Set) {
+    s.bits = 0;
+}
+
+// Reset s to the set holding everything.
+All :: (s: *Set) {
+    s.bits = MASK;
+}
+
+// One of the sixteen boolean operations; o's four low bits select the
+// result of a and b, as in the Limbo module. The operands do not swap.
+OpWord :: (o: s64, a: u64, b: u64) -> u64 {
+    sel := o & 15;
+    if sel == 0x0 { return 0 }
+    if sel == 0x1 { return (~(a | b)) & MASK }
+    if sel == 0x2 { return a & (~b & MASK) }
+    if sel == 0x3 { return (~b) & MASK }
+    if sel == 0x4 { return (~a & MASK) & b }
+    if sel == 0x5 { return (~a) & MASK }
+    if sel == 0x6 { return a ^ b }
+    if sel == 0x7 { return (~(a & b)) & MASK }
+    if sel == 0x8 { return a & b }
+    if sel == 0x9 { return (~(a ^ b)) & MASK }
+    if sel == 0xA { return a }
+    if sel == 0xB { return (a | (~b & MASK)) & MASK }
+    if sel == 0xC { return b }
+    if sel == 0xD { return ((~a & MASK) | b) & MASK }
+    if sel == 0xE { return a | b }
+    return MASK;
+}
+
+// Replace out with the operation applied to the two words; out may be
+// either operand.
+X :: (s1: *Set, o: s64, s2: *Set, out: *Set) {
+    out.bits = OpWord(o, s1.bits, s2.bits);
+}
+
+// Replace out with s turned inside out.
+Invert :: (s: *Set, out: *Set) {
+    out.bits = (~s.bits) & MASK;
+}
+
+// Replace out with s plus member n; out may be s.
+Add :: (s: *Set, n: s64, out: *Set) {
+    out.bits = (s.bits | (cast(u64) 1 << cast(u64)(n & 31))) & MASK;
+}
+
+// Replace out with s plus every member of ns; out may be s.
+AddList :: (s: *Set, ns: []s64, out: *Set) {
+    r := s.bits;
+    for i: 0..ns.count - 1 {
+        r |= cast(u64) 1 << cast(u64)(ns[i] & 31);
+    }
+    out.bits = r;
+}
+
+// Replace out with s less member n; out may be s.
+Del :: (s: *Set, n: s64, out: *Set) {
+    out.bits = s.bits & ~(cast(u64) 1 << cast(u64)(n & 31));
+}
+
+// Nonzero when n is a member: its bit in the word.
+Holds :: (s: *Set, n: s64) -> u64 {
+    return s.bits & (cast(u64) 1 << cast(u64)(n & 31));
+}
+
+Limit :: (s: *Set) -> s64 {
+    m: u64 = 0;
+    if s.bits >= MSB { m = MASK }
+    return TopBit(s.bits ^ m);
+}
+
+Eq :: (first: *Set, second: *Set) -> bool {
+    return first.bits == second.bits;
+}
+
+IsEmpty :: (s: *Set) -> bool {
+    return s.bits == 0;
+}
+
+Msb :: (s: *Set) -> bool {
+    return (s.bits & MSB) != 0;
+}
+
+// Lowercase hex digits of v, at least digits of them; nothing at all
+// for a zero value with a zero digit count, as Limbo's %.*ux printed.
+HexDigits :: (out: *Vec(u8), v: u64, digits: s64) {
+    tmp: Vec(u8);
+    glyphs := "0123456789abcdef";
+    x := v;
+    if x == 0 {
+        if digits > 0 { VecPush(tmp, glyphs[0]) }
+    }
+    while x != 0 {
+        VecPush(tmp, glyphs[x & 15]);
+        x = x >> 4;
+    }
+    while tmp.count < digits {
+        VecPush(tmp, glyphs[0]);
+    }
+    i := tmp.count - 1;
+    while i >= 0 {
+        VecPush(<<out, tmp[i]);
+        i -= 1;
+    }
+}
+
+// The compact hex form: leading nibbles that match the top bit are
+// dropped, and a word whose every nibble matches prints nothing.
+Str :: (s: *Set, out: *Vec(u8)) {
+    m: u64 = 0;
+    if s.bits >= MSB { m = MASK }
+    t := cast(u64) 0xF << 28;
+    sig: s64 = 8;
+    while t != 0 {
+        if (m & t) != (s.bits & t) { break }
+        sig -= 1;
+        t = (t >> 4) & 0x0FFFFFFF;
+    }
+    if sig > 0 {
+        top := (~MSB) & s.bits;
+        if sig < 8 {
+            top &= (cast(u64) 1 << cast(u64)(sig << 2)) - 1;
+        }
+        HexDigits(out, top, sig);
+    }
+    BuilderAppend(<<out, ":");
+    if (m & 1) != 0 {
+        BuilderAppend(<<out, "1");
+    } else {
+        BuilderAppend(<<out, "0");
+    }
+}
+
+// The word and nothing else, as debugstr printed.
+DebugStr :: (s: *Set, out: *Vec(u8)) {
+    HexDigits(out, s.bits, 1);
+}
+
+// The members as little-endian bytes, at least to the limit's byte and
+// always n of them; past the fourth byte the top bit's byte repeats.
+Bytes :: (s: *Set, n: s64, out: *Vec(u8)) {
+    VecClear(<<out);
+    m := (Limit(s) >> 3) + 1;
+    if m > n { n = m }
+    i: s64 = 0;
+    while i < n {
+        if i < 4 {
+            VecPush(<<out, cast(u8)((s.bits >> cast(u64)((i & 3) << 3)) & 0xFF));
+        } else {
+            f: u64 = 0;
+            if (s.bits & MSB) != 0 { f = 0xFF }
+            VecPush(<<out, cast(u8) f);
+        }
+        i += 1;
+    }
+}
+
+// The set from little-endian bytes; a top bit set in the last byte
+// extends through any missing leading bytes, and bytes beyond the
+// fourth are ignored, as in Limbo.
+Bytes2Set :: (d: []u8, out: *Set) {
+    if d.count == 0 {
+        out.bits = 0;
+        return;
+    }
+    msb: u64 = 0;
+    if (d[d.count - 1] >> 7) != 0 { msb = MASK }
+    v: u64 = cast(u64) d[0];
+    if d.count > 1 { v |= cast(u64) d[1] << 8 }
+    if d.count > 2 { v |= cast(u64) d[2] << 16 }
+    if d.count > 3 { v |= cast(u64) d[3] << 24 }
+    if d.count == 1 { v |= msb & 0xFFFFFF00 }
+    if d.count == 2 { v |= msb & 0xFFFF0000 }
+    if d.count == 3 { v |= msb & 0xFF000000 }
+    out.bits = v;
+}
+
+// The set from its compact hex form, which must end in a colon and the
+// top bit; digits beyond the low 31 bits are lost, and anything else
+// stores the empty set, as in Limbo.
+Str2Set :: (str: string, out: *Set) {
+    n: s64 = str.count;
+    if n >= 2 && str[n - 2] == #char ":" {
+        c := str[n - 1];
+        if c == #char "0" || c == #char "1" {
+            msb: u64 = 0;
+            if c == #char "1" { msb = MASK }
+            out.bits = ((Hex2Int(str, 0, n - 2, msb) & (~MSB & MASK)) | (msb & MSB)) & MASK;
+            return;
+        }
+    }
+    out.bits = 0;
+}
+
+// The hex digits s[from:to] as a word, the top bit filling any missing
+// leading nibbles; unknown digits count as zero, as in Limbo.
+Hex2Int :: (s: string, from: s64, to: s64, fill: u64) -> u64 {
+    n := fill;
+    i := from;
+    while i < to {
+        c := s[i];
+        v: u64 = 0;
+        if c >= #char "0" && c <= #char "9" {
+            v = cast(u64)(c - #char "0");
+        } else if c >= #char "a" && c <= #char "f" {
+            v = cast(u64)(c - #char "a") + 10;
+        } else if c >= #char "A" && c <= #char "F" {
+            v = cast(u64)(c - #char "A") + 10;
+        }
+        n = ((n << 4) | v) & MASK;
+        i += 1;
+    }
+    return n;
+}
+
+// The position of v's top set bit, 1-based, or 0 when v is empty.
+TopBit :: (v0: u64) -> s64 {
+    v := v0;
+    if v == 0 { return 0 }
+    b: s64 = 1;
+    n: s64 = 16;
+    mask := cast(u64) 0xFFFF0000;
+    while n != 0 {
+        if (v & mask) != 0 {
+            b += n;
+            v = v >> cast(u64) n;
+        }
+        n = n >> 1;
+        mask = mask >> cast(u64) n;
+    }
+    return b;
+}
