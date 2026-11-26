@@ -1,4 +1,4 @@
-# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 107 rows
+# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 106 rows
 
 Owner: Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`)
 
@@ -14,7 +14,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/asm.dis | appl/cmd/asm/asm.b|appl/cmd/limbo/asm.b |  | - |  |
 | zx/auhdr.dis | appl/cmd/auplay.b (copy rule) |  | - |  |
 | zx/auplay.dis | appl/cmd/auplay.b |  | - |  |
-| zx/bind.dis | appl/cmd/bind.b |  | - |  |
 | zx/bytes.dis | appl/cmd/bytes.b |  | - |  |
 | zx/cal.dis | appl/cmd/cal.b |  | - |  |
 | zx/calc.dis | appl/cmd/calc.b |  | - |  |

@@ -407,7 +407,7 @@ appl
 			rstyxd.b
 		avr
 			mkfile
-		bind.b
+		bind.zi
 		bit2gif.b
 		broke.b
 		bytes.b
@@ -746,6 +746,8 @@ appl
 		zeros.b
 		taijios_args.zi
 		taijios_io.zi
+		taijios_namespace.zi
+		taijios_stat.zi
 		zx_arg.zi
 		zx_cli.zi
 		zx_lines.zi
@@ -1428,7 +1430,7 @@ zx
 	avr
 		+
 	basename.zx
-	bind.dis
+	bind.zx
 	broke.dis
 	bytes.dis
 	cal.dis

@@ -1,0 +1,60 @@
+// Bind in the shared guest namespace, ported from Inferno bind.b.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Ns :: #import "taijios_namespace";
+Fs :: #import "taijios_stat";
+Cli :: #import "zx_cli";
+
+Usage :: "usage: bind [-a|-b|-c|-ac|-bc] [-q] source target\n";
+
+Diagnostic :: (path: string) {
+    problem := Io.Error();
+    if path.count == 0 { problem = "empty file name" }
+    unused Cli.WriteAll(2, "bind: ");
+    unused Cli.WriteAll(2, path);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, problem);
+    unused Cli.WriteAll(2, "\n");
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    next: s32;
+    flags: s32;
+    quiet := false;
+    while next < count {
+        option := Args.Operand(next);
+        if option.count == 0 || option[0] != #char "-" { break }
+        next += 1;
+        if option == "--" { break }
+        // A bare '-' is an empty option cluster in the original command.
+        for at: 1..option.count-1 {
+            letter := option[at];
+            if letter == #char "a" { flags |= Ns.After }
+            else if letter == #char "b" { flags |= Ns.Before }
+            else if letter == #char "c" { flags |= Ns.AllowCreate }
+            else if letter == #char "q" { quiet = true }
+            else { return Cli.Usage(Usage) }
+        }
+    }
+    if count - next != 2 || ((flags & Ns.After) != 0 && (flags & Ns.Before) != 0) { return Cli.Usage(Usage) }
+    source := Args.Operand(next);
+    target := Args.Operand(next + 1);
+    if Ns.Bind(source, target, flags) >= 0 || quiet { return 0 }
+    problem := Ns.Error();
+    bytes: [Fs.BufferSize]u8;
+    if Io.StatPacked(source, bytes[:]) <= 0 { Diagnostic(source) }
+    else if Io.StatPacked(target, bytes[:]) <= 0 { Diagnostic(target) }
+    else {
+        unused Cli.WriteAll(2, "bind: cannot bind ");
+        unused Cli.WriteAll(2, source);
+        unused Cli.WriteAll(2, " onto ");
+        unused Cli.WriteAll(2, target);
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, problem);
+        unused Cli.WriteAll(2, "\n");
+    }
+    unused Args.SetFailure("bind");
+    return 1;
+}

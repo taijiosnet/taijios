@@ -267,7 +267,7 @@ the file server serves the 1995 version of Inferno's Styx protocol, and
 .I mount
 inserts a process that translates to the current version.
 .SH SOURCE
-.B /appl/cmd/bind.b
+.B /appl/cmd/bind.zi
 .br
 .B /appl/cmd/mount.b
 .br
