@@ -8,7 +8,7 @@ Shape :: #import "kryon/shape";
 Text :: #import "kryon/text";
 Snake :: #import "snake_model";
 Rand :: #import "inferno_rand";
-Scores :: #import "score_table";
+Scores :: #import "scoretable";
 IO :: #import "taijios_io";
 Args :: #import "taijios_args";
 Clock :: #import "taijios_clock";

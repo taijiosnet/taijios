@@ -1,6 +1,6 @@
 // Inferno's score table (appl/lib/scoretable.b) for the guest games: one
 // "user score other..." line per entry, best first, at most ten kept.
-// See ../../NOTICE.
+// Copyright © 1999 Roger Peppe. See ../../NOTICE.
 IO :: #import "taijios_io";
 #import "std/vec"
 #import "std/number_text"
@@ -11,8 +11,6 @@ MaxScores :: 10
 ReadMode :: 0
 WriteMode :: 1
 ReadWrite :: 2
-
-FileLimit :: 65536
 
 // One parsed line; user and other are byte ranges in the file text.
 Score :: struct {
@@ -41,11 +39,12 @@ Open :: (path: string, user: string) -> Table {
 }
 
 ReadAll :: (path: string, bytes: *Vec(u8)) -> bool {
+    VecClear(bytes.*)
     fd := IO.Open(path, ReadMode)
     if fd < 0 { return false }
     defer { unused IO.Close(fd) }
     chunk: [4096]u8
-    while bytes.count < FileLimit {
+    while true {
         count := IO.Read(fd, chunk[:])
         if count < 0 { return false }
         if count == 0 { break }
@@ -85,25 +84,47 @@ ParseLine :: (text: string, start: s64, end: s64, score: *Score) -> bool {
         count += 1
     }
     if count < 2 { return false }
-    value: s64 = 0
+    // Limbo's int conversion uses the 32-bit guest strtol: skip its
+    // remaining whitespace, accept either sign and saturate on overflow.
+    while digits_start < digits_end && (text[digits_start] == cast(u8)13 ||
+        text[digits_start] == cast(u8)11 || text[digits_start] == cast(u8)12) { digits_start += 1 }
+    if digits_start == digits_end { score.score = 0; return true }
+    value: u32 = 0
     negative := text[digits_start] == cast(u8)45
-    if negative { digits_start += 1 }
+    if negative || text[digits_start] == cast(u8)43 { digits_start += 1 }
+    limit: u32 = 2147483647
+    if negative { limit += 1 }
     while digits_start < digits_end && text[digits_start] >= cast(u8)48 && text[digits_start] <= cast(u8)57 {
-        value = value * 10 + cast(s64)(text[digits_start] - cast(u8)48)
+        digit := cast(u32)(text[digits_start] - cast(u8)48)
+        if value > (limit - digit) / 10 { value = limit }
+        else { value = value * 10 + digit }
         digits_start += 1
     }
-    if negative { value = -value }
+    if negative { value = cast(u32)0 - value }
     score.score = cast(s32)value
     return true
 }
 
 // Every score in file order.
 Parse :: (text: string, scores: *Vec(Score)) {
+    VecClear(scores.*)
     start: s64 = 0
     for at: cast(s64)0..text.count {
         if at < text.count && text[at] != cast(u8)10 { continue }
         score: Score
-        if at > start && ParseLine(text, start, at, *score) { VecPush(scores.*, score) }
+        if at > start {
+            if ParseLine(text, start, at, *score) { VecPush(scores.*, score) }
+            else {
+                first := start
+                while first < at && Space(text[first]) { first += 1 }
+                if first < at {
+                    unused IO.Write(2, "bad line in score table: ")
+                    end := at
+                    if end < text.count { end += 1 }
+                    unused IO.Write(2, text[start:end])
+                }
+            }
+        }
         start = at + 1
     }
 }
@@ -120,14 +141,38 @@ Best :: (table: Table) -> (score: s32, ok: bool) {
     return scores[0].score, true
 }
 
-Line :: (out: *Vec(u8), user: string, score: s32, other: string) {
+Line :: (out: *Vec(u8), user: string, score: s32, other: string, normalize: bool) {
     digits: [24]u8
     unused BuilderAppend(out.*, user)
     unused BuilderAppend(out.*, " ")
     unused BuilderAppend(out.*, FormatInteger(cast(s64)score, digits[:]))
     unused BuilderAppend(out.*, " ")
-    unused BuilderAppend(out.*, other)
+    if normalize {
+        at: s64 = 0
+        first := true
+        while at < other.count {
+            while at < other.count && Space(other[at]) { at += 1 }
+            start := at
+            while at < other.count && !Space(other[at]) { at += 1 }
+            if at == start { break }
+            if !first { unused BuilderAppend(out.*, " ") }
+            unused BuilderAppend(out.*, other[start:at])
+            first = false
+        }
+    } else { unused BuilderAppend(out.*, other) }
     unused BuilderAppend(out.*, "\n")
+}
+
+WriteError :: (path: string) {
+    message := IO.Error()
+    report: Vec(u8)
+    defer VecFree(report)
+    unused BuilderAppend(report, "scoretable: cannot write score file '")
+    unused BuilderAppend(report, path)
+    unused BuilderAppend(report, "': ")
+    unused BuilderAppend(report, message)
+    unused BuilderAppend(report, "\n")
+    unused IO.Write(2, TextView(report[:]))
 }
 
 // Insert before the first lower score, keep the best ten and return the rank.
@@ -145,18 +190,23 @@ Set :: (table: Table, score: s32, other: string) -> s32 {
     for index: cast(s64)0..scores.count {
         if rank < 0 && (index == scores.count || score > scores[index].score) {
             rank = cast(s32)index
-            if written < MaxScores { Line(*out, table.user, score, other); written += 1 }
+            if written < MaxScores { Line(*out, table.user, score, other, false); written += 1 }
         }
         if index < scores.count && written < MaxScores {
             entry := scores[index]
-            Line(*out, text[entry.user_start:entry.user_end], entry.score, text[entry.other_start:entry.other_end])
+            Line(*out, text[entry.user_start:entry.user_end], entry.score, text[entry.other_start:entry.other_end], true)
             written += 1
         }
     }
     fd := IO.Create(table.path, WriteMode, 438)
     if fd >= 0 {
-        unused IO.Write(fd, TextView(out[:]))
+        at: s64 = 0
+        while at < out.count {
+            count := IO.Write(fd, TextView(out[at:]))
+            if count <= 0 { WriteError(table.path); break }
+            at += cast(s64)count
+        }
         unused IO.Close(fd)
-    }
+    } else { WriteError(table.path) }
     return rank
 }

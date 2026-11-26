@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Share Tetris and Snake score files through `appl/lib/scoretable.zi`, preserving
+  tied ranks, Limbo integer parsing, whitespace normalization and the best ten
+  entries. Remove the replaced Limbo score table and Dis binary.
+
 - Share RIFF/AVI metadata, palette and frame parsing through `appl/lib/riff.zi`,
   use it in the ZX AVI Player, and remove the unused Limbo RIFF library and Dis binary.
 

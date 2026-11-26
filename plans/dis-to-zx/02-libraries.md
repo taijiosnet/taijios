@@ -1,4 +1,4 @@
-# 2. Libraries - zx/lib/** (boot-loaded rows first) - 140 rows
+# 2. Libraries - zx/lib/** (boot-loaded rows first) - 139 rows
 
 Owner: Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane)
 
@@ -110,7 +110,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/lib/readxbitmap.dis | appl/lib/readxbitmap.b |  | - |  |
 | zx/lib/regex.dis | appl/lib/regex.b | module/regex.m | - |  |
 | zx/lib/registries.dis | appl/lib/registries.b | module/registries.m | - |  |
-| zx/lib/scoretable.dis | appl/lib/scoretable.b | module/scoretable.m | - |  |
 | zx/lib/secstore.dis | appl/lib/secstore.b | module/secstore.m | - |  |
 | zx/lib/selectfile.dis | appl/lib/selectfile.b | module/selectfile.m | - |  |
 | zx/lib/sexprs.dis | appl/lib/sexprs.b | module/sexprs.m | - |  |

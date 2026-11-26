@@ -128,14 +128,14 @@ install-stopwatch-zx:V: $DISBIN/stopwatch.zx
 install-kryon-zx:V: $DISBIN/clock.zx $DISBIN/stopwatch.zx $DISBIN/counter.zx $DISBIN/view.zx install-colors-zx install-date-zx
 
 # Desktop games and tools rewritten from their Limbo versions.
-snake.zx: snake.zi snake_model.zi score_table.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
-	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry snake:main -o $target snake.zi
+snake.zx: snake.zi snake_model.zi ../lib/scoretable.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --module-path ../lib --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry snake:main -o $target snake.zi
 
 sweeper.zx: sweeper.zi sweeper_model.zi inferno_rand.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_args --bind-host taijios_clock --entry sweeper:main -o $target sweeper.zi
 
-tetris.zx: tetris.zi tetris_model.zi score_table.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
-	ziran bundle --project --module-path ../cmd --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry tetris:main -o $target tetris.zi
+tetris.zx: tetris.zi tetris_model.zi ../lib/scoretable.zi inferno_rand.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
+	ziran bundle --project --module-path ../cmd --module-path ../lib --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry tetris:main -o $target tetris.zi
 
 polyhedra.zx: polyhedra_app.zi polyhedra_render.zi ../math/polyhedra.zi ../math/math_util.zi ../cmd/taijios_io.zi ../cmd/taijios_args.zi ../cmd/taijios_clock.zi ziran.toml ziran.lock mkfile
 	ziran bundle --project --module-path ../cmd --module-path ../math --bind-host kryon/pixmap --bind-host taijios_io --bind-host taijios_args --bind-host taijios_clock --entry polyhedra_app:main -o $target polyhedra_app.zi

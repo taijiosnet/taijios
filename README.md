@@ -460,6 +460,9 @@ palette and frame parsing; `avi_model.zi` decodes the frames without loading
 the removed Dis RIFF library. WmPlay keeps Inferno audio header validation (`rate` magic,
 `\n\n` terminator, 4-byte alignment), `/dev/audioctl` configuration, `/dev/audio`
 streaming and the file chooser.
+Tetris and Snake share `appl/lib/scoretable.zi` for the existing
+`user score other...` files: ties follow older entries and only the best ten
+scores are kept. Both games use this module instead of the Dis score table.
 Each test
 compares the rules and the window with games recorded from the Dis version.
 

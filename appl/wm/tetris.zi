@@ -9,7 +9,7 @@ Box :: #import "kryon/box";
 Text :: #import "kryon/text";
 Tetris :: #import "tetris_model";
 Rand :: #import "inferno_rand";
-Scores :: #import "score_table";
+Scores :: #import "scoretable";
 IO :: #import "taijios_io";
 Args :: #import "taijios_args";
 Clock :: #import "taijios_clock";
