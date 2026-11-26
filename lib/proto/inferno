@@ -418,7 +418,7 @@ appl
 		chgrp.b
 		chmod.b
 		cmp.b
-		comm.b
+		comm.zi
 		cook.b
 		cprof.b
 		cpu.b
@@ -1438,7 +1438,7 @@ zx
 	cmp.dis
 	collab
 		+
-	comm.dis
+	comm.zx
 	cook.dis
 	cp.zx
 	cprof.dis

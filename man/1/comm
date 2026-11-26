@@ -38,7 +38,7 @@ comm -12 file1 file2
 .IP
 Print lines common to two sorted files.
 .SH SOURCE
-.B /appl/cmd/comm.b
+.B /appl/cmd/comm.zi
 .SH "SEE ALSO"
 .IR sort (1),
 .IR cmp (1), 

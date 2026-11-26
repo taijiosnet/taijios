@@ -1,0 +1,80 @@
+// Sorted three-column merge, ported from Inferno comm.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Lines :: #import "zx_lines";
+#import "std/vec"
+
+// Inferno orders a longer prefix first. Otherwise UTF-8 byte order agrees
+// with rune order for the text lines handled here.
+Compare :: (a: string, b: string) -> s32 {
+    for i: 0..a.count-1 {
+        if i >= b.count || a[i] < b[i] { return 1 }
+        if a[i] != b[i] { return 2 }
+    }
+    if a.count == b.count { return 0 }
+    return 2
+}
+
+Open :: (path: string) -> s32 {
+    if path == "-" { return 0 }
+    handle := Io.Open(path, 0)
+    if handle < 0 {
+        problem := Io.Error()
+        unused Cli.WriteAll(2, "comm: cannot open ")
+        unused Cli.WriteAll(2, path)
+        unused Cli.WriteAll(2, ": ")
+        unused Cli.WriteAll(2, problem)
+        unused Cli.WriteAll(2, "\n")
+    }
+    return handle
+}
+
+Write :: (line: string, column: s32, columns: s32) -> bool {
+    if (columns & (1 << column)) == 0 { return true }
+    for i: 0..column-1 {
+        if (columns & (1 << i)) != 0 && !Cli.WriteAll(1, "\t") { return false }
+    }
+    return Cli.WriteAll(1, line)
+}
+
+main :: () -> s32 {
+    scan: Options.Scan
+    columns: s32 = 7
+    while true {
+        option := Options.Option(*scan)
+        if option == 0 { break }
+        if option < #char "1" || option > #char "3" {
+            return Cli.Usage("usage: comm [-123] file1 file2\n")
+        }
+        columns &= ~(1 << (option - #char "1"))
+    }
+    if Args.Count() - scan.next != 2 { return Cli.Usage("usage: comm [-123] file1 file2\n") }
+    first := Open(Args.At(scan.next))
+    if first < 0 { unused Args.SetFailure("open"); return 1 }
+    defer { if first != 0 { unused Io.Close(first) } }
+    second := Open(Args.At(scan.next + 1))
+    if second < 0 { unused Args.SetFailure("open"); return 1 }
+    defer { if second != 0 { unused Io.Close(second) } }
+    left := Lines.LineReader.{handle = first}
+    right := Lines.LineReader.{handle = second}
+    a: Vec(u8)
+    b: Vec(u8)
+    have_a := Lines.ReadLine(*left, *a)
+    have_b := Lines.ReadLine(*right, *b)
+    while have_a || have_b {
+        order: s32 = 0
+        if !have_a { order = 2 }
+        else if !have_b { order = 1 }
+        else { order = Compare(TextView(a[:]), TextView(b[:])) }
+        ok := true
+        if order == 0 { ok = Write(TextView(a[:]), 2, columns) }
+        else if order == 1 { ok = Write(TextView(a[:]), 0, columns) }
+        else { ok = Write(TextView(b[:]), 1, columns) }
+        if !ok { unused Args.SetFailure("write"); return 1 }
+        if order != 2 { have_a = Lines.ReadLine(*left, *a) }
+        if order != 1 { have_b = Lines.ReadLine(*right, *b) }
+    }
+    return 0
+}

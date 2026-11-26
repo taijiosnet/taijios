@@ -241,3 +241,6 @@ y.debug
 /appl/acme/**/*.zx
 /acme/**/*.zx
 /zx/acme/*.zx
+
+/appl/cmd/comm.zx
+/zx/comm.zx
