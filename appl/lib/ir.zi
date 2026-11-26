@@ -1,0 +1,164 @@
+// Inferno infrared protocols, ported from ir.b, irsim.b and irmpath.b.
+// See ../../NOTICE. Decoders keep their state in the caller; no worker is
+// spawned. Feed one byte with its monotonic arrival time to get a button.
+Utf8 :: #import "std/utf8";
+#import "std/vec"
+
+Zero :: 0
+One :: 1
+Two :: 2
+Three :: 3
+Four :: 4
+Five :: 5
+Six :: 6
+Seven :: 7
+Eight :: 8
+Nine :: 9
+ChanUP :: 10
+ChanDN :: 11
+VolUP :: 12
+VolDN :: 13
+FF :: 14
+Rew :: 15
+Up :: 16
+Dn :: 17
+Select :: 18
+Power :: 19
+Enter :: 20
+Rcl :: 21
+Record :: 22
+Mute :: 23
+Error :: 9999
+EOF :: -1
+Serial :: 0
+Keyboard :: 1
+MindPath :: 2
+
+TranslateKeyboard :: (key: s32) -> s32 {
+    if key >= 48 && key <= 57 { return key - 48 }
+    if key == #char "r" { return ChanUP }
+    if key == #char "c" { return ChanDN }
+    if key == #char "t" { return VolUP }
+    if key == #char "v" { return VolDN }
+    if key == #char "k" { return FF }
+    if key == #char "j" { return Rew }
+    if key == #char "i" { return Up }
+    if key == #char "m" { return Dn }
+    if key == #char "x" { return Rcl }
+    if key == 10 { return Select }
+    if key == 32 { return Enter }
+    if key == 127 { return Power }
+    return Error
+}
+
+SerialKey :: (first: u8, second: u8) -> s32 {
+    code := (cast(s32)(first & cast(u8)31) << 5) | cast(s32)(second & cast(u8)31)
+    if code == 71 { return ChanDN }
+    if code == 95 { return Seven }
+    if code == 135 { return VolDN }
+    if code == 207 { return Three }
+    if code == 215 { return Select }
+    if code == 263 { return Dn }
+    if code == 335 { return Five }
+    if code == 343 { return Rew }
+    if code == 399 { return Nine }
+    if code == 407 { return Enter }
+    if code == 455 { return Power }
+    if code == 479 { return One }
+    if code == 591 { return Six }
+    if code == 599 { return ChanUP }
+    if code == 663 { return VolUP }
+    if code == 711 { return Up }
+    if code == 735 { return Two }
+    if code == 791 { return Mute }
+    if code == 839 { return FF }
+    if code == 863 { return Four }
+    if code == 903 { return Record }
+    if code == 927 { return Eight }
+    if code == 975 { return Zero }
+    if code == 983 { return Rcl }
+    return Error
+}
+
+KeyboardState :: struct {
+    bytes: [4]u8
+    count: s32
+    needed: s32
+}
+
+// A complete UTF-8 scalar, as irsim's byte-at-a-time keyboard reader emits.
+FeedKeyboard :: (state: *KeyboardState, byte: u8) -> (key: s32, ready: bool) {
+    if state.count == 0 {
+        state.needed = 1
+        if byte >= cast(u8)194 && byte <= cast(u8)223 { state.needed = 2 }
+        else if byte >= cast(u8)224 && byte <= cast(u8)239 { state.needed = 3 }
+        else if byte >= cast(u8)240 && byte <= cast(u8)244 { state.needed = 4 }
+    }
+    state.bytes[state.count] = byte
+    state.count += 1
+    // A malformed continuation is complete too: Decode yields Runeerror.
+    if state.count < state.needed && (state.count == 1 || Utf8.Continuation(byte)) { return 0, false }
+    decoded := Utf8.Decode(TextView(state.bytes[:state.count]), 0)
+    state.count = 0
+    return cast(s32)decoded.value, true
+}
+
+Decoder :: struct {
+    kind: s32
+    keyboard: KeyboardState
+    pending: bool
+    first: u8
+    at: s64
+    pair_second: bool
+    direction: bool
+    trailer: bool
+    last: s32
+}
+
+FeedMindPath :: (state: *Decoder, byte: u8) -> (button: s32, ready: bool) {
+    // The original getconsec(fd, 2) consumes a pair and takes its latter
+    // byte, including when the pair differs. Keep that wire behavior.
+    state.pair_second = !state.pair_second
+    if state.pair_second { return 0, false }
+    if state.trailer {
+        if byte == #char "U" || byte == cast(u8)0 { state.trailer = false }
+        return 0, false
+    }
+    if state.direction {
+        state.direction = false
+        if byte == #char "a" || byte == #char "e" || byte == #char "i" || byte == #char "p" { state.last = Up }
+        else if byte == #char "b" || byte == #char "f" || byte == #char "j" || byte == #char "k" { state.last = FF }
+        else if byte == #char "c" || byte == #char "g" || byte == #char "l" || byte == #char "m" { state.last = Dn }
+        else if byte == #char "d" || byte == #char "h" || byte == #char "n" || byte == #char "o" { state.last = Rew }
+        else if byte == #char "Z" { state.last = Select }
+    } else {
+        if byte == #char "U" { return 0, false }
+        if byte == #char "R" { state.direction = true; return 0, false }
+        if byte == #char "-" { state.last = Enter }
+        else if byte == #char "+" { state.last = Rcl }
+        else if byte == #char "1" { state.last = One }
+        else if byte == #char "2" { state.last = Two }
+        else if byte == #char "3" { state.last = Three }
+        else if byte == #char "4" { state.last = ChanUP }
+        else if byte == #char "5" { state.last = ChanDN }
+    }
+    state.trailer = true
+    return state.last, true
+}
+
+Feed :: (state: *Decoder, byte: u8, milliseconds: s64) -> (button: s32, ready: bool) {
+    if state.kind == Keyboard {
+        key, ready := FeedKeyboard(*state.keyboard, byte)
+        if ready { return TranslateKeyboard(key), true }
+        return 0, false
+    }
+    if state.kind == MindPath { return FeedMindPath(state, byte) }
+    if !state.pending || milliseconds - state.at > 200 {
+        state.first = byte
+        state.at = milliseconds
+        state.pending = true
+        return 0, false
+    }
+    state.pending = false
+    return SerialKey(state.first, byte), true
+}

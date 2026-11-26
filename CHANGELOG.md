@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace the serial, keyboard and Mind Path infrared readers with shared Ziran
+  `ir`/`ir_input` SDK modules and ship `irtest.zx` with `-s` and `-m` modes.
+  Preserve button translations and serial setup, finish at EOF, and remove
+  the replaced Limbo sources, interface and Dis binaries.
+
 - Share Tetris and Snake score files through `appl/lib/scoretable.zi`, preserving
   tied ranks, Limbo integer parsing, whitespace normalization and the best ten
   entries. Remove the replaced Limbo score table and Dis binary.

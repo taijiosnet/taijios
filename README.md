@@ -460,6 +460,12 @@ palette and frame parsing; `avi_model.zi` decodes the frames without loading
 the removed Dis RIFF library. WmPlay keeps Inferno audio header validation (`rate` magic,
 `\n\n` terminator, 4-byte alignment), `/dev/audioctl` configuration, `/dev/audio`
 streaming and the file chooser.
+
+The shared `ir` and `ir_input` SDK modules replace the Dis infrared readers.
+`/zx/irtest.zx` reads the serial remote at 9600 baud; `-m` selects the Mind Path
+IR50 at 1200 baud with DTR/RTS, and `-s` selects the keyboard simulator.
+Readers close their device and finish at EOF without leaving a worker behind.
+
 Tetris and Snake share `appl/lib/scoretable.zi` for the existing
 `user score other...` files: ties follow older entries and only the best ten
 scores are kept. Both games use this module instead of the Dis score table.

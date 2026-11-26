@@ -1,4 +1,4 @@
-# 2. Libraries - zx/lib/** (boot-loaded rows first) - 139 rows
+# 2. Libraries - zx/lib/** (boot-loaded rows first) - 137 rows
 
 Owner: Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane)
 
@@ -69,8 +69,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/lib/inflate.dis | appl/lib/inflate.b | module/inflate.m | - |  |
 | zx/lib/ip.dis | appl/lib/ip.b | module/ip.m | - |  |
 | zx/lib/ipattr.dis | appl/lib/ipattr.b | module/ipattr.m | - |  |
-| zx/lib/ir.dis | appl/lib/ir.b | module/ir.m | - |  |
-| zx/lib/irsim.dis | appl/lib/irsim.b |  | - |  |
 | zx/lib/itslib.dis | appl/lib/itslib.b | module/itslib.m | - |  |
 | zx/lib/keyset.dis | appl/lib/keyset.b | module/keyset.m | - |  |
 | zx/lib/libc0.dis | appl/lib/libc0.b | module/libc0.m | - |  |

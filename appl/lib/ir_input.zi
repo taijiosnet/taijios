@@ -1,0 +1,78 @@
+// Guest file/device adapter for the infrared decoders in ir.zi.
+Ir :: #import "ir";
+Io :: #import "taijios_io";
+Clock :: #import "taijios_clock";
+Stat :: #import "taijios_stat";
+
+Reader :: struct {
+    handle: s32
+    ready: bool
+    ended: bool
+    decoder: Ir.Decoder
+}
+
+// Open a selected port. Serial devices discard their initially queued bytes,
+// as the Limbo readers did. Separate paths also allow alternate serial ports.
+OpenDevice :: (kind: s32, control_path: string, data_path: string) -> Reader {
+    reader: Reader
+    reader.handle = -1
+    reader.decoder.kind = kind
+    if kind != Ir.Serial && kind != Ir.Keyboard && kind != Ir.MindPath { return reader }
+    if kind != Ir.Keyboard {
+        control := Io.Open(control_path, 1)
+        if control < 0 { return reader }
+        baud := "b9600"
+        if kind == Ir.MindPath { baud = "b1200" }
+        ok := Io.Write(control, baud) == baud.count
+        if ok && kind == Ir.MindPath { ok = Io.Write(control, "d1") == 2 && Io.Write(control, "r1") == 2 }
+        unused Io.Close(control)
+        if !ok { return reader }
+    }
+    reader.handle = Io.Open(data_path, 0)
+    if reader.handle < 0 { return reader }
+    if kind != Ir.Keyboard {
+        metadata: [8192]u8
+        info := Stat.DescriptorInfo(reader.handle, metadata[:])
+        remaining := info.length
+        chunk: [4096]u8
+        while remaining > 0 {
+            size := remaining
+            if size > chunk.count { size = chunk.count }
+            count := Io.Read(reader.handle, chunk[:size])
+            if count <= 0 { break }
+            remaining -= count
+            reader.decoder.last = count
+        }
+    }
+    reader.ready = true
+    return reader
+}
+
+Open :: (kind: s32) -> Reader {
+    if kind == Ir.Keyboard { return OpenDevice(kind, "", "/dev/keyboard") }
+    return OpenDevice(kind, "#t/eia1ctl", "#t/eia1")
+}
+
+Close :: (reader: *Reader) {
+    if reader.handle >= 0 { unused Io.Close(reader.handle) }
+    reader.handle = -1
+    reader.ready = false
+    reader.ended = true
+}
+
+// Read until one button is ready. Serial end/error emits Error once, then
+// EOF; keyboard end emits EOF. The caller owns and closes the descriptor.
+Next :: (reader: *Reader) -> s32 {
+    if !reader.ready || reader.ended { return Ir.EOF }
+    byte: [1]u8
+    while true {
+        if Io.Read(reader.handle, byte[:]) != 1 {
+            reader.ended = true
+            if reader.decoder.kind == Ir.Keyboard { return Ir.EOF }
+            return Ir.Error
+        }
+        button, ready := Ir.Feed(*reader.decoder, byte[0], Clock.Millis())
+        if ready { return button }
+    }
+    return Ir.EOF
+}

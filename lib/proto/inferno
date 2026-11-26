@@ -554,7 +554,7 @@ appl
 			sntp.b
 			tftpd.b
 			virgild.b
-		irtest.b
+		irtest.zi
 		itest.b
 		itreplay.b
 		kill.b
@@ -971,9 +971,8 @@ appl
 		inflate.b
 		ip.b
 		ipattr.b
-		ir.b
-		irmpath.b
-		irsim.b
+		ir.zi
+		ir_input.zi
 		itslib.b
 		keyset.b
 		libc0.b
@@ -1543,8 +1542,6 @@ zx
 		inflate.dis
 		ip.dis
 		ipattr.dis
-		ir.dis
-		irsim.dis
 		itslib.dis
 		keyset.dis
 		libc0.dis
@@ -1632,6 +1629,7 @@ zx
 		workdir.dis
 		writegif.dis
 		xml.dis
+	irtest.zx
 	limbo.dis
 	listen.dis
 	lockfs.dis
@@ -2147,7 +2145,6 @@ module
 	inflate.m
 	ip.m
 	ipattr.m
-	ir.m
 	itslib.m
 	keyboard.m
 	keyring.m

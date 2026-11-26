@@ -3,6 +3,8 @@ name = "taijios"
 module_roots = ["appl/lib", "appl/cmd", "appl/cmd/tcltk"]
 
 [exports]
+ir = "appl/lib/ir.zi"
+ir_input = "appl/lib/ir_input.zi"
 scoretable = "appl/lib/scoretable.zi"
 riff = "appl/lib/riff.zi"
 app_registry = "appl/cmd/app_registry.zi"

@@ -1,0 +1,43 @@
+// irtest [-s|-m]: serial remote, keyboard simulator, or Mind Path IR50.
+// Port of irtest.b; see ../../NOTICE.
+Ir :: #import "ir";
+Input :: #import "ir_input";
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+#import "std/vec"
+#import "std/number_text"
+
+main :: () -> s32 {
+    kind: s32 = Ir.Serial
+    count := Args.OperandCount()
+    if count > 1 { return Cli.Usage("usage: irtest [-s|-m]\n") }
+    if count == 1 {
+        arg := Args.Operand(0)
+        if arg == "-s" { kind = Ir.Keyboard }
+        else if arg == "-m" { kind = Ir.MindPath }
+        else { return Cli.Usage("usage: irtest [-s|-m]\n") }
+    }
+    reader := Input.Open(kind)
+    if !reader.ready {
+        unused Cli.WriteAll(2, "Ir->init: ")
+        unused Cli.WriteAll(2, Io.Error())
+        unused Cli.WriteAll(2, "\n")
+        unused Args.SetFailure("open")
+        return 1
+    }
+    defer Input.Close(*reader)
+    names: [20]string = .["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+        "ChanUP", "ChanDN", "VolUP", "VolDN", "FF", "Rew", "Up", "Dn", "Select", "Power"]
+    while true {
+        button := Input.Next(*reader)
+        if button == Ir.EOF { break }
+        if button == Ir.Error { Cli.PrintLine("Error") }
+        else if button >= names.count || button < 0 {
+            digits: [24]u8
+            unused Cli.WriteAll(1, "unknown ")
+            Cli.PrintLine(FormatInteger(cast(s64)button, digits[:]))
+        } else { Cli.PrintLine(names[button]) }
+    }
+    return 0
+}

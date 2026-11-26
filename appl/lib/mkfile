@@ -44,8 +44,6 @@ TARG=\
 	inflate.dis\
 	ip.dis\
 	ipattr.dis\
-	ir.dis\
-	irsim.dis\
 	itslib.dis\
 	keyset.dis\
 	libc0.dis\
@@ -124,7 +122,6 @@ SYSMODULES= \
 	html.m\
 	imagefile.m\
 	inflate.m\
-	ir.m\
 	keyring.m\
 	lock.m\
 	man.m\
