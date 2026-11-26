@@ -466,6 +466,14 @@ The shared `ir` and `ir_input` SDK modules replace the Dis infrared readers.
 IR50 at 1200 baud with DTR/RTS, and `-s` selects the keyboard simulator.
 Readers close their device and finish at EOF without leaving a worker behind.
 
+The SDK also exports `quicktime` for 32-bit atom and movie/track-header decoding,
+and `quicktime_input` for buffered guest-file reading. `Open` retains the
+original unified-file convention (`mdat` followed by resources). Callers read
+atom headers, then use `ReadMovie`, `ReadTrack` or `SkipAtom`, and close the
+reader with `Close`. Invalid lengths and truncated input return errors.
+This reads metadata using the legacy header layout; it does not decode media
+or support extended-size atoms.
+
 Tetris and Snake share `appl/lib/scoretable.zi` for the existing
 `user score other...` files: ties follow older entries and only the best ten
 scores are kept. Both games use this module instead of the Dis score table.

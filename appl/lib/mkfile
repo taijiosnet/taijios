@@ -63,7 +63,6 @@ TARG=\
 	popup.dis\
 	profile.dis\
 	pslib.dis\
-	quicktime.dis\
 	rand.dis\
 	random.dis\
 	readdir.dis\
@@ -132,7 +131,6 @@ SYSMODULES= \
 	powerman.m\
 	prefab.m\
 	pslib.m\
-	quicktime.m\
 	rand.m\
 	readdir.m\
 	regex.m\

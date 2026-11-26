@@ -1000,7 +1000,8 @@ appl
 			scaler.m
 		profile.b
 		pslib.b
-		quicktime.b
+		quicktime.zi
+		quicktime_input.zi
 		rand.b
 		random.b
 		readdir.b
@@ -1566,7 +1567,6 @@ zx
 			+
 		profile.dis
 		pslib.dis
-		quicktime.dis
 		rand.dis
 		random.dis
 		readdir.dis
@@ -2171,7 +2171,6 @@ module
 	print.m
 	profile.m
 	pslib.m
-	quicktime.m
 	rand.m
 	readdir.m
 	regex.m

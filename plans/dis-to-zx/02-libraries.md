@@ -1,4 +1,4 @@
-# 2. Libraries - zx/lib/** (boot-loaded rows first) - 137 rows
+# 2. Libraries - zx/lib/** (boot-loaded rows first) - 136 rows
 
 Owner: Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane)
 
@@ -97,7 +97,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/lib/print/scaler.dis | appl/lib/print/scaler.b |  | - |  |
 | zx/lib/profile.dis | appl/lib/profile.b | module/profile.m | - |  |
 | zx/lib/pslib.dis | appl/lib/pslib.b | module/pslib.m | - |  |
-| zx/lib/quicktime.dis | appl/lib/quicktime.b | module/quicktime.m | - |  |
 | zx/lib/rand.dis | appl/lib/rand.b | module/rand.m | - |  |
 | zx/lib/random.dis | appl/lib/random.b |  | - |  |
 | zx/lib/readdir.dis | appl/lib/readdir.b | module/readdir.m | - |  |

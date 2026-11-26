@@ -1,0 +1,118 @@
+// QuickTime atom and metadata decoding, ported from quicktime.b (see NOTICE).
+// This covers the original 32-bit atom layout, not compressed media decoding.
+AtomHeaderSize :: 8
+MovieHeaderSize :: 100
+TrackHeaderSize :: 82
+Mdat :: 0x6D646174
+Moov :: 0x6D6F6F76
+Mvhd :: 0x6D766864
+Trak :: 0x7472616B
+Tkhd :: 0x746B6864
+Mdia :: 0x6D646961
+
+Atom :: struct {
+    kind: u32
+    size: s64
+}
+
+MovieHeader :: struct {
+    version: s32
+    create: s32
+    modtime: s32
+    timescale: s32
+    duration: s32
+    rate: s32
+    volume: s32
+    reserved1: s32
+    reserved2: s32
+    matrix: [9]s32
+    reserved3: s32
+    reserved4: s32
+    preview_time: s32
+    poster_time: s32
+    selection_time: s32
+    selection_duration: s32
+    current_time: s32
+    next_track_id: s32
+}
+
+TrackHeader :: struct {
+    version: s32
+    creation: s32
+    modtime: s32
+    track_id: s32
+    timescale: s32
+    duration: s32
+    time_offset: s32
+    priority: s32
+    layer: s32
+    alternate_group: s32
+    volume: s32
+    matrix: [9]s32
+    width: s32
+    height: s32
+}
+
+Word :: (data: []u8, offset: s64) -> s32 {
+    return cast(s32)data[offset] << 8 | cast(s32)data[offset+1]
+}
+
+Dword :: (data: []u8, offset: s64) -> s32 {
+    return cast(s32)data[offset] << 24 | cast(s32)data[offset+1] << 16 |
+        cast(s32)data[offset+2] << 8 | cast(s32)data[offset+3]
+}
+
+DecodeAtom :: (data: []u8) -> (atom: Atom, error: string) {
+    if data.count < AtomHeaderSize { return .{}, "short read in atom header" }
+    size := cast(s64)cast(u32)Dword(data,0)
+    // Sizes 0 and 1 name other atom layouts; they are not lengths of 0/1.
+    if size < AtomHeaderSize { return .{}, "unsupported or invalid atom size" }
+    return .{kind = cast(u32)Dword(data,4), size = size}, ""
+}
+
+DecodeMovie :: (data: []u8, header: *MovieHeader) -> string {
+    if data.count != MovieHeaderSize { return "mvhd atom funny size" }
+    value: MovieHeader
+    value.version = Dword(data,0)
+    value.create = Dword(data,4)
+    value.modtime = Dword(data,8)
+    value.timescale = Dword(data,12)
+    value.duration = Dword(data,16)
+    value.rate = Dword(data,20)
+    value.volume = Word(data,24)
+    value.reserved1 = Dword(data,26)
+    value.reserved2 = Dword(data,30)
+    for i: 0..8 { value.matrix[i] = Dword(data,34+i*4) }
+    value.reserved3 = Word(data,70)
+    value.reserved4 = Dword(data,72)
+    value.preview_time = Dword(data,76)
+    value.poster_time = Dword(data,80)
+    value.selection_time = Dword(data,84)
+    value.selection_duration = Dword(data,88)
+    value.current_time = Dword(data,92)
+    value.next_track_id = Dword(data,96)
+    header.* = value
+    return ""
+}
+
+// Keep the historical QuickTime module's track fields and byte offsets.
+DecodeTrack :: (data: []u8, header: *TrackHeader) -> string {
+    if data.count < TrackHeaderSize { return "short read in tkhd" }
+    value: TrackHeader
+    value.version = Dword(data,0)
+    value.creation = Dword(data,4)
+    value.modtime = Dword(data,8)
+    value.track_id = Dword(data,12)
+    value.timescale = Dword(data,16)
+    value.duration = Dword(data,20)
+    value.time_offset = Dword(data,24)
+    value.priority = Dword(data,28)
+    value.layer = Word(data,32)
+    value.alternate_group = Word(data,34)
+    value.volume = Word(data,36)
+    for i: 0..8 { value.matrix[i] = Dword(data,38+i*4) }
+    value.width = Dword(data,74)
+    value.height = Dword(data,78)
+    header.* = value
+    return ""
+}

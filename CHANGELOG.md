@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Replace the Limbo QuickTime metadata reader with shared `quicktime` and
+  `quicktime_input` Ziran SDK modules. Keep movie and track fields, fix buffered
+  short reads, bound atom traversal, and remove the old interface and Dis binary.
+
 - Replace the serial, keyboard and Mind Path infrared readers with shared Ziran
   `ir`/`ir_input` SDK modules and ship `irtest.zx` with `-s` and `-m` modes.
   Preserve button translations and serial setup, finish at EOF, and remove

@@ -1,0 +1,136 @@
+// Buffered guest file adapter for quicktime.zi. Owns its descriptor until Close.
+Qt :: #import "quicktime";
+Io :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+
+Reader :: struct {
+    handle: s32
+    ready: bool
+    buffer: [8192]u8
+    start: s64
+    available: s64
+    position: s64
+    length: s64
+    movie: Qt.MovieHeader
+    has_movie: bool
+}
+
+Close :: (reader: *Reader) {
+    if reader.ready { unused Io.Close(reader.handle) }
+    reader.handle = -1
+    reader.ready = false
+    reader.start = 0
+    reader.available = 0
+}
+
+Read :: (reader: *Reader, output: []u8) -> bool {
+    if !reader.ready { return false }
+    done: s64 = 0
+    while done < output.count {
+        if reader.available == 0 {
+            count := Io.Read(reader.handle,reader.buffer[:])
+            if count <= 0 { return false }
+            reader.start = 0
+            reader.available = count
+        }
+        count := output.count - done
+        if count > reader.available { count = reader.available }
+        for i: 0..count-1 { output[done+i] = reader.buffer[reader.start+i] }
+        done += count
+        reader.start += count
+        reader.available -= count
+        reader.position += count
+    }
+    return true
+}
+
+Skip :: (reader: *Reader, size: s64) -> bool {
+    if !reader.ready || size < 0 { return false }
+    if reader.length > 0 && size > reader.length - reader.position { return false }
+    buffered := size
+    if buffered > reader.available { buffered = reader.available }
+    remaining := size - buffered
+    if remaining > 0 && Io.Seek(reader.handle,remaining,1) < 0 { return false }
+    reader.start += buffered
+    reader.available -= buffered
+    reader.position += size
+    return true
+}
+
+ReadAtom :: (reader: *Reader) -> (atom: Qt.Atom, error: string) {
+    bytes: [8]u8
+    if !Read(reader,bytes[:]) { return .{}, "short read in atom header" }
+    atom, error := Qt.DecodeAtom(bytes[:])
+    if error.count > 0 { return .{}, error }
+    if reader.length > 0 && atom.size-Qt.AtomHeaderSize > reader.length-reader.position {
+        return .{}, "atom extends beyond file"
+    }
+    return atom, ""
+}
+
+SkipAtom :: (reader: *Reader, size: s64) -> bool {
+    if size < Qt.AtomHeaderSize { return false }
+    return Skip(reader,size-Qt.AtomHeaderSize)
+}
+
+// The original reader opens unified files with mdat followed by resources.
+Open :: (path: string) -> (reader: Reader, error: string) {
+    reader: Reader
+    reader.handle = Io.Open(path,0)
+    if reader.handle < 0 { return reader, "open failed" }
+    reader.ready = true
+    metadata: [8192]u8
+    info := Stat.DescriptorInfo(reader.handle,metadata[:])
+    reader.length = info.length
+    atom, error := ReadAtom(*reader)
+    if error.count > 0 { Close(*reader); return reader, error }
+    if atom.kind != Qt.Mdat { Close(*reader); return reader, "not a QuickTime movie file" }
+    if !SkipAtom(*reader,atom.size) { Close(*reader); return reader, "short read in mdat" }
+    return reader, ""
+}
+
+ReadMovie :: (reader: *Reader, size: s64) -> string {
+    if size != Qt.AtomHeaderSize+Qt.MovieHeaderSize { return "mvhd atom funny size" }
+    bytes: [100]u8
+    if !Read(reader,bytes[:]) { return "short read in mvhd" }
+    error := Qt.DecodeMovie(bytes[:],*reader.movie)
+    if error.count == 0 { reader.has_movie = true }
+    return error
+}
+
+// Read tkhd and skip each mdia child, bounded by both container lengths.
+// Return the track fields that the old implementation decoded then discarded.
+ReadTrack :: (reader: *Reader, size: s64, header: *Qt.TrackHeader) -> string {
+    if size < Qt.AtomHeaderSize { return "invalid trak atom size" }
+    left := size-Qt.AtomHeaderSize
+    if left < Qt.AtomHeaderSize { return "missing track header atom" }
+    atom, error := ReadAtom(reader)
+    if error.count > 0 { return error }
+    if atom.kind != Qt.Tkhd { return "missing track header atom" }
+    if atom.size > left || atom.size < Qt.AtomHeaderSize+Qt.TrackHeaderSize { return "invalid tkhd atom size" }
+    bytes: [82]u8
+    if !Read(reader,bytes[:]) { return "short read in tkhd" }
+    value: Qt.TrackHeader
+    error = Qt.DecodeTrack(bytes[:],*value)
+    if error.count > 0 { return error }
+    if !Skip(reader,atom.size-Qt.AtomHeaderSize-Qt.TrackHeaderSize) { return "short read in tkhd" }
+    left -= atom.size
+    if left < Qt.AtomHeaderSize { return "missing media atom" }
+    atom, error = ReadAtom(reader)
+    if error.count > 0 { return error }
+    if atom.kind != Qt.Mdia { return "missing media atom" }
+    if atom.size > left { return "invalid mdia atom size" }
+    media_left := atom.size-Qt.AtomHeaderSize
+    left -= atom.size
+    while media_left > 0 {
+        if media_left < Qt.AtomHeaderSize { return "invalid media child atom size" }
+        child, child_error := ReadAtom(reader)
+        if child_error.count > 0 { return child_error }
+        if child.size > media_left { return "invalid media child atom size" }
+        if !SkipAtom(reader,child.size) { return "short read in media atom" }
+        media_left -= child.size
+    }
+    if !Skip(reader,left) { return "short read in trak" }
+    header.* = value
+    return ""
+}

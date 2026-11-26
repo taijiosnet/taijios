@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-The section tables track **434** open migration rows in the canonical checkout,
+The section tables track **433** open migration rows in the canonical checkout,
 including Acme helpers outside `zx/`. Generated build caches, recovery copies
 and stale untracked outputs of completed ports are excluded from this count.
 
@@ -46,7 +46,7 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 
 ## Next ready order (independent, boot-ordered)
 
-1. Non-boot libraries (130 rows in zx/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+1. Non-boot libraries (129 rows in zx/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
 2. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
 3. Legacy misc (2 rows): disk/kfs and lego/clock.
 4. App families: acme (24 `zx/` rows + 2 helper binaries outside `zx/`), charon (15), alphabet (6), grid (5), demo (6).
@@ -67,7 +67,7 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 | # | Section | Owner | Open rows |
 |---|---|---|---|
 | 1 | [1. Desktop core - wm, zxrun, toolbar/panel - 3 rows](dis-to-zx/01-desktop-core.md) | Desktop core (`cmd-taijios-zx-graphical-dis-port`) | 3 |
-| 2 | [2. Libraries - zx/lib/** (boot-loaded rows first) - 137 rows](dis-to-zx/02-libraries.md) | Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane) | 137 |
+| 2 | [2. Libraries - zx/lib/** (boot-loaded rows first) - 136 rows](dis-to-zx/02-libraries.md) | Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane) | 136 |
 | 3 | [3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 111 rows](dis-to-zx/03-shell-commands.md) | Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`) | 111 |
 | 4 | [4. Services - storage, network, name, auth, collab, usb and aux daemons - 96 rows](dis-to-zx/04-services.md) | Services (unassigned after Claude commands-libs lane; next after section 2) | 96 |
 | 5 | [5. WM apps - zx/wm/** desktop applications (deletions go through the desktop-core owner) - 27 rows](dis-to-zx/05-wm-apps.md) | WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner) | 27 |
@@ -83,4 +83,4 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 | 15 | [15. Acme helper binaries outside zx/ - 2 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside zx/ (acme lane) | 2 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **434**.
+Total open table rows across sections 1–16: **433**.
