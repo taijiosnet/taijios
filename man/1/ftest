@@ -65,7 +65,7 @@ if so, it yields a true exit status.
 Otherwise, it yields an error status.
 Neither file may be a directory.
 .SH SOURCE
-.B /appl/cmd/ftest.b
+.B /appl/cmd/ftest.zi
 .br
 .B /appl/cmd/newer.b
 .SH SEE ALSO

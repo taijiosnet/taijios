@@ -1,0 +1,102 @@
+// Speculative file attributes and permissions, ported from Inferno ftest.b.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Fs :: #import "taijios_stat";
+Cli :: #import "zx_cli";
+#import "std/vec"
+#import "std/format"
+
+Usage :: "usage: (ftest -fdrwxes file)|(ftest -t fdno)\n";
+
+Permission :: (info: Fs.Info, mask: u32) -> bool {
+    // The legacy command has no group lookup. It still accepts an empty gid.
+    user := "";
+    bytes: [28]u8;
+    fd := Io.Open("/dev/user", 0);
+    if fd >= 0 {
+        size := Io.Read(fd, bytes[:]);
+        unused Io.Close(fd);
+        if size > 0 { user = TextView(bytes[:size]) }
+    }
+    return (info.mode & mask) != 0 ||
+           (info.group.count == 0 && (info.mode & (mask << 3)) != 0) ||
+           (info.owner == user && (info.mode & (mask << 6)) != 0);
+}
+
+IsTerminal :: (descriptor: s32) -> bool {
+    // #d duplicates an inherited descriptor; ZX handles otherwise name only
+    // streams opened through taijios_io. Stat the duplicate, not #d itself.
+    path: Vec(u8);
+    BuilderPrint(*path, "#d/%", descriptor);
+    handle := Io.Open(TextView(path[:]), 0);
+    if handle < 0 { handle = Io.Open(TextView(path[:]), 1) }
+    if handle < 0 { return false }
+    defer Io.Close(handle);
+    bytes: [Fs.BufferSize]u8;
+    opened := Fs.DescriptorInfo(handle, bytes[:]);
+    if opened.size == 0 { return false }
+    // qid version and type are deliberately not part of the tty comparison.
+    identity := opened.identity;
+    console := Fs.PathInfo("/dev/cons", bytes[:]);
+    return console.size > 0 && identity.dev == console.identity.dev && identity.qid == console.identity.qid;
+}
+
+Descriptor :: (text: string) -> s32 {
+    // Limbo int(string) uses the guest strtol and saturates at INT_MAX.
+    value: u64;
+    for at: 0..text.count-1 {
+        digit := cast(u64)(text[at] - #char "0");
+        if value > (0x7fffffff - digit) / 10 { value = 0x7fffffff }
+        else { value = value * 10 + digit }
+    }
+    return cast(s32)value;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 { return Cli.Usage(Usage) }
+    option := Args.Operand(0);
+    ok := false;
+    if option == "-t" {
+        fd: s32 = 1;
+        if count > 1 {
+            number := Args.Operand(1);
+            valid := number.count > 0;
+            for at: 0..number.count-1 {
+                if number[at] < #char "0" || number[at] > #char "9" { valid = false }
+            }
+            if !valid {
+                unused Cli.WriteAll(2, "ftest: bad argument to -t\n");
+                return Cli.Usage(Usage);
+            }
+            fd = Descriptor(number);
+        }
+        ok = IsTerminal(fd);
+    } else {
+        if option != "-f" && option != "-d" && option != "-r" && option != "-w" && option != "-x" && option != "-e" && option != "-s" {
+            unused Cli.WriteAll(2, "test: unknown option ");
+            unused Cli.WriteAll(2, option);
+            unused Cli.WriteAll(2, "\n");
+            return Cli.Usage(Usage);
+        }
+        if count < 2 {
+            unused Cli.WriteAll(2, "test: argument expected\n");
+            return Cli.Usage(Usage);
+        }
+        bytes: [Fs.BufferSize]u8;
+        info := Fs.PathInfo(Args.Operand(1), bytes[:]);
+        if info.size > 0 {
+            if option == "-e" { ok = true }
+            else if option == "-f" { ok = (info.mode & Fs.Directory) == 0 }
+            else if option == "-d" { ok = (info.mode & Fs.Directory) != 0 }
+            else if option == "-s" { ok = info.length > 0 }
+            else if option == "-r" { ok = Permission(info, 4) }
+            else if option == "-w" { ok = Permission(info, 2) }
+            else if option == "-x" { ok = Permission(info, 1) }
+        }
+    }
+    if ok { return 0 }
+    unused Args.SetFailure("false");
+    return 1;
+}

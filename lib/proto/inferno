@@ -484,7 +484,7 @@ appl
 			void.b
 			walk.b
 			write.b
-		ftest.b
+		ftest.zi
 		ftpfs.b
 		getauthinfo.b
 		getfile.b
@@ -1484,7 +1484,7 @@ zx
 	fs.dis
 	fs
 		+
-	ftest.dis
+	ftest.zx
 	ftpfs.dis
 	getauthinfo.dis
 	gettar.dis
