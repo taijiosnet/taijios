@@ -3251,13 +3251,19 @@ zxtasks(void *context, const char *module, const char *function,
 	return zxs32(result, 0);
 }
 
-/* Package builds prefix the module leaf with p and 16 hexadecimal digits. */
+/* Current packages use alias__leaf; older bundles use p<16 hex>_leaf. */
 static int
 zxmodule(const char *actual, const char *leaf)
 {
 	int i;
+	const char *part, *next;
 
 	if(strcmp(actual, leaf) == 0)
+		return 1;
+	part = actual;
+	while((next = strstr(part, "__")) != nil)
+		part = next + 2;
+	if(part != actual && strcmp(part, leaf) == 0)
 		return 1;
 	if(actual[0] != 'p')
 		return 0;

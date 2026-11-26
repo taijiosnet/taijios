@@ -428,6 +428,11 @@ def check_tertiary_pointer(emulator, root, env):
             wait_marker('ZX_TERTIARY_OK')
         except (AssertionError, subprocess.SubprocessError) as error:
             stop(app)
+            while len(transcript) < 65536 and select.select([app.stdout], [], [], 0)[0]:
+                chunk = app.stdout.read1(4096)
+                if not chunk:
+                    break
+                transcript.extend(chunk)
             raise AssertionError(f'{error}\n{transcript.decode(errors="replace")}') from error
         finally:
             stop(app)

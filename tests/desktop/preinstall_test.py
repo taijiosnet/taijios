@@ -14,8 +14,8 @@ function tables rather than shelling out to the toolchain.
 
 The granted set is `zxbindings` in `emu/port/zx.c`, section A of
 `plans/ecosystem-preinstall.md`. A capability module is granted when it equals
-a granted module name or carries the package prefix `p<16 hex>_` in front of
-it. Every other module is refused, which is what `std/guest_window` and the
+a granted module name or carries an `alias__` or legacy `p<16 hex>_` package
+prefix. Every other module is refused, which is what `std/guest_window` and the
 Kryon `zx_run` bundles declare today.
 
 Usage: preinstall_test.py [MANIFEST] [--root DIR]
@@ -92,6 +92,10 @@ def granted_module(name):
     """The granted module NAME stands for, or None when it is not granted."""
     if name in GRANTED:
         return name
+    if '__' in name:
+        leaf = name.rsplit('__', 1)[1]
+        if leaf in GRANTED:
+            return leaf
     if len(name) > PACKAGE_PREFIX_LENGTH and name[0] == 'p':
         digits = name[1:PACKAGE_PREFIX_LENGTH - 1]
         if len(digits) == 16 and all(c in '0123456789abcdef' for c in digits):

@@ -2,30 +2,30 @@
   "format": 1,
   "packages": [
     {
-      "commit": "3c8f80944ac5b6249d4febb3af667aef3789653f",
+      "commit": "2f5a60163d321525bcde54f10ea9484788c82304",
       "dependencies": {},
-      "id": "pcba78e68ef3f35a7",
+      "id": "waozi_xyz_ziranlang_tcl_2f5a60163d32",
       "name": "tcl",
       "ref": "3c8f80944ac5b6249d4febb3af667aef3789653f",
       "url": "https://git.waozi.xyz/ziranlang/tcl.git"
     },
     {
-      "commit": "4e792756eb0f0e8b84aedcc42aec789a37eff0c4",
-      "dependencies": {"tcl": "pcba78e68ef3f35a7"},
+      "commit": "50c0acdcc81b1e47719ec39eb01b96f587283bfd",
+      "dependencies": {"tcl": "waozi_xyz_ziranlang_tcl_2f5a60163d32"},
       "dependency_refs": {"tcl": "3c8f80944ac5b6249d4febb3af667aef3789653f"},
-      "id": "pd24e127eadcb20ef",
+      "id": "waozi_xyz_ziranlang_tk_50c0acdcc81b",
       "name": "tk",
       "ref": "4e792756eb0f0e8b84aedcc42aec789a37eff0c4",
       "url": "https://git.waozi.xyz/ziranlang/tk.git"
     }
   ],
   "root": {
-    "dependencies": {"tcl": "pcba78e68ef3f35a7", "tk": "pd24e127eadcb20ef"},
+    "dependencies": {"tcl": "waozi_xyz_ziranlang_tcl_2f5a60163d32", "tk": "waozi_xyz_ziranlang_tk_50c0acdcc81b"},
     "dependency_refs": {"tcl": "3c8f80944ac5b6249d4febb3af667aef3789653f", "tk": "4e792756eb0f0e8b84aedcc42aec789a37eff0c4"},
     "name": "taijios"
   },
   "toolchain": {
-    "commit": "7e56396c5c9d6519091d7151fcc6683e3944689e",
+    "commit": "4413456221aa5a9bc00a368762e9e50aaf6e7b6b",
     "ref": "7e56396c5c9d6519091d7151fcc6683e3944689e",
     "url": "https://git.waozi.xyz/ziranlang/ziran.git"
   }

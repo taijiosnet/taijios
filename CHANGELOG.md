@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Run fresh package-built ZX windows with Ziran’s readable `alias__module` capability names, while retaining support for installed bundles with older hashed names. Refresh the window-manager lockfile and preserve child diagnostics in the private graphics probe.
+
+- Export the TaijiOS guest SDK as a Ziran package so Rill and Explorer can build against its public desktop, filesystem, window, catalog and surface modules.
+
 - Rename the guest install tree from `dis/` to `zx/`: the guest now runs programs from `/zx` (`/zx/wm/wm.zx`, `/zx/lib/...`, `/zx/emuinit.dis`). The emulator's boot module, ZX command resolver and `/zx/lib` module root, both `mkroot` scripts, every `DISBIN=$ROOT/zx...` mkfile, the `module/*.m` `PATH` constants, `appl` sources, the desktop catalog generator, `tools/install-desktop.sh`, `lib/` setup files, tests, man pages and plans now name `/zx`. Legacy `.dis` modules still install there until their ZX ports land. Paths that keep the old name: `acme/dis` (Acme's own helper directory), the `dis(2)`/`dis(6)` manual pages about the Dis VM, and the `build/dis-*` test fixture directories. Older entries below keep the `/dis` paths they had when they shipped. Rebuild the emulator and reinstall guest programs after updating; launchers and roots built before this change still point at `/dis`.
 
 - Ship Sam (`sam.zx`) only as ZX and remove its Limbo sources (`appl/wm/sam.b`, `samstub.b`, `samstub.m`, `samterm.m`, `samtk.b`, `samtk.m`). It keeps the Plan 9 `sam -R` binary wire protocol over `#C` (`/cmd/clone`), rasp section buffer (`Section` holes/splits/line scans), split `~~sam~~` command and work flayers, Button-2 Edit menu (`cut`, `paste`, `snarf`, `look`, `send` / `/<pattern>`), Button-3 File menu (`new`, `zerox`, `close`, `write`, sorted file list with zerox cycling), proportional scrollbars, double-click `Tdclick`, `/chan/snarf` sync, `samterm.log` tracing, and an interactive offline local mode when host `sam -R` is absent.

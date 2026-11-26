@@ -167,6 +167,8 @@ honors guest `bind` mounts at `/zx/lib`. Declare module requirements and imports
 with `zi2zx --require-module` and `--import`, and open the module with
 `std/zx_module`. Module output follows the application's guest console and shell
 redirections. The shared loader validates module images and typed imports.
+Host capabilities accept package aliases such as `kryon__zx_surface` as well as
+the older `p<16 hex>_zx_surface` names used by installed bundles.
 
 Each ZX instance starts with a 16-million-step budget shared by initialization
 and execution. A graphical application renews its budget when `Event` delivers
@@ -633,6 +635,12 @@ ZIRAN_LOCK_GIT_OBJECTS=/path/to/tcl:/path/to/tk:/path/to/ziran ziran lock
 ```
 
 The Kryon applications use the separate manifest and lock under `appl/wm`.
+
+External guest applications declare this repository as a Ziran package dependency
+and import its exported desktop, filesystem, window, catalog and surface modules.
+Use a normal dependency rather than `source = true`, and select a local checkout
+with a `taiji_sdk` override in `ziran.local.toml` when developing Rill or Explorer.
+Their builds resolve the SDK exports without adding its folders as module paths.
 
 Build and install the guest Tcl shell and Tk applications with
 `(cd appl/cmd && mk install-zx)`. See the [Tcl integration guide](appl/lib/tcl.md)

@@ -1,6 +1,17 @@
 [package]
 name = "taijios"
-module_roots = ["appl/lib"]
+module_roots = ["appl/lib", "appl/cmd", "appl/cmd/tcltk"]
+
+[exports]
+app_registry = "appl/cmd/app_registry.zi"
+desktop_entry = "appl/cmd/desktop_entry.zi"
+icon_theme = "appl/cmd/icon_theme.zi"
+taijios_desktop = "appl/cmd/taijios_desktop.zi"
+taijios_io = "appl/cmd/taijios_io.zi"
+taijios_stat = "appl/cmd/taijios_stat.zi"
+taijios_clock = "appl/cmd/taijios_clock.zi"
+taijios_wm = "appl/cmd/taijios_wm.zi"
+zx_surface = "appl/cmd/tcltk/zx_surface.zi"
 
 [toolchain]
 git = "https://git.waozi.xyz/ziranlang/ziran.git"

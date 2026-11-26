@@ -26,14 +26,14 @@
 # 2026-11-24. Re-read them whenever a bundle is rebuilt.
 #
 # repo	bundle	desktop id	name	icon	categories	size	sha256	first-run
-taijios	/zx/wm/rill.zx	org.taijiosnet.wm-rill	Rill Desktop	system	System	11446225	58dee05b22aae2d52f833198c1990fadae94e31d77271bf84195009a6b89018c	root
+taijios	/zx/wm/rill.zx	org.taijiosnet.wm-rill	Rill Desktop	system	System	11443403	0efb7dd49071a06b0e88ac86b0a67e75c0b90c582d620bde7b81a0590a2a9daf	root
 taijios	/zx/wm/desktop_panel.zx	org.taijiosnet.wm-desktop_panel	Panel	system	System	119448	776e382bfd576bee47dfa49fc03b2bccb98b47823e2f6ed8400c41f39cf77c39	root
 taijios	/zx/wm/about.zx	org.taijiosnet.wm-about	About	help	Utility	3294890	778c7c93dba48de1911031a5f852b07409c37ef9d618c5db4a3ebaef20b2d02d	lazy
 taijios	/zx/wm/calendar.zx	org.taijiosnet.wm-calendar	Calendar	office	Office	7530244	8a70208b81530d5cf2d62442e48313dccc0c920bf92e01ff08144858360997a6	lazy
 taijios	/zx/wm/clock.zx	org.taijiosnet.wm-clock	Clock	clock	Utility	4136324	68e25506463e51a2708d49b6b4cb0fb5ecafb1f072819ead6616130d715cf6b3	lazy
 taijios	/zx/wm/counter.zx	org.taijiosnet.wm-counter	Counter	clock	Utility	5912669	e2d152a8690ea3d385aeec73ce9ae04445093df5bea2868fd5e59e01af79481c	lazy
 taijios	/zx/wm/dir.zx	org.taijiosnet.wm-dir	Directory Browser	files	Utility	4857208	42659db487949495bc9a66ca225baa18f9237a9bb7518f79da1f5f18d6588e1b	lazy
-taijios	/zx/wm/explorer.zx	org.taijiosnet.wm-explorer	Explorer	files	Utility	8751776	bb92f8179bdb201c5c797250ae162ada8d507332c03eecfcc983dd14aa3c7648	lazy
+taijios	/zx/wm/explorer.zx	org.taijiosnet.wm-explorer	Explorer	files	Utility	9078586	4d2f30df47b528ed2530c97785d9ef4617d26f80587053466a5cdf380815ac2e	lazy
 taijios	/zx/wm/filename.zx	org.taijiosnet.wm-filename	Filename	files	Utility	7438797	fa0307c18dfa7eb8f9257f22fddbad6e7e760d02548f136602295fde057eba24	lazy
 taijios	/zx/wm/logwindow.zx	org.taijiosnet.wm-logwindow	Log Window	development	Development	3741286	cbe8fdf7b3ee252e1c8243b4834c9709445605fcd80fa6c52b7934d11ec53425	lazy
 taijios	/zx/wm/memory.zx	org.taijiosnet.wm-memory	Memory	utilities	Utility	3745842	08b409bf952184bdae68c7d2f9c347861871d222093f6f9ecb0d212051487293	lazy
