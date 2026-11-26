@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Share RIFF/AVI metadata, palette and frame parsing through `appl/lib/riff.zi`,
+  use it in the ZX AVI Player, and remove the unused Limbo RIFF library and Dis binary.
+
 - Run fresh package-built ZX windows with Ziran’s readable `alias__module` capability names, while retaining support for installed bundles with older hashed names. Refresh the window-manager lockfile and preserve child diagnostics in the private graphics probe.
 
 - Export the TaijiOS guest SDK as a Ziran package so Rill and Explorer can build against its public desktop, filesystem, window, catalog and surface modules.

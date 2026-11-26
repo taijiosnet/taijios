@@ -17,7 +17,7 @@ BUILD = ROOT / 'build/wm-apps'
 EMU = ROOT / 'emu/Linux/o.emu'
 
 
-def run_model(name, fixture, env):
+def run_model(name, fixture, env, module_paths=()):
     """Bundle <name>_model_test.zi with the fixture as the module <fixture stem>_fixture and run it.
 
     Ziran source lines stay under 4096 bytes, so long fixture lines continue after a
@@ -36,7 +36,9 @@ def run_model(name, fixture, env):
     module = Path(fixture).stem + '_fixture'
     (folder / f'{module}.zi').write_text(f'Games :: #string GAMES_END\n{text}GAMES_END;\n', encoding='utf-8')
     bundle = BUILD / f'{name}_model_test.zx'
-    subprocess.run(['ziran', 'bundle', '--project', '--module-path', folder, '--entry', f'{name}_model_test:main',
+    subprocess.run(['ziran', 'bundle', '--project', '--module-path', folder,
+                    *(word for path in module_paths for word in ('--module-path', path)),
+                    '--entry', f'{name}_model_test:main',
                     '-o', bundle, f'{name}_model_test.zi'], cwd=HERE, env=env, check=True, timeout=180)
     result = subprocess.run(['zi2zx', 'run', '--backend', 'engine', bundle], env=env,
                             capture_output=True, text=True, check=True, timeout=180)

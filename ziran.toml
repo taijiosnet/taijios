@@ -3,6 +3,7 @@ name = "taijios"
 module_roots = ["appl/lib", "appl/cmd", "appl/cmd/tcltk"]
 
 [exports]
+riff = "appl/lib/riff.zi"
 app_registry = "appl/cmd/app_registry.zi"
 desktop_entry = "appl/cmd/desktop_entry.zi"
 icon_theme = "appl/cmd/icon_theme.zi"

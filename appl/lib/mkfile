@@ -76,7 +76,6 @@ TARG=\
 	readxbitmap.dis\
 	regex.dis\
 	registries.dis\
-	riff.dis\
 	scoretable.dis\
 	secstore.dis\
 	selectfile.dis\
@@ -141,7 +140,6 @@ SYSMODULES= \
 	rand.m\
 	readdir.m\
 	regex.m\
-	riff.m\
 	scoretable.m\
 	security.m\
 	sh.m\

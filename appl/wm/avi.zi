@@ -6,6 +6,7 @@ Box :: #import "kryon/box";
 Text :: #import "kryon/text";
 ImageWidget :: #import "kryon/image";
 Model :: #import "avi_model";
+using Riff :: #import "riff";
 IO :: #import "taijios_io";
 Args :: #import "taijios_args";
 Clock :: #import "taijios_clock";
@@ -41,7 +42,7 @@ light: Color = .{255, 255, 255, 255};
 dark: Color = .{173, 173, 173, 255};
 
 data: Vec(u8);
-movie: Model.Movie;
+movie: Riff.Movie;
 pixels: Vec(u8);
 texture: Texture2D;
 path_bytes: [1024]u8;
@@ -165,7 +166,7 @@ Load :: (path: string) {
         used += cast(s64)count
     }
     unused IO.Close(fd)
-    problem := Model.Open(data[:], *movie)
+    problem := Riff.Open(data[:], *movie)
     if problem != "" {
         SetNotice(problem)
         return

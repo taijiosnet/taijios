@@ -1,8 +1,11 @@
 # Dis -> ZX migration inventory (open items)
 
-Measured on this canonical checkout working tree (2026-11-22) at git 36908287c684a30e86c58778e1b382c1cbf9c5ab (47 uncommitted paths at measurement; the commit of this document follows), inventory universe **689** open rows = **667** on-disk `zx/` files (**129** top-level `zx/*.dis` + **538** under `zx/**/`) + **22** tracked acme helper binaries outside `zx/`. Excluded as build artifacts, not rows: `backup/` copies (8), `build/` caches (205), untracked local `appl/` builds (12). Installed Ziran/ZX artifacts for reference: **69** `.zx` files on disk (untracked; the replacement format, not rows). Earlier root counts are superseded by these measurements.
+The section tables track **437** open migration rows in the canonical checkout,
+including Acme helpers outside `zx/`. Generated build caches, recovery copies
+and stale untracked outputs of completed ports are excluded from this count.
 
-Every `.dis` in the measured universe - on-disk `zx/` plus tracked acme helper binaries outside `zx/` - has exactly one open row below. Rows are removed only when the `.dis` is actually deleted in a tested commit (tracked files via `git rm`). No completed-work log.
+Rows are removed only when the `.dis` is actually deleted in a tested commit
+(tracked files via `git rm`). No completed-work log.
 
 ## Goal
 
@@ -43,13 +46,12 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 
 ## Next ready order (independent, boot-ordered)
 
-1. `zx/lib/tcl_*.dis` (12 rows): their last user is `wm/wish` (`appl/wm/wish.b`, desktop-core owner). Delete them with `appl/lib/tcl_*.b` and `appl/lib/tcl.m` when wish is replaced; the ZX shell `zx/tclsh.zx` and the Tcl/Tk app `zx/tcltk.zx` already replace their other uses.
-2. Non-boot libraries (146 rows in zx/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
-3. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
-4. Legacy misc (2 rows): installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and stale orphans whose sources are gone.
-5. App families: acme (24 `zx/` rows + 2 helper binaries outside `zx/`), charon (15), alphabet (6), spree (0), grid (5), demo (6), ebook (0), math (0).
-6. WM apps with zx-twins (2 rows) and the rest of zx/wm (54 rows total): delete or port through the desktop-core owner.
-7. Desktop core (4 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
+1. Non-boot libraries (133 rows in zx/lib outside the boot chain): port subpackage by subpackage (convcs, crypt, encoding, ftree, mash, print, spki, strokes, styxconv, usb, w3c).
+2. Services (96 rows): auth, auxi, collab, ip, ndb, spki, svc, usb + top-level storage and network servers.
+3. Legacy misc (2 rows): disk/kfs and lego/clock.
+4. App families: acme (24 `zx/` rows + 2 helper binaries outside `zx/`), charon (15), alphabet (6), grid (5), demo (6).
+5. WM apps (27 rows): delete or port through the desktop-core owner.
+6. Desktop core (3 rows): stays with `claude-taijios-zx-graphical-dis-port`; deleted when no catalog application needs the legacy chain.
 
 ## Open blockers (preserved from lane reports)
 
@@ -64,8 +66,8 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 
 | # | Section | Owner | Open rows |
 |---|---|---|---|
-| 1 | [1. Desktop core - wm, zxrun, toolbar/panel (winplace closed by the Ziran winplace service; stale file remains) - 4 rows](dis-to-zx/01-desktop-core.md) | Desktop core (`cmd-taijios-zx-graphical-dis-port`) | 4 |
-| 2 | [2. Libraries - zx/lib/** (boot-loaded rows first) - 153 rows](dis-to-zx/02-libraries.md) | Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane) | 153 |
+| 1 | [1. Desktop core - wm, zxrun, toolbar/panel - 3 rows](dis-to-zx/01-desktop-core.md) | Desktop core (`cmd-taijios-zx-graphical-dis-port`) | 3 |
+| 2 | [2. Libraries - zx/lib/** (boot-loaded rows first) - 140 rows](dis-to-zx/02-libraries.md) | Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane) | 140 |
 | 3 | [3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 111 rows](dis-to-zx/03-shell-commands.md) | Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`) | 111 |
 | 4 | [4. Services - storage, network, name, auth, collab, usb and aux daemons - 96 rows](dis-to-zx/04-services.md) | Services (unassigned after Claude commands-libs lane; next after section 2) | 96 |
 | 5 | [5. WM apps - zx/wm/** desktop applications (deletions go through the desktop-core owner) - 27 rows](dis-to-zx/05-wm-apps.md) | WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner) | 27 |
@@ -81,4 +83,4 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 | 15 | [15. Acme helper binaries outside zx/ - 2 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside zx/ (acme lane) | 2 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **451**.
+Total open table rows across sections 1–16: **437**.

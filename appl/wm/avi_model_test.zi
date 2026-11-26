@@ -1,5 +1,6 @@
 
 Model :: #import "avi_model";
+using Riff :: #import "riff";
 Fixture :: #import "avi_sample_fixture";
 
 Width :: 32
@@ -35,7 +36,7 @@ Expected :: (frame: s32, x: s64, y: s64) -> s32 {
 }
 
 
-CheckFrame :: (movie: *Model.Movie, data: []u8, index: s32, rgba: []u8) -> s32 {
+CheckFrame :: (movie: *Riff.Movie, data: []u8, index: s32, rgba: []u8) -> s32 {
     for i: cast(s64)0..Width*Height-1 {
         rgba[i*4] = 0; rgba[i*4+1] = 0; rgba[i*4+2] = 0; rgba[i*4+3] = 255
     }
@@ -69,8 +70,8 @@ main :: () -> s32 {
     bytes: [4096]u8
     count := HexBytes(Fixture.Games, bytes[:])
     if count != 1718 { print("fixture is % bytes, want 1718\n", count); return 1 }
-    movie: Model.Movie
-    problem := Model.Open(bytes[:count], *movie)
+    movie: Riff.Movie
+    problem := Riff.Open(bytes[:count], *movie)
     if problem != "" { print("open: %\n", problem); return 1 }
     if movie.width != Width || movie.height != Height {
         print("size %x%, want %x%\n", movie.width, movie.height, Width, Height)
@@ -80,7 +81,7 @@ main :: () -> s32 {
         print("usec per frame %\n", movie.usec_per_frame)
         return 1
     }
-    if movie.compression != Model.BI_RLE8 || movie.bitcount != 8 {
+    if movie.compression != Riff.BI_RLE8 || movie.bitcount != 8 {
         print("compression % bits %\n", movie.compression, movie.bitcount)
         return 1
     }

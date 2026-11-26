@@ -14,7 +14,8 @@ BAND_Y = 14
 
 
 def check_model(env):
-    message = run_model('avi', 'avi_sample.hex', env)
+    message = run_model('avi', 'avi_sample.hex', env,
+                        module_paths=(Path(__file__).resolve().parents[1] / 'lib',))
     assert message == 'AVI model matched 3 RLE8 frames of 32x24', message
     print('AVI model matched 3 RLE8 frames of 32x24')
 

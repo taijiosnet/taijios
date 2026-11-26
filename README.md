@@ -455,7 +455,9 @@ information (with `/zx/wm/filename.zx` font chooser), the 3 by 8 glyph table
 with Next/Prev paging, and the Character Inspector (`/lib/unidata/unidata2.txt`,
 category descriptions, Snarf and Paste). AVI Player keeps File, Stop, Pause,
 Play, the `/zx/wm/filename.zx` chooser, and 8-bit uncompressed and BI_RLE8
-RIFF/AVI playback. WmPlay keeps Inferno audio header validation (`rate` magic,
+RIFF/AVI playback. The shared `appl/lib/riff.zi` module owns its metadata,
+palette and frame parsing; `avi_model.zi` decodes the frames without loading
+the removed Dis RIFF library. WmPlay keeps Inferno audio header validation (`rate` magic,
 `\n\n` terminator, 4-byte alignment), `/dev/audioctl` configuration, `/dev/audio`
 streaming and the file chooser.
 Each test
