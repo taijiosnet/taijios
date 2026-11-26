@@ -960,7 +960,8 @@ appl
 		filepat.b
 		fsfilter.b
 		fslib.b
-		fsproto.b
+		fsproto.zi
+		fsproto_files.zi
 		gamer.b
 		hash.b
 		html.b
@@ -1533,7 +1534,6 @@ zx
 		filepat.dis
 		fsfilter.dis
 		fslib.dis
-		fsproto.dis
 		ftree
 			+
 		gamer.dis
@@ -2124,7 +2124,6 @@ module
 	filter.m
 	freetype.m
 	fslib.m
-	fsproto.m
 	gamer.m
 	gr.m
 	grid

@@ -474,6 +474,12 @@ reader with `Close`. Invalid lengths and truncated input return errors.
 This reads metadata using the legacy header layout; it does not decode media
 or support extended-size atoms.
 
+The `fsproto` SDK module reads filesystem prototypes from a file (`ReadFile`)
+or text (`ReadString`). Its `ProtoResult` owns ordered entries and diagnostics,
+including paths and directory metadata. It preserves quoted names, environment
+substitution, inherited source paths, octal modes, and sorted `+`, `*`, `%`
+wildcards. Each read clears the previous result; see `fsproto(2)` for the API.
+
 Tetris and Snake share `appl/lib/scoretable.zi` for the existing
 `user score other...` files: ties follow older entries and only the best ten
 scores are kept. Both games use this module instead of the Dis score table.

@@ -1,87 +1,82 @@
 .TH FSPROTO 2
 .SH NAME
-FSproto: readprotofile, readprotostring \- read file system prototype file
+fsproto: ReadFile, ReadString \- read filesystem prototypes in Ziran
 .SH SYNOPSIS
 .EX
-include "fsproto.m";
-fsproto := load FSproto FSproto->PATH;
+Proto :: #import "fsproto";
+Files :: #import "fsproto_files";
 
-Direntry: type (string, string, ref Sys->Dir);
+result: Proto.ProtoResult
+ok := Proto.ReadFile(path, root, *result)
+ok = Proto.ReadString(text, root, *result)
 
-init:   fn(): string;
+count := Proto.ItemCount(*result)
+old_path := Proto.ItemOldPath(*result, index)
+new_path := Proto.ItemNewPath(*result, index)
+dir: Files.DirEntry
+Proto.ItemDir(*result, index, *dir)
 
-readprotofile: fn(proto: string, root: string,
-        entries: chan of Direntry,
-        warnings: chan of (string, string)): string;
-
-readprotostring: fn(proto: string, root: string,
-        entries: chan of Direntry,
-        warnings: chan of (string, string));
+count = Proto.DiagCount(*result)
+level := Proto.DiagLevel(*result, index)
+line := Proto.DiagLine(*result, index)
+path := Proto.DiagPath(*result, index)
+message := Proto.DiagMsg(*result, index)
 .EE
 .SH DESCRIPTION
-.B FSproto
-provides an interface to read a file system prototype file,
-as defined by
+.B fsproto
+reads filesystem prototype files as defined by
 .IR proto (6).
+The module is part of the TaijiOS Ziran SDK.
+Bind the
+.B taijios_io
+host interface when building a guest bundle.
 .PP
-.B Init
-must be called before any other function in the module.
-.PP
-.B Readprotofile
-reads a file system prototype from the file
-.IR proto .
-It traverses the file system, starting at the given
-.IR root ,
-and each file or directory encountered that is mentioned
-in the prototype causes
-.B readprotofile
-to send a
-.B Direntry
-tuple on the channel
-.IR entries .
-The tuple has the form
-.BI ( old , new , dir\fP\f5)\fP
-where
-.I old
-is the name of the current file or directory,
-rooted at
-.IR root ,
-.I new
-is the same file's name
-.I relative
-to
-.IR root ,
-and
-.I dir
-is a reference to the
-.B Sys->Dir
-directory information for
-.IR old ,
-as produced by
-.IR sys-stat (2).
-When all files in
+.B ReadFile
+reads a prototype from a guest file.
+.B ReadString
+reads prototype text supplied by the caller.
+Both traverse the filesystem rooted at
 .I root
-have been examined,
-.B readprotofile
-sends a single tuple with all nil components on
-.IR entries .
-For each error that occurs during processing (eg, unable to open a directory)
-.B readprotofile
-sends a tuple
-.BI ( old , diag )
-on the channel
-.IR warnings ,
-naming the file and giving a diagnostic string,
-but processing continues.
+and replace the entries and diagnostics in
+.IR result .
+They return false if opening or reading the prototype fails, or if a fatal
+prototype error stops traversal. Recoverable warnings leave the return value
+true and remain in the diagnostics.
 .PP
-.B Readprotostring
-reads a file system prototype from the string
-.I proto
-itself.
-Otherwise, its operation is the same as
-.BR readprotofile .
+Entries preserve traversal order. Each holds its source path, destination
+path and owned directory metadata. Source paths follow the prototype's
+explicit or inherited source names. Destination paths begin with a slash
+and describe names under the destination root.
+.B ItemOldPath
+and
+.B ItemNewPath
+return owned Text values.
+.B ItemDir
+copies the metadata into the caller's
+.BR Files.DirEntry .
+That record includes name, owner, group, modifier, mode, access and modification
+times, length and identity.
+.PP
+The parser preserves single-quoted names and doubled single quotes,
+$environment substitutions (with $user read from /dev/user), octal modes with
+directory, append and exclusive flags, indentation, and inherited source paths.
+Wildcard + expands directories recursively, * lists their immediate entries,
+and % lists immediate files. Wildcard entries are sorted by name.
+As in the original reader, owner and group fields in the prototype are parsed;
+returned ownership comes from the source metadata.
+.PP
+Diagnostics own their source path and message, and include the prototype line
+number and severity. Severity is
+.B Proto.WARN
+for recoverable problems and
+.B Proto.FATAL
+when traversal stops. Entries collected before a fatal error remain available.
+Missing files skip their indented children. No background walker or completion
+channel is required: the result is complete when the read returns.
 .SH SOURCE
-.B /appl/lib/fsproto.b
+.B /appl/lib/fsproto.zi
+.br
+.B /appl/lib/fsproto_files.zi
 .SH SEE ALSO
 .IR fs (1),
 .IR proto (6),

@@ -1,4 +1,4 @@
-# 2. Libraries - zx/lib/** (boot-loaded rows first) - 136 rows
+# 2. Libraries - zx/lib/** (boot-loaded rows first) - 135 rows
 
 Owner: Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane)
 
@@ -59,7 +59,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/lib/filepat.dis | appl/lib/filepat.b | module/filepat.m | - |  |
 | zx/lib/fsfilter.dis | appl/lib/fsfilter.b |  | - |  |
 | zx/lib/fslib.dis | appl/lib/fslib.b | module/fslib.m | - |  |
-| zx/lib/fsproto.dis | appl/lib/fsproto.b | module/fsproto.m | - |  |
 | zx/lib/ftree/cptree.dis | appl/wm/ftree/cptree.b |  | - |  |
 | zx/lib/ftree/ftree.dis | appl/wm/ftree/ftree.b |  | - |  |
 | zx/lib/ftree/items.dis | appl/wm/ftree/items.b |  | - |  |

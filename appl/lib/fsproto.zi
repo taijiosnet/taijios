@@ -1,0 +1,413 @@
+// Filesystem prototype reader, ported from appl/lib/fsproto.b (see NOTICE).
+// Results own their paths and metadata; ReadString and ReadFile replace channels
+// with a complete, ordered result and diagnostics. No background walker is spawned.
+IO :: #import "taijios_io";
+Stat :: #import "taijios_stat";
+Util :: #import "fsproto_files";
+#import "std/format"
+#import "std/vec"
+
+WARN :: 0
+ERROR :: 1
+FATAL :: 2
+
+ProtoItem :: struct {
+    new_path: Text;
+    old_path: Text;
+    dir: Util.DirEntry;
+}
+
+ProtoDiag :: struct {
+    level: s32;
+    lineno: s32;
+    msg: Text;
+    path: Text;
+}
+
+ProtoResult :: struct {
+    items: Vec(ProtoItem);
+    diags: Vec(ProtoDiag);
+}
+
+PFile :: struct {
+    new_p: Text;
+    elem: Text;
+    old_p: Text;
+    uid: Text;
+    gid: Text;
+    mode: u32;
+    has_mode: bool;
+}
+
+Reader :: struct {
+    data: Vec(u8);
+    pos: s64;
+    lineno: s32;
+    indent: s32;
+    oldroot: Text;
+    newfile: Text;
+    oldfile: Text;
+    res: *ProtoResult;
+    stopped: bool;
+}
+
+AddDiag :: (r: *Reader, level: s32, msg: string) {
+    d: ProtoDiag;
+    d.level = level;
+    d.lineno = r.lineno;
+    d.msg = Util.CopyText(msg);
+    d.path = Util.CopyText(TextView(r.oldfile));
+    if level == FATAL { r.stopped = true }
+    VecPush(r.res.diags, d);
+}
+
+AddItem :: (r: *Reader, d: *Util.DirEntry) {
+    it: ProtoItem;
+    it.new_path = Util.CopyText(TextView(r.newfile));
+    it.old_path = Util.CopyText(TextView(r.oldfile));
+    Util.CopyDirEntry(*it.dir, d);
+    VecPush(r.res.items, it);
+}
+
+CopyPFile :: (dst: *PFile, src: *PFile) {
+    Util.CopyTextInto(*dst.new_p, *src.new_p);
+    Util.CopyTextInto(*dst.elem, *src.elem);
+    Util.CopyTextInto(*dst.old_p, *src.old_p);
+    Util.CopyTextInto(*dst.uid, *src.uid);
+    Util.CopyTextInto(*dst.gid, *src.gid);
+    dst.mode = src.mode;
+    dst.has_mode = src.has_mode;
+}
+
+ReadLine :: (r: *Reader, out: *Vec(u8)) -> bool {
+    VecClear(out.*);
+    if r.pos >= r.data.count { return false }
+    start := r.pos;
+    while r.pos < r.data.count && r.data[r.pos] != 10 { r.pos += 1 }
+    if r.pos < r.data.count { r.pos += 1 }
+    for i: start..r.pos - 1 { VecPush(out.*, r.data[i]) }
+    if out.count == 0 || out.*[out.count - 1] != 10 { VecPush(out.*, 10) }
+    return true;
+}
+
+SetNames :: (r: *Reader, f: *PFile) {
+    VecClear(r.newfile.bytes);
+    unused BuilderAppend(r.newfile.bytes, TextView(f.new_p));
+    VecClear(r.oldfile.bytes);
+    if f.old_p.bytes.count > 0 {
+        if f.old_p.bytes[0] == 47 {
+            Util.MkPath(TextView(r.oldroot), TextView(f.old_p), *r.oldfile.bytes);
+        } else {
+            unused BuilderAppend(r.oldfile.bytes, TextView(f.old_p));
+        }
+    } else {
+        Util.MkPath(TextView(r.oldroot), TextView(f.new_p), *r.oldfile.bytes);
+    }
+}
+
+SkipDir :: (r: *Reader) {
+    if r.indent < 0 { return }
+    level := r.indent;
+    line: Vec(u8);
+    while true {
+        r.indent = 0;
+        fp := r.pos;
+        if !ReadLine(r, *line) {
+            r.indent = -1;
+            return;
+        }
+        r.lineno += 1;
+        j: s64 = 0;
+        while j < line.count && line[j] != 10 {
+            if line[j] == 32 { r.indent += 1 }
+            else if line[j] == 9 { r.indent += 8 }
+            else { break }
+            j += 1;
+        }
+        if r.indent <= level {
+            r.pos = fp;
+            r.lineno -= 1;
+            return;
+        }
+    }
+}
+
+GetName :: (r: *Reader, line: string, pos: *s64, out: *Vec(u8)) {
+    VecClear(out.*)
+    while pos.* < line.count && (line[pos.*] == 32 || line[pos.*] == 9) { pos.* += 1 }
+    quoted := false
+    while pos.* < line.count {
+        c := line[pos.*]
+        if c == 10 || (!quoted && (c == 32 || c == 9)) { break }
+        pos.* += 1
+        if c == #char "'" {
+            if quoted && pos.* < line.count && line[pos.*] == #char "'" {
+                pos.* += 1
+            } else {
+                quoted = !quoted
+                continue
+            }
+        }
+        VecPush(out.*,c)
+    }
+    if out.count > 0 && out.*[0] == #char "$" {
+        variable: Text
+        for i: 1..out.count-1 { VecPush(variable.bytes,out.*[i]) }
+        path: Vec(u8)
+        if TextView(variable) == "user" { unused BuilderAppend(path,"/dev/user") }
+        else { BuilderPrint(*path,"/env/%",TextView(variable)) }
+        VecClear(out.*)
+        handle := IO.Open(TextView(path[:]),0)
+        if handle >= 0 {
+            bytes: [256]u8
+            count := IO.Read(handle,bytes[:])
+            unused IO.Close(handle)
+            if count > 0 { unused BuilderAppend(out.*,TextView(bytes[:count])) }
+        }
+        if out.count == 0 {
+            message: Vec(u8)
+            BuilderPrint(*message,"can't read environment variable %",TextView(variable))
+            AddDiag(r,WARN,TextView(message[:]))
+        }
+    }
+}
+
+GetMode :: (r: *Reader, line: string, pos: *s64) -> (mode: u32, has: bool) {
+    tok: Vec(u8);
+    GetName(r, line, pos, *tok);
+    s := TextView(tok[:]);
+    if s.count == 0 || s == "-" { return 0, false }
+    m: u32 = 0;
+    i: s64 = 0;
+    if i < s.count && s[i] == 100 { m = m | Stat.Directory; i += 1 }
+    if i < s.count && s[i] == 97 { m |= Stat.AppendOnly; i += 1 }
+    if i < s.count && s[i] == 108 { m |= Stat.Exclusive; i += 1 }
+    rest := s[i:];
+    if rest.count < 3 {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "bad mode specification %", rest);
+        AddDiag(r, WARN, TextView(msg[:]));
+        return 0, false;
+    }
+    v: u32 = 0;
+    ok := true;
+    for rest {
+        if it < 48 || it > 55 { ok = false; break }
+        v = v*8+cast(u32)(it-48);
+    }
+    if !ok {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "bad mode specification %", rest);
+        AddDiag(r, WARN, TextView(msg[:]));
+        return 0, false;
+    }
+    return m | cast(u32)v, true;
+}
+
+GetFile :: (r: *Reader, old: *PFile, out_f: *PFile) -> (ok: bool, fp_out: s64) {
+    if r.indent < 0 || r.stopped { return false, 0 }
+    line: Vec(u8);
+    fp: s64 = 0;
+    pidx: s64 = 0;
+    while true {
+        fp = r.pos;
+        r.indent = 0;
+        if !ReadLine(r, *line) {
+            r.indent = -1;
+            return false, 0;
+        }
+        r.lineno += 1;
+        pidx = 0;
+        while pidx < line.count && line[pidx] != 10 {
+            if line[pidx] == 32 { r.indent += 1 }
+            else if line[pidx] == 9 { r.indent += 8 }
+            else { break }
+            pidx += 1;
+        }
+        if pidx < line.count && line[pidx] != 10 && line[pidx] != 35 { break }
+    }
+
+    sline := TextView(line[:]);
+    elem: Vec(u8);
+    GetName(r, sline, *pidx, *elem);
+    np_buf: Vec(u8);
+    Util.MkPath(TextView(old.new_p), TextView(elem[:]), *np_buf);
+    VecClear(out_f.new_p.bytes);
+    for i: 0..np_buf.count - 1 { VecPush(out_f.new_p.bytes, np_buf[i]) }
+
+    // splitr on "/" for f.elem
+    np := TextView(out_f.new_p);
+    last_slash: s64 = -1;
+    for i: 0..np.count - 1 { if np[i] == 47 { last_slash = i } }
+    VecClear(out_f.elem.bytes);
+    if last_slash >= 0 && last_slash + 1 < np.count {
+        unused BuilderAppend(out_f.elem.bytes, np[last_slash + 1:]);
+    } else if last_slash < 0 {
+        unused BuilderAppend(out_f.elem.bytes, np);
+    } else {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't find file name component of %", np);
+        AddDiag(r, FATAL, TextView(msg[:]));
+        return false, 0;
+    }
+
+    mode, has_m := GetMode(r, sline, *pidx);
+    out_f.mode = mode;
+    out_f.has_mode = has_m;
+
+    GetName(r, sline, *pidx, *out_f.uid.bytes);
+    if out_f.uid.bytes.count == 0 { unused BuilderAppend(out_f.uid.bytes, "-") }
+    GetName(r, sline, *pidx, *out_f.gid.bytes);
+    if out_f.gid.bytes.count == 0 { unused BuilderAppend(out_f.gid.bytes, "-") }
+
+    // getpath
+    while pidx < sline.count && (sline[pidx] == 32 || sline[pidx] == 9) { pidx += 1 }
+    pstart := pidx;
+    while pidx < sline.count && sline[pidx] != 10 && sline[pidx] != 32 && sline[pidx] != 9 { pidx += 1 }
+    oldp := sline[pstart:pidx];
+    VecClear(out_f.old_p.bytes);
+    if oldp != "-" && oldp.count > 0 {
+        unused BuilderAppend(out_f.old_p.bytes, oldp);
+    } else if old.old_p.bytes.count > 0 {
+        op_buf: Vec(u8);
+        Util.MkPath(TextView(old.old_p), TextView(elem[:]), *op_buf);
+        for i: 0..op_buf.count - 1 { VecPush(out_f.old_p.bytes, op_buf[i]) }
+    }
+
+    SetNames(r, out_f);
+    return true, fp;
+}
+
+CopyFile :: (r: *Reader, f: *PFile, d: *Util.DirEntry) -> bool {
+    VecClear(d.name.bytes);
+    unused BuilderAppend(d.name.bytes, TextView(f.elem));
+    if f.has_mode {
+        if (d.mode & Stat.Directory) != (f.mode & Stat.Directory) {
+            msg: Vec(u8);
+            BuilderPrint(*msg, "inconsistent mode for %", TextView(f.new_p));
+            AddDiag(r, WARN, TextView(msg[:]));
+        } else {
+            d.mode = f.mode;
+        }
+    }
+    AddItem(r, d);
+    return (d.mode & Stat.Directory) != 0;
+}
+
+MkFile :: (r: *Reader, f: *PFile) -> bool {
+    d: Util.DirEntry;
+    if !Util.StatEntry(TextView(r.oldfile), *d) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't stat file %: %", TextView(r.oldfile), IO.Error());
+        AddDiag(r, WARN, TextView(msg[:]));
+        SkipDir(r);
+        return false;
+    }
+    return CopyFile(r, f, *d);
+}
+
+MkTree :: (r: *Reader, me: *PFile, rec: bool, filesonly: bool) {
+    dl: Util.DirList;
+    if !Util.ReadDirSorted(TextView(r.oldfile), *dl) {
+        msg: Vec(u8);
+        BuilderPrint(*msg, "can't open %: %", TextView(r.oldfile), IO.Error());
+        AddDiag(r, WARN, TextView(msg[:]));
+        return;
+    }
+    child: PFile;
+    CopyPFile(*child, me);
+    for i: 0..dl.entries.count - 1 {
+        if filesonly && (Util.EntryMode(*dl, i) & Stat.Directory) != 0 { continue }
+        ename_t := Util.EntryName(*dl, i);
+        ename := TextView(ename_t);
+        np_buf: Vec(u8);
+        Util.MkPath(TextView(me.new_p), ename, *np_buf);
+        VecClear(child.new_p.bytes);
+        for j: 0..np_buf.count - 1 { VecPush(child.new_p.bytes, np_buf[j]) }
+        VecClear(child.old_p.bytes);
+        if me.old_p.bytes.count > 0 {
+            op_buf: Vec(u8);
+            Util.MkPath(TextView(me.old_p), ename, *op_buf);
+            for j: 0..op_buf.count - 1 { VecPush(child.old_p.bytes, op_buf[j]) }
+        }
+        VecClear(child.elem.bytes);
+        unused BuilderAppend(child.elem.bytes, ename);
+        SetNames(r, *child);
+        de: Util.DirEntry;
+        Util.GetEntry(*dl, i, *de);
+        if CopyFile(r, *child, *de) && rec {
+            MkTree(r, *child, rec, filesonly);
+        }
+    }
+}
+
+MkFs :: (r: *Reader, me: *PFile, level: s32) {
+    child: PFile;
+    ok, fp := GetFile(r, me, *child);
+    if !ok { return }
+    is_wild := false;
+    rec := false;
+    filesonly := false;
+    {
+        celem := TextView(child.elem);
+        if celem == "+" || celem == "*" || celem == "%" {
+            is_wild = true;
+            rec = celem == "+";
+            filesonly = celem == "%";
+        }
+    }
+    if is_wild {
+        Util.CopyTextInto(*child.new_p, *me.new_p);
+        SetNames(r, *child);
+        MkTree(r, *child, rec, filesonly);
+        ok, fp = GetFile(r, me, *child);
+    }
+    while ok && r.indent > level && !r.stopped {
+        if MkFile(r, *child) {
+            MkFs(r, *child, r.indent);
+        }
+        ok, fp = GetFile(r, me, *child);
+    }
+    if ok {
+        r.pos = fp;
+        r.lineno -= 1;
+    }
+}
+
+// Parse text from memory. Clear previous results before each read.
+ReadString :: (proto: string, root: string, res: *ProtoResult) -> bool {
+    VecClear(res.items)
+    VecClear(res.diags)
+    r: Reader
+    r.res = res
+    r.oldroot = Util.CopyText(root)
+    unused BuilderAppend(r.data,proto)
+    f: PFile
+    MkFs(*r,*f,-1)
+    return !r.stopped
+}
+
+ReadFile :: (proto: string, root: string, res: *ProtoResult) -> bool {
+    data: Vec(u8)
+    if !Util.ReadAllFile(proto,*data) {
+        VecClear(res.items)
+        VecClear(res.diags)
+        r: Reader
+        r.res = res
+        r.oldfile = Util.CopyText(proto)
+        AddDiag(*r,FATAL,IO.Error())
+        return false
+    }
+    return ReadString(TextView(data[:]),root,res)
+}
+
+DiagCount :: (res: *ProtoResult) -> s64 { return res.diags.count }
+DiagLevel :: (res: *ProtoResult, i: s64) -> s32 { return res.diags[i].level }
+DiagLine :: (res: *ProtoResult, i: s64) -> s32 { return res.diags[i].lineno }
+DiagMsg :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(res.diags[i].msg)) }
+ItemCount :: (res: *ProtoResult) -> s64 { return res.items.count }
+ItemNewPath :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(res.items[i].new_path)) }
+ItemOldPath :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(res.items[i].old_path)) }
+ItemDir :: (res: *ProtoResult, i: s64, out: *Util.DirEntry) { Util.CopyDirEntry(out, *res.items[i].dir) }
+
+DiagPath :: (res: *ProtoResult, i: s64) -> Text { return Util.CopyText(TextView(res.diags[i].path)) }

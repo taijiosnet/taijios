@@ -3,6 +3,8 @@ name = "taijios"
 module_roots = ["appl/lib", "appl/cmd", "appl/cmd/tcltk"]
 
 [exports]
+fsproto = "appl/lib/fsproto.zi"
+fsproto_files = "appl/lib/fsproto_files.zi"
 quicktime = "appl/lib/quicktime.zi"
 quicktime_input = "appl/lib/quicktime_input.zi"
 ir = "appl/lib/ir.zi"

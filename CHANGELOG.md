@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Port the filesystem prototype reader to the shared Ziran `fsproto` SDK module,
+  preserving quoting, environment substitution, inherited paths, mode flags,
+  sorted wildcards and diagnostics. Return owned results, identify missing
+  environment variables, and remove the replaced Limbo interface and Dis binary.
+
 - Replace the Limbo QuickTime metadata reader with shared `quicktime` and
   `quicktime_input` Ziran SDK modules. Keep movie and track fields, fix buffered
   short reads, bound atom traversal, and remove the old interface and Dis binary.
