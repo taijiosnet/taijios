@@ -24,7 +24,7 @@ is the name read from
 .SH FILES
 .B /dev/user
 .SH SOURCE
-.B /appl/cmd/cd.b
+.B /appl/cmd/cd.zi
 .SH "SEE ALSO"
 .IR pwd (1),
 .IR sys-chdir (2),

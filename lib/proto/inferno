@@ -413,7 +413,7 @@ appl
 		bytes.b
 		cal.b
 		calc.b
-		cd.b
+		cd.zi
 		cddb.b
 		chgrp.b
 		chmod.b
@@ -1434,7 +1434,7 @@ zx
 	cal.dis
 	calc.dis
 	cat.zx
-	cd.dis
+	cd.zx
 	cddb.dis
 	charon
 		+

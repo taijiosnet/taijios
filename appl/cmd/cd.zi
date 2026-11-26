@@ -1,0 +1,38 @@
+// Change the shared guest working directory, ported from Inferno cd.b.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+#import "std/vec"
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count > 1 { return Cli.Usage("Usage: cd [directory]\n") }
+    home: Vec(u8);
+    path := Args.Operand(0);
+    if count == 0 {
+        user := "inferno";
+        buffer: [256]u8;
+        fd := Io.Open("/dev/user", 0);
+        if fd >= 0 {
+            size := Io.Read(fd, buffer[:]);
+            unused Io.Close(fd);
+            if size > 0 { user = TextView(buffer[:size]) }
+        }
+        BuilderAppend(home, "/usr/");
+        BuilderAppend(home, user);
+        path = TextView(home[:]);
+    }
+    if Io.Chdir(path) < 0 {
+        problem := Io.Error();
+        if path.count == 0 { problem = "empty file name" }
+        unused Cli.WriteAll(2, "cd: ");
+        unused Cli.WriteAll(2, path);
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, problem);
+        unused Cli.WriteAll(2, "\n");
+        unused Args.SetFailure("failed");
+        return 1;
+    }
+    return 0;
+}
