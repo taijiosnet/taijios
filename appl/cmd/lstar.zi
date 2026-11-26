@@ -1,0 +1,111 @@
+// Buffered tar listing with no Dis loader, ported from Inferno lstar.b.
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Tar :: #import "lstar_header";
+#import "std/vec"
+#import "std/format"
+
+Input :: struct {
+    buffer: [8192]u8;
+    block: [Tar.BlockSize]u8;
+    next: s32;
+    count: s32;
+    ended: bool;
+    problem: string;
+}
+
+// Read logical blocks independently of how the input stream chunks its bytes.
+Block :: (input: *Input) -> bool {
+    if input.ended { return false }
+    held: s32;
+    while held < Tar.BlockSize {
+        if input.next >= input.count {
+            count := Io.Read(0, input.buffer[:]);
+            if count <= 0 {
+                input.ended = true;
+                if count < 0 { input.problem = "read error" }
+                else if held > 0 { input.problem = "blocksize error" }
+                return false;
+            }
+            input.count = count;
+            input.next = 0;
+        }
+        take := Tar.BlockSize - held;
+        if take > input.count - input.next { take = input.count - input.next }
+        for at: 0..take-1 { input.block[held+at] = input.buffer[input.next+at] }
+        held += take;
+        input.next += take;
+    }
+    return true;
+}
+
+Error :: (message: string) {
+    problem := Io.Error();
+    unused Cli.WriteAll(2, "lstar: ");
+    unused Cli.WriteAll(2, message);
+    // Header errors have no system-call failure to report.
+    if problem.count > 0 {
+        unused Cli.WriteAll(2, ": ");
+        unused Cli.WriteAll(2, problem);
+    }
+    unused Cli.WriteAll(2, "\n");
+}
+
+#program_export
+main :: () -> s32 {
+    input: Input;
+    while true {
+        ready := Block(*input);
+        if input.problem.count > 0 { Error(input.problem); return 0 }
+        if !ready { return 0 }
+        name: Vec(u8);
+        size: s32;
+        modified: s32;
+        {
+            header := Tar.Decode(input.block[:]);
+            if !header.present { return 0 }
+            // Preserve the name across buffered payload reads.
+            if header.prefix.count > 0 {
+                Tar.AppendText(*name, header.prefix);
+                VecPush(name, #char "/");
+            }
+            Tar.AppendText(*name, header.name);
+            if header.problem != 0 {
+                message: Vec(u8);
+                if header.problem == Tar.BadMagic { BuilderAppend(message, "bad magic ") }
+                else if header.problem == Tar.BadChecksum { BuilderAppend(message, "directory checksum error ") }
+                else { BuilderPrint(*message, "unrecognized typeflag % for ", cast(s32)header.flag) }
+                BuilderAppend(message, TextView(name[:]));
+                Error(TextView(message[:]));
+                return 0;
+            }
+            if header.notice != 0 {
+                message: Vec(u8);
+                if header.notice == Tar.HardLink { BuilderAppend(message, "skipping link ") }
+                else if header.notice == Tar.SymbolicLink { BuilderAppend(message, "skipping symlink ") }
+                else { BuilderAppend(message, "skipping special file ") }
+                BuilderAppend(message, TextView(name[:]));
+                if header.notice == Tar.HardLink {
+                    BuilderAppend(message, " -> ");
+                    Tar.AppendText(*message, header.link);
+                }
+                VecPush(message, #char "\n");
+                unused Cli.WriteAll(2, TextView(message[:]));
+            }
+            // Match the original's 32-bit size arithmetic. EOF in the payload
+            // still lists its header, and stops without unbounded repeated reads.
+            size = header.size;
+            modified = header.modified;
+        }
+        blocks := cast(s32)(cast(u32)size + 511) / 512;
+        for 1..blocks {
+            skipped := Block(*input);
+            if input.problem.count > 0 { Error(input.problem); return 0 }
+            if !skipped { break }
+        }
+        row: Vec(u8);
+        BuilderPrint(*row, "% % % 0\n", TextView(name[:]), modified, size);
+        unused Cli.WriteAll(1, TextView(row[:]));
+    }
+    return 0;
+}

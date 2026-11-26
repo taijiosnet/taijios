@@ -1,4 +1,6 @@
 Unreleased
+	port lstar to a native Ziran/ZX command
+	lstar: assemble partial input reads and omit stale errors from archive diagnostics
 	port ftest to a native Ziran/ZX command
 	port bind to a native Ziran/ZX command
 	port cd to a native Ziran/ZX command

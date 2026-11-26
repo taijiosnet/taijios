@@ -592,7 +592,7 @@ appl
 		lockfs.b
 		logfile.b
 		look.b
-		lstar.b
+		lstar.zi
 		m4.b
 		man2html.b
 		man2txt.b
@@ -746,6 +746,7 @@ appl
 		zeros.b
 		taijios_args.zi
 		taijios_io.zi
+		lstar_header.zi
 		taijios_namespace.zi
 		taijios_stat.zi
 		zx_arg.zi
@@ -1646,7 +1647,7 @@ zx
 	look.dis
 	lookman
 	ls.zx
-	lstar.dis
+	lstar.zx
 	m4.dis
 	man
 	man2html.dis

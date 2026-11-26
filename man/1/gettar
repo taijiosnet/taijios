@@ -79,7 +79,7 @@ srv.b 866042662 3865 0
 .SH SOURCE
 .B /appl/cmd/gettar.b
 .br
-.B /appl/cmd/lstar.b
+.B /appl/cmd/lstar.zi
 .br
 .B /appl/cmd/puttar.b
 .SH SEE ALSO
