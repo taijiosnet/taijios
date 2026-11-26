@@ -146,4 +146,3 @@ Open :: (data: []u8, movie: *Movie) -> string {
     if movie.frames.count < 1 { return "no frames" }
     return ""
 }
-
