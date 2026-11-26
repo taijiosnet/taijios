@@ -1013,9 +1013,9 @@ appl
 		regex.b
 		registries.b
 		rfc822.zi
-		riff.b
+		riff.zi
 		secstore.b
-		scoretable.b
+		scoretable.zi
 		selectfile.b
 		sets.zi
 		sets32.zi
@@ -1580,9 +1580,7 @@ zx
 		readxbitmap.dis
 		regex.dis
 		registries.dis
-		riff.dis
 		secstore.dis
-		scoretable.dis
 		selectfile.dis
 		sexprs.dis
 		smtp.dis
@@ -2181,9 +2179,7 @@ module
 	readdir.m
 	regex.m
 	registries.m
-	riff.m
 	runt.m
-	scoretable.m
 	secstore.m
 	security.m
 	selectfile.m
