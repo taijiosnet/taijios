@@ -1,0 +1,64 @@
+// Histogram storage and formatting shared by the freq stream frontend.
+#import "std/vec"
+
+Decimal :: 1
+Hex :: 2
+Octal :: 4
+Character :: 8
+Rune :: 16
+
+Table :: struct { counts: Vec(s64) }
+
+Add :: (table: *Table, value: s32) -> bool {
+    if value < 0 || value > 0x10FFFF { return false }
+    if value >= table.counts.count && !VecResize(table.counts, cast(s64)value + 1) { return false }
+    table.counts[value] += 1
+    return true
+}
+
+Number :: (out: *Vec(u8), value: s64, base: s64, width: s64, pad: u8) {
+    digits: [64]u8
+    alphabet := "0123456789abcdef"
+    at: s64 = digits.count
+    rest := value
+    while true {
+        at -= 1
+        digits[at] = alphabet[rest % base]
+        rest /= base
+        if rest == 0 { break }
+    }
+    for 1..width-(digits.count-at) { VecPush(out.*, pad) }
+    BuilderAppend(out.*, TextView(digits[at:]))
+}
+
+Row :: (value: s32, count: s64, flags: s32) -> Text {
+    out: Vec(u8)
+    if (flags & Decimal) != 0 { Number(*out, value, 10, 3, #char " "); VecPush(out, #char " ") }
+    if (flags & Octal) != 0 { Number(*out, value, 8, 3, #char "0"); VecPush(out, #char " ") }
+    if (flags & Hex) != 0 { Number(*out, value, 16, 2, #char "0"); VecPush(out, #char " ") }
+    if (flags & Character) != 0 {
+        if value <= 0x20 || (value >= 0x7F && value < 0xA0) || (value > 0xFF && (flags & Rune) == 0) {
+            BuilderAppend(out, "- ")
+        } else {
+            // UTF-8 encoding without a host dependency.
+            if value < 0x80 { VecPush(out, cast(u8)value) }
+            else if value < 0x800 {
+                VecPush(out, cast(u8)(0xC0 | (value >> 6)))
+                VecPush(out, cast(u8)(0x80 | (value & 63)))
+            } else if value < 0x10000 {
+                VecPush(out, cast(u8)(0xE0 | (value >> 12)))
+                VecPush(out, cast(u8)(0x80 | ((value >> 6) & 63)))
+                VecPush(out, cast(u8)(0x80 | (value & 63)))
+            } else {
+                VecPush(out, cast(u8)(0xF0 | (value >> 18)))
+                VecPush(out, cast(u8)(0x80 | ((value >> 12) & 63)))
+                VecPush(out, cast(u8)(0x80 | ((value >> 6) & 63)))
+                VecPush(out, cast(u8)(0x80 | (value & 63)))
+            }
+            VecPush(out, #char " ")
+        }
+    }
+    Number(*out, count, 10, 8, #char " ")
+    VecPush(out, #char "\n")
+    return BuilderFinish(out)
+}

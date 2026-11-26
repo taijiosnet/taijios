@@ -33,8 +33,12 @@ If any options are given, the
 .B -c
 flags specify a subset of value formats: decimal, hex, octal, and
 character, respectively.
+.PP
+Counts accumulate across input files; each file prints the current totals.
+Rune mode covers the complete Unicode scalar range, including CJK and
+supplementary characters. An incomplete UTF sequence at end of input is ignored.
 .SH SOURCE
-.B /appl/cmd/freq.b
+.B /appl/cmd/freq.zi
 .SH SEE ALSO
 .IR utf (6),
 .IR wc (1)

@@ -56,7 +56,6 @@ TARG=\
 	fcp.dis\
 	fmt.dis\
 	fortune.dis\
-	freq.dis\
 	ftest.dis\
 	ftpfs.dis\
 	getauthinfo.dis\
@@ -199,6 +198,7 @@ ZXCOMMANDS=$ZXCOMMANDS fs
 ZXCOMMANDS=$ZXCOMMANDS irtest
 ZXCOMMANDS=$ZXCOMMANDS comm
 ZXCOMMANDS=$ZXCOMMANDS cmp
+ZXCOMMANDS=$ZXCOMMANDS freq
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -210,6 +210,9 @@ COFFEEFRAMES=0 1 2 3 4 5
 COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
+
+freq.zx: freq.zi freq_table.zi zx_arg.zi $RUNESZX $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry freq:main -o $target freq.zi
 
 cmp.zx: cmp.zi zx_arg.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry cmp:main -o $target cmp.zi
@@ -487,6 +490,7 @@ $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
 $DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
+$DISBIN/freq.zx: freq.zx mkfile
 $DISBIN/cmp.zx: cmp.zx mkfile
 $DISBIN/comm.zx: comm.zx mkfile
 $DISBIN/irtest.zx: irtest.zx mkfile

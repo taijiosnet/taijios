@@ -1,3 +1,7 @@
+Unreleased
+	port comm, cmp and freq to streaming Ziran/ZX commands
+	freq -r: count and print the complete Unicode scalar range
+
 20140525
 	implement & in replacement text in sed
 20140524

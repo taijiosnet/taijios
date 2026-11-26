@@ -448,7 +448,8 @@ appl
 		fmt.b
 		fone.b
 		fortune.b
-		freq.b
+		freq.zi
+		freq_table.zi
 		fs.b
 		fs
 			and.b
@@ -743,6 +744,12 @@ appl
 		xmount.b
 		yacc.b
 		zeros.b
+		taijios_args.zi
+		taijios_io.zi
+		zx_arg.zi
+		zx_cli.zi
+		zx_lines.zi
+		zx_runes.zi
 	collab
 		clients
 			chat.b
@@ -1471,7 +1478,7 @@ zx
 	fmt.dis
 	fone.dis
 	fortune.dis
-	freq.dis
+	freq.zx
 	fs.dis
 	fs
 		+

@@ -1,0 +1,97 @@
+// Inferno freq, with a complete Unicode histogram instead of the old
+// 16,384-row output limit. See NOTICE for the original command's licence.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Table :: #import "freq_table";
+Runes :: #import "zx_runes";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+Count :: (table: *Table.Table, handle: s32, path: string, flags: s32) -> bool {
+    // Preserve an incomplete UTF sequence between reads, including when the
+    // stream supplies just one byte at a time. As in Bufio, an unfinished
+    // sequence at EOF has no rune to count.
+    buffer: [8192]u8
+    held: s32 = 0
+    while true {
+        count := Io.Read(handle, buffer[held:])
+        if count <= 0 {
+            if count < 0 {
+                problem := Io.Error()
+                unused Cli.WriteAll(2, "freq: read error on ")
+                unused Cli.WriteAll(2, path)
+                unused Cli.WriteAll(2, ": ")
+                unused Cli.WriteAll(2, problem)
+                unused Cli.WriteAll(2, "\n")
+            }
+            break
+        }
+        end := held + count
+        if (flags & Table.Rune) == 0 {
+            for i: 0..end-1 { if !Table.Add(table, buffer[i]) { return false } }
+            continue
+        }
+        at: s32 = 0
+        while at < end {
+            if end - at < Runes.Width(buffer[at]) { break }
+            decoded := UTF.Decode(TextView(buffer[at:end]), 0)
+            if !Table.Add(table, cast(s32)decoded.value) { return false }
+            at += decoded.after
+        }
+        held = end - at
+        for i: 0..held-1 { buffer[i] = buffer[at+i] }
+    }
+    for i: 0..table.counts.count-1 {
+        count := table.counts[i]
+        if count == 0 { continue }
+        row := Table.Row(cast(s32)i, count, flags)
+        if !Cli.WriteAll(1, TextView(row)) { return false }
+    }
+    return true
+}
+
+main :: () -> s32 {
+    scan: Options.Scan
+    flags: s32 = 0
+    while true {
+        option := Options.Option(*scan)
+        if option == 0 { break }
+        if option == #char "d" { flags |= Table.Decimal }
+        else if option == #char "x" { flags |= Table.Hex }
+        else if option == #char "o" { flags |= Table.Octal }
+        else if option == #char "c" { flags |= Table.Character }
+        else if option == #char "r" { flags |= Table.Rune }
+        else {
+            unused Cli.WriteAll(2, "freq: unknown option ")
+            byte: [1]u8
+            byte[0] = option
+            unused Cli.WriteAll(2, TextView(byte[:]))
+            unused Cli.WriteAll(2, "\n")
+            unused Args.SetFailure("usage")
+            return 1
+        }
+    }
+    if (flags & 15) == 0 { flags |= 15 }
+    table: Table.Table
+    if scan.next == Args.Count() {
+        if Count(*table, 0, "-", flags) { return 0 }
+        unused Args.SetFailure("error")
+        return 1
+    }
+    for i: scan.next..Args.Count()-1 {
+        path := Args.At(cast(s32)i)
+        handle := Io.Open(path, 0)
+        if handle < 0 {
+            unused Cli.WriteAll(2, "cannot open ")
+            unused Cli.WriteAll(2, path)
+            unused Cli.WriteAll(2, "\n")
+            continue
+        }
+        ok := Count(*table, handle, path, flags)
+        unused Io.Close(handle)
+        if !ok { unused Args.SetFailure("error"); return 1 }
+    }
+    return 0
+}
