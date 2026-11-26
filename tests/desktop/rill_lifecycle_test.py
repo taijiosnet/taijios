@@ -56,9 +56,13 @@ def main():
         env['XDG_CACHE_HOME'] = str(scratch / 'cache')
         env['XDG_DATA_HOME'] = str(scratch / 'data')
         (scratch / 'lib').mkdir()
+        settings = scratch / 'lib/rill'
+        settings.mkdir()
+        # Keep the favorite controls deterministic as desktop defaults evolve.
+        (settings / 'favorites').write_text(
+            'favorites-count = 2\nfavorite-0 = explorer.desktop\n'
+            'favorite-1 = org.taijiosnet.wm-counter.desktop\n')
         if args.workspace_tiles:
-            settings = scratch / 'lib/rill'
-            settings.mkdir()
             (settings / 'settings').write_text(f'workspace-count = {args.workspace_count}\n')
         home = '/' + scratch.relative_to(ROOT).as_posix()
         overlay = guest_overlay(args.guest_overlay)
@@ -146,7 +150,7 @@ def main():
             return None
 
         def task_label(label):
-            return (visible_word(label, (0, 0, 800, 40), psm='6' if label == 'explorer' else '11')
+            return (visible_word(label, (92, 0, frame().width - 260, 32))
                     or task_icon(label))
 
         def task_action(label, action):
@@ -323,6 +327,13 @@ def main():
             click(*task)
             until(lambda: counter() == resized, 'Rill task did not restore Counter')
             print('RILL_TASK_RESTORE_OK', flush=True)
+
+            task_action('counter', 'maximize')
+            until(lambda: (box := counter()) and box[2] - box[0] > size[0]
+                  and box[3] - box[1] > size[1], 'Rill task did not maximize Counter')
+            task_action('counter', 'restore')
+            until(lambda: counter() == resized, 'Rill task did not restore Counter geometry')
+            print('RILL_TASK_MAXIMIZE_RESTORE_OK', flush=True)
 
             if args.desktop_extras:
                 search_app('Files')

@@ -2,7 +2,7 @@
 
 `rill_lifecycle_test.py BUNDLE SHA256 --emu EMULATOR --guest-overlay OVERLAY
 --desktop-extras` checks the full Rill desktop, application launch, input,
-move/resize, task-menu Minimize, task restore, Explorer and Settings. It uses a
+move/resize, task-menu Minimize, Maximize and Restore, Explorer and Settings. It uses a
 private display and a 128 MiB main pool by default. Its task operations use the
 actual Rill context menu so titlebar layout changes cannot turn Minimize into
 Close. OCR uses three-times scaling and unquoted TSV fields.
@@ -174,8 +174,8 @@ revision 28, and every `abi` line in the host-interface section must name a
 capability module and function that TaijiOS grants. The granted set is copied
 from `zxbindings` in `emu/port/zx.c` and listed in
 [`plans/ecosystem-preinstall.md`](../../plans/ecosystem-preinstall.md), Section
-A. Capability module names match either exactly or as `p<16 hex>_<module>`,
-which is how package builds qualify a module. A row whose `size` and `sha256`
+A. Capability module names match exactly, as `alias__module` in current
+package builds, or as `p<16 hex>_<module>` in older bundles. A row whose `size` and `sha256`
 are empty and whose bundle is absent is skipped, matching the catalog
 generator; a present bundle must match the size the manifest records. The
 default run also builds the negative fixtures: a `guest_window` bundle that
