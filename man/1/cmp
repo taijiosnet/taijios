@@ -38,13 +38,10 @@ Print the line number of the first differing byte.
 If offsets are given,
 comparison starts at the designated byte position
 of the corresponding file.
-Offsets that begin with
-.B 0x
-are hexadecimal;
-with
-.BR 0 ,
-octal; with anything else, decimal.
+Offsets use a decimal prefix, as in the original Limbo command.
+A leading sign and whitespace are accepted; trailing text is ignored.
+Comparison byte and line numbers start at one after the offsets.
 .SH SOURCE
-.B /appl/cmd/cmp.b
+.B /appl/cmd/cmp.zi
 .SH "SEE ALSO"
 .IR diff (1) 

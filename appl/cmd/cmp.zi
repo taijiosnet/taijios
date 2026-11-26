@@ -1,0 +1,157 @@
+// Bounded streaming comparison, ported from Inferno cmp.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+#import "std/vec"
+#import "std/format"
+#import "std/number_text"
+
+Usage :: "Usage: cmp [-lsL] file1 file2 [offset1 [offset2] ]\n"
+
+Fail :: (status: string) -> s32 { unused Args.SetFailure(status); return 1 }
+
+Diagnostic :: (prefix: string, name: string) {
+    problem := Io.Error()
+    unused Cli.WriteAll(2, prefix)
+    unused Cli.WriteAll(2, name)
+    unused Cli.WriteAll(2, ": ")
+    unused Cli.WriteAll(2, problem)
+    unused Cli.WriteAll(2, "\n")
+}
+
+// Limbo string-to-big reads a decimal prefix and wraps in 64 bits.
+Offset :: (text: string) -> s64 {
+    at: s64 = 0
+    while at < text.count && (text[at] == #char " " || (text[at] >= 9 && text[at] <= 13)) { at += 1 }
+    negative := false
+    if at < text.count && (text[at] == #char "+" || text[at] == #char "-") {
+        negative = text[at] == #char "-"
+        at += 1
+    }
+    value: u64
+    while at < text.count && text[at] >= #char "0" && text[at] <= #char "9" {
+        value = value * 10 + cast(u64)(text[at] - #char "0")
+        at += 1
+    }
+    if negative { value = 0 - value }
+    return cast(s64)value
+}
+
+Listed :: (number: s64, a: u8, b: u8) -> bool {
+    digits: [24]u8
+    decimal := FormatInteger(number, digits[:])
+    row: Vec(u8)
+    for 1..6-decimal.count { VecPush(row, #char " ") }
+    BuilderAppend(row, decimal)
+    hex := "0123456789abcdef"
+    BuilderAppend(row, " 0x")
+    VecPush(row, hex[a >> 4]); VecPush(row, hex[a & 15])
+    BuilderAppend(row, " 0x")
+    VecPush(row, hex[b >> 4]); VecPush(row, hex[b & 15])
+    VecPush(row, #char "\n")
+    return Cli.WriteAll(1, TextView(row[:]))
+}
+
+main :: () -> s32 {
+    scan: Options.Scan
+    list := false
+    lines := false
+    silent := false
+    while true {
+        option := Options.Option(*scan)
+        if option == 0 { break }
+        if option == #char "l" { list = true }
+        else if option == #char "L" { lines = true }
+        else if option == #char "s" { silent = true }
+        else { return Cli.Usage(Usage) }
+    }
+    if Args.Count() - scan.next < 2 { return Cli.Usage(Usage) }
+    name_a := Args.At(scan.next)
+    name_b := Args.At(scan.next + 1)
+    a := Io.Open(name_a, 0)
+    if a < 0 { Diagnostic("cmp: can't open ", name_a); return Fail("open") }
+    defer { unused Io.Close(a) }
+    b := Io.Open(name_b, 0)
+    if b < 0 { Diagnostic("cmp: can't open ", name_b); return Fail("open") }
+    defer { unused Io.Close(b) }
+    remaining := Args.Count() - scan.next
+    if remaining > 2 && Io.Seek(a, Offset(Args.At(scan.next + 2)), 0) < 0 {
+        Diagnostic("cmp: seek by offset1 failed", ""); return Fail("seek 1")
+    }
+    if remaining > 3 && Io.Seek(b, Offset(Args.At(scan.next + 3)), 0) < 0 {
+        // The original second-offset diagnostic does not end with a newline.
+        problem := Io.Error()
+        unused Cli.WriteAll(2, "cmp: seek by offset2 failed: ")
+        unused Cli.WriteAll(2, problem)
+        return Fail("seek 2")
+    }
+    if remaining > 4 { return Cli.Usage(Usage) }
+    data_a: [65536]u8
+    data_b: [65536]u8
+    at_a: s32 = 0
+    at_b: s32 = 0
+    end_a: s32 = 0
+    end_b: s32 = 0
+    number: s64 = 1
+    line: s64 = 1
+    different := false
+    while true {
+        if at_a == end_a {
+            at_a = 0
+            end_a = Io.Read(a, data_a[:])
+            if end_a < 0 {
+                if !silent {
+                    row: Vec(u8)
+                    BuilderPrint(*row, "error on % after % bytes", name_a, number - 1)
+                    Cli.PrintLine(TextView(row[:]))
+                }
+                return Fail("read error")
+            }
+        }
+        if at_b == end_b {
+            at_b = 0
+            end_b = Io.Read(b, data_b[:])
+            if end_b < 0 {
+                if !silent {
+                    row: Vec(u8)
+                    BuilderPrint(*row, "error on % after % bytes", name_b, number - 1)
+                    Cli.PrintLine(TextView(row[:]))
+                }
+                return Fail("read error")
+            }
+        }
+        count := end_a - at_a
+        if end_b - at_b < count { count = end_b - at_b }
+        if count == 0 { break }
+        for i: 0..count-1 {
+            left := data_a[at_a + i]
+            right := data_b[at_b + i]
+            if lines && left == #char "\n" { line += 1 }
+            if left == right { continue }
+            if !list {
+                if !silent {
+                    row: Vec(u8)
+                    BuilderPrint(*row, "% % differ: char %", name_a, name_b, number + i)
+                    if lines { BuilderPrint(*row, " line %", line) }
+                    Cli.PrintLine(TextView(row[:]))
+                }
+                return Fail("differ")
+            }
+            if !Listed(number + i, left, right) { return Fail("write") }
+            different = true
+        }
+        number += count
+        at_a += count
+        at_b += count
+    }
+    if end_a - at_a != end_b - at_b {
+        row: Vec(u8)
+        path := ifx end_a - at_a > end_b - at_b then name_b else name_a
+        BuilderPrint(*row, "EOF on % after % bytes", path, number - 1)
+        Cli.PrintLine(TextView(row[:]))
+        return Fail("EOF")
+    }
+    if different { return Fail("differ") }
+    return 0
+}

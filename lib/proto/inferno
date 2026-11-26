@@ -417,7 +417,7 @@ appl
 		cddb.b
 		chgrp.b
 		chmod.b
-		cmp.b
+		cmp.zi
 		comm.zi
 		cook.b
 		cprof.b
@@ -1435,7 +1435,7 @@ zx
 	chgrp.dis
 	chmod.dis
 	cleanname.zx
-	cmp.dis
+	cmp.zx
 	collab
 		+
 	comm.zx
