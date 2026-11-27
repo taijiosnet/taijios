@@ -1,0 +1,133 @@
+// Inferno grep.b, sharing the shell's pure Limbo-compatible regex engine.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Bufio :: #import "zx_bufio";
+Regex :: #import "shell_regexp";
+#import "std/vec"
+
+Flags :: struct {
+    list: bool;
+    numbers: bool;
+    invert: bool;
+    insensitive: bool;
+    unmatched: bool;
+    silent: bool;
+    multi: bool;
+}
+
+Lower :: (text: string, out: *Vec(u8)) {
+    VecClear(out.*);
+    for at: 0..text.count-1 {
+        byte := text[at];
+        if byte >= 65 && byte <= 90 { byte += 32 }
+        VecPush(out.*, byte);
+    }
+}
+
+// sys->print("%s", text) stops at its first NUL.
+Print :: (text: string) {
+    end: s64;
+    while end < text.count && text[end] != 0 { end += 1 }
+    unused Cli.WriteAll(1, text[:end]);
+}
+
+Search :: (re: *Regex.Re, flags: *Flags, handle: s32, filename: string) -> bool {
+    reader: Bufio.Reader;
+    reader.handle = handle;
+    line: Vec(u8);
+    folded: Vec(u8);
+    runes: Vec(s32);
+    matched: bool;
+    number: s32 = 1;
+    while Bufio.ReadLine(*reader, *line) {
+        VecClear(runes);
+        if flags.insensitive { Lower(TextView(line[:]), *folded) }
+        text := ifx flags.insensitive then TextView(folded[:]) else TextView(line[:]);
+        at: s64;
+        while at < text.count {
+            rune, next := Regex.Rune(text, at);
+            VecPush(runes, rune);
+            at = next;
+        }
+        match: Regex.Match;
+        // The original excludes the final rune from the range, including
+        // a final line without a newline; keep its anchor semantics.
+        selected := Regex.ExecuteRange(re, *runes, 0, runes.count-1, true, true, *match) != flags.invert;
+        if selected {
+            matched = true;
+            if flags.list || flags.silent {
+                if !flags.silent { Print(filename); unused Cli.WriteAll(1, "\n") }
+                return true;
+            }
+            if !flags.unmatched {
+                prefix: Vec(u8);
+                if flags.numbers {
+                    if flags.multi { BuilderPrint(*prefix, "%:%: ", filename, number) }
+                    else { BuilderPrint(*prefix, "%:", number) }
+                } else if flags.multi { BuilderPrint(*prefix, "%: ", filename) }
+                Print(TextView(prefix[:]));
+                Print(TextView(line[:]));
+            }
+        }
+        number = cast(s32)(cast(s64)number+1);
+    }
+    if flags.unmatched && !matched && !flags.silent { Print(filename); unused Cli.WriteAll(1, "\n") }
+    return matched;
+}
+
+#program_export
+main :: () -> s32 {
+    flags: Flags;
+    scan: Options.Scan;
+    while true {
+        option := Options.Option(*scan);
+        if option == 0 { break }
+        if option == 108 { flags.list = true }
+        else if option == 110 { flags.numbers = true }
+        else if option == 118 { flags.invert = true }
+        else if option == 105 { flags.insensitive = true }
+        else if option == 76 { flags.unmatched = true }
+        else if option == 115 { flags.silent = true }
+        else { return Cli.Usage("usage: grep [-lnviLs] pattern [file...]\n") }
+    }
+    if scan.next >= Args.OperandCount() { return Cli.Usage("usage: grep [-lnviLs] pattern [file...]\n") }
+    pattern := Args.Operand(scan.next);
+    folded: Vec(u8);
+    if flags.insensitive { Lower(pattern, *folded) }
+    expression := ifx flags.insensitive then TextView(folded[:]) else pattern;
+    re: Regex.Re;
+    error: Text;
+    if !Regex.Compile(expression, 0, *re, *error) {
+        unused Cli.WriteAll(2, "grep: ");
+        unused Cli.WriteAll(2, TextView(error));
+        unused Cli.WriteAll(2, "\n");
+        unused Args.SetFailure("bad regex");
+        return 1;
+    }
+    matched: bool;
+    first := scan.next+1;
+    if first == Args.OperandCount() { matched = Search(*re, *flags, 0, "stdin") }
+    else {
+        flags.multi = Args.OperandCount()-first > 1;
+        for index: first..Args.OperandCount()-1 {
+            filename := Args.Operand(cast(s32)index);
+            handle := Io.Open(filename, 0);
+            if handle < 0 {
+                problem := Io.Error();
+                unused Cli.WriteAll(2, "grep: cannot open ");
+                unused Cli.WriteAll(2, filename);
+                unused Cli.WriteAll(2, ": ");
+                unused Cli.WriteAll(2, problem);
+                unused Cli.WriteAll(2, "\n");
+            } else {
+                found := Search(*re, *flags, handle, filename);
+                if found { matched = true }
+                unused Io.Close(handle);
+            }
+        }
+    }
+    if !matched { unused Args.SetFailure("no matches"); return 1 }
+    return 0;
+}

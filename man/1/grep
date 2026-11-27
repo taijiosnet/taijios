@@ -42,7 +42,7 @@ Pattern matching is case insensitive (roman letters only).
 .B -s
 Do not print anything; yield only the exit status.
 .SH SOURCE
-.B /appl/cmd/grep.b
+.B /appl/cmd/grep.zi
 .SH SEE ALSO
 .IR regex (2)
 .SH DIAGNOSTICS

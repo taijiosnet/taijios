@@ -490,7 +490,7 @@ appl
 		getfile.b
 		gettar.b
 		gif2bit.b
-		grep.b
+		grep.zi
 		gunzip.b
 		gzip.b
 		idea.b
@@ -1493,7 +1493,7 @@ zx
 	ftpfs.dis
 	getauthinfo.dis
 	gettar.dis
-	grep.dis
+	grep.zx
 	grid
 		*
 		demo

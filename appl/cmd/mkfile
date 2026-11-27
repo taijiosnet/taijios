@@ -54,7 +54,6 @@ TARG=\
 	getauthinfo.dis\
 	gettar.dis\
 	# gif2bit.dis\
-	grep.dis\
 	gunzip.dis\
 	gzip.dis\
 	idea.dis\
@@ -199,6 +198,7 @@ ZXCOMMANDS=$ZXCOMMANDS fortune
 ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
+ZXCOMMANDS=$ZXCOMMANDS grep
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -210,6 +210,9 @@ COFFEEFRAMES=0 1 2 3 4 5
 COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
+
+grep.zx: grep.zi zx_arg.zi zx_bufio.zi zx_runes.zi sh/shell_regexp.zi $UTILZX mkfile
+	ziran bundle --root . --module-path sh --bind-host taijios_args --bind-host taijios_io --entry grep:main -o $target grep.zi
 
 tail.zx: tail.zi zx_int.zi zx_bufio.zi zx_runes.zi taijios_stat.zi taijios_clock.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --entry tail:main -o $target tail.zi
@@ -520,6 +523,7 @@ $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
 $DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
+$DISBIN/grep.zx: grep.zx mkfile
 $DISBIN/tail.zx: tail.zx mkfile
 $DISBIN/cal.zx: cal.zx mkfile
 $DISBIN/du.zx: du.zx mkfile
