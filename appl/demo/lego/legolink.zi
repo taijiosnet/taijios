@@ -1,0 +1,12 @@
+// Lego RCX infrared link demo server over /net/legolink (replaces appl/demo/lego/legolink.b).
+Args :: #import "taijios_args";
+IO :: #import "taijios_io";
+Service :: #import "legolink_service";
+
+main :: () -> s32 {
+    if Args.OperandCount() != 1 {
+        unused IO.Write(1, "usage: legolink portnum\n");
+        return 0;
+    }
+    return Service.Run(Args.Operand(0));
+}

@@ -15,11 +15,11 @@ DISBIN=$ROOT/zx/lego
 <$ROOT/mkfiles/mkdis
 
 ZXCOMMANDS=firmdl send link clockface
-ZXUTIL=lego_proto.zi rcx_serial.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi ../taijios_namespace.zi ../taijios_file2chan.zi ../taijios_clock.zi
+ZXUTIL=lego_proto.zi rcx_serial.zi legolink_service.zi ../zx_cli.zi ../taijios_args.zi ../taijios_io.zi ../taijios_namespace.zi ../taijios_file2chan.zi ../taijios_clock.zi
 
 install:V: ${ZXCOMMANDS:%=$DISBIN/%.zx}
 
-link.zx: link.zi $ZXUTIL
+link.zx: link.zi legolink_service.zi $ZXUTIL
 	zi2zx --root . --module-path .. --module-path ../../lib --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_clock --entry link:main -o $target link.zi
 
 clockface.zx: clockface.zi $ZXUTIL

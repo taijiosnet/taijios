@@ -1,41 +1,34 @@
 <../../../mkconfig
 
-TARG=\
-		firmdl.dis\
-		legolink.dis\
-		rcxsend.dis\
-		timers.dis\
-		styx.srec\
+all:V:	firmdl.zx legolink.zx clockface.zx
 
 SHTARG=\
 		clockreg.sh\
 
-MODULES=\
-	rcxsend.m\
-
-SYSMODULES= \
-	bufio.m\
-	draw.m\
-	sys.m\
-	timers.m\
-
 DISBIN=$ROOT/zx/demo/lego
 
-<$ROOT/mkfiles/mkdis
+LEGO_CMD=../../cmd/lego
+ZXUTIL=$LEGO_CMD/lego_proto.zi $LEGO_CMD/rcx_serial.zi $LEGO_CMD/legolink_service.zi ../../cmd/zx_cli.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi ../../cmd/taijios_file2chan.zi ../../cmd/taijios_clock.zi
+
+firmdl.zx: $LEGO_CMD/firmdl.zi $ZXUTIL mkfile
+	zi2zx --root . --module-path ../../cmd --module-path ../../cmd/lego --bind-host taijios_args --bind-host taijios_io --entry firmdl:main -o $target $LEGO_CMD/firmdl.zi
+
+legolink.zx: legolink.zi $ZXUTIL mkfile
+	zi2zx --root . --module-path ../../cmd --module-path ../../cmd/lego --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --bind-host taijios_clock --entry legolink:main -o $target legolink.zi
+
+clockface.zx: clockface.zi clockface_model.zi $ZXUTIL mkfile
+	zi2zx --root . --module-path ../../cmd --module-path ../../cmd/lego --bind-host taijios_args --bind-host taijios_io --entry clockface:main -o $target clockface.zi
 
 $DISBIN/%.srec:	%.srec
 	rm -f $target && cp $stem.srec $target
 
-clockface.zx: clockface.zi clockface_model.zi ../../cmd/taijios_args.zi ../../cmd/taijios_io.zi ../../cmd/taijios_namespace.zi ../../cmd/taijios_file2chan.zi mkfile
-	ziran bundle --project --root . --module-path . --module-path ../../cmd --bind-host taijios_args --bind-host taijios_io --bind-host taijios_namespace --entry clockface:main -o $target clockface.zi
-
-$DISBIN/clockface.zx: clockface.zx
+$DISBIN/%.zx:	%.zx
 	staged=$(mktemp "$target.XXXXXX") &&
 	trap 'rm -f "$staged"' EXIT &&
-	install -m 0755 clockface.zx "$staged" && mv "$staged" "$target"
+	install -m 0755 "$stem.zx" "$staged" && mv "$staged" "$target"
 
 SHFILES=${SHTARG:%.sh=$DISBIN/%}
-install:V:	$SHFILES $DISBIN/clockface.zx $DISBIN/firmdl.dis $DISBIN/legolink.dis $DISBIN/rcxsend.dis $DISBIN/timers.dis
+install:V:	$SHFILES $DISBIN/clockface.zx $DISBIN/firmdl.zx $DISBIN/legolink.zx $DISBIN/styx.srec
 %.install:V:	$DISBIN/%
 %.installall:V:	$DISBIN/%
 

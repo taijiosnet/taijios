@@ -1,0 +1,110 @@
+// Guest live parity test for the zx/demo/lego bundles (firmdl, legolink, clockface).
+//
+// Run from TaijiOS root:
+//   ziran run --target=c --root tests/lego tests/lego/demo_test.zi -- [EMU]
+#import "std/byte_text_linux"
+#import "std/file"
+#import "std/file_linux"
+#import "std/file_tree_linux"
+#import "std/process_run_linux"
+#import "std/vec"
+
+WORK :: "build/dis-legacy-math/legodemo";
+
+failures: s32;
+
+Expect :: (ok: bool, what: string) {
+    if !ok {
+        failures += 1;
+        print("FAIL: %\n", what);
+    }
+}
+
+Contains :: (s: string, needle: string) -> bool {
+    if needle.count == 0 { return true }
+    if s.count < needle.count { return false }
+    for i: 0..s.count - needle.count {
+        if s[i:i + needle.count] == needle { return true }
+    }
+    return false;
+}
+
+Result :: (name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/result/%", WORK, name);
+    text, ok := ReadEntireFile(BuilderFinish(path));
+    return ifx ok then text else "<missing>";
+}
+
+main :: (argc: s32, argv: **u8) -> s32 {
+    emu := ifx argc > 1 then TextFromCString(argv[1]) else "emu/Linux/o.emu";
+
+    unused RemoveTree(WORK);
+    unused CreateDirectory("build");
+    unused CreateDirectory("build/dis-legacy-math");
+    if !CreateDirectory(WORK) || !CreateDirectory("build/dis-legacy-math/legodemo/work") ||
+        !CreateDirectory("build/dis-legacy-math/legodemo/work/motor") ||
+        !CreateDirectory("build/dis-legacy-math/legodemo/work/sensor") ||
+        !CreateDirectory("build/dis-legacy-math/legodemo/result") {
+        print("FAIL: cannot prepare %\n", WORK);
+        return 1;
+    }
+
+    // Mock lego motor & sensor files for clockface (no light sensor -> skips lightwait loop)
+    unused WriteEntireFile("build/dis-legacy-math/legodemo/work/motor/0", "");
+    unused WriteEntireFile("build/dis-legacy-math/legodemo/work/motor/2", "");
+    unused WriteEntireFile("build/dis-legacy-math/legodemo/work/motor/012", "");
+    unused WriteEntireFile("build/dis-legacy-math/legodemo/work/sensor/0", "0   ");
+    unused WriteEntireFile("build/dis-legacy-math/legodemo/work/sensor/2", "0   ");
+
+    script: Vec(u8);
+    BuilderPrint(*script, "cd /%/work\n", WORK);
+    // 1. firmdl usage and missing firmware file
+    BuilderPrint(*script, "/zx/demo/lego/firmdl.zx > ../result/f_usage.out >[2] ../result/f_usage.err\n");
+    BuilderPrint(*script, "/zx/demo/lego/firmdl.zx 0 missing.srec > ../result/f_missing.out >[2] ../result/f_missing.err\n");
+    // 2. legolink usage and missing serial port
+    BuilderPrint(*script, "/zx/demo/lego/legolink.zx > ../result/l_usage.out >[2] ../result/l_usage.err\n");
+    BuilderPrint(*script, "/zx/demo/lego/legolink.zx 99 > ../result/l_nop.out >[2] ../result/l_nop.err\n");
+    // 3. clockface usage and live /chan/clockface flow
+    BuilderPrint(*script, "/zx/demo/lego/clockface.zx > ../result/cf_usage.out >[2] ../result/cf_usage.err\n");
+    BuilderPrint(*script, "echo $status > ../result/cf_usage.st\n");
+    BuilderPrint(*script, "bind '#s' /chan\n");
+    BuilderPrint(*script, "/zx/demo/lego/clockface.zx /%/work > ../result/cf.out >[2] ../result/cf.err &\n", WORK);
+    BuilderPrint(*script, "cfpid=$apid\n");
+    BuilderPrint(*script, "sleep 1\n");
+    BuilderPrint(*script, "read < /chan/clockface > ../result/cf_t0.out >[2] ../result/cf_t0.err\n");
+    BuilderPrint(*script, "echo -n 3:15 > /chan/clockface >[2] ../result/cf_set.err\n");
+    BuilderPrint(*script, "read < /chan/clockface > ../result/cf_t1.out >[2] ../result/cf_t1.err\n");
+    BuilderPrint(*script, "echo -n badcmd > /chan/clockface >[2] ../result/cf_bad.err\n");
+    BuilderPrint(*script, "unmount /chan\n");
+    BuilderPrint(*script, "for p in /prog/* { if {~ `{cat $p/status >[2]/dev/null} *Clockface* *clockface*} { echo killgrp > $p/ctl >[2]/dev/null } }\n");
+    unused WriteEntireFile("build/dis-legacy-math/legodemo/script", BuilderFinish(script));
+
+    root: Text = WorkingDirectory();
+    guest: Vec(u8);
+    BuilderPrint(*guest, "/%/script", WORK);
+    command: [7]string = .["timeout", "8", emu, "-r", TextView(root), "/zx/sh.dis", BuilderFinish(guest)];
+    run: ProcessRun;
+    if !RunProcess(.{arguments = command[:], capture_output = true, new_session = true}, *run) {
+        print("FAIL: cannot start %\n", emu);
+        return 1;
+    }
+
+    Expect(Result("f_usage.out") == "usage: portnum file\n", "firmdl usage");
+    Expect(Contains(Result("f_missing.out"), "cannot open missing.srec"), "firmdl missing firmware file");
+    Expect(Result("l_usage.out") == "usage: legolink portnum\n", "legolink usage");
+    Expect(Contains(Result("l_nop.out"), "cannot read"), "legolink missing serial port");
+    Expect(Result("cf_usage.out") == "usage: lego_dir\n", "clockface usage");
+    Expect(Result("cf_usage.st") != "\n", "clockface usage status");
+    Expect(Result("cf_t0.out") == "12:00\n", "clockface initial time 12:00");
+    Expect(Result("cf_set.err") == "", "clockface set 3:15 no error");
+    Expect(Result("cf_t1.out") == " 3:15\n", "clockface updated time  3:15");
+    Expect(Contains(Result("cf_bad.err"), "syntax is hh:mm or `reset'"), "clockface bad syntax error");
+
+    if failures != 0 {
+        print("demo_test: % failures\n", failures);
+        return 1;
+    }
+    print("demo_test: all checks passed\n");
+    return 0;
+}

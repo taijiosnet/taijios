@@ -1,4 +1,6 @@
 Unreleased
+	port demo lego firmdl and legolink to modular Ziran/ZX with the shared legolink service
+	build demo lego clockface with zi2zx; the project bundler rejects the generated touch module name
 	port itreplay to modular Ziran/ZX; fix report months and range diagnostics, skip malformed messages
 	port plumb to native Ziran/ZX with the documented stdin default action
 	preserve complete native guest writes beyond the 8 KiB read scratch buffer

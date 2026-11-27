@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-The section tables track **403** open migration rows in the canonical checkout,
+The section tables track **399** open migration rows in the canonical checkout,
 including Acme helpers outside `zx/`. Generated build caches, recovery copies
 and stale untracked outputs of completed ports are excluded from this count.
 
@@ -76,11 +76,11 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 | 8 | [8. Alphabet - gridded documents family - 6 rows](dis-to-zx/08-alphabet.md) | Alphabet (`cmd-taijios-zx-alphabet-port`) | 6 |
 | 9 | [9. Spree - multiuser engine family - 0 rows](dis-to-zx/09-spree.md) | Spree (`agy-taijios-dis-app-families`) | 0 |
 | 10 | [10. Grid - computing grid family - 5 rows](dis-to-zx/10-grid.md) | Grid (`agy-taijios-dis-app-families`) | 5 |
-| 11 | [11. Demo - demonstration apps - 6 rows](dis-to-zx/11-demo.md) | Demo (`agy-taijios-dis-app-families`) | 6 |
+| 11 | [11. Demo - demonstration apps - 2 rows](dis-to-zx/11-demo.md) | Demo (`agy-taijios-dis-app-families`) | 2 |
 | 12 | [12. Ebook - readers - 0 rows](dis-to-zx/12-ebook.md) | Ebook (`agy-taijios-dis-app-families`) | 0 |
 | 13 | [13. Math - numeric modules - 0 rows](dis-to-zx/13-math.md) | Math (`agy-taijios-dis-legacy-math`) | 0 |
 | 14 | [14. Legacy misc - installer, disk, fs, avr, lego, mpc, mpeg, palm, dbm and orphans - 2 rows](dis-to-zx/14-legacy-misc.md) | Legacy misc (`agy-taijios-dis-legacy-math`) | 2 |
 | 15 | [15. Acme helper binaries outside zx/ - 2 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside zx/ (acme lane) | 2 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **403**.
+Total open table rows across sections 1–16: **399**.

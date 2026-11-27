@@ -810,14 +810,11 @@ appl
 			regpoll.b
 			runrstyx.sh
 		lego
+			clockface.zi
+			clockface_model.zi
 			clockreg.sh
-			legolink.b
-			clock.b
-			clockface.b
-			link.b
+			legolink.zi
 			mkfile
-			timers.b
-			timers.m
 			styx.srec
 		mkfile
 		ns
