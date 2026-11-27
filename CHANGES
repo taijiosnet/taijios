@@ -1,4 +1,5 @@
 Unreleased
+	port fortune to a native Ziran/ZX command
 	port fmt to native Ziran/ZX with streaming UTF-8 input
 	avoid fmt indentation overflow at the minimum signed integer
 	port kill to a native Ziran/ZX command for Dis and native task IDs

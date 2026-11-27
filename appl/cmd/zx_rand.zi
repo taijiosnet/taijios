@@ -1,0 +1,12 @@
+// The Inferno Rand generator, with explicit per-caller state (see NOTICE).
+Generator :: struct { salt: u64; }
+
+Seed :: (generator: *Generator, seed: s32) { generator.salt = cast(u64)cast(s64)seed }
+
+// Like Rand.bigrand: use 0 < modulus < 2^53. Nonpositive moduli return zero
+// after advancing the generator, as Rand.rand and Rand.bigrand do.
+Next :: (generator: *Generator, modulus: s64) -> s64 {
+    generator.salt = generator.salt * 1103515245 + 12345;
+    if modulus <= 0 { return 0 }
+    return cast(s64)((generator.salt & 0x7fffffffffffffff) >> 10) % modulus;
+}

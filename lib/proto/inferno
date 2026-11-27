@@ -447,7 +447,7 @@ appl
 		fcp.b
 		fmt.zi
 		fone.b
-		fortune.b
+		fortune.zi
 		freq.zi
 		freq_table.zi
 		fs.b
@@ -753,6 +753,7 @@ appl
 		zx_cli.zi
 		zx_bufio.zi
 		zx_int.zi
+		zx_rand.zi
 		zx_lines.zi
 		zx_runes.zi
 	collab
@@ -1482,7 +1483,7 @@ zx
 	fcp.dis
 	fmt.zx
 	fone.dis
-	fortune.dis
+	fortune.zx
 	freq.zx
 	fs.dis
 	fs
