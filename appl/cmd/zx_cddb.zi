@@ -1,0 +1,110 @@
+// CDDB query formatting and title parsing, ported from cddb.b (see NOTICE).
+Int :: #import "zx_int";
+#import "std/vec"
+#import "std/format"
+
+Track :: struct { offset: s32; title: Vec(u8); }
+Toc :: struct { disk: u32; title: Vec(u8); tracks: Vec(Track); }
+
+Space :: (byte: u8) -> bool {
+    return byte == 32 || byte == 9 || byte == 10 || byte == 13; }
+Digit :: (byte: u8) -> bool {
+    return byte >= 48 && byte <= 57; }
+
+Word :: (text: string, at: *s64) -> string {
+    while at.* < text.count && Space(text[at.*]) { at.* += 1 }
+    start := at.*;
+    while at.* < text.count && !Space(text[at.*]) { at.* += 1 }
+    return text[start:at.*];
+}
+
+Hex :: (text: string) -> u32 {
+    at: s64;
+    while at < text.count && (text[at] == 32 || text[at] == 9 || text[at] == 10) { at += 1 }
+    negative: bool;
+    if at < text.count && (text[at] == 43 || text[at] == 45) { negative = text[at] == 45; at += 1 }
+    value: u32;
+    while at < text.count {
+        byte := text[at];
+        digit: u32 = 16;
+        if Digit(byte) { digit = cast(u32)byte-48 }
+        else if byte >= 97 && byte <= 102 { digit = cast(u32)byte-87 }
+        else if byte >= 65 && byte <= 70 { digit = cast(u32)byte-55 }
+        if digit == 16 { break }
+        value = value*16+digit;
+        at += 1;
+    }
+    return ifx negative then 0-value else value;
+}
+
+Address :: (output: *Vec(u8), server: string) {
+    words: s32;
+    inside: bool;
+    for byte: server {
+        if byte == #char "!" { inside = false }
+        else if !inside { words += 1; inside = true }
+    }
+    if words <= 1 { BuilderAppend(output.*, "tcp!") }
+    BuilderAppend(output.*, server);
+    if words <= 2 { BuilderAppend(output.*, "!888") }
+}
+
+Query :: (output: *Vec(u8), toc: *Toc) {
+    BuilderAppend(output.*, "cddb query ");
+    digits := "0123456789abcdef";
+    for at: 0..7 { VecPush(output.*, digits[(toc.disk>>cast(u32)(28-4*at))&15]) }
+    BuilderPrint(output, " %", toc.tracks.count-1);
+    for index: 0..toc.tracks.count-1 { BuilderPrint(output, " %", toc.tracks[index].offset) }
+    BuilderAppend(output.*, "\r\n");
+}
+
+Title :: (toc: *Toc, line: string) {
+    if line.count >= 7 && line[:7] == "DTITLE=" { BuilderAppend(toc.title, line[7:]); return }
+    if line.count < 7 || line[:6] != "TTITLE" || !Digit(line[6]) { return }
+    index := Int.Decimal(line[6:]);
+    if index < 0 || index >= toc.tracks.count-1 { return }
+    at: s64 = 6;
+    while at < line.count && Digit(line[at]) { at += 1 }
+    if at < line.count && line[at] == #char "=" { at += 1 }
+    BuilderAppend(toc.tracks[index].title, line[at:]);
+}
+
+Time :: (output: *Vec(u8), seconds: s32) {
+    BuilderPrint(output, "%:", seconds/60);
+    remainder := seconds%60;
+    if remainder < 0 { VecPush(output.*, #char "-"); remainder = -remainder }
+    if remainder < 10 { VecPush(output.*, #char "0") }
+    BuilderPrint(output, "%", remainder);
+}
+
+Init :: (toc: *Toc, disk: string, count: s32) {
+    toc.disk = Hex(disk);
+    VecResize(toc.tracks, cast(s64)count+1);
+}
+
+SetOffset :: (toc: *Toc, index: s32, value: s32) {
+    toc.tracks[index].offset = value;
+}
+
+// Sys printf's string fields stop at a NUL, independently of line framing.
+Printed :: (text: string) -> string {
+    for at: 0..text.count-1 { if text[at] == 0 { return text[:at] } }
+    return text;
+}
+
+Format :: (output: *Vec(u8), toc: *Toc, times: bool, total: bool) {
+    tracks := toc.tracks.count-1;
+    BuilderPrint(output, "title\t%\n", Printed(TextView(toc.title[:])));
+    for index: 0..tracks-1 {
+        track := *toc.tracks[index];
+        BuilderPrint(output, "%\t%", index+1, Printed(TextView(track.title[:])));
+        if times {
+            next := cast(u32)toc.tracks[index+1].offset;
+            if index == tracks-1 { next *= 75 }
+            seconds := cast(s32)(next-cast(u32)toc.tracks[index].offset)/75;
+            VecPush(output.*, #char "\t"); Time(output, seconds);
+        }
+        VecPush(output.*, #char "\n");
+    }
+    if total { BuilderAppend(output.*, "Total time: "); Time(output, toc.tracks[tracks].offset); VecPush(output.*, #char "\n") }
+}

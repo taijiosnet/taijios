@@ -415,7 +415,7 @@ appl
 		cal.zi
 		calc.b
 		cd.zi
-		cddb.b
+		cddb.zi
 		chgrp.b
 		chmod.b
 		cmp.zi
@@ -755,6 +755,7 @@ appl
 		zx_bufio.zi
 		zx_byte_escape.zi
 		zx_calendar.zi
+		zx_cddb.zi
 		zx_dd_convert.zi
 		zx_dump.zi
 		zx_idea.zi
@@ -1450,7 +1451,7 @@ zx
 	calc.dis
 	cat.zx
 	cd.zx
-	cddb.dis
+	cddb.zx
 	charon
 		+
 	charon.dis

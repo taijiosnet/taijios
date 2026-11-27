@@ -1,0 +1,118 @@
+// CDDB protocol client, ported from cddb.b (Lucent Public License; see NOTICE).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Io :: #import "taijios_io";
+Dial :: #import "taijios_dial";
+Cli :: #import "zx_cli";
+Bufio :: #import "zx_bufio";
+Int :: #import "zx_int";
+Cddb :: #import "zx_cddb";
+#import "std/vec"
+#import "std/format"
+
+Usage :: "usage: cddb [-DTt] [-s server] query diskid n ...\n";
+
+ReadLine :: (reader: *Bufio.Reader, line: *Vec(u8)) -> bool {
+    if !Bufio.ReadLine(reader, line) { return false }
+    while line.count > 0 && Cddb.Space(line.*[line.count-1]) { line.count -= 1 }
+    return line.count > 0;
+}
+
+Debug :: (enabled: bool, prefix: string, line: string) {
+    if enabled { unused Cli.WriteAll(2, prefix); unused Cli.WriteAll(2, Cddb.Printed(line)); unused Cli.WriteAll(2, "\n") }
+}
+
+Died :: (line: string) -> bool {
+    unused Cli.WriteAll(2, "cddb: error talking to server\n");
+    if line.count > 0 { unused Cli.WriteAll(2, "cddb: server says: "); unused Cli.WriteAll(2, Cddb.Printed(line)); unused Cli.WriteAll(2, "\n") }
+    return false;
+}
+
+Fill :: (toc: *Cddb.Toc, handle: s32, debug: bool) -> bool {
+    reader: Bufio.Reader; reader.handle = handle;
+    line: Vec(u8);
+    if !ReadLine(*reader, *line) || Int.Decimal(TextView(line[:]))/100 != 2 { return Died(TextView(line[:])) }
+    if !Cli.WriteAll(handle, "cddb hello gre plan9 9cd 1.0\r\n") { return Died("") }
+    if !ReadLine(*reader, *line) || Int.Decimal(TextView(line[:]))/100 != 2 { return Died(TextView(line[:])) }
+    if !Cli.WriteAll(handle, "proto 6\r\n") { return Died("") }
+    if !ReadLine(*reader, *line) || Int.Decimal(TextView(line[:]))/100 != 2 { return Died(TextView(line[:])) }
+    Debug(debug, "", TextView(line[:]));
+    query: Vec(u8); Cddb.Query(*query, toc);
+    if !Cli.WriteAll(handle, TextView(query[:])) { return Died("") }
+    if debug { unused Cli.WriteAll(2, TextView(query[:query.count-2])); unused Cli.WriteAll(2, "\r\n") }
+    if !ReadLine(*reader, *line) || Int.Decimal(TextView(line[:]))/100 != 2 { return Died(TextView(line[:])) }
+    Debug(debug, "cddb: ", TextView(line[:]));
+    code := Int.Decimal(TextView(line[:]));
+    category: Vec(u8);
+    id: Vec(u8);
+    if code == 200 {
+        at: s64;
+        unused Cddb.Word(TextView(line[:]), *at);
+        BuilderAppend(category, Cddb.Word(TextView(line[:]), *at));
+        BuilderAppend(id, Cddb.Word(TextView(line[:]), *at));
+        if category.count == 0 || id.count == 0 { return Died(TextView(line[:])) }
+    } else if code == 210 || code == 211 {
+        if !ReadLine(*reader, *line) || line[0] == #char "." { return Died("") }
+        at: s64;
+        BuilderAppend(category, Cddb.Word(TextView(line[:]), *at));
+        BuilderAppend(id, Cddb.Word(TextView(line[:]), *at));
+        if category.count == 0 || id.count == 0 { return Died(TextView(line[:])) }
+        while line[0] != #char "." {
+            if !ReadLine(*reader, *line) { return Died("") }
+            Debug(debug, "cddb: ", TextView(line[:]));
+        }
+    } else { return Died(TextView(line[:])) }
+    request: Vec(u8);
+    BuilderPrint(*request, "cddb read % %\r\n", TextView(category[:]), TextView(id[:]));
+    if !Cli.WriteAll(handle, TextView(request[:])) { return Died("") }
+    while true {
+        if !ReadLine(*reader, *line) { return Died("") }
+        Debug(debug, "cddb ", TextView(line[:]));
+        Cddb.Title(toc, TextView(line[:]));
+        if line[0] == #char "." { break }
+    }
+    unused Cli.WriteAll(handle, "quit\r\n");
+    return true;
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan;
+    server := "freedb.freedb.org";
+    debug: bool;
+    times: bool;
+    total: bool;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "D" { debug = true }
+        else if option == #char "T" { times = true; total = true }
+        else if option == #char "t" { times = true }
+        else if option == #char "s" { value, valid := Arg.Value(*scan); if !valid { return Cli.Usage(Usage) } server = value }
+        else { return Cli.Usage(Usage) }
+    }
+    if Args.OperandCount()-scan.next < 3 || Args.Operand(scan.next) != "query" { return Cli.Usage(Usage) }
+    tracks := Int.Decimal(Args.Operand(scan.next+2));
+    if tracks < 0 || cast(s64)Args.OperandCount()-scan.next != 4+cast(s64)tracks {
+        unused Cli.WriteAll(2, "cddb: argument count does not match given ntrack");
+        unused Args.SetFailure("error");
+        return 1;
+    }
+    toc: Cddb.Toc;
+    Cddb.Init(*toc, Args.Operand(scan.next+1), tracks);
+    for index: 0..tracks { Cddb.SetOffset(*toc, cast(s32)index, Int.Decimal(Args.Operand(scan.next+3+cast(s32)index))) }
+    address: Vec(u8); Cddb.Address(*address, server);
+    handles: [2]s32;
+    directory: [Dial.DirectoryBytes]u8;
+    if Dial.Dial(TextView(address[:]), "", handles[:], directory[:]) < 0 {
+        message: Vec(u8); BuilderPrint(*message, "cddb: cannot dial %: %\n", server, Io.Error()); unused Cli.WriteAll(2, TextView(message[:]));
+        unused Args.SetFailure("whoops");
+        return 1;
+    }
+    defer { unused Io.Close(handles[0]); unused Io.Close(handles[1]) }
+    if !Fill(*toc, handles[0], debug) { unused Args.SetFailure("whoops"); return 1 }
+    output: Vec(u8);
+    Cddb.Format(*output, *toc, times, total);
+    unused Cli.WriteAll(1, TextView(output[:]));
+    return 0;
+}

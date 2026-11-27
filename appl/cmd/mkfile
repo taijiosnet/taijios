@@ -30,7 +30,6 @@ TARG=\
 	archfs.dis\
 	# bit2gif.dis\
 	calc.dis\
-	cddb.dis\
 	cook.dis\
 	cprof.dis\
 	cpu.dis\
@@ -187,7 +186,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
-ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns idea gettar B dd
+ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns idea gettar B dd cddb
 ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -212,6 +211,9 @@ raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 
 wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
+
+cddb.zx: cddb.zi zx_cddb.zi zx_arg.zi zx_bufio.zi zx_int.zi zx_runes.zi taijios_dial.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_dial --entry cddb:main -o $target cddb.zi
 
 dd.zx: dd.zi zx_dd_convert.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry dd:main -o $target dd.zi
