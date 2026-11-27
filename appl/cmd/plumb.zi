@@ -1,0 +1,75 @@
+// Send one plumbing message, ported from plumb.b (see NOTICE).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Plumb :: #import "zx_plumbmsg";
+#import "std/vec"
+
+Usage :: "usage: plumb [-s src] [-d dest] [-w wdir] [-t type] [-a name val] -i | ... data ...\n";
+
+Error :: (prefix: string) -> s32 {
+    unused Cli.WriteAll(2, "plumb: ");
+    unused Cli.WriteAll(2, prefix);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, Io.Error());
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+#program_export
+main :: () -> s32 {
+    channel := Io.Open("/chan/plumb.input", 1);
+    if channel < 0 { return Error("can't connect to plumb") }
+    defer { unused Io.Close(channel) }
+    message: Plumb.Message;
+    message.source = "plumb";
+    message.directory = Io.Cwd();
+    message.kind = "text";
+    scan: Arg.Scan;
+    attributes: Vec(u8);
+    input: bool;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "i" { input = true; continue }
+        if option == #char "a" {
+            name, name_valid := Arg.Value(*scan);
+            value, value_valid := Arg.Value(*scan);
+            if !name_valid || !value_valid { return Cli.Usage(Usage) }
+            Plumb.Attribute(*attributes, name, value);
+            continue;
+        }
+        if option != #char "s" && option != #char "d" && option != #char "w" && option != #char "D" && option != #char "t" && option != #char "k" { return Cli.Usage(Usage) }
+        value, valid := Arg.Value(*scan);
+        if !valid && option != #char "t" && option != #char "k" { return Cli.Usage(Usage) }
+        if option == #char "s" { message.source = value }
+        else if option == #char "d" { message.destination = value }
+        else if option == #char "w" || option == #char "D" { message.directory = value }
+        else { message.kind = value }
+    }
+    if (input && scan.next < Args.OperandCount()) || (!input && scan.next == Args.OperandCount()) { return Cli.Usage(Usage) }
+    data: Vec(u8);
+    if input {
+        buffer: [8192]u8;
+        while true {
+            count := Io.Read(0, buffer[:]);
+            if count < 0 { return Error("error reading input") }
+            if count == 0 { break }
+            BuilderAppend(data, TextView(buffer[:count]));
+        }
+        if !Plumb.HasAttribute(TextView(attributes[:]), "action") { Plumb.Attribute(*attributes, "action", "showdata") }
+    } else {
+        for index: scan.next..Args.OperandCount()-1 {
+            if index > scan.next { VecPush(data, #char " ") }
+            BuilderAppend(data, Args.Operand(cast(s32)index));
+        }
+    }
+    message.attributes = TextView(attributes[:]);
+    message.data = TextView(data[:]);
+    packet: Vec(u8);
+    Plumb.Pack(*packet, message);
+    if Io.Write(channel, TextView(packet[:])) < 0 { return Error(ifx input then "can't send message" else "can't plumb message") }
+    return 0;
+}

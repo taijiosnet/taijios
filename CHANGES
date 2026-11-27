@@ -1,4 +1,6 @@
 Unreleased
+	port plumb to native Ziran/ZX with the documented stdin default action
+	preserve complete native guest writes beyond the 8 KiB read scratch buffer
 	port cddb to modular Ziran/ZX; handle empty and dot-prefixed titles and preserve full server errors
 	port dd to modular Ziran/ZX; fix product-size and invalid-conversion hangs and incomplete byte swaps
 	port B to native Ziran/ZX; diagnose an empty command-device id reliably

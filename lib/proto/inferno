@@ -658,7 +658,7 @@ appl
 			mkfile
 			palmsrv.b
 		pause.b
-		plumb.b
+		plumb.zi
 		plumber.b
 		prof.b
 		promptstring.b
@@ -762,6 +762,7 @@ appl
 		zx_int.zi
 		zx_look.zi
 		zx_ns.zi
+		zx_plumbmsg.zi
 		zx_iaf.zi
 		zx_rand.zi
 		zx_lines.zi
@@ -1698,7 +1699,7 @@ zx
 	palm
 		+
 	pause.dis
-	plumb.dis
+	plumb.zx
 	plumber.dis
 	prof.dis
 	ps.dis

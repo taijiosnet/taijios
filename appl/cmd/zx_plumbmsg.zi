@@ -1,0 +1,30 @@
+// Plumbing wire messages and attributes, ported from plumbmsg.b (see NOTICE).
+#import "std/vec"
+#import "std/format"
+
+Message :: struct { source: string; destination: string; directory: string; kind: string; attributes: string; data: string; }
+
+Attribute :: (output: *Vec(u8), name: string, value: string) {
+    if output.count > 0 { VecPush(output.*, #char "\t") }
+    BuilderAppend(output.*, name);
+    VecPush(output.*, #char "=");
+    BuilderAppend(output.*, value);
+}
+
+HasAttribute :: (attributes: string, name: string) -> bool {
+    at: s64;
+    while at < attributes.count {
+        start := at;
+        while at < attributes.count && attributes[at] != #char "\t" && attributes[at] != #char "=" { at += 1 }
+        if at < attributes.count && attributes[at] == #char "=" && attributes[start:at] == name { return true }
+        while at < attributes.count && attributes[at] != #char "\t" { at += 1 }
+        at += 1;
+    }
+    return false;
+}
+
+// One pack must be sent in one write: the plumber's channel is message framed.
+Pack :: (output: *Vec(u8), message: Message) {
+    BuilderPrint(output, "%\n%\n%\n%\n%\n%\n", message.source, message.destination, message.directory, message.kind, message.attributes, message.data.count);
+    BuilderAppend(output.*, message.data);
+}

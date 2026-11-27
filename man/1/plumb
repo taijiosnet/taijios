@@ -35,7 +35,8 @@ The options are:
 .BI -s " src"
 Set the source to
 .I src
-(default: unspecified).
+(default:
+.BR plumb ).
 .TP
 .BI -d " dest"
 Set the destination to
@@ -85,7 +86,7 @@ will apply its rules to the resulting message to decide how to route it.
 .IR plumber (8)
 input channel
 .SH SOURCE
-.B /appl/cmd/plumb.b
+.B /appl/cmd/plumb.zi
 .SH SEE ALSO
 .IR plumbmsg (2),
 .IR plumbing (6),

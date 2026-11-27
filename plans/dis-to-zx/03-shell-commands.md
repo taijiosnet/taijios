@@ -1,4 +1,4 @@
-# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 84 rows
+# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 83 rows
 
 Owner: Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`)
 
@@ -48,7 +48,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/netkey.dis | appl/cmd/netkey.b |  | - |  |
 | zx/nsbuild.dis | appl/cmd/nsbuild.b |  | - |  |
 | zx/os.dis | appl/cmd/os.b |  | - |  |
-| zx/plumb.dis | appl/cmd/plumb.b |  | - |  |
 | zx/prof.dis | appl/cmd/prof.b |  | - |  |
 | zx/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
 | zx/rdp.dis | appl/cmd/rdp.b |  | - |  |

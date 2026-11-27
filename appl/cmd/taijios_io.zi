@@ -19,6 +19,7 @@ Read :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
 // nothing has arrived yet, or -1. It works on pipes, network connections and
 // the standard streams. Read on the same handle afterwards continues in order.
 PollRead :: (handle: s32, buffer: []u8) -> s32 #foreign host_api;
+// Submit the whole byte string in one guest write; return the device's count.
 Write :: (handle: s32, data: string) -> s32 #foreign host_api;
 Seek :: (handle: s32, offset: s64, origin: s32) -> s64 #foreign host_api;
 Stat :: (path: string, metadata: []u8) -> s32 #foreign host_api;

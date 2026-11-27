@@ -2173,8 +2173,13 @@ zxio(void *context, const char *module, const char *function,
 		for(i = 0; !polled && i < count; i++)
 			buffer->elements[i].bits = bytes[i];
 	}else{
-		if(buffer->kind != HOST_STRING || (length != 0 && buffer->data == nil))
+		if(buffer->kind != HOST_STRING || (buffer->length != 0 && buffer->data == nil))
 			return 0;
+		/* Message devices need one complete write, including payloads larger
+		 * than the read scratch buffer. Preserve the device's partial result. */
+		if(buffer->length > 0x7fffffffUL)
+			return zxioerror(command, result, "write request too large");
+		length = buffer->length;
 		count = kwrite(fd, length == 0 ? (void *)"" : (void *)buffer->data, length);
 		/* A write that lands is progress, as a read that returns data is. */
 		if(count > 0)
