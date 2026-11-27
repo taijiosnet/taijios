@@ -66,7 +66,6 @@ TARG=\
 	iostats.dis\
 	itest.dis\
 	itreplay.dis\
-	kill.dis\
 	listen.dis\
 	lockfs.dis\
 	logfile.dis\
@@ -199,6 +198,7 @@ ZXCOMMANDS=$ZXCOMMANDS cd
 ZXCOMMANDS=$ZXCOMMANDS bind
 ZXCOMMANDS=$ZXCOMMANDS ftest
 ZXCOMMANDS=$ZXCOMMANDS lstar
+ZXCOMMANDS=$ZXCOMMANDS kill
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -210,6 +210,9 @@ COFFEEFRAMES=0 1 2 3 4 5
 COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
+
+kill.zx: kill.zi zx_arg.zi taijios_stat.zi taijios_tasks.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_tasks --entry kill:main -o $target kill.zi
 
 lstar.zx: lstar.zi lstar_header.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry lstar:main -o $target lstar.zi
@@ -502,6 +505,7 @@ $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
 $DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
+$DISBIN/kill.zx: kill.zx mkfile
 $DISBIN/lstar.zx: lstar.zx mkfile
 $DISBIN/ftest.zx: ftest.zx mkfile
 $DISBIN/bind.zx: bind.zx mkfile

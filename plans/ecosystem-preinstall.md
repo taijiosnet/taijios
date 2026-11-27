@@ -32,7 +32,7 @@ Guest capability set granted by TaijiOS today (`emu/port/zx.c:3319-3489`, module
 | `taijios_files` | ReadAt | always |
 | `taijios_draw` | SampleGuestPointer | window |
 | `taijios_image` | Begin, Step, End, Cancel | always |
-| `taijios_tasks` | Capture, TaskAt, PoolAt, Terminate, SampleNanos | hosted or Dis-free |
+| `taijios_tasks` | Capture, TaskAt, PoolAt, Terminate, SampleNanos, Native | hosted or Dis-free |
 | `taijios_clock`, `clock` | MonotonicMillis, UnixMillis / ClockMillisecondsHost | always |
 | `taijios_args` | Count, At, SetFailure | always |
 | `taijios_process` | Run, Start, Poll, Wait, Kill, StartWith, Pid, NewPgrp | Linux only (`#ifdef __linux__`, 3377-3426) |

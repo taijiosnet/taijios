@@ -51,7 +51,7 @@ GRANTED = {
     'taijios_files': {'ReadAt'},
     'taijios_draw': {'SampleGuestPointer'},
     'taijios_image': {'Begin', 'Step', 'End', 'Cancel'},
-    'taijios_tasks': {'Capture', 'TaskAt', 'PoolAt', 'Terminate', 'SampleNanos'},
+    'taijios_tasks': {'Capture', 'TaskAt', 'PoolAt', 'Terminate', 'SampleNanos', 'Native'},
     'taijios_clock': {'MonotonicMillis', 'UnixMillis', 'Yield'},
     'clock': {'ClockMillisecondsHost'},
     'taijios_args': {'Count', 'At', 'SetFailure'},

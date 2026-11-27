@@ -64,7 +64,7 @@ releasing back to the system any resources owned by those processes.
 .TP
 .BI /prog/ pid /status
 .SH SOURCE
-.B /appl/cmd/kill.b
+.B /appl/cmd/kill.zi
 .br
 .B /zx/broke
 .SH "SEE ALSO"

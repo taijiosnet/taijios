@@ -558,7 +558,7 @@ appl
 		irtest.zi
 		itest.b
 		itreplay.b
-		kill.b
+		kill.zi
 		lego
 			clock.b
 			clockface.b
@@ -1507,7 +1507,7 @@ zx
 		+
 	itest.dis
 	itreplay.dis
-	kill.dis
+	kill.zx
 	lc
 	lego
 		+

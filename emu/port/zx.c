@@ -1524,6 +1524,7 @@ zxprocessstart(ZxCommand *command, const HostValue *args, ZxResult *result, int 
 	lock(&zxprocesslock);
 	process->pid = ++zxprocesspid;
 	process->command.pid = process->pid;
+	process->command.group = command->group;
 	unlock(&zxprocesslock);
 	kproc("ZX command", zxprocessworker, process, KPDUPPG|KPDUPENVG);
 	poperror();
@@ -3207,6 +3208,12 @@ zxtasks(void *context, const char *module, const char *function,
 	int index, i;
 
 	USED(module);
+	if(strcmp(function, "Native") == 0){
+		if(n != 0)
+			return 0;
+		zxbool(result, !command->hosted);
+		return 1;
+	}
 	if(strcmp(function, "Capture") == 0)
 		return n == 0 && zxs32(result, zxtaskcapture(command));
 	if(strcmp(function, "SampleNanos") == 0){
@@ -3406,7 +3413,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 		if((command->hosted || !usesdis()) && zxmodule(abi.module, "taijios_tasks")){
 			if(strcmp(abi.function, "Capture") == 0 || strcmp(abi.function, "TaskAt") == 0 ||
 			   strcmp(abi.function, "PoolAt") == 0 || strcmp(abi.function, "Terminate") == 0 ||
-		   strcmp(abi.function, "SampleNanos") == 0)
+		   strcmp(abi.function, "SampleNanos") == 0 || strcmp(abi.function, "Native") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxtasks, command};
 			continue;
 		}
