@@ -1,0 +1,140 @@
+// Namespace-aware disk usage, ported from Inferno du.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Fs :: #import "taijios_stat";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Numbers :: #import "zx_int";
+Files :: #import "fsproto_files";
+Quote :: #import "taijios_quote";
+#import "std/vec"
+#import "std/number_text"
+
+State :: struct {
+    all: bool;
+    names: bool;
+    summary: bool;
+    time: bool;
+    accessed: bool;
+    block: s64;
+    seen: Vec(Fs.Identity);
+}
+
+Number :: (out: *Vec(u8), number: s64, width: s32 = 0) {
+    digits: [24]u8;
+    text := FormatInteger(number, digits[:]);
+    BuilderAppend(out.*, text);
+    for pad: text.count+1..width { VecPush(out.*, 32) }
+}
+
+Warn :: (why: string, name: string) {
+    problem := Io.Error();
+    line: Vec(u8);
+    BuilderAppend(line, "du: ");
+    BuilderAppend(line, why);
+    VecPush(line, 32);
+    Quote.Quote(*line, name);
+    BuilderAppend(line, ": ");
+    BuilderAppend(line, problem);
+    VecPush(line, 10);
+    unused Cli.WriteAll(2, TextView(line[:]));
+}
+
+Report :: (state: *State, name: string, modified: s32, accessed: s32, length: s64) {
+    stamp := ifx state.accessed then accessed else modified;
+    line: Vec(u8);
+    if state.names {
+        Quote.Quote(*line, name);
+        if state.time {
+            VecPush(line, 32);
+            Number(*line, cast(s64)cast(u32)stamp);
+            VecPush(line, 32);
+            Number(*line, length);
+            BuilderAppend(line, " 0");
+        }
+    } else {
+        if state.time { Number(*line, cast(s64)cast(u32)stamp) }
+        else {
+            rounded := cast(s64)(cast(u64)length + cast(u64)state.block - 1) / state.block;
+            kb := cast(s64)(cast(u64)rounded * cast(u64)state.block) / 1024;
+            Number(*line, kb, 4);
+        }
+        VecPush(line, 32);
+        Quote.Quote(*line, name);
+    }
+    VecPush(line, 10);
+    unused Cli.WriteAll(1, TextView(line[:]));
+}
+
+Seen :: (state: *State, identity: Fs.Identity) -> bool {
+    for index: 0..state.seen.count-1 {
+        previous := state.seen[index];
+        if previous.dev == identity.dev && previous.qid == identity.qid { return true }
+    }
+    VecPush(state.seen, identity);
+    return false;
+}
+
+Directory :: (state: *State, name: string) -> s64 {
+    entries: Files.DirList;
+    if !Files.ReadDirSorted(name, *entries, false) { Warn("can't read", name); return 0 }
+    total: u64;
+    for index: 0..entries.entries.count-1 {
+        entry: Files.DirEntry;
+        Files.GetEntry(*entries, index, *entry);
+        path: Vec(u8);
+        if name != "." { BuilderAppend(path, name); VecPush(path, 47) }
+        BuilderAppend(path, TextView(entry.name));
+        if (entry.mode & Fs.Directory) != 0 {
+            if !Seen(state, entry.identity) {
+                size := Directory(state, TextView(path[:]));
+                total += cast(u64)size;
+                if !state.summary && !state.names { Report(state, TextView(path[:]), entry.mtime, entry.accessed, size) }
+            }
+        } else {
+            total += cast(u64)entry.length;
+            if state.all { Report(state, TextView(path[:]), entry.mtime, entry.accessed, entry.length) }
+        }
+    }
+    return cast(s64)total;
+}
+
+Du :: (state: *State, name: string) {
+    buffer: [Fs.BufferSize]u8;
+    info := Fs.PathInfo(name, buffer[:]);
+    if info.size <= 0 { Warn("can't stat", name); return }
+    length := info.length;
+    if (info.mode & Fs.Directory) != 0 {
+        length = Directory(state, name);
+        if state.names && !state.summary { return }
+    }
+    Report(state, name, info.modified, info.accessed, length);
+}
+
+Usage :: () -> s32 { return Cli.Usage("usage: du [-anstu] [-b bsize] [file ...]\n") }
+
+#program_export
+main :: () -> s32 {
+    state: State;
+    state.block = 1024;
+    scan: Options.Scan;
+    while true {
+        option := Options.Option(*scan);
+        if option == 0 { break }
+        if option == 97 { state.all = true }
+        else if option == 110 { state.names = true; state.all = true }
+        else if option == 115 { state.summary = true }
+        else if option == 116 { state.time = true }
+        else if option == 117 { state.accessed = true; state.time = true }
+        else if option == 98 {
+            text, ok := Options.Value(*scan);
+            if !ok { return Usage() }
+            state.block = Numbers.BigDecimal(text);
+            if text.count > 0 && text[text.count-1] == 107 { state.block = cast(s64)(cast(u64)state.block * 1024) }
+            if state.block <= 0 { state.block = 1 }
+        } else { return Usage() }
+    }
+    if scan.next == Args.OperandCount() { Du(*state, ".") }
+    else { for index: scan.next..Args.OperandCount()-1 { Du(*state, Args.Operand(cast(s32)index)) } }
+    return 0;
+}

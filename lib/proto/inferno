@@ -438,7 +438,7 @@ appl
 			prep
 				mkfile
 		dossrv.b
-		du.b
+		du.zi
 		ed.b
 		emuinit.b
 		env.b
@@ -1471,7 +1471,7 @@ zx
 	disk
 		+
 	dossrv.dis
-	du.dis
+	du.zx
 	ebook
 		*
 	echo.zx

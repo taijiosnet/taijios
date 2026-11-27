@@ -90,7 +90,8 @@ GetEntry :: (dl: *DirList, i: s64, out: *DirEntry) {
     CopyDirEntry(out, *dl.entries[i]);
 }
 
-ReadDirSorted :: (path: string, out: *DirList) -> bool {
+// Keep duplicate names when reading an uncompacted union directory.
+ReadDirSorted :: (path: string, out: *DirList, compact: bool = true) -> bool {
     VecClear(out.entries);
     fd := IO.Open(path, 0);
     if fd < 0 { return false }
@@ -134,7 +135,7 @@ ReadDirSorted :: (path: string, out: *DirList) -> bool {
     }
 
     // Compact duplicate names (matching Readdir->COMPACT)
-    if cnt > 1 {
+    if compact && cnt > 1 {
         w: s64 = 1;
         for i: 1..cnt - 1 {
             if TextView(out.entries[i].name) != TextView(out.entries[w - 1].name) {

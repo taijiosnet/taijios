@@ -15,3 +15,18 @@ Decimal :: (text: string) -> s32 {
     }
     return cast(s32)(ifx negative then -value else value);
 }
+
+// Limbo's big conversion accepts the same decimal prefix and wraps in 64 bits.
+BigDecimal :: (text: string) -> s64 {
+    at: s64;
+    while at < text.count && (text[at] == 32 || (text[at] >= 9 && text[at] <= 13)) { at += 1 }
+    negative: bool;
+    if at < text.count && (text[at] == 43 || text[at] == 45) { negative = text[at] == 45; at += 1 }
+    value: u64;
+    while at < text.count && text[at] >= 48 && text[at] <= 57 {
+        value = value * 10 + cast(u64)(text[at] - 48);
+        at += 1;
+    }
+    if negative { value = 0 - value }
+    return cast(s64)value;
+}

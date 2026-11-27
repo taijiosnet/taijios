@@ -60,7 +60,7 @@ The checksum field is always 0; it is a place-holder for a value computed by ano
 .B \-u
 Display the last-accessed time for each file, not its size.
 .SH SOURCE
-.B /appl/cmd/du.b
+.B /appl/cmd/du.zi
 .SH SEE ALSO
 .IR sh (1),
 .IR sys-stat (2)

@@ -47,7 +47,6 @@ TARG=\
 	disdep.dis\
 	disdump.dis\
 	dossrv.dis\
-	du.dis\
 	ed.dis\
 	emuinit.dis\
 	fc.dis\
@@ -199,6 +198,7 @@ ZXCOMMANDS=$ZXCOMMANDS lstar
 ZXCOMMANDS=$ZXCOMMANDS kill
 ZXCOMMANDS=$ZXCOMMANDS fmt
 ZXCOMMANDS=$ZXCOMMANDS fortune
+ZXCOMMANDS=$ZXCOMMANDS du
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -210,6 +210,9 @@ COFFEEFRAMES=0 1 2 3 4 5
 COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
+
+du.zx: du.zi zx_arg.zi zx_int.zi taijios_stat.zi $ZXLIB/fsproto_files.zi $ZXLIB/taijios_quote.zi $UTILZX mkfile
+	ziran bundle --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --entry du:main -o $target du.zi
 
 fortune.zx: fortune.zi zx_bufio.zi zx_runes.zi zx_rand.zi taijios_stat.zi taijios_keyring.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_keyring --entry fortune:main -o $target fortune.zi
@@ -511,6 +514,7 @@ $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
 $DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
+$DISBIN/du.zx: du.zx mkfile
 $DISBIN/fortune.zx: fortune.zx mkfile
 $DISBIN/fmt.zx: fmt.zx mkfile
 $DISBIN/kill.zx: kill.zx mkfile
