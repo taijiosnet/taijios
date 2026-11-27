@@ -445,7 +445,7 @@ appl
 		export.zi
 		fc.b
 		fcp.b
-		fmt.b
+		fmt.zi
 		fone.b
 		fortune.b
 		freq.zi
@@ -751,6 +751,8 @@ appl
 		taijios_stat.zi
 		zx_arg.zi
 		zx_cli.zi
+		zx_bufio.zi
+		zx_int.zi
 		zx_lines.zi
 		zx_runes.zi
 	collab
@@ -1478,7 +1480,7 @@ zx
 	export.zx
 	fc.dis
 	fcp.dis
-	fmt.dis
+	fmt.zx
 	fone.dis
 	fortune.dis
 	freq.zx

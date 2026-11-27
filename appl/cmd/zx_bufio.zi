@@ -1,0 +1,53 @@
+// UTF-8 line reading with Inferno Bufio.gets chunk conversion and EOF rules.
+Io :: #import "taijios_io";
+Runes :: #import "zx_runes";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+Reader :: struct {
+    handle: s32;
+    buffer: [8200]u8;
+    next: s32;
+    end: s32;
+    offset: s64;
+    done: bool;
+}
+
+// Limbo's byte-array to string conversion stops at an incomplete final rune.
+// Keep that conversion separate from byte2char's lookahead for the delimiter.
+AppendText :: (line: *Vec(u8), bytes: string) {
+    at: s32;
+    while at < bytes.count {
+        if bytes.count - at < Runes.Width(bytes[at]) { break }
+        rune := UTF.Decode(bytes, at);
+        if rune.valid { BuilderAppend(line.*, bytes[at:rune.after]) }
+        else { BuilderAppend(line.*, "�") }
+        at = rune.after;
+    }
+}
+
+ReadLine :: (reader: *Reader, line: *Vec(u8)) -> bool {
+    VecClear(line.*);
+    if reader.done { return false }
+    while true {
+        start := reader.next;
+        newline: bool;
+        while reader.next < reader.end {
+            if reader.end - reader.next < Runes.Width(reader.buffer[reader.next]) { break }
+            rune := UTF.Decode(TextView(reader.buffer[:reader.end]), reader.next);
+            reader.offset += rune.after - reader.next;
+            reader.next = rune.after;
+            if rune.value == 10 { newline = true; break }
+        }
+        AppendText(line, TextView(reader.buffer[start:reader.next]));
+        if newline { return line.count > 0 }
+        remaining := reader.end - reader.next;
+        for index: 0..remaining-1 { reader.buffer[index] = reader.buffer[reader.next+index] }
+        count := Io.Read(reader.handle, reader.buffer[remaining:remaining+8192]);
+        reader.next = 0;
+        reader.end = remaining;
+        if count <= 0 { reader.done = true; return line.count > 0 }
+        reader.end += count;
+    }
+    return false;
+}

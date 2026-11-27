@@ -1,0 +1,139 @@
+// Streaming paragraph formatter, ported from Inferno fmt.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Numbers :: #import "zx_int";
+Bufio :: #import "zx_bufio";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+Formatter :: struct {
+    extra: s32;
+    length: s32;
+    join: bool;
+    active: bool;
+    indent: s32;
+    column: s32;
+    spaces: s32;
+    output: Vec(u8);
+}
+
+Flush :: (state: *Formatter) {
+    unused Cli.WriteAll(1, TextView(state.output[:]));
+    VecClear(state.output);
+}
+
+Append :: (state: *Formatter, text: string) {
+    BuilderAppend(state.output, text);
+    if state.output.count >= 8192 { Flush(state) }
+}
+
+EndLine :: (state: *Formatter) {
+    if state.active { Append(state, "\n"); state.active = false }
+}
+
+Word :: (state: *Formatter, word: string, indent: s32, beginning: bool) {
+    length := UTF.Count(word);
+    if state.active && (indent != state.indent || (!state.join && beginning) ||
+        cast(s32)(cast(s64)state.column + state.spaces + length) > cast(s32)(cast(s64)state.extra + state.length)) {
+        EndLine(state);
+    }
+    if !state.active {
+        state.column = cast(s32)(cast(s64)state.extra + indent);
+        remaining := state.column;
+        while remaining >= 8 { Append(state, "\t"); remaining -= 8 }
+        while remaining > 0 { Append(state, " "); remaining -= 1 }
+        state.indent = indent;
+        state.active = true;
+    } else {
+        for space: 1..state.spaces { Append(state, " ") }
+        state.column = cast(s32)(cast(s64)state.column + state.spaces);
+    }
+    Append(state, word);
+    state.column = cast(s32)(cast(s64)state.column + length);
+    state.spaces = 1;
+    if length >= 2 && !(length < 4 && word[0] >= 65 && word[0] <= 90) {
+        last := word[word.count-1];
+        if last == 46 || last == 33 || last == 63 { state.spaces = 2 }
+    }
+}
+
+Line :: (state: *Formatter, line: string) {
+    at: s64;
+    indent: s32;
+    while at < line.count && (line[at] == 32 || line[at] == 9) {
+        if line[at] == 9 { indent += 8; indent -= indent % 8 }
+        else { indent += 1 }
+        at += 1;
+    }
+    if at == line.count { EndLine(state); Append(state, "\n"); return }
+    beginning := true;
+    while at < line.count {
+        start := at;
+        while at < line.count && line[at] != 32 && line[at] != 9 { at += 1 }
+        Word(state, line[start:at], indent, beginning);
+        beginning = false;
+        while at < line.count && (line[at] == 32 || line[at] == 9) { at += 1 }
+    }
+}
+
+Format :: (state: *Formatter, fd: s32) {
+    reader: Bufio.Reader;
+    reader.handle = fd;
+    line: Vec(u8);
+    while Bufio.ReadLine(*reader, *line) {
+        count := line.count;
+        if count > 0 && line[count-1] == 10 { count -= 1 }
+        Line(state, TextView(line[:count]));
+    }
+    EndLine(state);
+}
+
+Usage :: () -> s32 { return Cli.Usage("usage: fmt [-j] [-i indent] [-l length] [file...]\n") }
+
+#program_export
+main :: () -> s32 {
+    state: Formatter;
+    state.length = 70;
+    state.join = true;
+    scan: Options.Scan;
+    while true {
+        option := Options.Option(*scan);
+        if option == 0 { break }
+        if option == 106 { state.join = false; continue }
+        if option != 105 && option != 108 && option != 119 { return Usage() }
+        value, ok := Options.Value(*scan);
+        if !ok { return Usage() }
+        if option == 105 { state.extra = Numbers.Decimal(value) }
+        else { state.length = Numbers.Decimal(value) }
+    }
+    if state.length <= state.extra {
+        unused Cli.WriteAll(2, "fmt: line length<=indentation\n");
+        unused Args.SetFailure("length");
+        return 1;
+    }
+    failed: bool;
+    if scan.next == Args.OperandCount() { Format(*state, 0) }
+    else {
+        for index: scan.next..Args.OperandCount()-1 {
+            path := Args.Operand(cast(s32)index);
+            fd := Io.Open(path, 0);
+            if fd < 0 {
+                unused Cli.WriteAll(2, "fmt: can't open ");
+                unused Cli.WriteAll(2, path);
+                unused Cli.WriteAll(2, ": ");
+                unused Cli.WriteAll(2, Io.Error());
+                unused Cli.WriteAll(2, "\n");
+                failed = true;
+            } else {
+                Format(*state, fd);
+                unused Io.Close(fd);
+                if index + 1 < Args.OperandCount() { Append(*state, "\n") }
+            }
+        }
+    }
+    Flush(*state);
+    if failed { unused Args.SetFailure("open"); return 1 }
+    return 0;
+}

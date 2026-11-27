@@ -1,4 +1,6 @@
 Unreleased
+	port fmt to native Ziran/ZX with streaming UTF-8 input
+	avoid fmt indentation overflow at the minimum signed integer
 	port kill to a native Ziran/ZX command for Dis and native task IDs
 	inherit native ZX process groups when starting children
 	port lstar to a native Ziran/ZX command

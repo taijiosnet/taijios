@@ -1,0 +1,17 @@
+// Limbo's decimal int conversion: skip ASCII whitespace, accept a sign and
+// digit prefix, and saturate at the signed 32-bit bounds.
+Decimal :: (text: string) -> s32 {
+    at: s64;
+    while at < text.count && (text[at] == 32 || (text[at] >= 9 && text[at] <= 13)) { at += 1 }
+    negative: bool;
+    if at < text.count && (text[at] == 43 || text[at] == 45) { negative = text[at] == 45; at += 1 }
+    limit: s64 = ifx negative then 2147483648 else 2147483647;
+    value: s64;
+    while at < text.count && text[at] >= 48 && text[at] <= 57 {
+        digit := cast(s64)(text[at] - 48);
+        if value > (limit - digit) / 10 { value = limit; break }
+        value = value * 10 + digit;
+        at += 1;
+    }
+    return cast(s32)(ifx negative then -value else value);
+}

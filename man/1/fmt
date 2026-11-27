@@ -44,4 +44,4 @@ Empty lines are inserted between input files.
 .I Fmt
 is idempotent: it leaves already formatted text unchanged.
 .SH SOURCE
-.B /appl/cmd/fmt.b
+.B /appl/cmd/fmt.zi
