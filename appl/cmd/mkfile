@@ -98,7 +98,6 @@ TARG=\
 	styxchat.dis\
 	styxmon.dis\
 	styxlisten.dis\
-	tail.dis\
 	tarfs.dis\
 	tcs.dis\
 	telnet.dis\
@@ -199,6 +198,7 @@ ZXCOMMANDS=$ZXCOMMANDS fmt
 ZXCOMMANDS=$ZXCOMMANDS fortune
 ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
+ZXCOMMANDS=$ZXCOMMANDS tail
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -210,6 +210,9 @@ COFFEEFRAMES=0 1 2 3 4 5
 COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
+
+tail.zx: tail.zi zx_int.zi zx_bufio.zi zx_runes.zi taijios_stat.zi taijios_clock.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_clock --entry tail:main -o $target tail.zi
 
 cal.zx: cal.zi zx_calendar.zi zx_daytime.zi taijios_files.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry cal:main -o $target cal.zi
@@ -517,6 +520,7 @@ $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
 $DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
+$DISBIN/tail.zx: tail.zx mkfile
 $DISBIN/cal.zx: cal.zx mkfile
 $DISBIN/du.zx: du.zx mkfile
 $DISBIN/fortune.zx: fortune.zx mkfile

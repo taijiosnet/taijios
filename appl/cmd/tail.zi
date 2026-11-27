@@ -1,0 +1,287 @@
+// Seekable and streaming tails, ported from Inferno tail.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Fs :: #import "taijios_stat";
+Cli :: #import "zx_cli";
+Numbers :: #import "zx_int";
+Bufio :: #import "zx_bufio";
+Clock :: #import "taijios_clock";
+#import "std/vec"
+
+Block :: 8192;
+Usage :: "usage: tail [-n N] [-c N] [-f] [-r] [+-N[bc][fr]] [file]\n";
+State :: struct {
+    count: s32;
+    any: bool;
+    follow: bool;
+    beginning: bool;
+    chars: bool;
+    reverse: bool;
+    failed: bool;
+    file: s32;
+}
+
+Fail :: (state: *State, text: string) {
+    state.failed = true;
+    unused Cli.WriteAll(2, "tail: ");
+    unused Cli.WriteAll(2, text);
+    unused Cli.WriteAll(2, "\n");
+}
+
+Fatal :: (state: *State, name: string) {
+    problem := Io.Error();
+    state.failed = true;
+    unused Cli.WriteAll(2, "tail: ");
+    unused Cli.WriteAll(2, name);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, problem);
+    unused Cli.WriteAll(2, "\n");
+}
+
+BadUsage :: (state: *State) { state.failed = true; unused Cli.WriteAll(2, Usage) }
+
+Number :: (state: *State, text: string) -> bool {
+    at: s64;
+    if text.count == 0 { return false }
+    if text[0] == 45 || text[0] == 43 { at = 1 }
+    if at >= text.count || text[at] < 48 || text[at] > 57 { return false }
+    if text[0] == 43 { state.beginning = true }
+    if state.any { Fail(state, "excess option"); return true }
+    state.any = true;
+    if text[0] == 45 { state.count = cast(s32)Numbers.BigDecimal(text[1:]) }
+    else { state.count = cast(s32)Numbers.BigDecimal(text) }
+    if state.count < 0 { Fail(state, "too big") }
+    return true;
+}
+
+Suffix :: (state: *State, text: string) {
+    at: s64;
+    while at < text.count && ((text[at] >= 48 && text[at] <= 57) || text[at] == 43 || text[at] == 45) { at += 1 }
+    if at == text.count { return }
+    if text[at] == 98 {
+        state.count = cast(s32)(cast(s64)state.count * 1024);
+        if state.count < 0 { Fail(state, "too big"); return }
+    }
+    if text[at] == 99 || text[at] == 98 { state.chars = true }
+    if text[at] == 108 || text[at] == 99 || text[at] == 98 { at += 1 }
+    if at < text.count {
+        if text[at] == 114 { state.reverse = true; return }
+        if text[at] == 102 { state.follow = true; return }
+    }
+    at += 1;
+    if at < text.count { BadUsage(state) }
+}
+
+Parse :: (state: *State) -> s32 {
+    at: s32;
+    while at < Args.OperandCount() && !state.failed {
+        text := Args.Operand(at);
+        if Number(state, text) { if !state.failed { Suffix(state, text) } }
+        else if text.count > 1 && text[0] == 45 {
+            flag := text[1];
+            if flag == 99 || flag == 110 {
+                if flag == 99 { state.chars = true }
+                if text.count > 2 && Number(state, text[2:]) { }
+                else if at+1 < Args.OperandCount() && Number(state, Args.Operand(at+1)) { at += 1 }
+                else { BadUsage(state) }
+            } else if flag == 114 { state.reverse = true }
+            else if flag == 102 { state.follow = true }
+            else if flag == 45 {
+                // Stop at -- instead of skipping the following operand and
+                // potentially dereferencing a nil argument list.
+                return at+1;
+            }
+        } else { break }
+        at += 1;
+    }
+    return at;
+}
+
+Seek :: (state: *State, offset: s64, origin: s32) -> s64 {
+    result := Io.Seek(state.file, offset, origin);
+    if result < 0 { Fatal(state, "") }
+    return result;
+}
+
+Read :: (state: *State, buffer: []u8) -> s32 {
+    result := Io.Read(state.file, buffer);
+    if result < 0 { Fatal(state, ""); return 0 }
+    return result;
+}
+
+Write :: (state: *State, bytes: string) {
+    if state.failed { return }
+    text: Vec(u8);
+    Bufio.AppendText(*text, bytes);
+    if !Cli.WriteAll(1, TextView(text[:])) { Fatal(state, "") }
+}
+
+Copy :: (state: *State) {
+    buffer: [Block]u8;
+    while !state.failed {
+        count := Read(state, buffer[:]);
+        if count <= 0 { break }
+        Write(state, TextView(buffer[:count]));
+    }
+}
+
+Skip :: (state: *State) {
+    buffer: [Block]u8;
+    if state.chars {
+        while state.count > 0 && !state.failed {
+            length := state.count;
+            if length > Block { length = Block }
+            count := Read(state, buffer[:length]);
+            if count <= 0 { return }
+            state.count -= count;
+        }
+    } else {
+        count: s32;
+        at: s32;
+        while state.count > 0 && !state.failed {
+            count = Read(state, buffer[:]);
+            if count <= 0 { return }
+            at = 0;
+            while at < count && state.count > 0 {
+                if buffer[at] == 10 { state.count -= 1 }
+                at += 1;
+            }
+        }
+        Write(state, TextView(buffer[at:count]));
+    }
+    Copy(state);
+}
+
+Keep :: (state: *State) {
+    buffer: Vec(u8);
+    capacity: s64;
+    length: s64;
+    reading := true;
+    while reading && !state.failed {
+        if length + Block > capacity { capacity += 2*Block; VecResize(buffer, capacity+1) }
+        while reading && length < capacity {
+            count := Read(state, buffer[length:capacity]);
+            reading = count > 0;
+            length += count;
+        }
+        if state.count >= length { continue }
+        start: s64;
+        if state.chars { start = length-state.count }
+        else {
+            start = length;
+            if length > 0 && buffer[length-1] == 10 { start -= 1 }
+            lines: s32;
+            while start > 0 {
+                if buffer[start-1] == 10 { lines += 1; if lines >= state.count { break } }
+                start -= 1;
+            }
+        }
+        length -= start;
+        for at: 0..length-1 { buffer[at] = buffer[start+at] }
+    }
+    if state.failed { return }
+    if state.reverse {
+        if length > 0 && buffer[length-1] != 10 { buffer[length] = 10; length += 1 }
+        at := length-1;
+        while at > 0 {
+            if buffer[at-1] == 10 {
+                Write(state, TextView(buffer[at:length]));
+                state.count -= 1;
+                if state.count <= 0 { return }
+                length = at;
+            }
+            at -= 1;
+        }
+    }
+    if state.count > 0 && length > 0 { Write(state, TextView(buffer[:length])) }
+}
+
+Reverse :: (state: *State) {
+    position := Seek(state, 0, 2);
+    buffer: Vec(u8);
+    length: s64;
+    scanned: s64;
+    first := true;
+    while position > 0 && state.count > 0 && !state.failed {
+        count := ifx position > Block then Block else position;
+        position -= count;
+        VecResize(buffer, length+count+1);
+        at := length;
+        while at > 0 { at -= 1; buffer[count+at] = buffer[at] }
+        length += count;
+        unused Seek(state, position, 0);
+        if state.failed { return }
+        if Read(state, buffer[:count]) != count { if !state.failed { Fatal(state, "length error") }; return }
+        if first && buffer[length-1] != 10 { buffer[length] = 10; length += 1 }
+        first = false;
+        scanned = length-1;
+        while scanned > 0 && state.count > 0 {
+            if buffer[scanned-1] == 10 {
+                state.count -= 1;
+                if state.reverse { Write(state, TextView(buffer[scanned:length])) }
+                length = scanned;
+            }
+            scanned -= 1;
+        }
+    }
+    if state.failed { return }
+    if !state.reverse {
+        unused Seek(state, ifx scanned == 0 then 0 else position+scanned+1, 0);
+        if !state.failed { Copy(state) }
+    } else if state.count > 0 { Write(state, TextView(buffer[:length])) }
+}
+
+Wait :: () {
+    deadline := Clock.Millis()+5000;
+    timer: [32]u8;
+    while Clock.Millis() < deadline {
+        handle := Io.Open("/dev/msec", 0);
+        if handle < 0 { return }
+        unused Io.Read(handle, timer[:]);
+        unused Io.Close(handle);
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    state: State;
+    operand := Parse(*state);
+    if state.failed { return 0 }
+    if state.reverse && (state.chars || state.follow || state.beginning) { Fail(*state, "incompatible options"); return 0 }
+    if !state.any { state.count = ifx state.reverse then 2147483647 else 10 }
+    if state.beginning && !state.chars && state.count > 0 { state.count -= 1 }
+    remaining := Args.OperandCount()-operand;
+    if remaining > 1 { BadUsage(*state); return 0 }
+    seekable: bool;
+    if remaining == 1 && Args.Operand(operand) != "-" {
+        filename := Args.Operand(operand);
+        state.file = Io.Open(filename, 0);
+        if state.file < 0 { Fatal(*state, filename); return 0 }
+        metadata: [Fs.BufferSize]u8;
+        info := Fs.DescriptorInfo(state.file, metadata[:]);
+        seekable = Io.Seek(state.file, 0, 0) == 0 && info.length > 0;
+    }
+    defer { if state.file != 0 { unused Io.Close(state.file) } }
+    if !seekable {
+        if state.beginning { Skip(*state) } else { Keep(*state) }
+    } else if state.chars {
+        unused Seek(*state, ifx state.beginning then cast(s64)state.count else -cast(s64)state.count, ifx state.beginning then 0 else 2);
+        if !state.failed { Copy(*state) }
+    } else if state.beginning { Skip(*state) }
+    else { Reverse(*state) }
+    if state.follow && !state.failed {
+        previous: s64 = -1;
+        while !state.failed {
+            if seekable {
+                metadata: [Fs.BufferSize]u8;
+                info := Fs.DescriptorInfo(state.file, metadata[:]);
+                if info.size <= 0 { Fatal(*state, ""); break }
+                current := info.length;
+                if current < previous { current = Seek(*state, 0, 0) }
+                previous = current;
+            }
+            if !state.failed { Copy(*state); Wait() }
+        }
+    }
+    return 0;
+}

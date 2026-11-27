@@ -710,7 +710,7 @@ appl
 		styxlisten.b
 		styxmon.b
 		sum.b
-		tail.b
+		tail.zi
 		tarfs.b
 		tcs.b
 		telnet.b
@@ -1728,7 +1728,7 @@ zx
 	sum.dis
 	svc
 		+
-	tail.dis
+	tail.zx
 	tarfs.dis
 	tclsh.zx
 	tcs.dis
