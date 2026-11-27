@@ -1,0 +1,75 @@
+// Calendar command, ported from Inferno cal.b (see NOTICE).
+Args :: #import "taijios_args";
+Cli :: #import "zx_cli";
+Daytime :: #import "zx_daytime";
+Calendar :: #import "zx_calendar";
+#import "std/vec"
+
+Number :: (text: string) -> (value: s32, ok: bool) {
+    for month: 0..11 {
+        name := Calendar.Months[month];
+        // Dictionary names are lower case; numeric arguments accept digits only.
+        lower: Vec(u8);
+        for at: 0..name.count-1 {
+            byte := name[at];
+            if byte >= 65 && byte <= 90 { byte += 32 }
+            VecPush(lower, byte);
+        }
+        word := TextView(lower[:]);
+        if text == word || text == word[:3] || (month == 8 && text == "sept") { return cast(s32)(-month-1), true }
+    }
+    value: u32;
+    for at: 0..text.count-1 {
+        byte := text[at];
+        if byte < 48 || byte > 57 { return 0, false }
+        value = value * 10 + cast(u32)(byte-48);
+    }
+    return cast(s32)value, true;
+}
+
+Bad :: () -> s32 {
+    unused Cli.WriteAll(2, "cal: bad argument\n");
+    unused Args.SetFailure("bad argument");
+    return 1;
+}
+
+Current :: () -> Daytime.Tm {
+    zone := Daytime.ReadZone();
+    return Daytime.Local(*zone, Daytime.Now());
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count > 2 { return Cli.Usage("usage: cal [month] [year]\n") }
+    month: s32;
+    year: s32;
+    whole: bool;
+    if count == 0 {
+        now := Current();
+        month = cast(s32)(now.mon+1);
+        year = cast(s32)(now.year+1900);
+    } else {
+        value, ok := Number(Args.Operand(0));
+        if !ok { return Bad() }
+        if value < 0 { value = cast(s32)(-cast(s64)value) }
+        if count == 1 {
+            if value >= 1 && value <= 12 {
+                month = value;
+                now := Current();
+                year = cast(s32)(now.year+1900);
+            } else { year = value; whole = true }
+        } else {
+            month = value;
+            parsed, valid := Number(Args.Operand(1));
+            if !valid { return Bad() }
+            year = parsed;
+        }
+    }
+    if year < 1 || year > 9999 || (!whole && (month < 1 || month > 12)) { return Bad() }
+    output: Vec(u8);
+    if whole { Calendar.Long(year, *output) }
+    else { Calendar.Short(month, year, *output) }
+    unused Cli.WriteAll(1, TextView(output[:]));
+    return 0;
+}

@@ -1,0 +1,76 @@
+// The historical calendar printed by Inferno cal.b (see NOTICE).
+// Preserve the September 1752 changeover and the original pre-1801 rules.
+#import "std/vec"
+#import "std/number_text"
+
+Week :: " S  M Tu  W Th  F  S";
+Months: [12]string = .{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+Month :: struct { lines: [6]Text; }
+
+January :: (year: s64) -> s64 {
+    day := 4 + year + (year + 3) / 4;
+    if year > 1800 { day -= (year - 1701) / 100; day += (year - 1601) / 400 }
+    if year > 1752 { day += 3 }
+    return day % 7;
+}
+
+Render :: (month: s64, year: s64, out: *Month) {
+    days: [13]s64 = .{0,31,29,31,30,31,30,31,31,30,31,30,31};
+    weekday := January(year);
+    change := (January(year + 1) + 7 - weekday) % 7;
+    if change == 1 { days[2] = 28 }
+    else if change != 2 { days[9] = 19 }
+    for at: 1..month-1 { weekday += days[at] }
+    weekday %= 7;
+    for at: 0..5 { VecClear(out.lines[at].bytes) }
+    line: s64;
+    for pad: 1..weekday { BuilderAppend(out.lines[0].bytes, "   ") }
+    day: s64 = 1;
+    while day <= days[month] {
+        if day == 3 && days[month] == 19 { day += 11; days[month] += 11 }
+        digits: [24]u8;
+        number := FormatInteger(day, digits[:]);
+        if number.count < 2 { VecPush(out.lines[line].bytes, 32) }
+        BuilderAppend(out.lines[line].bytes, number);
+        weekday += 1;
+        if weekday == 7 { weekday = 0; line += 1 }
+        else { VecPush(out.lines[line].bytes, 32) }
+        day += 1;
+    }
+    if line < 6 {
+        while out.lines[line].bytes.count > 0 && out.lines[line].bytes[out.lines[line].bytes.count-1] == 32 {
+            VecResize(out.lines[line].bytes, out.lines[line].bytes.count-1);
+        }
+    }
+}
+
+Short :: (month: s64, year: s64, out: *Vec(u8)) {
+    BuilderPrint(out, "   % %\n%\n", Months[month-1], year, Week);
+    calendar: Month;
+    Render(month, year, *calendar);
+    for line: 0..5 { BuilderAppend(out.*, TextView(calendar.lines[line])); VecPush(out.*, 10) }
+}
+
+Long :: (year: s64, out: *Vec(u8)) {
+    BuilderPrint(out, "\n\n\n                                %\n\n", year);
+    for quarter: 0..3 {
+        first := quarter * 3;
+        BuilderPrint(out, "         %                    %                    %\n", Months[first][:3], Months[first+1][:3], Months[first+2][:3]);
+        BuilderPrint(out, "%   %   %\n", Week, Week, Week);
+        calendars: [3]Month;
+        for column: 0..2 { Render(first+column+1, year, *calendars[column]) }
+        for line: 0..5 {
+            row: Vec(u8);
+            for column: 0..2 {
+                text := TextView(calendars[column].lines[line]);
+                length := text.count;
+                if length > 20 { length = 20 }
+                BuilderAppend(row, text[:length]);
+                for pad: length+1..23 { VecPush(row, 32) }
+            }
+            while row.count > 0 && row[row.count-1] == 32 { VecResize(row, row.count-1) }
+            BuilderAppend(out.*, TextView(row[:]));
+            VecPush(out.*, 10);
+        }
+    }
+}

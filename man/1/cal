@@ -35,7 +35,7 @@ Try
 	cal sep 1752
 .EE
 .SH SOURCE
-.B /appl/cmd/cal.b
+.B /appl/cmd/cal.zi
 .SH BUGS
 The year is always considered to start in January even though this
 is historically naive.
