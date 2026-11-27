@@ -1,0 +1,186 @@
+// Block-oriented file copy, ported from dd.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Convert :: #import "zx_dd_convert";
+#import "std/vec"
+#import "std/format"
+
+Output :: struct { handle: s32; width: s32; bytes: Vec(u8); used: s32; full: u32; partial: u32; failed: bool; }
+Options :: struct { input: string; output: string; ibs: s32; obs: s32; bs: s32; skip: s32; seek: s32; iseek: s32; count: s32; files: s32; conversion: Convert.State; }
+
+Fail :: (message: string, status: string) -> s32 {
+    unused Cli.WriteAll(2, message);
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+SystemError :: (message: string) {
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, Io.Error());
+    unused Cli.WriteAll(2, "\n");
+}
+
+// Decimal sizes wrap in 32 bits like Limbo. x separates multiplicative terms.
+Number :: (text: string) -> (value: s32, valid: bool) {
+    value: u32;
+    at: s64;
+    while at < text.count && text[at] >= 48 && text[at] <= 57 { value = value*10+cast(u32)text[at]-48; at += 1 }
+    while at < text.count {
+        byte := text[at];
+        at += 1;
+        if byte == #char "k" { value *= 1024 }
+        else if byte == #char "b" { value *= 512 }
+        else if byte == #char "x" {
+            factor, valid := Number(text[at:]);
+            if !valid { return 0, false }
+            value *= cast(u32)factor;
+            break;
+        }
+    }
+    if value >= 2147483647 { return 0, false }
+    return cast(s32)value, true;
+}
+
+Conversion :: (state: *Convert.State, text: string) -> bool {
+    at: s64;
+    while at < text.count {
+        if text[at] == #char "," { at += 1; continue }
+        found := false;
+        for choice: 0..10 {
+            word := ifx choice == 0 then "ebcdic" else ifx choice == 1 then "ibm" else ifx choice == 2 then "ascii" else ifx choice == 3 then "block" else ifx choice == 4 then "unblock" else ifx choice == 5 then "lcase" else ifx choice == 6 then "ucase" else ifx choice == 7 then "swab" else ifx choice == 8 then "noerror" else ifx choice == 9 then "sync" else "";
+            if word.count == 0 || at+word.count > text.count || text[at:at+word.count] != word { continue }
+            if choice <= 4 { state.kind = cast(s32)choice+2 }
+            else { state.flags |= 1<<cast(s32)(choice-5) }
+            at += word.count;
+            found = true;
+            break;
+        }
+        if !found { return false }
+    }
+    return true;
+}
+
+WriteBlock :: (output: *Output, bytes: []u8) {
+    if bytes.count == 0 || output.failed { return }
+    if bytes.count == output.width { output.full += 1 } else { output.partial += 1 }
+    if Io.Write(output.handle, TextView(bytes)) != bytes.count { SystemError("write"); output.failed = true }
+}
+
+Flush :: (output: *Output) {
+    WriteBlock(output, output.bytes[:output.used]);
+    output.used = 0;
+}
+
+Repeat :: (output: *Output, byte: u8, count: s32) {
+    remaining := count;
+    while remaining > 0 && !output.failed {
+        take := cast(s32)output.bytes.count-output.used;
+        if take > remaining { take = remaining }
+        for at: 0..take-1 { output.bytes[output.used+at] = byte }
+        output.used += take;
+        remaining -= take;
+        if output.used == output.bytes.count { Flush(output) }
+    }
+}
+
+Stats :: (output: *Output, full: u32, partial: u32, truncated: u32) {
+    message: Vec(u8);
+    BuilderPrint(*message, "%+% records in\n%+% records out\n", full, partial, output.full, output.partial);
+    if truncated != 0 { BuilderPrint(*message, "% truncated records\n", truncated) }
+    unused Cli.WriteAll(2, TextView(message[:]));
+}
+
+#program_export
+main :: () -> s32 {
+    options: Options;
+    options.ibs = 512; options.obs = 512; options.files = 1;
+    next: s32;
+    while next < Args.OperandCount() {
+        key := Args.Operand(next); next += 1;
+        message: Vec(u8);
+        if next == Args.OperandCount() { BuilderPrint(*message, "dd: arg % needs a value\n", key); return Fail(TextView(message[:]), "arg") }
+        value := Args.Operand(next); next += 1;
+        if key == "-if" { options.input = value; continue }
+        if key == "-of" { options.output = value; continue }
+        if key == "-conv" {
+            if !Conversion(*options.conversion, value) { return Fail("dd: bad conversion\n", "arg") }
+            continue;
+        }
+        if key != "-ibs" && key != "-obs" && key != "-cbs" && key != "-bs" && key != "-skip" && key != "-seek" && key != "-oseek" && key != "-iseek" && key != "-count" && key != "-files" {
+            BuilderPrint(*message, "dd: bad arg: %\n", key); return Fail(TextView(message[:]), "arg");
+        }
+        number, valid := Number(value);
+        if !valid { return Fail("dd: argument out of range\n", "range") }
+        if key == "-ibs" { options.ibs = number }
+        else if key == "-obs" { options.obs = number }
+        else if key == "-cbs" { options.conversion.width = number }
+        else if key == "-bs" { options.bs = number }
+        else if key == "-skip" { options.skip = number }
+        else if key == "-seek" || key == "-oseek" { options.seek = number }
+        else if key == "-iseek" { options.iseek = number }
+        else if key == "-count" { options.count = number }
+        else { options.files = number }
+    }
+    if options.conversion.kind == Convert.Copy && (options.conversion.flags&(Convert.Lower|Convert.Upper)) != 0 { options.conversion.kind = Convert.Case }
+    input: s32;
+    if options.input.count > 0 { input = Io.Open(options.input, 0) }
+    if input < 0 {
+        message: Vec(u8); BuilderPrint(*message, "dd: open %: %\n", options.input, Io.Error()); return Fail(TextView(message[:]), "open");
+    }
+    defer { if input >= 3 { unused Io.Close(input) } }
+    output: Output; output.handle = 1;
+    if options.output.count > 0 { output.handle = Io.Create(options.output, 1, 436) }
+    if output.handle < 0 {
+        message: Vec(u8); BuilderPrint(*message, "dd: create %: %\n", options.output, Io.Error()); return Fail(TextView(message[:]), "create");
+    }
+    defer { if output.handle >= 3 { unused Io.Close(output.handle) } }
+    if options.bs != 0 { options.ibs = options.bs; options.obs = options.bs }
+    if options.ibs == 0 || options.obs == 0 { return Fail("dd: counts: cannot be zero\n", "counts") }
+    fast := options.ibs == options.obs && options.conversion.kind == Convert.Copy;
+    buffer: Vec(u8); VecResize(buffer, cast(s64)options.ibs);
+    output.width = options.obs;
+    if !fast { VecResize(output.bytes, cast(s64)options.obs) }
+    unused Io.Seek(input, cast(s64)options.ibs*options.iseek, 1);
+    unused Io.Seek(output.handle, cast(s64)options.obs*options.seek, 1);
+    for skipped: 1..options.skip { unused Io.Read(input, buffer[:]) }
+    full: u32;
+    partial: u32;
+    while !output.failed {
+        got: s32;
+        if options.count == 0 || full+partial != cast(u32)options.count {
+            if (options.conversion.flags&(Convert.NoError|Convert.Sync)) != 0 { for at: 0..buffer.count-1 { buffer[at] = 0 } }
+            got = Io.Read(input, buffer[:]);
+        }
+        if got < 0 {
+            SystemError("read");
+            if (options.conversion.flags&Convert.NoError) == 0 { break }
+            got = 0;
+            for at: 0..buffer.count-1 { if buffer[at] != 0 { got = cast(s32)at } }
+            Stats(*output, full, partial, options.conversion.truncated);
+        }
+        if got == 0 { options.files -= 1; if options.files <= 0 { break } }
+        if got != options.ibs {
+            partial += 1;
+            if (options.conversion.flags&Convert.Sync) != 0 { got = options.ibs }
+        } else { full += 1 }
+        if (options.conversion.flags&Convert.Swap) != 0 {
+            for pair: 0..got/2-1 { byte := buffer[2*pair]; buffer[2*pair] = buffer[2*pair+1]; buffer[2*pair+1] = byte }
+        }
+        if fast {
+            WriteBlock(*output, buffer[:got]);
+        } else {
+            for at: 0..got-1 {
+                piece := Convert.Byte(*options.conversion, buffer[at]);
+                Repeat(*output, piece.padding, piece.repeats);
+                if piece.value >= 0 { Repeat(*output, cast(u8)piece.value, 1) }
+                if piece.newline { Repeat(*output, 10, 1) }
+                if output.failed { break }
+            }
+        }
+    }
+    Flush(*output);
+    Stats(*output, full, partial, options.conversion.truncated);
+    return 0;
+}

@@ -171,8 +171,15 @@ structure of the input file; the
 and
 .L block\^
 options become a simple file copy.
+.PP
+Large explicit buffer sizes also need space for the native ZX runtime's
+buffer storage in the emulator malloc pool.
+For example,
+.L "emu -p main=512M"
+enlarges that pool; see
+.IR emu (1).
 .SH SOURCE
-.B /appl/cmd/dd.b
+.B /appl/cmd/dd.zi
 .SH DIAGNOSTICS
 .I Dd
 reports the number of full + partial input and output

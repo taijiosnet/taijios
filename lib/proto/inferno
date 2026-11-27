@@ -428,7 +428,7 @@ appl
 		dbfs.b
 		dbm
 			mkfile
-		dd.b
+		dd.zi
 		dial.b
 		diff.b
 		disdep.b
@@ -755,6 +755,7 @@ appl
 		zx_bufio.zi
 		zx_byte_escape.zi
 		zx_calendar.zi
+		zx_dd_convert.zi
 		zx_dump.zi
 		zx_idea.zi
 		zx_int.zi
@@ -1469,7 +1470,7 @@ zx
 	dbfs.dis
 	dbm
 		+
-	dd.dis
+	dd.zx
 	demo
 		+
 	dial.dis
