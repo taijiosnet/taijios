@@ -1,6 +1,6 @@
 # Dis -> ZX migration inventory (open items)
 
-The section tables track **413** open migration rows in the canonical checkout,
+The section tables track **412** open migration rows in the canonical checkout,
 including Acme helpers outside `zx/`. Generated build caches, recovery copies
 and stale untracked outputs of completed ports are excluded from this count.
 
@@ -68,8 +68,8 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 |---|---|---|---|
 | 1 | [1. Desktop core - wm, zxrun, toolbar/panel - 3 rows](dis-to-zx/01-desktop-core.md) | Desktop core (`cmd-taijios-zx-graphical-dis-port`) | 3 |
 | 2 | [2. Libraries - zx/lib/** (boot-loaded rows first) - 135 rows](dis-to-zx/02-libraries.md) | Libraries (`glm-taijios-dis-libraries-port`; mash rows owned by shell lane) | 135 |
-| 3 | [3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 92 rows](dis-to-zx/03-shell-commands.md) | Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`) | 92 |
-| 4 | [4. Services - storage, network, name, auth, collab, usb and aux daemons - 92 rows](dis-to-zx/04-services.md) | Services (unassigned after Claude commands-libs lane; next after section 2) | 96 |
+| 3 | [3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 91 rows](dis-to-zx/03-shell-commands.md) | Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`) | 91 |
+| 4 | [4. Services - storage, network, name, auth, collab, usb and aux daemons - 96 rows](dis-to-zx/04-services.md) | Services (unassigned after Claude commands-libs lane; next after section 2) | 96 |
 | 5 | [5. WM apps - zx/wm/** desktop applications (deletions go through the desktop-core owner) - 27 rows](dis-to-zx/05-wm-apps.md) | WM apps (`cmd-taijios-zx-desktop-apps-port`; deletions through desktop-core owner) | 27 |
 | 6 | [6. Acme - editor family - 24 rows](dis-to-zx/06-acme.md) | Acme (acme lane) | 24 |
 | 7 | [7. Charon - web browser family - 15 rows](dis-to-zx/07-charon.md) | Charon (unassigned; pending owner decision) | 15 |
@@ -83,4 +83,4 @@ Catalog applications that still need the legacy chain (12): cprof deb getauthinf
 | 15 | [15. Acme helper binaries outside zx/ - 2 rows](dis-to-zx/15-acme-helpers.md) | Acme helpers outside zx/ (acme lane) | 2 |
 | 16 | [16. Native kernel configurations - open item, no `.dis` rows](dis-to-zx/16-native-kernel.md) | Native kernel configurations (unassigned) | 0 |
 
-Total open table rows across sections 1–16: **413**.
+Total open table rows across sections 1–16: **412**.

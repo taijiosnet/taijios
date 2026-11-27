@@ -592,7 +592,7 @@ appl
 		listen.b
 		lockfs.b
 		logfile.b
-		look.b
+		look.zi
 		lstar.zi
 		m4.b
 		man2html.b
@@ -756,6 +756,7 @@ appl
 		zx_byte_escape.zi
 		zx_calendar.zi
 		zx_int.zi
+		zx_look.zi
 		zx_iaf.zi
 		zx_rand.zi
 		zx_lines.zi
@@ -1651,7 +1652,7 @@ zx
 	listen.dis
 	lockfs.dis
 	logfile.dis
-	look.dis
+	look.zx
 	lookman
 	ls.zx
 	lstar.zx

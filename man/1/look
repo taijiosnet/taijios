@@ -76,7 +76,7 @@ is assumed, with collating sequence
 .SH FILES
 .B /lib/words
 .SH SOURCE
-.B /appl/cmd/look.b
+.B /appl/cmd/look.zi
 .SH "SEE ALSO"
 .IR sort (1), 
 .IR grep (1)

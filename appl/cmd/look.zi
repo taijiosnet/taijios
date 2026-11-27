@@ -1,0 +1,198 @@
+// Binary dictionary lookup, ported from Inferno look.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Bufio :: #import "zx_bufio";
+Keys :: #import "zx_look";
+Quote :: #import "taijios_quote";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+State :: struct {
+    config: Keys.Config;
+    debug: bool;
+    numeric: bool;
+    exact: bool;
+    interactive: bool;
+    range: bool;
+    reader: Bufio.Reader;
+    entry: Vec(u8);
+    word: Vec(u8);
+    key: Vec(u8);
+    last: Vec(u8);
+    output: Vec(u8);
+}
+
+Flush :: (state: *State) {
+    unused Cli.WriteAll(1, TextView(state.output[:]));
+    VecClear(state.output);
+}
+
+Emit :: (state: *State, text: string) {
+    at: s32;
+    while at < text.count {
+        next := UTF.Decode(text, at).after;
+        BuilderAppend(state.output, text[at:next]);
+        at = next;
+        if state.output.count >= 8192 { Flush(state) }
+    }
+}
+
+Compare :: (state: *State, a: string, b: string) -> s32 {
+    if state.numeric { return Keys.Numeric(a, b) }
+    return Keys.Alphabetic(a, b);
+}
+
+Position :: (state: *State, offset: s64) {
+    state.reader.offset = Io.Seek(state.reader.handle, offset, 0);
+    state.reader.next = 0;
+    state.reader.end = 0;
+    state.reader.done = false;
+}
+
+ReadEntry :: (state: *State) -> bool {
+    if !Bufio.ReadLine(*state.reader, *state.entry) { return false }
+    Keys.Canonical(*state.config, TextView(state.entry[:]), *state.word);
+    return true;
+}
+
+Locate :: (state: *State) -> bool {
+    bottom: s64;
+    top := Io.Seek(state.reader.handle, 0, 2);
+    middle: s64;
+    while true {
+        middle = (top+bottom)/2;
+        if state.debug {
+            line: Vec(u8);
+            BuilderPrint(*line, "locate % % %\n", top, middle, bottom);
+            unused Cli.WriteAll(2, TextView(line[:]));
+        }
+        Position(state, middle);
+        unused Bufio.ReadLine(*state.reader, *state.entry);
+        middle = state.reader.offset;
+        if !ReadEntry(state) { break }
+        comparison := Compare(state, TextView(state.key[:]), TextView(state.word[:]));
+        if state.debug {
+            line: Vec(u8);
+            BuilderPrint(*line, "mid % key: % entry: %\ncompare: %\n", middle, TextView(state.key[:]), TextView(state.word[:]), comparison);
+            unused Cli.WriteAll(2, TextView(line[:]));
+        }
+        if comparison <= 0 {
+            if top <= middle { break }
+            top = middle;
+        } else { bottom = middle }
+    }
+    if state.debug {
+        line: Vec(u8);
+        BuilderPrint(*line, "locate % % %\n", top, middle, bottom);
+        unused Cli.WriteAll(2, TextView(line[:]));
+    }
+    Position(state, bottom);
+    bottom = state.reader.offset;
+    while ReadEntry(state) {
+        comparison := Compare(state, TextView(state.key[:]), TextView(state.word[:]));
+        if state.debug {
+            line: Vec(u8);
+            BuilderPrint(*line, "seekbot % key: % entry: %\ncompare: %\n", bottom, TextView(state.key[:]), TextView(state.word[:]), comparison);
+            unused Cli.WriteAll(2, TextView(line[:]));
+        }
+        if comparison == -2 { return false }
+        if comparison == -1 { return !state.exact }
+        if comparison == 0 { return true }
+    }
+    return false;
+}
+
+Matches :: (state: *State, original: string) {
+    if state.range {
+        if Compare(state, TextView(state.key[:]), TextView(state.word[:])) <= 0 && Compare(state, TextView(state.word[:]), TextView(state.last[:])) <= 0 {
+            Emit(state, TextView(state.entry[:]));
+        }
+    } else if !state.exact || Keys.Alphabetic(TextView(state.word[:]), original) == 0 {
+        Emit(state, TextView(state.entry[:]));
+    }
+    while ReadEntry(state) {
+        comparison := ifx state.range then Compare(state, TextView(state.word[:]), TextView(state.last[:])) else Compare(state, TextView(state.key[:]), TextView(state.word[:]));
+        if state.debug {
+            line: Vec(u8);
+            BuilderPrint(*line, "compare % ", comparison);
+            Quote.Quote(*line, TextView(state.word[:]));
+            VecPush(line, 10);
+            unused Cli.WriteAll(1, TextView(line[:]));
+        }
+        if comparison == -2 {
+            if !state.range { break }
+            Emit(state, TextView(state.entry[:]));
+        } else if comparison == -1 {
+            if state.exact { break }
+            Emit(state, TextView(state.entry[:]));
+        } else if comparison == 0 {
+            if !state.exact || Keys.Alphabetic(TextView(state.word[:]), original) == 0 { Emit(state, TextView(state.entry[:])) }
+        } else { break }
+    }
+}
+
+Usage :: () -> s32 { return Cli.Usage("usage: look -[dfinx] [-r lastkey] [-t c] [string] [file]\n") }
+
+#program_export
+main :: () -> s32 {
+    state: State;
+    state.config.terminator = 9;
+    scan: Options.Scan;
+    while true {
+        option := Options.Option(*scan);
+        if option == 0 { break }
+        if option == 68 { state.debug = true }
+        else if option == 100 { state.config.directory = true }
+        else if option == 102 { state.config.fold = true }
+        else if option == 105 { state.interactive = true }
+        else if option == 110 { state.numeric = true }
+        else if option == 120 { state.exact = true }
+        else if option == 116 || option == 114 {
+            value, ok := Options.Value(*scan);
+            if !ok { return Usage() }
+            if option == 116 { state.config.terminator = ifx value.count == 0 then -1 else cast(s32)UTF.Decode(value, 0).value }
+            else { state.range = true; Keys.Canonical(*state.config, value, *state.last) }
+        } else { return Usage() }
+    }
+    at := scan.next;
+    original: Vec(u8);
+    if !state.interactive {
+        if at < Args.OperandCount() { BuilderAppend(original, Args.Operand(at)); at += 1 }
+        else { state.interactive = true }
+    }
+    filename := "/lib/words";
+    if at == Args.OperandCount() { state.config.directory = true; state.config.fold = true }
+    else { filename = Args.Operand(at) }
+    if !state.interactive { Keys.Canonical(*state.config, TextView(original[:]), *state.key) }
+    if state.debug {
+        line: Vec(u8);
+        BuilderPrint(*line, "orig % key % %\n", TextView(original[:]), TextView(state.key[:]), filename);
+        unused Cli.WriteAll(2, TextView(line[:]));
+    }
+    state.reader.handle = Io.Open(filename, 0);
+    if state.reader.handle < 0 {
+        unused Cli.WriteAll(2, "look: can't open ");
+        unused Cli.WriteAll(2, filename);
+        unused Cli.WriteAll(2, "\n");
+        unused Args.SetFailure("no dictionary");
+        return 1;
+    }
+    defer Io.Close(state.reader.handle);
+    if !state.interactive {
+        if !Locate(*state) && !state.range { unused Args.SetFailure("not found"); return 1 }
+        Matches(*state, TextView(original[:]));
+    } else {
+        input: Bufio.Reader;
+        input.handle = 0;
+        while true {
+            Flush(*state);
+            if !Bufio.ReadLine(*input, *original) { break }
+            Keys.Canonical(*state.config, TextView(original[:]), *state.key);
+            if Locate(*state) { Matches(*state, TextView(original[:])) }
+        }
+    }
+    Flush(*state);
+    return 0;
+}

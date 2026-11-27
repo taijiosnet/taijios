@@ -1,0 +1,78 @@
+// Key canonicalization and arbitrary-precision decimal ordering for look.b.
+UTF :: #import "std/utf8";
+Runes :: #import "zx_runes";
+#import "std/vec"
+
+Config :: struct { fold: bool; directory: bool; terminator: s32; }
+
+Latin: [64]s32 = .{97,97,97,97,97,97,97,99,101,101,101,101,105,105,105,105,100,110,111,111,111,111,111,0,111,117,117,117,117,121,0,0,97,97,97,97,97,97,97,99,101,101,101,101,105,105,105,105,100,110,111,111,111,111,111,0,111,117,117,117,117,121,0,121};
+
+Canonical :: (config: *Config, text: string, out: *Vec(u8)) {
+    VecClear(out.*);
+    end := text.count;
+    if end > 0 && text[end-1] == 10 { end -= 1 }
+    at: s32;
+    while at < end {
+        decoded := UTF.Decode(text, at);
+        rune := cast(s32)decoded.value;
+        at = decoded.after;
+        if rune == config.terminator { break }
+        if rune >= 192 && rune <= 255 && Latin[rune-192] != 0 { rune = Latin[rune-192] }
+        if config.directory && !((rune >= 48 && rune <= 57) || (rune >= 65 && rune <= 90) || (rune >= 97 && rune <= 122) || rune == 32 || rune == 9) { continue }
+        if config.fold && rune >= 65 && rune <= 90 { rune += 32 }
+        bytes: [4]u8;
+        count := Runes.Encode(rune, bytes[:]);
+        BuilderAppend(out.*, TextView(bytes[:count]));
+    }
+}
+
+// -2/2: strict ordering, -1/1: prefix ordering, 0: equality.
+Alphabetic :: (a: string, b: string) -> s32 {
+    count := ifx a.count < b.count then a.count else b.count;
+    for at: 0..count-1 { if a[at] != b[at] { return ifx a[at] < b[at] then -2 else 2 } }
+    if a.count == b.count { return 0 }
+    return ifx a.count < b.count then -1 else 1;
+}
+
+Digit :: (byte: u8) -> bool { return byte >= 48 && byte <= 57 }
+Space :: (byte: u8) -> bool { return byte == 32 || (byte >= 9 && byte <= 13) }
+Decimal :: struct { negative: bool; integer: string; fraction: string; nonzero: bool; }
+
+Number :: (text: string) -> Decimal {
+    at: s64;
+    while at < text.count && Space(text[at]) { at += 1 }
+    negative := at < text.count && text[at] == 45;
+    if negative { at += 1 }
+    first := at;
+    while at < text.count && Digit(text[at]) { at += 1 }
+    integer_end := at;
+    while first < integer_end && text[first] == 48 { first += 1 }
+    fraction_start := at;
+    if at < text.count && text[at] == 46 {
+        at += 1;
+        fraction_start = at;
+        while at < text.count && Digit(text[at]) { at += 1 }
+    }
+    last := at;
+    while last > fraction_start && text[last-1] == 48 { last -= 1 }
+    return .{negative = negative, integer = text[first:integer_end], fraction = text[fraction_start:last], nonzero = first < integer_end || fraction_start < last};
+}
+
+Numeric :: (a: string, b: string) -> s32 {
+    first := Number(a);
+    second := Number(b);
+    if !first.nonzero && !second.nonzero { return 0 }
+    if first.negative != second.negative { return ifx first.negative then -2 else 2 }
+    comparison: s32;
+    if first.integer.count != second.integer.count { comparison = ifx first.integer.count < second.integer.count then -2 else 2 }
+    else {
+        comparison = Alphabetic(first.integer, second.integer);
+        if comparison == 0 {
+            comparison = Alphabetic(first.fraction, second.fraction);
+            // A fractional prefix has trailing zeros, so length breaks ties.
+            if comparison == -1 { comparison = -2 }
+            else if comparison == 1 { comparison = 2 }
+        }
+    }
+    return ifx first.negative then -comparison else comparison;
+}
