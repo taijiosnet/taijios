@@ -361,7 +361,8 @@ appl
 		B.b
 		ar.b
 		archfs.b
-		auplay.b
+		auhdr.zi
+		auplay.zi
 		auth
 			aescbc.zi
 			ai2key.zi
@@ -666,7 +667,7 @@ appl
 		pwd.b
 		ramfile.b
 		randpass.b
-		raw2iaf.b
+		raw2iaf.zi
 		rawdbfs.b
 		rcmd.b
 		rdp.b
@@ -734,7 +735,7 @@ appl
 		vacfs.b
 		vacget.b
 		vacput.b
-		wav2iaf.b
+		wav2iaf.zi
 		webgrab.b
 		wish.b
 		wmimport.b
@@ -754,6 +755,7 @@ appl
 		zx_bufio.zi
 		zx_calendar.zi
 		zx_int.zi
+		zx_iaf.zi
 		zx_rand.zi
 		zx_lines.zi
 		zx_runes.zi
@@ -1426,8 +1428,8 @@ zx
 	acme.dis
 	alphabet
 		+
-	auhdr.dis
-	auplay.dis
+	auhdr.zx
+	auplay.zx
 	auth
 		+
 	auxi
@@ -1697,7 +1699,7 @@ zx
 	pwd.dis
 	ramfile.dis
 	randpass.dis
-	raw2iaf.dis
+	raw2iaf.zx
 	rawdbfs.dis
 	rcmd.dis
 	rdp.dis
@@ -1756,7 +1758,7 @@ zx
 	vacfs.dis
 	vacget.dis
 	vacput.dis
-	wav2iaf.dis
+	wav2iaf.zx
 	wc.zx
 	webgrab.dis
 	wish.dis

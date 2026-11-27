@@ -104,11 +104,11 @@ file, which must be in Windows WAV format and encoded using PCM,
 and converts the data to Inferno format
 on the standard output.
 .SH SOURCE
-.B /appl/cmd/auplay.b
+.B /appl/cmd/auplay.zi
 .br
-.B /appl/cmd/raw2iaf.b
+.B /appl/cmd/raw2iaf.zi
 .br
-.B /appl/cmd/wav2iaf.b
+.B /appl/cmd/wav2iaf.zi
 .SH SEE ALSO
 .IR sys-read (2),
 .IR audio (3),

@@ -1,0 +1,146 @@
+// Bounded PCM WAV conversion after Inferno wav2iaf.b (see NOTICE).
+// RIFF chunk lengths count bytes, with a pad byte after odd-sized chunks.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Fs :: #import "taijios_stat";
+Cli :: #import "zx_cli";
+Audio :: #import "zx_iaf";
+#import "std/vec"
+#import "std/number_text"
+
+Reader :: struct { handle: s32; failed: bool; }
+
+Message :: (reader: *Reader, message: string) {
+    reader.failed = true;
+    unused Cli.WriteAll(2, "wav2iaf: ");
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, "\n");
+}
+
+Read :: (reader: *Reader, output: []u8) -> s64 {
+    done: s64;
+    while done < output.count {
+        count := Io.Read(reader.handle, output[done:]);
+        if count < 0 {
+            problem := Io.Error();
+            reader.failed = true;
+            unused Cli.WriteAll(2, "wav2iaf: read error: ");
+            unused Cli.WriteAll(2, problem);
+            unused Cli.WriteAll(2, "\n");
+            return done;
+        }
+        if count == 0 { return done }
+        done += count;
+    }
+    return done;
+}
+
+Get :: (reader: *Reader, output: []u8, name: string) -> bool {
+    if reader.failed { return false }
+    if Read(reader, output) != output.count {
+        if !reader.failed {
+            reader.failed = true;
+            unused Cli.WriteAll(2, "wav2iaf: short read: expected ");
+            unused Cli.WriteAll(2, name);
+            unused Cli.WriteAll(2, "\n");
+        }
+        return false;
+    }
+    return true;
+}
+
+Need :: (reader: *Reader, name: string) -> bool {
+    bytes: [4]u8;
+    if !Get(reader, bytes[:], name) { return false }
+    if TextView(bytes[:]) != name { Message(reader, "not a wave file"); return false }
+    return true;
+}
+
+Integer :: (reader: *Reader, size: s64, name: string) -> s64 {
+    bytes: [4]u8;
+    if !Get(reader, bytes[:size], name) { return 0 }
+    return cast(s64)Fs.Uint(bytes[:], 0, size);
+}
+
+Skip :: (reader: *Reader, size: s64) -> bool {
+    buffer: [8192]u8;
+    remaining := size;
+    while remaining > 0 && !reader.failed {
+        count := ifx remaining > buffer.count then buffer.count else remaining;
+        if !Get(reader, buffer[:count], "tag") { return false }
+        remaining -= count;
+    }
+    return !reader.failed;
+}
+
+#program_export
+main :: () -> s32 {
+    reader: Reader;
+    if Args.OperandCount() > 1 {
+        unused Cli.WriteAll(2, "usage: wav2iaf [infile]\n");
+        return 0;
+    }
+    if Args.OperandCount() == 1 {
+        filename := Args.Operand(0);
+        reader.handle = Io.Open(filename, 0);
+        if reader.handle < 0 { Audio.IoError("wav2iaf", "open", filename); return 0 }
+    }
+    defer { if reader.handle != 0 { unused Io.Close(reader.handle) } }
+    if !Need(*reader, "RIFF") { return 0 }
+    unused Integer(*reader, 4, "length");
+    if !Need(*reader, "WAVE") { return 0 }
+    tag: [4]u8;
+    length: s64;
+    while !reader.failed {
+        if !Get(*reader, tag[:], "tag") { return 0 }
+        length = Integer(*reader, 4, "length");
+        if reader.failed { return 0 }
+        if TextView(tag[:]) == "fmt " { break }
+        if !Skip(*reader, length+(length&1)) { return 0 }
+    }
+    if reader.failed { return 0 }
+    if length < 16 { Message(*reader, "bad wave file: short format chunk"); return 0 }
+    format := Integer(*reader, 2, "format");
+    if reader.failed { return 0 }
+    if format != 1 { Message(*reader, "bad wave file: not PCM"); return 0 }
+    channels := Integer(*reader, 2, "channels");
+    rate := cast(s32)Integer(*reader, 4, "rate");
+    unused Integer(*reader, 4, "AvgBytesPerSec");
+    unused Integer(*reader, 2, "BlockAlign");
+    bits := Integer(*reader, 2, "bits");
+    if reader.failed { return 0 }
+    remaining := length-16+(length&1);
+    while true {
+        if !Skip(*reader, remaining) { return 0 }
+        if !Get(*reader, tag[:], "tag") { return 0 }
+        length = Integer(*reader, 4, "length");
+        if reader.failed { return 0 }
+        if TextView(tag[:]) == "data" { break }
+        remaining = length+(length&1);
+    }
+    rate_text: [24]u8;
+    channels_text: [24]u8;
+    bits_text: [24]u8;
+    pending: Vec(u8);
+    Audio.Header(FormatInteger(rate, rate_text[:]), FormatInteger(channels, channels_text[:]), FormatInteger(bits, bits_text[:]), "pcm", *pending);
+    buffer: [8192]u8;
+    remaining = length;
+    while remaining > 0 {
+        count := ifx remaining > buffer.count then buffer.count else remaining;
+        got := Read(*reader, buffer[:count]);
+        BuilderAppend(pending, TextView(buffer[:got]));
+        while pending.count >= 8192 {
+            if !Cli.WriteAll(1, TextView(pending[:8192])) { return 0 }
+            left := pending.count-8192;
+            for at: 0..left-1 { pending[at] = pending[8192+at] }
+            VecResize(pending, left);
+        }
+        if got != count {
+            if !reader.failed { Message(*reader, "short input file") }
+            return 0;
+        }
+        remaining -= count;
+    }
+    unused Cli.WriteAll(1, TextView(pending[:]));
+    return 0;
+}

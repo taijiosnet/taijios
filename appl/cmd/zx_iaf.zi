@@ -1,0 +1,75 @@
+// Inferno audio-file headers and bounded byte streaming (see NOTICE).
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+#import "std/vec"
+
+Header :: (rate: string, channels: string, bits: string, encoding: string, out: *Vec(u8)) {
+    BuilderPrint(out, "rate\t%\nchans\t%\nbits\t%\nenc\t%", rate, channels, bits, encoding);
+    padding: [4]string = .{"  ", " ", "", "   "};
+    BuilderAppend(out.*, padding[out.count%4]);
+    BuilderAppend(out.*, "\n\n");
+}
+
+Stream :: (input: s32, output: s32) -> bool {
+    buffer: [8192]u8;
+    while true {
+        count := Io.Read(input, buffer[:]);
+        if count < 0 { return false }
+        if count == 0 { return true }
+        if !Cli.WriteAll(output, TextView(buffer[:count])) { return false }
+    }
+}
+
+Error :: (program: string, name: string, message: string) {
+    unused Cli.WriteAll(2, program);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, name);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, "\n");
+}
+
+IoError :: (program: string, action: string, name: string) {
+    problem := Io.Error();
+    unused Cli.WriteAll(2, program);
+    unused Cli.WriteAll(2, ": could not ");
+    unused Cli.WriteAll(2, action);
+    unused Cli.WriteAll(2, " ");
+    unused Cli.WriteAll(2, name);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, problem);
+    unused Cli.WriteAll(2, "\n");
+}
+
+Process :: (program: string, filename: string, play: bool) {
+    input := Io.Open(filename, 0);
+    if input < 0 { IoError(program, "open", filename); return }
+    defer Io.Close(input);
+    buffer: [8192]u8;
+    count := Io.Read(input, buffer[:]);
+    if count < 0 { IoError(program, "read", filename); return }
+    if count < 10 || TextView(buffer[:4]) != "rate" { Error(program, filename, "not an audio file"); return }
+    end: s32;
+    while true {
+        if end == count { Error(program, filename, "bad header"); return }
+        if buffer[end] == 10 {
+            end += 1;
+            if end == count { Error(program, filename, "bad header"); return }
+            if buffer[end] == 10 {
+                end += 1;
+                if end%4 != 0 { Error(program, filename, "unpadded header"); return }
+                break;
+            }
+        } else { end += 1 }
+    }
+    if !play { unused Cli.WriteAll(2, TextView(buffer[:end-1])); return }
+    audio := Io.Open("/dev/audio", 1);
+    if audio < 0 { IoError(program, "open", "/dev/audio"); return }
+    defer Io.Close(audio);
+    control := Io.Open("/dev/audioctl", 1);
+    if control < 0 { IoError(program, "open", "/dev/audioctl"); return }
+    defer Io.Close(control);
+    if !Cli.WriteAll(control, TextView(buffer[:end-1])) { IoError(program, "write", "/dev/audioctl"); return }
+    if count > end && !Cli.WriteAll(audio, TextView(buffer[end:count])) { IoError(program, "write", "/dev/audio"); return }
+    if !Stream(input, audio) { IoError(program, "stream", "/dev/audio") }
+}

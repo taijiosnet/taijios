@@ -29,8 +29,6 @@ TARG=\
 	B.dis\
 	ar.dis\
 	archfs.dis\
-	auplay.dis\
-	auhdr.dis\
 	# bit2gif.dis\
 	bytes.dis\
 	calc.dis\
@@ -83,7 +81,6 @@ TARG=\
 	plumber.dis\
 	prof.dis\
 	ramfile.dis\
-	raw2iaf.dis\
 	rawdbfs.dis\
 	rcmd.dis\
 	rdp.dis\
@@ -107,7 +104,6 @@ TARG=\
 	vacfs.dis\
 	vacget.dis\
 	vacput.dis\
-	wav2iaf.dis\
 	webgrab.dis\
 	whois.dis\
 	wish.dis\
@@ -199,6 +195,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
+ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
 NINEPZX=$ZXLIB/ninep.zi
@@ -210,6 +207,18 @@ COFFEEFRAMES=0 1 2 3 4 5
 COFFEEART=$ROOT/icons/bigdelight.bit ${COFFEEFRAMES:%=$ROOT/icons/coffee%.bit} ${COFFEEFRAMES:%=$ROOT/icons/coffee%.mask}
 
 <$ROOT/mkfiles/mkdis
+
+auplay.zx: auplay.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry auplay:main -o $target auplay.zi
+
+auhdr.zx: auhdr.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry auhdr:main -o $target auhdr.zi
+
+raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry raw2iaf:main -o $target raw2iaf.zi
+
+wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
 
 grep.zx: grep.zi zx_arg.zi zx_bufio.zi zx_runes.zi sh/shell_regexp.zi $UTILZX mkfile
 	ziran bundle --root . --module-path sh --bind-host taijios_args --bind-host taijios_io --entry grep:main -o $target grep.zi
@@ -263,8 +272,6 @@ mntgen.zx: mntgen.zi taijios_io.zi $NINEPZX
 	zi2zx --root . --module-path $ZXLIB --bind-host taijios_io --entry mntgen:main -o $target mntgen.zi
 <$ROOT/mkfiles/mksubdirs
 
-auhdr.dis: auplay.dis
-	rm -f auhdr.dis && cp auplay.dis auhdr.dis
 
 dbfs.dis: $MODDIR/styxservers.m
 rawdbfs.dis: $MODDIR/styxservers.m
@@ -523,6 +530,10 @@ $DISBIN/xargs.zx: xargs.zx mkfile
 $DISBIN/time.zx: time.zx mkfile
 $DISBIN/puttar.zx: puttar.zx mkfile
 $DISBIN/fs.zx: fs.zx mkfile
+$DISBIN/auplay.zx: auplay.zx mkfile
+$DISBIN/auhdr.zx: auhdr.zx mkfile
+$DISBIN/raw2iaf.zx: raw2iaf.zx mkfile
+$DISBIN/wav2iaf.zx: wav2iaf.zx mkfile
 $DISBIN/grep.zx: grep.zx mkfile
 $DISBIN/tail.zx: tail.zx mkfile
 $DISBIN/cal.zx: cal.zx mkfile

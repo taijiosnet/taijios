@@ -1,0 +1,8 @@
+Args :: #import "taijios_args";
+Audio :: #import "zx_iaf";
+
+#program_export
+main :: () -> s32 {
+    for index: 0..Args.OperandCount()-1 { Audio.Process("auplay", Args.Operand(cast(s32)index), true) }
+    return 0;
+}

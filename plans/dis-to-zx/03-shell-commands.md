@@ -1,4 +1,4 @@
-# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 97 rows
+# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 93 rows
 
 Owner: Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`)
 
@@ -12,8 +12,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/acme.dis | appl/acme/acme.b |  | - |  |
 | zx/ar.dis | appl/cmd/ar.b |  | - |  |
 | zx/asm.dis | appl/cmd/asm/asm.b|appl/cmd/limbo/asm.b |  | - |  |
-| zx/auhdr.dis | appl/cmd/auplay.b (copy rule) |  | - |  |
-| zx/auplay.dis | appl/cmd/auplay.b |  | - |  |
 | zx/bytes.dis | appl/cmd/bytes.b |  | - |  |
 | zx/calc.dis | appl/cmd/calc.b |  | - |  |
 | zx/cddb.dis | appl/cmd/cddb.b |  | - |  |
@@ -60,7 +58,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/os.dis | appl/cmd/os.b |  | - |  |
 | zx/plumb.dis | appl/cmd/plumb.b |  | - |  |
 | zx/prof.dis | appl/cmd/prof.b |  | - |  |
-| zx/raw2iaf.dis | appl/cmd/raw2iaf.b |  | - |  |
 | zx/rcmd.dis | appl/cmd/rcmd.b |  | - |  |
 | zx/rdp.dis | appl/cmd/rdp.b |  | - |  |
 | zx/rioimport.dis | appl/cmd/rioimport.b |  | - |  |
@@ -96,7 +93,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 | zx/units.dis | appl/cmd/units.b |  | - |  |
 | zx/vacget.dis | appl/cmd/vacget.b |  | - |  |
 | zx/vacput.dis | appl/cmd/vacput.b |  | - |  |
-| zx/wav2iaf.dis | appl/cmd/wav2iaf.b |  | - |  |
 | zx/webgrab.dis | appl/cmd/webgrab.b |  | - |  |
 | zx/wish.dis | appl/cmd/wish.b |  | - |  |
 | zx/wmexport.dis | appl/cmd/wmexport.b |  | - |  |
