@@ -1,0 +1,98 @@
+// Streaming byte-range display and replacement after Inferno bytes.b.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Numbers :: #import "zx_int";
+Escape :: #import "zx_byte_escape";
+#import "std/vec"
+
+End :: 2147483647;
+
+Fail :: (message: string, status: string) -> s32 {
+    unused Cli.WriteAll(2, message);
+    unused Args.SetFailure(status);
+    return 1;
+}
+
+Problem :: () -> s32 {
+    problem := Io.Error();
+    unused Cli.WriteAll(2, "bytes: ");
+    unused Cli.WriteAll(2, problem);
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("I/O");
+    return 1;
+}
+
+Show :: (start: s64, end: s64) -> s32 {
+    buffer: [8192]u8;
+    pending: Vec(u8);
+    escaped: Vec(u8);
+    position: s64;
+    while position < end {
+        count := Io.Read(0, buffer[:]);
+        if count < 0 { return Problem() }
+        if count == 0 { break }
+        lower := ifx start > position then start-position else 0;
+        upper := ifx end < position+count then end-position else cast(s64)count;
+        if lower < upper {
+            BuilderAppend(pending, TextView(buffer[lower:upper]));
+            VecClear(escaped);
+            used := Escape.Append(*escaped, TextView(pending[:]));
+            if !Cli.WriteAll(1, TextView(escaped[:])) { return Problem() }
+            left := pending.count-used;
+            for at: 0..left-1 { pending[at] = pending[used+at] }
+            VecResize(pending, left);
+        }
+        position += count;
+    }
+    VecClear(escaped);
+    for at: 0..pending.count-1 { Escape.Byte(*escaped, pending[at]) }
+    if !Cli.WriteAll(1, TextView(escaped[:])) { return Problem() }
+    return 0;
+}
+
+Replace :: (start: s64, end: s64, bytes: string) -> s32 {
+    buffer: [8192]u8;
+    position: s64;
+    inserted: bool;
+    while true {
+        count := Io.Read(0, buffer[:]);
+        if count < 0 { return Problem() }
+        if count == 0 { break }
+        if start == End {
+            if !Cli.WriteAll(1, TextView(buffer[:count])) { return Problem() }
+        } else {
+            prefix := start-position;
+            if prefix > count { prefix = count }
+            if prefix > 0 && !Cli.WriteAll(1, TextView(buffer[:prefix])) { return Problem() }
+            if !inserted && start <= position+count {
+                if !Cli.WriteAll(1, bytes) { return Problem() }
+                inserted = true;
+                if end == End { return 0 }
+            }
+            suffix := ifx end > position then end-position else 0;
+            if suffix < count && !Cli.WriteAll(1, TextView(buffer[suffix:count])) { return Problem() }
+        }
+        position += count;
+    }
+    if !inserted && (start == position || start == End) {
+        if !Cli.WriteAll(1, bytes) { return Problem() }
+    }
+    return 0;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count < 2 || count > 3 { return Cli.Usage("usage: bytes start end [bytes]\n") }
+    first := Args.Operand(0);
+    last := Args.Operand(1);
+    start := ifx first == "end" then End else cast(s64)Numbers.Decimal(first);
+    end := ifx last == "end" then End else cast(s64)Numbers.Decimal(last);
+    if end < start { return Fail("bytes: out of order range\n", "bad range") }
+    if start < 0 || end < 0 { return Fail("bytes: negative range\n", "bad range") }
+    if count == 2 { return Show(start, end) }
+    replacement: Vec(u8);
+    if !Escape.Parse(Args.Operand(2), *replacement) { return Fail("bytes: invalid backslash sequence\n", "bad args") }
+    return Replace(start, end, TextView(replacement[:]));
+}

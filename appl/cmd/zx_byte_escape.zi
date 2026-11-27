@@ -1,0 +1,59 @@
+// Reversible UTF-8 byte display and replacement escapes for bytes.b.
+Runes :: #import "zx_runes";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+Hex :: (byte: u8) -> s32 {
+    if byte >= 48 && byte <= 57 { return cast(s32)(byte-48) }
+    if byte >= 97 && byte <= 102 { return cast(s32)(byte-97+10) }
+    if byte >= 65 && byte <= 70 { return cast(s32)(byte-65+10) }
+    return -1;
+}
+
+Parse :: (text: string, out: *Vec(u8)) -> bool {
+    at: s64;
+    while at < text.count {
+        byte := text[at];
+        at += 1;
+        if byte != 92 { VecPush(out.*, byte); continue }
+        if at == text.count { return false }
+        byte = text[at];
+        at += 1;
+        if byte == 110 { VecPush(out.*, 10) }
+        else if byte == 114 { VecPush(out.*, 13) }
+        else if byte == 116 { VecPush(out.*, 9) }
+        else if byte == 118 { VecPush(out.*, 11) }
+        else if byte == 92 { VecPush(out.*, 92) }
+        else {
+            if at == text.count { return false }
+            upper := Hex(byte);
+            lower := Hex(text[at]);
+            if upper < 0 || lower < 0 { return false }
+            VecPush(out.*, cast(u8)(upper*16+lower));
+            at += 1;
+        }
+    }
+    return true;
+}
+
+Byte :: (out: *Vec(u8), byte: u8) {
+    digits := "0123456789ABCDEF";
+    VecPush(out.*, 92);
+    VecPush(out.*, digits[byte>>4]);
+    VecPush(out.*, digits[byte&15]);
+}
+
+// Returns the complete prefix consumed; at most three bytes remain.
+Append :: (out: *Vec(u8), bytes: string) -> s64 {
+    at: s64;
+    while at < bytes.count {
+        if bytes.count-at < Runes.Width(bytes[at]) { break }
+        rune := UTF.Decode(bytes, cast(s32)at);
+        if rune.valid {
+            if rune.value == 92 { VecPush(out.*, 92) }
+            BuilderAppend(out.*, bytes[at:rune.after]);
+            at = rune.after;
+        } else { Byte(out, bytes[at]); at += 1 }
+    }
+    return at;
+}

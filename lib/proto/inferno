@@ -411,7 +411,7 @@ appl
 		bind.zi
 		bit2gif.b
 		broke.b
-		bytes.b
+		bytes.zi
 		cal.zi
 		calc.b
 		cd.zi
@@ -753,6 +753,7 @@ appl
 		zx_arg.zi
 		zx_cli.zi
 		zx_bufio.zi
+		zx_byte_escape.zi
 		zx_calendar.zi
 		zx_int.zi
 		zx_iaf.zi
@@ -1439,7 +1440,7 @@ zx
 	basename.zx
 	bind.zx
 	broke.dis
-	bytes.dis
+	bytes.zx
 	cal.zx
 	calc.dis
 	cat.zx

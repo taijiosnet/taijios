@@ -30,7 +30,6 @@ TARG=\
 	ar.dis\
 	archfs.dis\
 	# bit2gif.dis\
-	bytes.dis\
 	calc.dis\
 	cddb.dis\
 	cook.dis\
@@ -195,6 +194,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
+ZXCOMMANDS=$ZXCOMMANDS bytes
 ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -219,6 +219,9 @@ raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 
 wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
+
+bytes.zx: bytes.zi zx_byte_escape.zi zx_runes.zi zx_int.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry bytes:main -o $target bytes.zi
 
 grep.zx: grep.zi zx_arg.zi zx_bufio.zi zx_runes.zi sh/shell_regexp.zi $UTILZX mkfile
 	ziran bundle --root . --module-path sh --bind-host taijios_args --bind-host taijios_io --entry grep:main -o $target grep.zi
@@ -534,6 +537,7 @@ $DISBIN/auplay.zx: auplay.zx mkfile
 $DISBIN/auhdr.zx: auhdr.zx mkfile
 $DISBIN/raw2iaf.zx: raw2iaf.zx mkfile
 $DISBIN/wav2iaf.zx: wav2iaf.zx mkfile
+$DISBIN/bytes.zx: bytes.zx mkfile
 $DISBIN/grep.zx: grep.zx mkfile
 $DISBIN/tail.zx: tail.zx mkfile
 $DISBIN/cal.zx: cal.zx mkfile
