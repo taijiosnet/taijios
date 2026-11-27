@@ -173,7 +173,7 @@ def generate_catalog(output):
         if relative in ('emuinit', 'wm', 'zxrun') or relative.startswith(('sh/', 'install/')):
             continue
         apps[relative] = relative not in ('acme', 'charon', 'math/graph0', 'math/linbench')
-    for name in ('cat', 'echo', 'basename', 'cleanname', 'wc', 'uniq', 'tr', 'tee', 'cp', 'test', 'ls', 'mkdir', 'tclsh', 'irtest', 'comm', 'cmp', 'freq', 'cd', 'bind', 'ftest', 'lstar', 'kill', 'fmt', 'fortune', 'du', 'cal', 'tail', 'grep', 'auplay', 'auhdr', 'raw2iaf', 'wav2iaf', 'bytes', 'look', 'xd', 'ns', 'idea'):
+    for name in ('cat', 'echo', 'basename', 'cleanname', 'wc', 'uniq', 'tr', 'tee', 'cp', 'test', 'ls', 'mkdir', 'tclsh', 'irtest', 'comm', 'cmp', 'freq', 'cd', 'bind', 'ftest', 'lstar', 'kill', 'fmt', 'fortune', 'du', 'cal', 'tail', 'grep', 'auplay', 'auhdr', 'raw2iaf', 'wav2iaf', 'bytes', 'look', 'xd', 'ns', 'idea', 'gettar'):
         apps.setdefault(name, True)
     for relative, hidden in apps.items():
         name = relative.split('/')[-1]

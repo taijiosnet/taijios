@@ -1,0 +1,225 @@
+// POSIX tar extraction, ported from gettar.b (see NOTICE).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Io :: #import "taijios_io";
+Fs :: #import "taijios_stat";
+Cli :: #import "zx_cli";
+Tar :: #import "lstar_header";
+#import "std/vec"
+#import "std/format"
+
+Input :: struct {
+    buffer: [10240]u8;
+    block: [512]u8;
+    next: s32;
+    count: s32;
+    problem: string;
+}
+
+// A pipe can split a logical tar block across any number of reads.
+Block :: (input: *Input) -> bool {
+    used: s32;
+    while used < 512 {
+        if input.next == input.count {
+            got := Io.Read(0, input.buffer[:]);
+            if got <= 0 {
+                if got < 0 {
+                    message: Vec(u8);
+                    BuilderAppend(message, "read error: ");
+                    BuilderAppend(message, Io.Error());
+                    input.problem = TextDetach(BuilderFinish(message));
+                } else if used > 0 { input.problem = "blocksize error" }
+                return false;
+            }
+            input.next = 0;
+            input.count = got;
+        }
+        take := 512-used;
+        if take > input.count-input.next { take = input.count-input.next }
+        for at: 0..take-1 { input.block[used+at] = input.buffer[input.next+at] }
+        input.next += take;
+        used += take;
+    }
+    return true;
+}
+
+Error :: (message: string) -> s32 {
+    unused Cli.WriteAll(2, "gettar: ");
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure("error");
+    return 1;
+}
+
+CheckDirectory :: (name: string) -> bool {
+    path: Vec(u8);
+    if name.count > 0 && name[0] == #char "/" { BuilderAppend(path, "/") }
+    at: s64;
+    while at < name.count {
+        while at < name.count && name[at] == #char "/" { at += 1 }
+        start := at;
+        while at < name.count && name[at] != #char "/" { at += 1 }
+        component := name[start:at];
+        if component.count == 0 { continue }
+        if component == ".." { unused Error(".. pathnames forbidden"); return false }
+        next := at;
+        while next < name.count && name[next] == #char "/" { next += 1 }
+        if next == name.count { continue }
+        if path.count > 0 && path[path.count-1] != #char "/" { VecPush(path, #char "/") }
+        BuilderAppend(path, component);
+        metadata: [Fs.BufferSize]u8;
+        info := Fs.PathInfo(TextView(path[:]), metadata[:]);
+        message: Vec(u8);
+        if info.size == 0 {
+            handle := Io.Create(TextView(path[:]), 0, cast(s32)(Fs.Directory|511));
+            if handle >= 0 { unused Io.Close(handle); continue }
+            BuilderAppend(message, "cannot mkdir ");
+            BuilderAppend(message, TextView(path[:]));
+            BuilderAppend(message, ": ");
+            BuilderAppend(message, Io.Error());
+        } else if (info.mode&Fs.Directory) == 0 {
+            BuilderAppend(message, "found non-directory at ");
+            BuilderAppend(message, TextView(path[:]));
+        } else { continue }
+        unused Error(TextView(message[:]));
+        return false;
+    }
+    return true;
+}
+
+Matched :: (name: string, first: s32) -> bool {
+    if first == Args.OperandCount() { return true }
+    for operand: first..Args.OperandCount()-1 {
+        prefix := Args.Operand(operand);
+        if prefix.count > name.count { continue }
+        if name[:prefix.count] == prefix && (prefix.count == name.count || name[prefix.count] == #char "/") { return true }
+    }
+    return false;
+}
+
+Notice :: (header: Tar.Header, name: string) {
+    message: Vec(u8);
+    BuilderAppend(message, "gettar: skipping ");
+    if header.notice == Tar.HardLink { BuilderAppend(message, "link ") }
+    else if header.notice == Tar.SymbolicLink { BuilderAppend(message, "symlink ") }
+    else { BuilderAppend(message, "special file ") }
+    BuilderAppend(message, name);
+    if header.notice == Tar.HardLink { BuilderAppend(message, " -> "); Tar.AppendText(*message, header.link) }
+    VecPush(message, #char "\n");
+    unused Cli.WriteAll(2, TextView(message[:]));
+}
+
+SetMetadata :: (handle: s32, name: string, mode: u32, modified: s32) {
+    info: Fs.Info;
+    info.mode = mode;
+    info.modified = modified;
+    if Fs.Change(handle, info, true, true, false, false) || Fs.Change(handle, info, true, false, false, false) { return }
+    message: Vec(u8);
+    BuilderPrint(*message, "gettar: cannot set mode/mtime % 0", name);
+    if mode != 0 {
+        started := false;
+        for digit: 0..2 {
+            byte := cast(u8)((mode>>cast(u32)(6-3*digit))&7);
+            if byte != 0 || started { VecPush(message, 48+byte); started = true }
+        }
+    }
+    BuilderPrint(*message, " %: %\n", cast(u32)modified, Io.Error());
+    unused Cli.WriteAll(2, TextView(message[:]));
+}
+
+#program_export
+main :: () -> s32 {
+    scan: Arg.Scan;
+    keep: bool;
+    absolute: bool;
+    verbose: bool;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == #char "k" { keep = true }
+        else if option == #char "R" { absolute = true }
+        else if option == #char "v" { verbose = true }
+        else { return Cli.Usage("usage: gettar [-kTRv] [file ...]\n") }
+    }
+    input: Input;
+    while true {
+        if !Block(*input) {
+            if input.problem.count > 0 { return Error(input.problem) }
+            return 0;
+        }
+        filename: Vec(u8);
+        size: s32;
+        mode: u32;
+        modified: s32;
+        handle: s32 = -1;
+        {
+            header := Tar.Decode(input.block[:]);
+            if !header.present { return 0 }
+            if header.prefix.count > 0 { Tar.AppendText(*filename, header.prefix); VecPush(filename, #char "/") }
+            Tar.AppendText(*filename, header.name);
+            if !absolute && filename.count > 0 {
+                prefix := ifx filename[0] == #char "#" then "./" else (ifx filename[0] == #char "/" then "." else "");
+                if prefix.count > 0 {
+                    relative: Vec(u8);
+                    BuilderAppend(relative, prefix);
+                    BuilderAppend(relative, TextView(filename[:]));
+                    VecFree(filename);
+                    filename = relative;
+                }
+            }
+            name := TextView(filename[:]);
+            if header.problem != 0 {
+                message: Vec(u8);
+                if header.problem == Tar.BadMagic { BuilderAppend(message, "bad magic ") }
+                else if header.problem == Tar.BadChecksum { BuilderAppend(message, "directory checksum error ") }
+                else { BuilderPrint(*message, "unrecognized typeflag % for ", cast(s32)header.flag) }
+                BuilderAppend(message, name);
+                return Error(TextView(message[:]));
+            }
+            size = Tar.Octal(input.block[124:136]);
+            mode = cast(u32)Tar.Octal(input.block[100:108])&511;
+            modified = Tar.Octal(input.block[136:148]);
+            if size < 0 { return Error("file too large") }
+            regular := header.flag == 0 || header.flag == #char "0" || header.flag == #char "7";
+            if header.notice != 0 { Notice(header, name) }
+            else if header.flag == #char "5" {
+                directory: Vec(u8);
+                BuilderAppend(directory, name);
+                if name.count == 0 || name[name.count-1] != #char "/" { VecPush(directory, #char "/") }
+                VecPush(directory, #char ".");
+                if !CheckDirectory(TextView(directory[:])) { return 1 }
+            } else if regular && Matched(name, scan.next) {
+                metadata: [Fs.BufferSize]u8;
+                if !keep || Fs.PathInfo(name, metadata[:]).size == 0 {
+                    if verbose { unused Cli.WriteAll(2, name); unused Cli.WriteAll(2, "\n") }
+                    if !CheckDirectory(name) { return 1 }
+                    handle = Io.Create(name, 1, 438);
+                    if handle < 0 {
+                        message: Vec(u8);
+                        BuilderPrint(*message, "gettar: cannot create %: %\n", name, Io.Error());
+                        unused Cli.WriteAll(2, TextView(message[:]));
+                    }
+                }
+            }
+        }
+        name := TextView(filename[:]);
+        bytes := cast(s64)size;
+        while bytes > 0 {
+            if !Block(*input) {
+                if handle >= 0 { unused Io.Close(handle) }
+                if input.problem.count > 0 { return Error(input.problem) }
+                return Error("unexpected end of archive");
+            }
+            take := ifx bytes < 512 then bytes else 512;
+            if handle >= 0 && Io.Write(handle, TextView(input.block[:take])) != take {
+                message: Vec(u8);
+                BuilderPrint(*message, "write error for %: %", name, Io.Error());
+                unused Io.Close(handle);
+                return Error(TextView(message[:]));
+            }
+            bytes -= take;
+        }
+        if handle >= 0 { SetMetadata(handle, name, mode, modified); unused Io.Close(handle) }
+    }
+    return 0;
+}

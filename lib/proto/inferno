@@ -489,7 +489,7 @@ appl
 		ftpfs.b
 		getauthinfo.b
 		getfile.b
-		gettar.b
+		gettar.zi
 		gif2bit.b
 		grep.zi
 		gunzip.b
@@ -1499,7 +1499,7 @@ zx
 	ftest.zx
 	ftpfs.dis
 	getauthinfo.dis
-	gettar.dis
+	gettar.zx
 	grep.zx
 	grid
 		*
