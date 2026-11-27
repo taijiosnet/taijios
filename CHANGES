@@ -1,4 +1,5 @@
 Unreleased
+	port idea to modular Ziran/ZX with pure IDEA blocks and safe filename validation
 	port ns to modular Ziran/ZX; expose live native process namespaces with
 	stable references during fork and exit, preserving Dis namespace output
 	port xd to modular Ziran/ZX with buffered multi-format dumps, repetition

@@ -60,6 +60,6 @@ The decryped data is put in the file A10076795.gz.
 Note that the quotes around the key are interpreted by the shell and simply delimit
 the key string.
 .SH SOURCE
-.B /appl/cmd/idea.b
+.B /appl/cmd/idea.zi
 .br
 .B /utils/idea/idea.c

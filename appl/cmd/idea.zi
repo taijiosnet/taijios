@@ -1,0 +1,113 @@
+// Inferno IDEA file framing and streaming, ported from idea.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Cipher :: #import "zx_idea";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+Output :: struct { handle: s32; buffer: [8192]u8; count: s32; }
+
+Flush :: (output: *Output) {
+    unused Cli.WriteAll(output.handle, TextView(output.buffer[:output.count]));
+    output.count = 0;
+}
+
+Write :: (output: *Output, bytes: []u8) {
+    for at: 0..bytes.count-1 {
+        output.buffer[output.count] = bytes[at];
+        output.count += 1;
+        if output.count == 8192 { Flush(output) }
+    }
+}
+
+Error :: (message: string) -> s32 {
+    unused Cli.WriteAll(2, message);
+    return 0;
+}
+
+DecryptError :: (message: string) -> s32 {
+    unused Cli.WriteAll(2, "decrypt error: ");
+    unused Cli.WriteAll(2, message);
+    return Error(" (wrong password ?)\n");
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    key_text := Args.Operand(1);
+    key: [16]u8;
+    at: s32;
+    runes: s32;
+    while at < key_text.count {
+        rune := UTF.Decode(key_text, at);
+        if runes < 16 { key[runes] = cast(u8)(rune.value&255) }
+        runes += 1;
+        at = rune.after;
+    }
+    option := Args.Operand(0);
+    if (count != 2 && count != 3) || (option != "-e" && option != "-d") || runes != 16 {
+        return Error("usage: idea -[e | d] <16 char key> [inputfile]\n");
+    }
+    decrypt := option == "-d";
+    input: s32;
+    output: Output;
+    output.handle = 1;
+    filename: Vec(u8);
+    if count == 3 {
+        path := Args.Operand(2);
+        input = Io.Open(path, 0);
+        if input < 0 { unused Cli.WriteAll(2, "cannot open "); unused Cli.WriteAll(2, path); return Error("\n") }
+        if decrypt {
+            if path.count < 3 || path[path.count-3:] != ".id" {
+                unused Io.Close(input);
+                return Error("input file not a .id file\n");
+            }
+            BuilderAppend(filename, path[:path.count-3]);
+        } else { BuilderAppend(filename, path); BuilderAppend(filename, ".id") }
+        output.handle = Io.Create(TextView(filename[:]), 1, 438);
+        if output.handle < 0 {
+            unused Io.Close(input);
+            unused Cli.WriteAll(2, "cannot create ");
+            unused Cli.WriteAll(2, TextView(filename[:]));
+            return Error("\n");
+        }
+    }
+    defer { if input >= 3 { unused Io.Close(input) } }
+    defer { if output.handle >= 3 { unused Io.Close(output.handle) } }
+    cipher: Cipher.State;
+    Cipher.Setup(*cipher, key[:]);
+    block: [8]u8;
+    previous: [8]u8;
+    have_previous: bool;
+    used: s32;
+    while true {
+        got := Io.Read(input, block[used:]);
+        if got <= 0 { break }
+        used += got;
+        if used == 8 {
+            Cipher.Block(*cipher, block[:], decrypt);
+            if decrypt {
+                if have_previous { Write(*output, previous[:]) }
+                previous = block;
+                have_previous = true;
+            } else { Write(*output, block[:]) }
+            used = 0;
+        }
+    }
+    if decrypt {
+        if !have_previous { return DecryptError("no last block") }
+        if used != 0 { return DecryptError("last block not 8 bytes long") }
+        used = cast(s32)previous[7];
+        if used > 7 { return DecryptError("bad modulus") }
+        for padding: used..6 { if previous[padding] != 0 { return DecryptError("byte not 0") } }
+        Write(*output, previous[:used]);
+    } else {
+        for padding: used..7 { block[padding] = 0 }
+        block[7] = cast(u8)used;
+        Cipher.Block(*cipher, block[:], false);
+        Write(*output, block[:]);
+    }
+    Flush(*output);
+    return 0;
+}

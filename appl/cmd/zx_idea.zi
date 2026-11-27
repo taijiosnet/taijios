@@ -1,0 +1,68 @@
+// IDEA key expansion and ECB blocks, translated from libsec/port/idea.c.
+// See NOTICE for the Inferno source license.
+State :: struct { keys: [104]u32; }
+
+Multiply :: (a: u32, b: u32) -> u32 {
+    first := ifx a == 0 then 65536 else cast(u64)a;
+    second := ifx b == 0 then 65536 else cast(u64)b;
+    return cast(u32)((first*second % 65537) & 65535);
+}
+
+Inverse :: (value: u32) -> u32 {
+    if value <= 1 { return value }
+    first: s64 = 65537;
+    second := cast(s64)value;
+    previous: s64;
+    current: s64 = 1;
+    while second != 0 {
+        quotient := first/second;
+        remainder := first-quotient*second;
+        coefficient := previous-quotient*current;
+        first = second; second = remainder;
+        previous = current; current = coefficient;
+    }
+    if previous < 0 { previous += 65537 }
+    return cast(u32)previous & 65535;
+}
+
+Setup :: (state: *State, key: []u8) {
+    for at: 0..7 { state.keys[at] = (cast(u32)key[2*at]<<8)|cast(u32)key[2*at+1] }
+    source: s32;
+    for at: 8..51 {
+        next := at-7;
+        state.keys[at] = ((state.keys[source+(next&7)]<<9)|(state.keys[source+((next+1)&7)]>>7))&65535;
+        if ((at+1)&7) == 0 { source += 8 }
+    }
+    temporary := state.keys[49]; state.keys[49] = state.keys[50]; state.keys[50] = temporary;
+    at: s32;
+    while at < 54 {
+        state.keys[52+at] = Inverse(state.keys[48-at]);
+        state.keys[53+at] = (65536-state.keys[50-at])&65535;
+        state.keys[54+at] = (65536-state.keys[49-at])&65535;
+        state.keys[55+at] = Inverse(state.keys[51-at]);
+        if at < 48 { state.keys[56+at] = state.keys[46-at]; state.keys[57+at] = state.keys[47-at] }
+        at += 6;
+    }
+}
+
+Block :: (state: *State, data: []u8, decrypt: bool) {
+    keys := ifx decrypt then 52 else 0;
+    x: [4]u32;
+    for at: 0..3 { x[at] = (cast(u32)data[2*at]<<8)|cast(u32)data[2*at+1] }
+    for round: 0..16 {
+        at := keys+3*round;
+        if (round&1) == 0 {
+            x[0] = Multiply(x[0], state.keys[at]);
+            temporary := (x[2]+state.keys[at+2])&65535;
+            x[2] = (x[1]+state.keys[at+1])&65535;
+            x[3] = Multiply(x[3], state.keys[at+3]);
+            x[1] = temporary;
+        } else {
+            temporary := Multiply(state.keys[at+1], x[0]^x[1]);
+            y := Multiply((temporary+(x[2]^x[3]))&65535, state.keys[at+2]);
+            z := (temporary+y)&65535;
+            x[0] ^= y; x[1] ^= y; x[2] ^= z; x[3] ^= z;
+        }
+    }
+    for at: 0..3 { data[2*at] = cast(u8)(x[at]>>8); data[2*at+1] = cast(u8)(x[at]&255) }
+}

@@ -494,7 +494,7 @@ appl
 		grep.zi
 		gunzip.b
 		gzip.b
-		idea.b
+		idea.zi
 		import.b
 		install
 			NOTICE
@@ -756,6 +756,7 @@ appl
 		zx_byte_escape.zi
 		zx_calendar.zi
 		zx_dump.zi
+		zx_idea.zi
 		zx_int.zi
 		zx_look.zi
 		zx_ns.zi
@@ -1508,7 +1509,7 @@ zx
 			+
 	gunzip.dis
 	gzip.dis
-	idea.dis
+	idea.zx
 	import.dis
 	install
 		+
