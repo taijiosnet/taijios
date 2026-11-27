@@ -87,6 +87,6 @@ Print file addresses in the given
 .IR style .
 .SH SOURCE
 .TP
-.B /appl/cmd/xd.b
+.B /appl/cmd/xd.zi
 .SH BUGS
 There is no means of dumping 2 or 8 byte wide values in little-endian form.

@@ -107,7 +107,6 @@ TARG=\
 	wish.dis\
 	wmexport.dis\
 	wmimport.dis\
-	xd.dis\
 	yacc.dis\
 	zxrun.dis\
 
@@ -193,7 +192,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
-ZXCOMMANDS=$ZXCOMMANDS bytes look
+ZXCOMMANDS=$ZXCOMMANDS bytes look xd
 ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -218,6 +217,9 @@ raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 
 wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
+
+xd.zx: xd.zi zx_dump.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry xd:main -o $target xd.zi
 
 look.zx: look.zi zx_look.zi zx_arg.zi zx_bufio.zi zx_runes.zi $ZXLIB/taijios_quote.zi $UTILZX mkfile
 	ziran bundle --root . --module-path $ZXLIB --bind-host taijios_args --bind-host taijios_io --entry look:main -o $target look.zi

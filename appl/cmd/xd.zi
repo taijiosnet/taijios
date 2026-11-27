@@ -1,0 +1,149 @@
+// Streaming multiple-format file dump after Inferno xd.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Dump :: #import "zx_dump";
+UTF :: #import "std/utf8";
+#import "std/vec"
+
+State :: struct {
+    layout: Dump.Layout;
+    address_base: s32;
+    repeats: bool;
+    swap: bool;
+    unbuffered: bool;
+    output: Vec(u8);
+}
+
+Flush :: (state: *State) {
+    unused Cli.WriteAll(1, TextView(state.output[:]));
+    VecClear(state.output);
+}
+
+Emit :: (state: *State, text: string) {
+    at: s32;
+    while at < text.count {
+        next := UTF.Decode(text, at).after;
+        BuilderAppend(state.output, text[at:next]);
+        at = next;
+        if state.output.count >= 8192 { Flush(state) }
+    }
+}
+
+Usage :: () -> s32 { return Cli.Usage("usage: xd [-u] [-r] [-s] [-a{odx}] [-c|{b1w2l4v8}{odx}] ... file ...\n") }
+
+File :: (state: *State, path: string, title: bool) -> s32 {
+    handle: s32;
+    if path.count != 0 {
+        handle = Io.Open(path, 0);
+        if handle < 0 {
+            unused Cli.WriteAll(2, "xd: cannot open ");
+            unused Cli.WriteAll(2, path);
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, Io.Error());
+            unused Cli.WriteAll(2, "\n");
+            unused Args.SetFailure("cannot open");
+            return 1;
+        }
+    }
+    should_close := path.count != 0;
+    defer { if should_close { unused Io.Close(handle) } }
+    if title { Emit(state, path); Emit(state, "\n") }
+    address: u64;
+    previous: [16]u8;
+    have_previous: bool;
+    star: bool;
+    line: Vec(u8);
+    while true {
+        data: [16]u8;
+        count: s32;
+        while count < 16 {
+            got := Io.Read(handle, data[count:]);
+            if got <= 0 { break }
+            count += got;
+        }
+        if state.swap { Dump.Swap(data[:]) }
+        if count == 16 && state.repeats {
+            same := have_previous;
+            for at: 0..15 { if previous[at] != data[at] { same = false } }
+            if same {
+                address += 16;
+                if !star { star = true; Emit(state, "*\n") }
+                continue;
+            }
+            previous = data;
+            have_previous = true;
+            star = false;
+        }
+        for format: 0..state.layout.count-1 {
+            VecClear(line);
+            Dump.Integer(*line, address, 7, state.address_base, ifx format == 0 then 48 else 32);
+            VecPush(line, 32);
+            Dump.Data(*line, *state.layout, state.layout.formats[format], data[:], count);
+            VecPush(line, 10);
+            Emit(state, TextView(line[:]));
+            if state.unbuffered { Flush(state) }
+        }
+        address += cast(u64)count;
+        if count < 16 {
+            VecClear(line);
+            Dump.Integer(*line, address, 7, state.address_base, 48);
+            VecPush(line, 10);
+            Emit(state, TextView(line[:]));
+            break;
+        }
+    }
+    Flush(state);
+    return 0;
+}
+
+#program_export
+main :: () -> s32 {
+    state: State;
+    state.address_base = 16;
+    at: s32;
+    while at < Args.OperandCount() {
+        option := Args.Operand(at);
+        if option.count == 0 { at += 1; continue }
+        if option[0] != 45 { break }
+        width: s32;
+        base: s32;
+        add: bool;
+        if option.count == 2 {
+            if option[1] == 99 { add = true; base = 256 }
+            else if option[1] == 114 { state.repeats = true }
+            else if option[1] == 115 { state.swap = true }
+            else if option[1] == 117 { state.unbuffered = true }
+            else { return Usage() }
+        } else if option.count == 3 {
+            if option[2] == 111 { base = 0 }
+            else if option[2] == 100 { base = 1 }
+            else if option[2] == 120 { base = 2 }
+            else { return Usage() }
+            if option[1] == 97 { state.address_base = Dump.Bases[base] }
+            else {
+                if option[1] == 98 || option[1] == 49 { width = 0 }
+                else if option[1] == 119 || option[1] == 50 { width = 1 }
+                else if option[1] == 108 || option[1] == 52 { width = 2 }
+                else if option[1] == 118 || option[1] == 56 { width = 3 }
+                else { return Usage() }
+                add = true;
+            }
+        } else { return Usage() }
+        if add && !Dump.Add(*state.layout, width, base) {
+            unused Cli.WriteAll(2, "xd: too many formats\n");
+            unused Args.SetFailure("error");
+            return 1;
+        }
+        at += 1;
+    }
+    if state.layout.count == 0 { unused Dump.Add(*state.layout, 2, 2) }
+    count := Args.OperandCount()-at;
+    if count == 0 { return File(*state, "", false) }
+    while at < Args.OperandCount() {
+        result := File(*state, Args.Operand(at), count > 1);
+        if result != 0 { return result }
+        at += 1;
+    }
+    return 0;
+}

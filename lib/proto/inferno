@@ -741,7 +741,7 @@ appl
 		wmimport.b
 		wmexport.b
 		xargs.b
-		xd.b
+		xd.zi
 		xmount.b
 		yacc.b
 		zeros.b
@@ -755,6 +755,7 @@ appl
 		zx_bufio.zi
 		zx_byte_escape.zi
 		zx_calendar.zi
+		zx_dump.zi
 		zx_int.zi
 		zx_look.zi
 		zx_iaf.zi
@@ -1820,7 +1821,7 @@ zx
 	wmimport.dis
 	wmexport.dis
 	xargs.dis
-	xd.dis
+	xd.zx
 	xmount.dis
 	yacc.dis
 	zeros.dis

@@ -1,4 +1,6 @@
 Unreleased
+	port xd to modular Ziran/ZX with buffered multi-format dumps, repetition
+	suppression and byte swapping; fix unsigned 64-bit formatting
 	port look to modular Ziran/ZX with binary dictionary lookup, interactive
 	queries, exact and range searches; fix numeric comparison bounds and
 	key separator truncation

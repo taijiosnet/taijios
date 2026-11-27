@@ -1,0 +1,82 @@
+// Multi-format sixteen-byte dump layout after Inferno xd.b (see NOTICE).
+#import "std/vec"
+
+Format :: struct { width: s32; base: s32; field: s32; }
+Layout :: struct { formats: [10]Format; count: s32; position: [16]s32; }
+Widths: [4]s32 = .{1, 2, 4, 8};
+Bases: [3]s32 = .{8, 10, 16};
+Fields: [12]s32 = .{3,3,2,6,5,4,11,10,8,22,20,16};
+
+Add :: (layout: *Layout, width: s32, base: s32) -> bool {
+    if layout.count == 10 { return false }
+    format: Format;
+    format.width = Widths[width];
+    format.base = ifx base == 256 then 256 else Bases[base];
+    format.field = ifx base == 256 then 2 else Fields[base+width*3];
+    layout.formats[layout.count] = format;
+    layout.count += 1;
+    position: s32;
+    at: s32;
+    while at < 16 {
+        if layout.position[at] >= position { position = layout.position[at] }
+        else {
+            difference := position-layout.position[at];
+            for next: at..15 { layout.position[next] += difference }
+        }
+        position += format.field+1;
+        at += format.width;
+    }
+    return true;
+}
+
+Integer :: (out: *Vec(u8), value: u64, minimum: s32, base: s32, pad: u8) {
+    digits := "0123456789abcdef";
+    reverse: [64]u8;
+    count: s32;
+    remaining := value;
+    while true {
+        reverse[count] = digits[cast(s64)(remaining % cast(u64)base)];
+        count += 1;
+        remaining /= cast(u64)base;
+        if remaining == 0 { break }
+    }
+    for count..minimum-1 { VecPush(out.*, pad) }
+    while count > 0 { count -= 1; VecPush(out.*, reverse[count]) }
+}
+
+Swap :: (data: []u8) {
+    at: s32;
+    while at < 16 {
+        first := data[at]; second := data[at+1];
+        data[at] = data[at+3]; data[at+1] = data[at+2];
+        data[at+2] = second; data[at+3] = first;
+        at += 4;
+    }
+}
+
+Data :: (out: *Vec(u8), layout: *Layout, format: Format, data: []u8, count: s32) {
+    written: s32;
+    at: s32;
+    while at < count {
+        if at != 0 {
+            for written..layout.position[at]-1 { VecPush(out.*, 32) }
+            written = layout.position[at];
+        }
+        before := out.count;
+        if format.base == 256 {
+            ch := data[at];
+            if ch == 9 { BuilderAppend(out.*, "\\t") }
+            else if ch == 13 { BuilderAppend(out.*, "\\r") }
+            else if ch == 10 { BuilderAppend(out.*, "\\n") }
+            else if ch == 8 { BuilderAppend(out.*, "\\b") }
+            else if ch >= 127 || ch < 32 { Integer(out, cast(u64)ch, 2, 16, 48) }
+            else { VecPush(out.*, ch) }
+        } else {
+            value := cast(u64)data[at];
+            for byte: 1..format.width-1 { value = (value << 8)+cast(u64)data[at+byte] }
+            Integer(out, value, format.field, format.base, 48);
+        }
+        written += cast(s32)(out.count-before);
+        at += format.width;
+    }
+}
