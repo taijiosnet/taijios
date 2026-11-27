@@ -1,4 +1,6 @@
 Unreleased
+	port ns to modular Ziran/ZX; expose live native process namespaces with
+	stable references during fork and exit, preserving Dis namespace output
 	port xd to modular Ziran/ZX with buffered multi-format dumps, repetition
 	suppression and byte swapping; fix unsigned 64-bit formatting
 	port look to modular Ziran/ZX with binary dictionary lookup, interactive

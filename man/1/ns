@@ -13,8 +13,10 @@ ns \- display current namespace
 displays the construction of the namespace of the given
 .IR pid ,
 or its own (as inherited) by default.
-Based on the contents of
-.BI /prog/ pid /ns ,
+For Dis processes it reads
+.BI /prog/ pid /ns ;
+for native ZX processes it reads the process namespace directly.
+In either case,
 it prints on standard output a sequence of bind and mount commands
 (see
 .IR bind (1))
@@ -34,7 +36,7 @@ option causes
 .I ns
 to show the raw file name instead.
 .SH SOURCE
-.B /appl/cmd/ns.b
+.B /appl/cmd/ns.zi
 .SH "SEE ALSO"
 .IR bind (1),
 .IR prog (3),

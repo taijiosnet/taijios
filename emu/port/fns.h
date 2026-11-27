@@ -33,6 +33,7 @@ Chan*	cclone(Chan*);
 void		closeegrp(Egrp*);
 void		closefgrp(Fgrp*);
 void		closepgrp(Pgrp*);
+long		pgrpnsread(Pgrp*, vlong*, char*, long);
 void		closesigs(Skeyset*);
 int		cmount(Chan*, Chan*, int, char*);
 Chan*	createdir(Chan*, Mhead*);

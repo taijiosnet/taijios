@@ -62,3 +62,9 @@ NoDevs :: () -> bool #foreign host_api;
 ForkEnv :: () -> bool #foreign host_api;
 
 Error :: () -> string #foreign host_api;
+
+// Read one raw bind/mount/cd record from a native ZX process namespace.
+// Initialize cursor[0] to zero; it becomes -1 after cd. Returns the bytes
+// written, zero at EOF, or -1 with Error set and cursor unchanged. A live
+// native PID is required; Dis callers read /prog/PID/ns through taijios_io.
+Read :: (pid: s32, cursor: []s64, output: []u8) -> s32 #foreign host_api;

@@ -1,0 +1,96 @@
+// Display native ZX or Dis process namespace construction records.
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Options :: #import "zx_arg";
+Numbers :: #import "zx_int";
+Bufio :: #import "zx_bufio";
+Records :: #import "zx_ns";
+Process :: #import "taijios_process";
+Tasks :: #import "taijios_tasks";
+Namespace :: #import "taijios_namespace";
+#import "std/vec"
+
+Format :: (text: string, raw: bool) {
+    record := Records.Parse(text);
+    if !record.valid { return }
+    output: Vec(u8);
+    BuilderAppend(output, record.command);
+    VecPush(output, 32);
+    if record.cd { Records.Quote(*output, record.source) }
+    else {
+        if record.flags.count > 0 { BuilderAppend(output, record.flags); VecPush(output, 32) }
+        network := Records.NetPath(record.source);
+        remote: Vec(u8);
+        if record.command == "mount" && !raw && network.valid {
+            filename: Vec(u8);
+            BuilderPrint(*filename, "/%/%/%/remote", network.directory, network.protocol, network.connection);
+            handle := Io.Open(TextView(filename[:]), 0);
+            if handle >= 0 {
+                bytes: [256]u8;
+                count := Io.Read(handle, bytes[:]);
+                unused Io.Close(handle);
+                if count > 0 {
+                    if bytes[count-1] == 10 { count -= 1 }
+                    if network.directory != "net" { BuilderAppend(remote, "/"); BuilderAppend(remote, network.directory); BuilderAppend(remote, "/") }
+                    BuilderAppend(remote, network.protocol);
+                    VecPush(remote, 33);
+                    Bufio.AppendText(*remote, TextView(bytes[:count]));
+                }
+            }
+        }
+        Records.Quote(*output, ifx remote.count > 0 then TextView(remote[:]) else record.source);
+        VecPush(output, 32);
+        Records.Quote(*output, record.destination);
+    }
+    VecPush(output, 10);
+    unused Cli.WriteAll(1, TextView(output[:]));
+}
+
+Usage :: () -> s32 { return Cli.Usage("usage: ns [-r] [pid]\n") }
+
+#program_export
+main :: () -> s32 {
+    scan: Options.Scan;
+    raw: bool;
+    while true {
+        option := Options.Option(*scan);
+        if option == 0 { break }
+        if option != 114 { return Usage() }
+        raw = true;
+    }
+    count := Args.OperandCount()-scan.next;
+    if count > 1 { return Usage() }
+    pid := ifx count == 1 then Numbers.Decimal(Args.Operand(scan.next)) else Process.Pid();
+    filename: Vec(u8);
+    BuilderPrint(*filename, "/prog/%/ns", pid);
+    handle: s32 = -1;
+    native := Tasks.Native();
+    if !native { handle = Io.Open(TextView(filename[:]), 0) }
+    cursor: [1]s64;
+    bytes: [2048]u8;
+    text: Vec(u8);
+    first := true;
+    while true {
+        length := ifx native then Namespace.Read(pid, cursor[:], bytes[:]) else ifx handle < 0 then -1 else Io.Read(handle, bytes[:]);
+        if length < 0 {
+            opening := (native && first) || handle < 0;
+            problem := ifx native then Namespace.Error() else Io.Error();
+            unused Cli.WriteAll(2, ifx opening then "ns: can't open " else "ns: error reading ");
+            unused Cli.WriteAll(2, TextView(filename[:]));
+            unused Cli.WriteAll(2, ": ");
+            unused Cli.WriteAll(2, problem);
+            unused Cli.WriteAll(2, "\n");
+            if handle >= 0 { unused Io.Close(handle) }
+            if opening { unused Args.SetFailure("open"); return 1 }
+            return 0;
+        }
+        if length == 0 { break }
+        first = false;
+        VecClear(text);
+        Bufio.AppendText(*text, TextView(bytes[:length]));
+        Format(TextView(text[:]), raw);
+    }
+    if handle >= 0 { unused Io.Close(handle) }
+    return 0;
+}

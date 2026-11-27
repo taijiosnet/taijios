@@ -262,3 +262,55 @@ freeskey(Signerkey *key)
 	(*key->pkfree)(key->pk);
 	free(key);
 }
+
+/* Read one construction record without retaining pointers into a mutable
+ * mount table. A nonnegative cursor is the next mount id, -1 follows cd. */
+long
+pgrpnsread(Pgrp *pg, vlong *cursor, char *out, long size)
+{
+	Mhead *head, *besthead;
+	Mount *mount, *best;
+	char flag[8], *end;
+	int bucket;
+	long count;
+
+	if(*cursor < 0)
+		return 0;
+	best = nil;
+	besthead = nil;
+	rlock(&pg->ns);
+	for(bucket = 0; bucket < MNTHASH; bucket++)
+		for(head = pg->mnthash[bucket]; head != nil; head = head->hash)
+			for(mount = head->mount; mount != nil; mount = mount->next)
+				if((uvlong)mount->mountid >= (uvlong)*cursor &&
+				   (best == nil || mount->mountid < best->mountid)){
+					best = mount;
+					besthead = head;
+				}
+	if(best == nil)
+		count = snprint(out, size, "cd %s\n", pg->dot->name->s);
+	else{
+		end = flag;
+		if(best->mflag != 0){
+			*end++ = '-';
+			if(best->mflag & MAFTER) *end++ = 'a';
+			if(best->mflag & MBEFORE) *end++ = 'b';
+			if(best->mflag & MCREATE) *end++ = 'c';
+			if(best->mflag & MCACHE) *end++ = 'C';
+		}
+		*end = 0;
+		if(strcmp(best->to->name->s, "#M") == 0)
+			count = snprint(out, size, "mount %s %s %s %s\n", flag,
+				best->to->mchan->name->s, besthead->from->name->s,
+				best->spec != nil ? best->spec : "");
+		else
+			count = snprint(out, size, "bind %s %s %s\n", flag,
+				best->to->name->s, besthead->from->name->s);
+	}
+	if(count >= size-1)
+		count = -1;
+	else
+		*cursor = best == nil ? -1 : (vlong)best->mountid+1;
+	runlock(&pg->ns);
+	return count;
+}

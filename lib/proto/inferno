@@ -650,7 +650,7 @@ appl
 		netkey.b
 		netstat.b
 		newer.b
-		ns.b
+		ns.zi
 		nsbuild.b
 		os.b
 		p.b
@@ -758,6 +758,7 @@ appl
 		zx_dump.zi
 		zx_int.zi
 		zx_look.zi
+		zx_ns.zi
 		zx_iaf.zi
 		zx_rand.zi
 		zx_lines.zi
@@ -1687,7 +1688,7 @@ zx
 	netkey.dis
 	netstat.dis
 	newer.dis
-	ns.dis
+	ns.zx
 	nsbuild.dis
 	os.dis
 	p.dis

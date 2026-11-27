@@ -1344,6 +1344,7 @@ static Lock zxprocesslock;
 /* Process 1 is the program the emulator boots; children count from 2. */
 static int zxprocessactive, zxprocesspid = 1;
 static ZxProcess *zxprocesslist;
+static ZxCommand *zxbootcommand;
 static Rendez zxactivity;
 
 void
@@ -2262,6 +2263,43 @@ zxmountforget(ZxCommand *command)
 	}
 }
 
+/* Hold a native target's namespace across a read, including a concurrent
+ * exit or Fork/NewNs. The command and runner are protected in that order. */
+static Pgrp *
+zxnamespacepgrp(ZxCommand *command, int pid)
+{
+	Pgrp *pg = nil;
+#ifdef __linux__
+	ZxProcess *process;
+	ZxCommand *target = nil;
+#endif
+	if(usesdis() || pid <= 0)
+		return nil;
+	if(pid == command->pid){
+		pg = up->env->pgrp;
+		incref(&pg->r);
+		return pg;
+	}
+#ifdef __linux__
+	lock(&zxprocesslock);
+	if(pid == 1)
+		target = zxbootcommand;
+	else
+		for(process = zxprocesslist; process != nil; process = process->listed)
+			if(process->pid == pid){ target = &process->command; break; }
+	if(target != nil){
+		lock(&target->runlock);
+		if(target->runner != nil){
+			pg = target->runner->env->pgrp;
+			incref(&pg->r);
+		}
+		unlock(&target->runlock);
+	}
+	unlock(&zxprocesslock);
+#endif
+	return pg;
+}
+
 /* Namespace calls for ZX file servers and the programs that mount them. */
 static int
 zxnamespace(void *context, const char *module, const char *function,
@@ -2273,6 +2311,9 @@ zxnamespace(void *context, const char *module, const char *function,
 	Egrp *env, *sharedenv;
 	ZxMount *mount, **link;
 	int ends[2], handles[2], fd, afd, binding, status;
+	char *record;
+	vlong cursor;
+	long length;
 
 	USED(module);
 	if(strcmp(function, "Error") == 0){
@@ -2281,6 +2322,38 @@ zxnamespace(void *context, const char *module, const char *function,
 		*result = (HostValue){.kind = HOST_STRING, .type = "string",
 			.data = (uchar *)command->err, .length = strlen(command->err)};
 		return 1;
+	}
+	if(strcmp(function, "Read") == 0){
+		if(n != 3 || !zxisindex(args) || args[1].kind != HOST_SLICE ||
+		   args[1].type == nil || strcmp(args[1].type, "[]s64") != 0 ||
+		   args[1].length < 1 || args[1].elements == nil || !zxioslice(args+2))
+			return 0;
+		if(args[2].length < 2 || args[2].length > INT32_MAX-2)
+			return zxioerror(command, result, "invalid namespace read buffer");
+		copy = zxnamespacepgrp(command, args[0].integer);
+		if(copy == nil)
+			return zxioerror(command, result, "process does not exist");
+		record = malloc(args[2].length+2);
+		if(record == nil){
+			closepgrp(copy);
+			return zxioerror(command, result, "out of memory reading namespace");
+		}
+		cursor = args[1].elements[0].integer;
+		length = pgrpnsread(copy, &cursor, record, args[2].length+2);
+		if(length > args[2].length)
+			length = -1;
+		closepgrp(copy);
+		if(length >= 0){
+			for(status = 0; status < length; status++)
+				args[2].elements[status].bits = (uchar)record[status];
+			args[1].elements[0].integer = cursor;
+		}
+		free(record);
+		if(length > 0)
+			BundleHostRenewSteps();
+		if(length < 0)
+			return zxioerror(command, result, "namespace read buffer too small");
+		return zxs32(result, length);
 	}
 	if(strcmp(function, "ForkEnv") == 0){
 		if(n != 0)
@@ -2312,8 +2385,10 @@ zxnamespace(void *context, const char *module, const char *function,
 		copy->slash->name = newcname("/");
 		copy->nodevs = up->env->pgrp->nodevs;
 		poperror();
+		lock(&command->runlock);
 		shared = up->env->pgrp;
 		up->env->pgrp = copy;
+		unlock(&command->runlock);
 		closepgrp(shared);
 		zxbool(result, 1);
 		return 1;
@@ -2340,8 +2415,10 @@ zxnamespace(void *context, const char *module, const char *function,
 		}
 		pgrpcpy(copy, up->env->pgrp);
 		poperror();
+		lock(&command->runlock);
 		shared = up->env->pgrp;
 		up->env->pgrp = copy;
+		unlock(&command->runlock);
 		closepgrp(shared);
 		zxbool(result, 1);
 		return 1;
@@ -3485,7 +3562,7 @@ zxbindings(Bundle *bundle, ZxSurface *surface, ZxCommand *command, HostBinding *
 			   strcmp(abi.function, "Bind") == 0 || strcmp(abi.function, "Unmount") == 0 ||
 			   strcmp(abi.function, "Fork") == 0 || strcmp(abi.function, "Error") == 0 ||
 			   strcmp(abi.function, "ForkEnv") == 0 || strcmp(abi.function, "NewNs") == 0 ||
-			   strcmp(abi.function, "NoDevs") == 0 ||
+			   strcmp(abi.function, "NoDevs") == 0 || strcmp(abi.function, "Read") == 0 ||
 			   strcmp(abi.function, "MountAsync") == 0 || strcmp(abi.function, "MountDone") == 0 ||
 			   strcmp(abi.function, "Export") == 0)
 				bindings[count++] = (HostBinding){abi.module, abi.function, zxnamespace, command};
@@ -3999,7 +4076,13 @@ zxboot(const char *path, int argc, char **argv)
 				.data = (uchar*)argv[i], .length = strlen(argv[i])};
 	}
 	kbind("#e", "/env", MREPL|MCREATE);
+	lock(&zxprocesslock);
+	zxbootcommand = &command;
+	unlock(&zxprocesslock);
 	result = zxexecute(path, &surface, &command);
+	lock(&zxprocesslock);
+	zxbootcommand = nil;
+	unlock(&zxprocesslock);
 	free(command.args);
 	if(result.problem[0] != '\0')
 		fprint(2, "emu: %s: %s\n", path, result.problem);

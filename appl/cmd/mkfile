@@ -72,7 +72,6 @@ TARG=\
 	mouse.dis\
 	mprof.dis\
 	netkey.dis\
-	ns.dis\
 	nsbuild.dis\
 	os.dis\
 	plumb.dis\
@@ -192,7 +191,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
-ZXCOMMANDS=$ZXCOMMANDS bytes look xd
+ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns
 ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -217,6 +216,9 @@ raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 
 wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
+
+ns.zx: ns.zi zx_ns.zi zx_arg.zi zx_int.zi zx_bufio.zi zx_runes.zi taijios_process.zi taijios_tasks.zi $SERVICEZX $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --bind-host taijios_tasks --bind-host taijios_namespace --entry ns:main -o $target ns.zi
 
 xd.zx: xd.zi zx_dump.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry xd:main -o $target xd.zi

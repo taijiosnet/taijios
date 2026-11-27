@@ -1,0 +1,61 @@
+// Construction-record parsing and shell quoting after Inferno ns.b.
+#import "std/vec"
+
+Record :: struct { command: string; flags: string; source: string; destination: string; valid: bool; cd: bool; }
+
+Parse :: (text: string) -> Record {
+    words: [6]string;
+    count: s32;
+    at: s64;
+    while at < text.count && count < 6 {
+        while at < text.count && (text[at] == 32 || text[at] == 10) { at += 1 }
+        first := at;
+        while at < text.count && text[at] != 32 && text[at] != 10 { at += 1 }
+        if at > first { words[count] = text[first:at]; count += 1 }
+    }
+    result: Record;
+    if count < 2 { return result }
+    result.command = words[0];
+    if result.command == "cd" { result.valid = true; result.cd = true; result.source = words[1]; return result }
+    next: s32 = 1;
+    if words[1][0] == 45 { result.flags = words[1]; next += 1 }
+    if count-next < 2 { return result }
+    result.source = words[next];
+    if result.source.count >= 3 && (result.source[:2] == "#/" || result.source[:2] == "#U") { result.source = result.source[2:] }
+    result.destination = words[next+1];
+    if result.destination == "#M" { result.destination = "/" }
+    result.valid = true;
+    return result;
+}
+
+Quote :: (out: *Vec(u8), text: string) {
+    quoted: bool;
+    for text { if it == 39 || it == 32 || it == 9 || it == 92 || it == 36 || it == 35 { quoted = true } }
+    if quoted { VecPush(out.*, 39) }
+    for text {
+        // As sys->print's %s, a NUL ends the formatted argument.
+        if it == 0 { return }
+        if quoted && it == 39 { VecPush(out.*, 39) }
+        VecPush(out.*, it);
+    }
+    if quoted { VecPush(out.*, 39) }
+}
+
+Network :: struct { directory: string; protocol: string; connection: string; valid: bool; }
+
+NetPath :: (path: string) -> Network {
+    result: Network;
+    if path.count == 0 || path[0] != 47 { return result }
+    words: [4]string;
+    count: s32;
+    at: s64;
+    while at < path.count && count < 4 {
+        while at < path.count && path[at] == 47 { at += 1 }
+        first := at;
+        while at < path.count && path[at] != 47 { at += 1 }
+        if at > first { words[count] = path[first:at]; count += 1 }
+    }
+    if count < 4 || (words[0] != "net" && words[0] != "net.alt") || words[3] != "data" { return result }
+    result.directory = words[0]; result.protocol = words[1]; result.connection = words[2]; result.valid = true;
+    return result;
+}
