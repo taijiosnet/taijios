@@ -1,4 +1,5 @@
 Unreleased
+	port B to native Ziran/ZX; diagnose an empty command-device id reliably
 	port gettar to modular Ziran/ZX; handle split input, truncated payloads and absolute directories
 	port idea to modular Ziran/ZX with pure IDEA blocks and safe filename validation
 	port ns to modular Ziran/ZX; expose live native process namespaces with

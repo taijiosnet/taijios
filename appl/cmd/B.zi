@@ -1,0 +1,66 @@
+// Forward guest file names to the host B command, ported from B.b (see NOTICE).
+Args :: #import "taijios_args";
+Io :: #import "taijios_io";
+Process :: #import "taijios_process";
+Cli :: #import "zx_cli";
+#import "std/vec"
+
+Diagnostic :: (message: string) -> s32 {
+    unused Cli.WriteAll(2, "B: ");
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, ": ");
+    unused Cli.WriteAll(2, Io.Error());
+    unused Cli.WriteAll(2, "\n");
+    return 0;
+}
+
+#program_export
+main :: () -> s32 {
+    count := Args.OperandCount();
+    if count == 0 { unused Cli.WriteAll(2, "Usage: B file ...\n"); return 0 }
+    command: Vec(u8);
+    directory: Vec(u8);
+    BuilderAppend(command, "exec B ");
+    for operand: 0..count-1 {
+        path := Args.Operand(operand);
+        BuilderAppend(command, "/usr/inferno");
+        if path.count > 0 && path[0] != #char "/" && path[0] != #char "-" {
+            if directory.count == 0 {
+                cwd := Io.Cwd();
+                if cwd.count == 0 {
+                    unused Cli.WriteAll(2, "B: can't get working dir: ");
+                    unused Cli.WriteAll(2, Io.Error());
+                    return 0;
+                }
+                BuilderAppend(directory, cwd);
+                VecPush(directory, #char "/");
+            }
+            BuilderAppend(command, TextView(directory[:]));
+        }
+        BuilderAppend(command, path);
+        if operand+1 < count { VecPush(command, #char " ") }
+    }
+    control := Io.Open("/cmd/clone", 2);
+    if control < 0 { return Diagnostic("open /cmd/clone") }
+    defer { unused Io.Close(control) }
+    id: [32]u8;
+    got := Io.Read(control, id[:]);
+    if got < 0 { return Diagnostic("read /cmd/#/ctl") }
+    if got == 0 { unused Cli.WriteAll(2, "B: read /cmd/#/ctl: empty command id\n"); return 0 }
+    data_path: Vec(u8);
+    BuilderAppend(data_path, "/cmd/");
+    BuilderAppend(data_path, TextView(id[:got]));
+    BuilderAppend(data_path, "/data");
+    if Io.Write(control, TextView(command[:])) <= 0 { return Diagnostic("exec") }
+    stream := Io.Open(TextView(data_path[:]), 2);
+    if stream < 0 { return Diagnostic("open /cmd/#/data") }
+    defer { unused Io.Close(stream) }
+    unused Process.NewPgrp();
+    buffer: [8192]u8;
+    while true {
+        bytes := Io.Read(stream, buffer[:]);
+        if bytes <= 0 { break }
+        if Io.Write(1, TextView(buffer[:bytes])) != bytes { break }
+    }
+    return 0;
+}

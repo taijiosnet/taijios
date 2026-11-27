@@ -1,4 +1,4 @@
-# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 87 rows
+# 3. Shell and commands - sh module, sh builtins, tiny, top-level commands - 86 rows
 
 Owner: Commands A–L / M–Z (`glm-taijios-dis-commands-a-l`, `cmd-taijios-dis-commands-m-z`); shell (`cmd-taijios-zx-shell-port`)
 
@@ -8,7 +8,6 @@ Index: [plans/dis-to-zx.md](../dis-to-zx.md)
 |---|---|---|---|---|
 | zx/sh.dis | appl/cmd/sh/sh.b | module/sh.m | P1 | zx-twin /zx/sh.zx (appl/cmd/sh/sh.zi, `mk install-zx`), the shell of a Dis-free guest; tests/sh: all cases match sh.dis; open: the tk, mload, mk and alphabet builtin modules, and the step budget (a long CPU-bound script ends a ZX program). A Dis guest keeps sh.dis for `sh`. Limbo loaders of Sh left: 9srvfs 9win auxi/rstyxd dial ed fs/{eval,exec,pipe,query,run} iostats itest listen m4 mk mount p rawdbfs rioimport runas styxlisten styxmon time wmimport xargs (appl/cmd), alphabet/{alphabet,eval,auxi/endpoints,auxi/rexecsrv,fs/exec,fs/pipe,fs/query,fs/run,grid/farm,grid/rexec,main/filter,main/parse,main/pretty,main/rewrite,main/unparse}, grid/{cpupool,reglisten,regstyxlisten,remotelogon}, wm/{ftree/ftree,remotelogon,sh,toolbar,vt,wm}, sh/mload |
 | zx/9win.dis | appl/cmd/9win.b |  | - |  |
-| zx/B.dis | appl/cmd/B.b |  | - |  |
 | zx/acme.dis | appl/acme/acme.b |  | - |  |
 | zx/ar.dis | appl/cmd/ar.b |  | - |  |
 | zx/asm.dis | appl/cmd/asm/asm.b|appl/cmd/limbo/asm.b |  | - |  |

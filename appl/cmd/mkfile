@@ -26,7 +26,6 @@ TARG=\
 	9export.dis\
 	9srvfs.dis\
 	9win.dis\
-	B.dis\
 	ar.dis\
 	archfs.dis\
 	# bit2gif.dis\
@@ -189,7 +188,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
-ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns idea gettar
+ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns idea gettar B
 ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -214,6 +213,9 @@ raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 
 wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
+
+B.zx: B.zi taijios_process.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_process --entry B:main -o $target B.zi
 
 gettar.zx: gettar.zi lstar_header.zi zx_arg.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry gettar:main -o $target gettar.zi
