@@ -1,0 +1,66 @@
+// Recorded Inferno test messages, ported from itreplay.b (see NOTICE).
+Integer :: #import "zx_int";
+Daytime :: #import "zx_daytime";
+#import "std/vec"
+#import "std/number_text"
+
+Record :: struct { when: s32; severity: s32; verbosity: s32; body: string; valid: bool; }
+
+// As printf("%s") did, stop at a NUL rather than copying bytes after it.
+Printable :: (text: string) -> string {
+    for i: 0..text.count-1 { if text[i] == 0 { return text[:i] } }
+    return text;
+}
+
+Parse :: (line: string) -> Record {
+    record: Record;
+    colon: s64;
+    while colon < line.count && line[colon] != 58 { colon += 1 }
+    if colon == line.count || line.count-colon < 3 { return record }
+    record.when = Integer.Decimal(line[:colon]);
+    record.severity = Integer.Decimal(line[colon+1:colon+2]);
+    record.verbosity = Integer.Decimal(line[colon+2:colon+3]);
+    record.body = line[colon+3:];
+    record.valid = true;
+    return record;
+}
+
+Severity :: (value: s32) -> string {
+    if value == 0 { return "INF" }
+    if value == 1 { return "WRN" }
+    if value == 2 { return "ERR" }
+    if value == 3 { return "FTL" }
+    return "UNK";
+}
+
+Padded :: (out: *Vec(u8), value: s64, width: s64, fill: u8) {
+    digits: [32]u8;
+    text := FormatInteger(value, digits[:]);
+    for i: text.count..width-1 { VecPush(out.*, fill) }
+    BuilderAppend(out.*, text);
+}
+
+// Month numbers in reports are 1..12 (Tm.mon itself is zero based).
+Report :: (output: *Vec(u8), zone: *Daytime.Zone, indentation: s64, when: s32, severity: s32, verbosity: s32, threshold: s32, message: string) {
+    if severity == 0 && verbosity > threshold { return }
+    time: Vec(u8);
+    defer VecFree(time);
+    if when != 0 {
+        tm := Daytime.Local(zone, cast(s64)when);
+        Padded(*time, tm.year+1900, 4, 32);
+        Padded(*time, tm.mon+1, 2, 48);
+        Padded(*time, tm.mday, 2, 48);
+        VecPush(time, 32);
+        Padded(*time, tm.hour, 2, 48);
+        VecPush(time, 58);
+        Padded(*time, tm.min, 2, 48);
+        VecPush(time, 58);
+        Padded(*time, tm.sec, 2, 48);
+    }
+    BuilderAppend(output.*, TextView(time[:]));
+    for i: time.count..16 { VecPush(output.*, 32) }
+    VecPush(output.*, 32);
+    BuilderAppend(output.*, "---"[:indentation]);
+    BuilderAppend(output.*, Printable(message));
+    if message.count > 0 && message[message.count-1] != 10 { VecPush(output.*, 10) }
+}

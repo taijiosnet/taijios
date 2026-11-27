@@ -118,7 +118,7 @@ and the name of the test directory.
 .SH SOURCE
 .B /appl/cmd/itest.b
 .br
-.B /appl/cmd/itreplay.b
+.B /appl/cmd/itreplay.zi
 .SH SEE ALSO
 .IR itslib (2),
 .IR sh-test (2)

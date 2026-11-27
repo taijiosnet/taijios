@@ -1,0 +1,184 @@
+// Replay Inferno test recordings, ported from itreplay.b (see NOTICE).
+Args :: #import "taijios_args";
+Arg :: #import "zx_arg";
+Io :: #import "taijios_io";
+Cli :: #import "zx_cli";
+Input :: #import "zx_bufio";
+Integer :: #import "zx_int";
+Daytime :: #import "zx_daytime";
+Report :: #import "zx_itreport";
+#import "std/vec"
+#import "std/format"
+
+Options :: struct { verbosity: s32; errors: bool; output: bool; }
+Usage :: "Usage: itreplay [-eo] [-v verbosity] recorddir ...\n";
+
+UsageError :: () -> s32 {
+    unused Cli.WriteAll(2, Usage);
+    unused Args.SetFailure(" usage");
+    return 1;
+}
+
+Fail :: (message: string) -> s32 {
+    unused Cli.WriteAll(2, message);
+    unused Cli.WriteAll(2, "\n");
+    unused Args.SetFailure(" error");
+    return 1;
+}
+
+Emit :: (zone: *Daytime.Zone, options: Options, indent: s64, when: s32, severity: s32, verbosity: s32, text: string) {
+    line: Vec(u8);
+    defer VecFree(line);
+    Report.Report(*line, zone, indent, when, severity, verbosity, options.verbosity, text);
+    unused Cli.WriteAll(1, TextView(line[:]));
+}
+
+Join :: (directory: string, name: string) -> string {
+    path: Vec(u8);
+    BuilderPrint(*path, "%/%", directory, name);
+    return BuilderFinish(path);
+}
+
+Display :: (path: string) {
+    reader: Input.Reader;
+    reader.handle = Io.Open(path, 0);
+    if reader.handle < 0 { return }
+    defer { unused Io.Close(reader.handle) }
+    line: Vec(u8);
+    defer VecFree(line);
+    while Input.ReadLine(*reader, *line) {
+        unused Cli.WriteAll(1, "                    ");
+        unused Cli.WriteAll(1, Report.Printable(TextView(line[:])));
+    }
+}
+
+Messages :: (path: string, specification: string, cflag: s32, zone: *Daytime.Zone, options: Options) {
+    reader: Input.Reader;
+    reader.handle = Io.Open(path, 0);
+    if reader.handle < 0 { return }
+    defer { unused Io.Close(reader.handle) }
+    line: Vec(u8);
+    defer VecFree(line);
+    text: Vec(u8);
+    defer VecFree(text);
+    warnings: s32;
+    errors: s32;
+    fatals: s32;
+    start: s32;
+    number: s64;
+    while Input.ReadLine(*reader, *line) {
+        number += 1;
+        record := Report.Parse(TextView(line[:]));
+        if !record.valid {
+            VecClear(text);
+            BuilderPrint(*text, "itreplay: malformed message in % at line %\n", Report.Printable(path), number);
+            unused Cli.WriteAll(2, TextView(text[:]));
+            continue;
+        }
+        VecClear(text);
+        if record.severity == 4 {
+            start = Integer.Decimal(record.body);
+            BuilderPrint(*text, "Starting test % cflag=%", Report.Printable(specification), cflag);
+            Emit(zone, options, 2, record.when, 0, 3, TextView(text[:]));
+        } else if record.severity == 5 {
+            elapsed := Integer.Decimal(record.body)-start;
+            BuilderPrint(*text, "Finished test % after %ms - WRN:% ERR:% FTL:%", Report.Printable(specification), elapsed, warnings, errors, fatals);
+            Emit(zone, options, 2, record.when+elapsed/1000, 0, 3, TextView(text[:]));
+        } else {
+            if record.severity == 1 { warnings += 1 }
+            if record.severity == 2 { errors += 1 }
+            if record.severity == 3 { fatals += 1 }
+            BuilderPrint(*text, "%: %", Report.Severity(record.severity), Report.Printable(record.body));
+            Emit(zone, options, 3, record.when, record.severity, record.verbosity, TextView(text[:]));
+        }
+    }
+}
+
+Replay :: (directory: string, zone: *Daytime.Zone, options: Options) {
+    reader: Input.Reader;
+    reader.handle = Io.Open(Join(directory, "summary"), 0);
+    if reader.handle < 0 {
+        unused Cli.WriteAll(2, "No summary file in ");
+        unused Cli.WriteAll(2, Report.Printable(directory));
+        unused Cli.WriteAll(2, "\n");
+        return;
+    }
+    summary: Vec(u8);
+    line: Vec(u8);
+    defer VecFree(summary);
+    defer VecFree(line);
+    seen: bool;
+    // The old linelist prepended each line; replay used the final summary.
+    while Input.ReadLine(*reader, *line) {
+        seen = true;
+        VecClear(summary);
+        BuilderAppend(summary, TextView(line[:]));
+    }
+    unused Io.Close(reader.handle);
+    if !seen {
+        unused Cli.WriteAll(2, "No summary file in ");
+        unused Cli.WriteAll(2, Report.Printable(directory));
+        unused Cli.WriteAll(2, "\n");
+        return;
+    }
+    if summary.count > 0 && summary[summary.count-1] == 10 { unused VecResize(summary, summary.count-1) }
+    fields: [4]string;
+    at: s64;
+    count: s64;
+    while at < summary.count && count < fields.count {
+        while at < summary.count && summary[at] == 32 { at += 1 }
+        begin := at;
+        while at < summary.count && summary[at] != 32 { at += 1 }
+        if at > begin { fields[count] = TextView(summary[begin:at]); count += 1 }
+    }
+    if count < 4 {
+        unused Cli.WriteAll(2, "Bad summary file in ");
+        unused Cli.WriteAll(2, Report.Printable(directory));
+        unused Cli.WriteAll(2, "\n");
+        return;
+    }
+    when := Integer.Decimal(fields[0]);
+    elapsed := Integer.Decimal(fields[1]);
+    cflag := Integer.Decimal(fields[2]);
+    specification := fields[3];
+    text: Vec(u8);
+    defer VecFree(text);
+    BuilderPrint(*text, "Processing %: test % ran in %ms with cflag=%\n", Report.Printable(directory), Report.Printable(specification), elapsed, cflag);
+    Emit(zone, options, 1, when, 0, 2, TextView(text[:]));
+    Messages(Join(directory, "msgs"), specification, cflag, zone, options);
+    if options.output {
+        Emit(zone, options, 2, 0, 0, 0, "Stdout from test:");
+        Display(Join(directory, "stdout"));
+    }
+    if options.errors {
+        Emit(zone, options, 2, 0, 0, 0, "Stderr from test:");
+        Display(Join(directory, "stderr"));
+    }
+}
+
+#program_export
+main :: () -> s32 {
+    options: Options;
+    options.verbosity = 3;
+    scan: Arg.Scan;
+    while true {
+        option := Arg.Option(*scan);
+        if option == 0 { break }
+        if option == 101 { options.errors = true }
+        else if option == 111 { options.output = true }
+        else if option == 118 {
+            value, valid := Arg.Value(*scan);
+            numeric := valid && value.count > 0;
+            for c: value { if (c < 48 || c > 57) && c != 43 && c != 45 && c != 91 && c != 93 { numeric = false } }
+            if !numeric { return Fail("no value specified for option v") }
+            options.verbosity = Integer.Decimal(value);
+            message: Vec(u8);
+            if options.verbosity < 0 { BuilderPrint(*message, "option v value is less than minimum of 0: %", options.verbosity); return Fail(TextView(message[:])) }
+            if options.verbosity > 9 { BuilderPrint(*message, "option v value is greater than maximum of 9: %", options.verbosity); return Fail(TextView(message[:])) }
+        } else { return UsageError() }
+    }
+    if scan.next >= Args.OperandCount() { return UsageError() }
+    zone := Daytime.ReadZone();
+    for index: scan.next..Args.OperandCount()-1 { Replay(Args.Operand(cast(s32)index), *zone, options) }
+    return 0;
+}

@@ -52,7 +52,6 @@ TARG=\
 	import.dis\
 	iostats.dis\
 	itest.dis\
-	itreplay.dis\
 	listen.dis\
 	lockfs.dis\
 	logfile.dis\
@@ -185,7 +184,7 @@ ZXCOMMANDS=$ZXCOMMANDS du
 ZXCOMMANDS=$ZXCOMMANDS cal
 ZXCOMMANDS=$ZXCOMMANDS tail
 ZXCOMMANDS=$ZXCOMMANDS grep
-ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns idea gettar B dd cddb plumb
+ZXCOMMANDS=$ZXCOMMANDS bytes look xd ns idea gettar B dd cddb plumb itreplay
 ZXCOMMANDS=$ZXCOMMANDS auplay auhdr raw2iaf wav2iaf
 UTILZX=zx_cli.zi taijios_args.zi taijios_io.zi
 SERVICEZX=taijios_namespace.zi
@@ -210,6 +209,9 @@ raw2iaf.zx: raw2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 
 wav2iaf.zx: wav2iaf.zi zx_iaf.zi taijios_stat.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry wav2iaf:main -o $target wav2iaf.zi
+
+itreplay.zx: itreplay.zi zx_itreport.zi zx_daytime.zi taijios_files.zi zx_arg.zi zx_bufio.zi zx_int.zi zx_runes.zi $UTILZX mkfile
+	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --bind-host taijios_files --entry itreplay:main -o $target itreplay.zi
 
 plumb.zx: plumb.zi zx_plumbmsg.zi zx_arg.zi $UTILZX mkfile
 	ziran bundle --root . --bind-host taijios_args --bind-host taijios_io --entry plumb:main -o $target plumb.zi

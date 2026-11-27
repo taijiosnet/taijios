@@ -1,4 +1,5 @@
 Unreleased
+	port itreplay to modular Ziran/ZX; fix report months and range diagnostics, skip malformed messages
 	port plumb to native Ziran/ZX with the documented stdin default action
 	preserve complete native guest writes beyond the 8 KiB read scratch buffer
 	port cddb to modular Ziran/ZX; handle empty and dot-prefixed titles and preserve full server errors

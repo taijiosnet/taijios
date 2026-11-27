@@ -558,7 +558,7 @@ appl
 			virgild.b
 		irtest.zi
 		itest.b
-		itreplay.b
+		itreplay.zi
 		kill.zi
 		lego
 			clock.b
@@ -760,6 +760,7 @@ appl
 		zx_dump.zi
 		zx_idea.zi
 		zx_int.zi
+		zx_itreport.zi
 		zx_look.zi
 		zx_ns.zi
 		zx_plumbmsg.zi
@@ -1520,7 +1521,7 @@ zx
 	ip
 		+
 	itest.dis
-	itreplay.dis
+	itreplay.zx
 	kill.zx
 	lc
 	lego
